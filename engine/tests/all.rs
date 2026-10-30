@@ -56,6 +56,8 @@ mod evict;
 mod export;
 #[path = "failed_writes.rs"]
 mod failed_writes;
+#[path = "failure.rs"]
+mod failure;
 #[path = "goals.rs"]
 mod goals;
 #[path = "groups.rs"]

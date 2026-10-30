@@ -717,8 +717,12 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
         .and_then(|m| m["contextWindow"].as_u64())
         .map(|window| EngineEvent::Context { used: None, window: Some(window) });
     let ok = msg["subtype"] == "success" && msg["is_error"] != true;
-    // Why a turn that did not end well ended, from the CLI's terminal reason (its subtype when it names none), as a key.
-    let why = (!ok).then(|| failure_reason(msg["terminal_reason"].as_str(), msg["subtype"].as_str()));
+    // Why a turn that did not end well ended, from the CLI's terminal reason (its subtype when it names none), as a key; a
+    // generic one says the kind of failure its error words name, when they name one.
+    let why = (!ok).then(|| {
+        let words = items(&msg["errors"]).filter_map(Value::as_str).chain(msg["result"].as_str()).collect::<Vec<_>>().join(" ");
+        crate::failure::reason(failure_reason(msg["terminal_reason"].as_str(), msg["subtype"].as_str()), crate::failure::from_text(&words))
+    });
     window
         .into_iter()
         .chain(warm)

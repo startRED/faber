@@ -700,14 +700,23 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
                 tool: "ExitPlanMode".into(),
                 input: json!({}),
             });
-            // Why a turn that did not complete ended, from the turn's own status, as a key (rule 6).
-            let why = (status != "completed").then(|| crate::events::failure_reason(Some(&status), None));
+            // Why a turn that did not complete ended, from the turn's own status, as a key (rule 6); a generic one says the kind
+            // of failure the turn's error names (`codexErrorInfo`, else its message).
+            let error = &p["turn"]["error"];
+            let kind = crate::failure::from_codex(&error["codexErrorInfo"])
+                .or_else(|| error["message"].as_str().and_then(crate::failure::from_text));
+            let why = (status != "completed").then(|| crate::failure::reason(crate::events::failure_reason(Some(&status), None), kind));
+            let mut reason = error["message"].as_str().map(String::from).unwrap_or_else(|| status.clone());
+            // A plan limit Codex names in its own word goes to the quota recovery, whatever its message says.
+            if kind == Some(crate::failure::Failure::Limit) && error["codexErrorInfo"] == "usageLimitExceeded" {
+                reason = format!("usage_limit_reached: {reason}");
+            }
             approval
                 .into_iter()
                 .chain(why.map(EngineEvent::Reason))
                 .chain([EngineEvent::Done {
                     ok: status == "completed",
-                    reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
+                    reason,
                     cost_total_usd: cost,
                     input_tokens: u.input + sub.input,
                     output_tokens: u.output + sub.output,

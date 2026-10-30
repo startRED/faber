@@ -17,6 +17,7 @@ pub mod creative;
 pub mod engine;
 pub mod events;
 pub mod export;
+pub mod failure;
 pub mod fileview;
 pub mod follow;
 pub mod guide;

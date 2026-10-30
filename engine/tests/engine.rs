@@ -6098,10 +6098,10 @@ async fn rule_6_a_turn_that_ends_badly_says_why_in_a_reason_key_and_an_unknown_o
         (json!({"subtype":"success","is_error":false,"terminal_reason":"completed"}), None),
         // A plan limit shaped as a "success" flagged as an error, its words only in `result`, is still the plan limit.
         (json!({"subtype":"success","is_error":true,"terminal_reason":"completed","result":"You've hit your limit"}), None),
-        // Another limit in the same place (the context's) is no plan limit: it ends as a plain failure, never as a handover.
+        // Another limit in the same place (the context's) is no plan limit: it says the conversation is too long, never a handover.
         (
             json!({"subtype":"success","is_error":true,"terminal_reason":"completed","result":"Context limit reached"}),
-            Some("reason.failed"),
+            Some("reason.fail.contextFull"),
         ),
     ];
     for (result, shown) in cases {
@@ -6164,7 +6164,7 @@ async fn rule_6_the_persons_own_stop_stays_quiet_when_the_cli_names_no_terminal_
 async fn rule_6_a_chatgpt_turn_that_failed_for_another_reason_than_the_plan_says_so() {
     let dir = tempfile::tempdir().unwrap();
     let mut entries = fixture("codex", "chat");
-    // The recorded first turn ends as the CLI reports a failure that is not a plan limit.
+    // The recorded first turn ends as the CLI reports a failure that is not a plan limit: a dropped connection.
     let done = entries.iter_mut().find(|e| e.msg["method"] == "turn/completed").unwrap();
     done.msg["params"]["turn"]["status"] = "failed".into();
     done.msg["params"]["turn"]["error"] = json!({"message": "stream disconnected before completion"});
@@ -6173,7 +6173,24 @@ async fn rule_6_a_chatgpt_turn_that_failed_for_another_reason_than_the_plan_says
     engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
     let reply = finished(&mut rx, |_| {}).await;
     engine.shutdown();
-    assert_eq!(reply.error.as_deref(), Some("reason.failed"), "{:?}", (reply.status, &reply.error));
+    assert_eq!(reply.error.as_deref(), Some("reason.fail.connection"), "{:?}", (reply.status, &reply.error));
+}
+
+#[tokio::test]
+async fn rule_6_a_chatgpt_plan_limit_named_only_by_its_kind_still_goes_to_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut entries = fixture("codex", "chat");
+    // Codex names the limit (`usageLimitExceeded`) while its message holds none of the plan's phrases.
+    let done = entries.iter_mut().find(|e| e.msg["method"] == "turn/completed").unwrap();
+    done.msg["params"]["turn"]["status"] = "failed".into();
+    done.msg["params"]["turn"]["error"] = json!({"message": "Try again tomorrow.", "codexErrorInfo": "usageLimitExceeded"});
+    let f = fake(entries);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    // Recovery may name its own key; the typed line of a failure never shows.
+    assert!(reply.error.as_deref().is_none_or(|e| e.starts_with("error.")), "{:?}", (reply.status, &reply.error));
 }
 
 #[tokio::test]
