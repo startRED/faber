@@ -224,7 +224,7 @@ app, or another process's window covers its whole monitor (a borderless game). F
 
 ### How a look reaches the screen
 
-- `src-tauri/src/themes.json` is the single source of tokens, and `src-tauri/src/look.rs` is the only code that computes
+- `src-tauri/src/themes.json` is the single source of tokens, and `host/src/look.rs` is the only code that computes
   a colour. It applies the theme, the user's choices and the colour validator, checks the 26 pairs, and returns the CSS
   variables, the motion level, the effect switches and any notice. The screen never computes a colour.
 - `state()` returns the look of the saved appearance, and `main.tsx` writes it on `<html>` before the first frame. The

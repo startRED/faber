@@ -10,7 +10,7 @@ default-run = "faber"
 
 [features]
 # Test builds only (testkit/): a command the screen's checks report through, and the page that runs them. Never default.
-test-hooks = []
+test-hooks = ["faber-host/test-hooks"]
 # The manual webview spike only (examples/pane-spike-host.rs): Tauri's child webviews are behind its `unstable` feature.
 pane-spike = ["tauri/unstable"]
 
