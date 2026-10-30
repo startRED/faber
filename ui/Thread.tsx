@@ -280,6 +280,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // Streaming and not yet finished: the agent still writes or works. Once it said all it will say, the reply reads as done while the
   // CLI closes its turn (its Stop hooks, say), and more words after that would undo it.
   const working = () => streaming() && m().finishedAt === undefined;
+  const [closedRefused, setClosedRefused] = createSignal('');
   // The caret means words are arriving. It shows before the first word, and after that only while the text grew in the last
   // moment: never while the agent runs a step or thinks after writing (a reply on 2026-10-19 blinked for nine minutes while a
   // command waited, and looked finished and stuck at once). One timer, reset by each change of the text.
@@ -614,8 +615,23 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
-      <Show when={m().status === 'stopped' && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
+      <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
+      </Show>
+      {/* Faber was closed while this ran: said in place of "Stopped.", and the newest such reply offers to go on (R477). */}
+      <Show when={m().status === 'stopped' && m().closed}>
+        <div class="note">{t('answer.closed')}</div>
+        <Show when={props.area === 'project'}>
+          <div class="note">{t('answer.closedFiles')}</div>
+        </Show>
+        <Show when={props.last && !closedRefused()}>
+          <div>
+            <button type="button" class="btn" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>
+              {t('answer.closedContinue')}
+            </button>
+          </div>
+        </Show>
+        <Show when={closedRefused()}>{(text) => <div class="note err" role="alert">{text()}</div>}</Show>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
         {/* A limit is told calmly (C001); a failure keeps the red bar. */}
