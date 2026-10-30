@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { covered, statusText, toCheck } from './ci-scope.mjs';
+import { covered, lintsFor, statusText, toCheck } from './ci-scope.mjs';
 import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
@@ -195,4 +195,13 @@ test('only a landing cancelled after a green gate is dropped', () => {
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'cancelled' }]), true);
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'cancelled' }, { name: 'land', conclusion: 'skipped' }]), false);
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'failure' }]), false);
+});
+
+test('the PC runs the cheap lints a change needs before it queues', () => {
+  assert.deepEqual(lintsFor(['engine/src/x.rs']), ['fmt', 'clippy', 'docs']);
+  assert.deepEqual(lintsFor(['engine/Cargo.toml']), ['fmt', 'clippy', 'docs'], 'a manifest can turn on a Clippy warning');
+  assert.deepEqual(lintsFor(['ui/App.tsx', 'tests/ui/system-motion.js']), ['lint', 'typecheck', 'docs']);
+  assert.deepEqual(lintsFor(['vite.config.ts']), ['typecheck', 'docs']);
+  assert.deepEqual(lintsFor(['docs/dev/workflow.md']), ['docs'], 'a page over its limit fails in CI too');
+  assert.deepEqual(lintsFor(['scripts/land.mjs', 'package.json']), ['docs'], 'the docs check also reads page links in code');
 });

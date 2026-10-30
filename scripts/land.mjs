@@ -274,15 +274,17 @@ async function land(number, dry, given, args) {
   }
   // Read only here: CI runs a copy of this file alone (the land job's run again on a new base), which checks nothing.
   const skip = noCheck(process.env, args, process.platform);
-  const { STATUS, statusText, toCheck } = skip ? {} : await import('./ci-scope.mjs');
-  const suites = skip ? [] : toCheck(git('diff', '--name-only', base, commit).split('\n').map((l) => l.trim()).filter(Boolean));
-  const verified = suites.length ? check(commit, suites) : null;
+  const { STATUS, statusText, toCheck, lintsFor } = skip ? {} : await import('./ci-scope.mjs');
+  const files = skip ? [] : git('diff', '--name-only', base, commit).split('\n').map((l) => l.trim()).filter(Boolean);
+  const suites = skip ? [] : toCheck(files);
+  const lints = skip ? [] : lintsFor(files);
+  const verified = suites.length || lints.length ? check(commit, suites, lints) : null;
   if (skip) console.log(`No check on this PC (${skip}): CI runs every suite the change needs.`);
   if (verified === false) {
-    console.error(`#${pr.number} failed ${suites.join(', ')} on this PC (the lines above): fix it, push, and run this again. Nothing was queued.`);
+    console.error(`#${pr.number} failed ${[...lints, ...suites].join(', ')} on this PC (the lines above): fix it, push, and run this again. Nothing was queued.`);
     return 1;
   }
-  if (verified) {
+  if (verified && suites.length) {
     // GitHub takes a status only on a commit it has: the commit goes to a branch no workflow starts on, the status on it,
     // and only then to the queue, so CI reads the status from its first job.
     try {
@@ -325,7 +327,7 @@ async function land(number, dry, given, args) {
  * under the main checkout's `target`, so each landing builds only what changed. True when every suite passed, false when
  * one failed, null when it could not run here (no `cargo`, or another landing checks now), so CI runs every suite.
  */
-function check(commit, suites) {
+function check(commit, suites, lints = []) {
   const common = resolve(git('rev-parse', '--path-format=absolute', '--git-common-dir').trim());
   const main = dirname(common);
   const lock = join(common, 'faber-landing.lock');
@@ -360,6 +362,26 @@ function check(commit, suites) {
       writeFileSync(join(dir, 'node_modules', '.faber-lock'), readFileSync(join(dir, 'package-lock.json')));
     }
     const env = { ...process.env, CARGO_TARGET_DIR: join(main, 'target', 'landing') };
+    const npm = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    const commands = {
+      fmt: ['cargo', ['fmt', '--all', '--check']],
+      // The first of the lint suite's Clippy proofs only (testkit/src/runner.rs LINTS): the whole suite, with its test-hooks
+      // and macOS proofs, took over 3 minutes on a busy PC (2026-10-30), so those stay CI's.
+      clippy: ['cargo', ['clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']],
+      lint: [process.execPath, [npm, 'run', '-s', 'lint']],
+      typecheck: [process.execPath, [npm, 'run', '-s', 'typecheck']],
+      docs: [process.execPath, ['scripts/docs.mjs']],
+    };
+    for (const lint of lints) {
+      const [command, args] = commands[lint];
+      console.log(`Checking ${lint} on this PC before queueing...`);
+      try {
+        execFileSync(command, args, { cwd: dir, env, stdio: 'inherit', windowsHide: true });
+      } catch (error) {
+        console.error(localProofFailure(lint, error));
+        return false;
+      }
+    }
     for (const suite of suites) {
       console.log(`Checking ${suite} on this PC before queueing (cargo t --suite ${suite})...`);
       try {
