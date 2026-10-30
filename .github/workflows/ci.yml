@@ -16,6 +16,10 @@ on:
   schedule:
     - cron: '17 6 * * *'
 
+# Electron (R459) is a dev dependency; no job here starts it yet, so npm ci skips its 100 MB binary.
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
 # A newer push to the same pull request or queue branch makes its older run pointless. Pushes to the shared branches keep
 # every run, so main can follow the newest green commit of phase-1-base (R127) even while pushes keep coming.
 concurrency:
