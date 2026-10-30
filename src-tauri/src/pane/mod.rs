@@ -1154,9 +1154,10 @@ impl Pane {
         }
     }
 
-    /// Test builds only: observe the child through safe native getters and fixed private DevTools requests.
+    /// Test builds only: observe the child through safe native getters and fixed private DevTools requests. `quick` answers
+    /// only where the child is: the page's own calls can take hundreds of milliseconds right after it shows.
     #[cfg(feature = "test-hooks")]
-    pub async fn test_probe(&self, capture: bool) -> Result<Value, String> {
+    pub async fn test_probe(&self, capture: bool, quick: bool) -> Result<Value, String> {
         let (webview, shown, owner, era, made) = {
             let s = crate::lock(&self.state);
             (s.webview.clone(), s.shown, s.owner.clone(), s.era, s.made)
@@ -1175,6 +1176,11 @@ impl Pane {
             let now = crate::lock(&self.state);
             test_probe_error(e, "scale_factor", (era, made, owner.as_deref()), (now.era, now.made, now.owner.as_deref()))
         })?;
+        if quick {
+            return Ok(
+                json!({ "shown": shown, "x": position.x, "y": position.y, "width": size.width, "height": size.height, "scale": scale }),
+            );
+        }
         let page = self.call("Runtime.evaluate", json!({
             "expression": "({url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,2000),width:innerWidth,height:innerHeight})",
             "returnByValue": true
