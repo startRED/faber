@@ -60,13 +60,19 @@ const AGENTS: &str = "# Rules\n\n## Proof commands\n\n```bash\nnpm run lint\ncar
 
 /// What Faber's MCP server answered to one control request, once it did.
 async fn answer(pipe: &support::Pipe, request: &str) -> serde_json::Value {
-    for _ in 0..500 {
-        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request) {
-            return m["response"]["response"]["mcp_response"].clone();
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{request} was never answered");
+    let mut found = None;
+    support::until(&format!("{request} was never answered"), || {
+        found = pipe
+            .lines
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|m| m["response"]["request_id"] == request)
+            .map(|m| m["response"]["response"]["mcp_response"].clone());
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 
 fn tools(answer: &serde_json::Value) -> Vec<String> {
@@ -304,24 +310,12 @@ fn turns(pipe: &support::Pipe) -> Vec<String> {
 }
 
 async fn until_turns(pipe: &support::Pipe, n: usize) {
-    for _ in 0..300 {
-        if turns(pipe).len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the CLI got {} turns, not {n}: {:?}", turns(pipe).len(), turns(pipe));
+    support::until(&format!("the CLI never got {n} turns"), || turns(pipe).len() >= n).await;
 }
 
 async fn until(engine: &Engine, id: &str, done: impl Fn(&[Message]) -> bool) -> Vec<Message> {
-    for _ in 0..300 {
-        let messages = engine.open(id).unwrap().messages;
-        if done(&messages) {
-            return messages;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the conversation never got there: {:?}", engine.open(id).unwrap().messages);
+    support::until("the conversation never got there", || done(&engine.open(id).unwrap().messages)).await;
+    engine.open(id).unwrap().messages
 }
 
 fn state(m: &Message) -> Option<ChecksState> {
@@ -452,12 +446,7 @@ async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_th
     pipe.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
     // Git has told what the folder held when the reply began; then a command (`cargo fmt`, `sed -i`) writes a file.
     let read = || git.listed.load(std::sync::atomic::Ordering::SeqCst);
-    for _ in 0..300 {
-        if read() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("git was never asked what the folder held", || read() > 0).await;
     assert_eq!(read(), 1, "the reply's start asked git once");
     {
         let captures = git.rewind_listed.lock().unwrap();
@@ -557,7 +546,7 @@ async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_wit
         mode: faber_engine::rewind::Mode::Conversation,
         saved_versions: vec![],
     };
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(support::DEADLINE, async {
         loop {
             if engine.rewind_preview(request.clone()).unwrap().running.is_empty() {
                 break;
@@ -705,14 +694,7 @@ mod processes {
         let out = v.verify(request(dir.path(), node(dir.path(), script), Level::Full)).await;
         assert_eq!(out.checks[0].verdict, Verdict::NotFinished, "{out:?}");
         // Windows closes an ended process's files a moment after the job reports it gone.
-        let mut gone = false;
-        for _ in 0..50 {
-            if std::fs::remove_file(dir.path().join("hold.txt")).is_ok() {
-                gone = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        assert!(gone, "the check that ran out of time was still running");
+        let held = dir.path().join("hold.txt");
+        support::until("the check that ran out of time was still running", || std::fs::remove_file(&held).is_ok()).await;
     }
 }
