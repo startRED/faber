@@ -336,6 +336,8 @@ export const en = {
   'tray.stopped.quota': '{title}: stopped keeping going until {ai} has quota again',
   'tray.stopped.billed': '{title}: stopped keeping going, {ai} may be billed per use',
   'tray.stopped.goal': '{title}: Faber could not fix this goal by itself',
+  'tray.stopped.stage': '{title}: done, come and look',
+  'tray.stopped.decision': '{title}: needs a decision from you',
   'toast.dismiss': 'Dismiss',
   'group.groups': "Groups",
   'group.create': "New group",

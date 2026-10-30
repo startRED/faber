@@ -336,6 +336,8 @@ export const es: Messages = {
   'tray.stopped.quota': '{title}: dejó de seguir hasta que {ai} vuelva a tener cuota',
   'tray.stopped.billed': '{title}: dejó de seguir, {ai} puede cobrarse por uso',
   'tray.stopped.goal': '{title}: Faber no pudo arreglar esta meta por sí solo',
+  'tray.stopped.stage': '{title}: listo, ven a verlo',
+  'tray.stopped.decision': '{title}: necesita que tomes una decisión',
   'toast.dismiss': 'Descartar',
   'group.groups': "Grupos",
   'group.create': "Nuevo grupo",

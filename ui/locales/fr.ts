@@ -175,6 +175,8 @@ export const fr: Messages = {
   'tray.stopped.quota': '{title} : a cessé de continuer jusqu’à ce que {ai} ait du quota',
   'tray.stopped.billed': '{title} : a cessé de continuer, {ai} est peut-être facturé à l’usage',
   'tray.stopped.goal': '{title} : Faber n’a pas pu réparer cet objectif tout seul',
+  'tray.stopped.stage': '{title} : c’est fini, venez voir',
+  'tray.stopped.decision': '{title} : a besoin d’une décision de votre part',
   'toast.dismiss': 'Ignorer',
   'group.groups': "Groupes",
   'group.create': "Nouveau groupe",

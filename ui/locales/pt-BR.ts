@@ -335,6 +335,8 @@ export const ptBR: Messages = {
   'tray.stopped.quota': '{title}: parou de continuar até o {ai} ter cota de novo',
   'tray.stopped.billed': '{title}: parou de continuar, o {ai} pode ser cobrado por uso',
   'tray.stopped.goal': '{title}: o Faber não conseguiu consertar esta meta sozinho',
+  'tray.stopped.stage': '{title}: pronto, venha ver',
+  'tray.stopped.decision': '{title}: precisa de uma decisão sua',
   'toast.dismiss': 'Dispensar',
   'group.groups': "Grupos",
   'group.create': "Novo grupo",

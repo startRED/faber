@@ -175,6 +175,8 @@ export const de: Messages = {
   'tray.stopped.quota': '{title}: hat aufgehört, bis {ai} wieder Kontingent hat',
   'tray.stopped.billed': '{title}: hat aufgehört, {ai} wird vielleicht nach Nutzung abgerechnet',
   'tray.stopped.goal': '{title}: Faber konnte dieses Ziel nicht von selbst reparieren',
+  'tray.stopped.stage': '{title}: fertig, schau es dir an',
+  'tray.stopped.decision': '{title}: braucht eine Entscheidung von dir',
   'toast.dismiss': 'Ausblenden',
   'group.groups': "Gruppen",
   'group.create': "Neue Gruppe",

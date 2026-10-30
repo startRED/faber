@@ -830,7 +830,7 @@ export interface Plural {
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
 /** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
-export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
+export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal', 'stage', 'decision'] as const;
 
 /** A sign that the agent's own work seems stuck: a step with no news (`quiet`), a long compaction, or the same step again
  * and again. `minutes` without news for the first two. It never stops anything by itself. */
