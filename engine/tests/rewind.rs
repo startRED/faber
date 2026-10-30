@@ -937,7 +937,7 @@ async fn rewind_recorded_turns_capture_before_cli_start_and_redo_never_spawns_or
                 choice: Choice { vendor: name.into(), model: None, effort: None },
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(crate::support::DEADLINE, async {
             loop {
                 if let AppEvent::Message { conversation_id, message } = rx.recv().await.unwrap()
                     && conversation_id == id
@@ -950,7 +950,7 @@ async fn rewind_recorded_turns_capture_before_cli_start_and_redo_never_spawns_or
         })
         .await
         .expect("recorded turn finishes");
-        let point = tokio::time::timeout(Duration::from_secs(5), async {
+        let point = tokio::time::timeout(crate::support::DEADLINE, async {
             loop {
                 if let Some(point) = engine.rewind_points(&id).unwrap().into_iter().find(|point| point.sealed) {
                     break point;
@@ -1058,7 +1058,7 @@ async fn rewind_overlap_refuses_restore_without_interrupting_another_conversatio
     pipe.say(json!({"type":"system","subtype":"init","session_id":"overlapping-writer","model":"claude-haiku-5-5"})).await;
     pipe.say(json!({"type":"system","subtype":"task_started","task_type":"local_bash","is_backgrounded":true,"run_id":"command"})).await;
     pipe.say(json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if engine.open(&b.id).unwrap().messages.last().is_some_and(|message| message.status == Some(Status::Done)) {
                 break;
@@ -1074,7 +1074,7 @@ async fn rewind_overlap_refuses_restore_without_interrupting_another_conversatio
     assert!(!pipe.closed.load(std::sync::atomic::Ordering::SeqCst), "restore of A leaves B's owned pipe alive");
     assert!(!pipe.lines.lock().unwrap().iter().any(|line| line["request"]["subtype"] == "interrupt"));
     pipe.say(json!({"type":"system","subtype":"task_notification","run_id":"command","status":"completed"})).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if engine.rewind_preview(request.clone()).unwrap().running.is_empty() {
                 break;
@@ -1417,7 +1417,7 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
     pipe.say(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"edit","content":"ok","is_error":false}]}}))
         .await;
     pipe.say(json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
-    tokio::time::timeout(Duration::from_secs(3), checks.started.notified()).await.expect("the check starts");
+    tokio::time::timeout(crate::support::DEADLINE, checks.started.notified()).await.expect("the check starts");
     let point = engine.rewind_points(CONVERSATION).unwrap().pop().unwrap();
     assert!(!point.coverage.unavailable, "the test needs a real baseline: {point:?}; Git calls: {:?}", s.git.0.lock().unwrap().calls);
     assert!(!point.sealed);
@@ -1431,7 +1431,7 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
     s.write("file", b"late check write");
     assert!(!engine.rewind_points(CONVERSATION).unwrap()[0].sealed, "an aborted future is not process completion");
     complete.send(true).unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if engine.rewind_points(CONVERSATION).unwrap()[0].sealed
                 && engine.rewind_preview(overlapping.clone()).unwrap().running.is_empty()

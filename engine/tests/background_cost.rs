@@ -69,7 +69,7 @@ async fn background_cost_at_thirty_two_full_output_caps() {
         let id = format!("cost-{index}");
         support::emit(&mut output, json!({"method":"item/started","params":{"threadId":"cost-thread","turnId":"cost-turn","item":{"type":"commandExecution","id":id,"command":"node long-task.js","status":"inProgress","processId":index.to_string()}}})).await;
         support::emit(&mut output, json!({"method":"item/commandExecution/outputDelta","params":{"threadId":"cost-thread","turnId":"cost-turn","itemId":id,"delta":"x".repeat(MAX_BYTES)}})).await;
-        tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::time::timeout(crate::support::DEADLINE, async {
             loop {
                 if let Some(AppEvent::Background { items, .. }) = rx.recv().await
                     && items.len() == index + 1

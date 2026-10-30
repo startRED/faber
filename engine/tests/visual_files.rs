@@ -113,7 +113,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
                 })
                 .unwrap();
             loop {
-                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("the fixture turn finishes").unwrap();
+                let event = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("the fixture turn finishes").unwrap();
                 if let AppEvent::Message { message, .. } = event
                     && message.role == Role::Assistant
                     && message.status == Some(Status::Done)

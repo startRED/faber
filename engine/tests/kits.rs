@@ -9,7 +9,6 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 const TASK: &str = "Debug this failing test.";
 const DEBUG: &str = "---\nname: debug\ndescription: Debug failures.\n---\nDEBUG_KIT_INSTRUCTIONS";
@@ -143,7 +142,7 @@ async fn replay(
         }
     };
     session.send(UserTurn::text(task));
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             match events.recv().await.expect("fake session ended before completing") {
                 EngineEvent::Done { ok, .. } => {

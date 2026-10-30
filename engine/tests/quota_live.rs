@@ -465,13 +465,7 @@ fn start(dir: &crate::support::DataFolder, spawn: Spawner) -> (Engine, Arc<Atomi
 }
 
 async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    for _ in 0..150 {
-        if done() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("never happened: {what}");
+    support::until(&format!("never happened: {what}"), &mut done).await;
 }
 
 #[tokio::test]

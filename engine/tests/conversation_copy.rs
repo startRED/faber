@@ -887,7 +887,7 @@ async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_w
     let _ = release.send(());
     ready(&s.engine, &id).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), capture_started).await.expect("history capture starts after attachment").unwrap();
+    tokio::time::timeout(crate::support::DEADLINE, capture_started).await.expect("history capture starts after attachment").unwrap();
     assert!(s.cwds.lock().unwrap().is_empty(), "an attached copy must finish its history capture before the agent starts");
     assert!(s.engine.open(&id).unwrap().messages[0].rewind.is_none(), "the held capture has not published its baseline yet");
     finish_capture.send(()).unwrap();

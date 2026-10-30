@@ -72,13 +72,13 @@ async fn moved_attachment_handover(long: bool) {
     engine.move_turn(&before.id, &blocked.id).unwrap();
     let mut agent = support::next_pipe(&made).await;
     let next = async |agent: &support::Pipe, method: &str| {
-        for _ in 0..200 {
-            if let Some(m) = agent.lines.lock().unwrap().iter().find(|m| m["method"] == method).cloned() {
-                return m;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("no {method}: {:?}", agent.lines.lock().unwrap());
+        let mut found = None;
+        support::until(&format!("the agent never sent {method}"), || {
+            found = agent.lines.lock().unwrap().iter().find(|m| m["method"] == method).cloned();
+            found.is_some()
+        })
+        .await;
+        found.unwrap()
     };
     let init = next(&agent, "initialize").await;
     agent.say(json!({"id":init["id"],"result":{}})).await;
@@ -490,13 +490,13 @@ fn quota(window: &str, after: u64, used: f64) -> EngineEvent {
     EngineEvent::Quota { window: window.into(), used, resets_at: (WHEN + after) as f64 }
 }
 async fn reply(engine: &Engine, id: &str, status: Status) -> Message {
-    for _ in 0..200 {
-        if let Some(m) = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| m.status == Some(status)) {
-            return m;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("reply never became {status:?}: {:?}", engine.open(id));
+    let mut found = None;
+    support::until(&format!("the reply never became {status:?}"), || {
+        found = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| m.status == Some(status));
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 #[tokio::test]
 async fn a_message_for_a_vendor_that_resets_soon_waits_and_sends_itself() {
@@ -708,12 +708,7 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
         r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,
     );
     r.engine.send(request(None, "auto")).unwrap();
-    for _ in 0..200 {
-        if !r.claude.args.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    support::until("the turn never moved to Claude", || !r.claude.args.lock().unwrap().is_empty()).await;
     let args = r.claude.args.lock().unwrap().first().cloned().expect("the turn moved to Claude");
     let flag = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].clone());
     assert_eq!(flag("--model").as_deref(), Some("claude-sonnet-5-5"));
@@ -743,12 +738,7 @@ async fn a_lifted_pick_that_runs_out_of_quota_is_re_picked_and_the_answer_no_lon
         r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,
     );
     let id = r.engine.send(request(None, "auto")).unwrap();
-    for _ in 0..300 {
-        if !r.claude.args.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    support::until("recovery never moved the turn to Claude", || !r.claude.args.lock().unwrap().is_empty()).await;
     let m = r.engine.open(&id).unwrap().messages.last().unwrap().clone();
     assert!(!r.codex.args.lock().unwrap().is_empty(), "the lifted pick started at Codex");
     assert!(!r.claude.args.lock().unwrap().is_empty(), "recovery moved the turn to Claude");
