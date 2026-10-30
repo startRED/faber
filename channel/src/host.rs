@@ -26,7 +26,8 @@ impl Backend for Arc<Host> {
         Box::pin(async move {
             match Host::kind(&cmd) {
                 Some(Kind::Window) => Err("error.host.noWindow".into()),
-                _ => Host::dispatch(&host, &cmd, args).await,
+                // The command line shows the key; the field a look error names (its detail) stays with the screen.
+                _ => Host::dispatch(&host, &cmd, args).await.map_err(|failure| failure.key),
             }
         })
     }
