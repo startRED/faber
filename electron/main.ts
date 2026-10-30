@@ -41,6 +41,12 @@ app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
 // The GPU process is ended on purpose whenever the window closes (`releaseGpu`); that must not count as crashes.
 app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
+// Chromium's profile (caches, local storage, crash dumps) lives in `webview` inside Faber's data folder, as the Tauri
+// shell kept it, never loose beside the conversations: its default folder would be the data folder itself. The data
+// folder is the one the host reads (`data_dir_from_env` in host/src/lib.rs).
+const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
+app.setPath('userData', path.join(dataDir, 'webview'));
+
 // The screen test runner's switches, ignored by an installed Faber (testmode.ts).
 testmode.prepare();
 
