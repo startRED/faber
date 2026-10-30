@@ -2245,6 +2245,7 @@ export const de: Messages = {
   'notes.312.better': 'Eine Antwort, die abbrach, weil Faber geschlossen wurde, sagt das jetzt, und mit Weitermachen macht die KI dort weiter, wo sie aufgehört hat.',
   'notes.313.fixed': 'Ein Pull Request mit grünen Prüfungen wird weiter beobachtet, bis er zusammengeführt ist, sodass ein späterer Fehler den Agenten noch erreicht.',
   'notes.315.fixed': 'Nach „Update bereit, neu starten“ installiert Faber das Update jetzt und öffnet sich von selbst wieder, statt manchmal geschlossen zu bleiben, ohne etwas zu installieren.',
+  'notes.316.new': 'Große Anfragen: Die KI teilt die Arbeit auf und führt selbst ein kleines Team; kleine Anfragen erledigt sie weiter direkt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

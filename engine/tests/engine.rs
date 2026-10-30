@@ -4340,6 +4340,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
+                leads: false,
                 verify: false,
                 progress: false,
                 area: Area::Project,
@@ -5311,6 +5312,8 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
         .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
         .unwrap();
     let mut agent = next_pipe(&made).await;
+    let leads = faber_engine::persona::LEADS;
+    assert!(appended(&agent.args).is_some_and(|p| p.contains(leads)), "the person's own project agent may lead a team");
     agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
     let input = json!({"title":"Docs","brief":"Write the docs."});
     agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
@@ -5320,6 +5323,7 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
     until(&engine, &parent, |c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))).await;
     let mut child = next_pipe(&made).await;
+    assert!(appended(&child.args).is_some_and(|p| !p.contains(leads)), "a team member never leads one of its own");
     child.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
     child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Wrote the parser page."}}})).await;
     child.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;

@@ -2125,6 +2125,7 @@ export const en = {
   'notes.312.better': 'An answer cut off because Faber closed now says so, and you can press Continue to have the AI pick up where it stopped.',
   'notes.313.fixed': 'A pull request whose checks went green is still watched until it is merged, so a later failure still reaches the agent.',
   'notes.315.fixed': 'After “Update ready, restart”, Faber now installs the update and opens again by itself, instead of sometimes staying closed with nothing installed.',
+  'notes.316.new': 'Big requests: the AI splits the work and runs a small team by itself; small requests are still done directly.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
