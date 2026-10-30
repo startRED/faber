@@ -108,8 +108,18 @@ the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the s
 words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the
 same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or
 no step for 10 minutes (30 while a command runs, since builds say nothing until they end). The time a question waits for
-the person never counts. Neither CLI lets Faber speak to the main agent while it waits for its subagent, so the main
-agent's own chance is the retry the numbers leave it. Background subagents are not followed.
+the person never counts, and only for the subagent that asked it: a sibling that hangs meanwhile still turns amber
+(task 110). Neither CLI lets Faber speak to the main agent while it waits for its subagent, so the main agent's own
+chance is the retry the numbers leave it. Background subagents are followed the same way while the reply that sent them
+runs.
+
+The main agent gets the same line, under its reply's status line instead of under a row (`ui/StallNote.tsx`, task 110):
+the same `.agent-stuck` amber box and entrance, its words, and Stop (which asks first, like the composer's, when helpers
+would end with it). It says that a step of its own has given no news for N minutes (10, or 30 while a command runs; the
+number moves once a minute), that compacting the conversation has taken N minutes (past 5), that it keeps running the same
+step (10 times with no file changed between, whatever came between), or that the same step failed three times. It
+stops nothing: the person decides. The running column shows the same words on the row, with "Open conversation", like a
+stuck helper's.
 
 A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
 ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person

@@ -889,3 +889,69 @@ async fn clearing_context_delivers_waiting_messages_before_the_handoff() {
     assert_eq!(engine.open(&id).unwrap().messages[4].wake.as_ref().map(|w| w.why.as_str()), Some("wake.cleared"));
     engine.shutdown();
 }
+
+/// Task 110: a compaction the CLI never ends held the queue and Keep going for ever with nothing said. Past five minutes the
+/// reply it follows says so, with Stop; at the deadline Faber stops it like a compaction that failed, so the context stays as
+/// it was and the message that waited goes out.
+#[tokio::test]
+async fn a_compaction_that_takes_too_long_is_told_then_stopped_and_the_queue_goes_on() {
+    use faber_engine::model::StallKind;
+    let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
+    let (engine, _rx, mut agent, id) = started(&dir, project.path()).await;
+    let clock = Arc::new(Mutex::new(1_000_000.0));
+    let time = clock.clone();
+    engine.set_time_source(Arc::new(move || *time.lock().unwrap()));
+    let (ok, _) = tool(&mut agent, 1, json!({ "action": "compact", "next": "Go on with the footer." })).await;
+    assert!(ok);
+    answers(&mut agent, "The header is done.", true).await;
+    until_turns(&agent, 2).await;
+    until(&engine, &id, |c| c.compacting).await;
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: None,
+            text: "Also the sidebar".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    // The timer's looks, one every half minute, up to `secs` after the compaction started.
+    let start = *clock.lock().unwrap();
+    let walk = |secs: f64| {
+        let mut now = *clock.lock().unwrap();
+        while now < start + secs {
+            now = (now + 30.0).min(start + secs);
+            *clock.lock().unwrap() = now;
+            engine.check_compactions();
+        }
+    };
+    let stall = || engine.open(&id).unwrap().messages.last().unwrap().stall.map(|s| (s.kind, s.minutes));
+    let interrupted = || agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt");
+    walk(299.0);
+    assert_eq!(stall(), None, "a few minutes are a normal compaction");
+    walk(330.0);
+    assert_eq!(stall(), Some((StallKind::Compacting, Some(5))));
+    let item = engine.state().running.items.into_iter().find(|i| i.conversation_id == id).unwrap();
+    assert_eq!((item.state, item.stall.map(|s| s.kind)), (RunState::NeedsYou, Some(StallKind::Compacting)));
+    walk(899.0);
+    assert!(!interrupted(), "told, not stopped, before the deadline");
+    walk(900.0);
+    for _ in 0..300 {
+        if interrupted() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(interrupted(), "the CLI was told to stop at the deadline");
+    // The CLI ends it as interrupted: a compaction that failed. The context is the one before, and the queue goes on.
+    answers(&mut agent, "", false).await;
+    until_turns(&agent, 3).await;
+    assert_eq!(turns(&agent)[2], "Also the sidebar");
+    let c = engine.open(&id).unwrap();
+    assert!(!c.compacting);
+    assert_eq!(c.queued.first().and_then(|q| q.wake.as_ref()).map(|w| w.why.as_str()), Some("wake.compactFailed"));
+    assert!(c.messages.iter().all(|m| m.stall.is_none() || m.stall.is_some_and(|s| s.kind != StallKind::Compacting)), "the notice went");
+    engine.shutdown();
+}

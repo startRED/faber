@@ -428,6 +428,34 @@ pub struct Message {
     /// On a reply: the closing box of the task it ended (`crate::progress::wrap_up`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrap_up: Option<WrapUp>,
+    /// On the latest reply while its conversation works: a sign that the agent itself seems stuck (task 110). Never read back
+    /// from disk, so a sign can outlive neither its work nor Faber.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub stall: Option<Stall>,
+}
+
+/// What the person is told when the agent's own work seems stuck: a step that has said nothing for a long while, a
+/// compaction that takes too long, or the same step again and again. It never stops anything by itself (task 110).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stall {
+    pub kind: StallKind,
+    /// Whole minutes without news, for `quiet` and `compacting`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StallKind {
+    /// A step of the agent's own has run with no word from the CLI for longer than its kind of work allows.
+    Quiet,
+    /// The compaction of the context runs longer than it should.
+    Compacting,
+    /// The agent started the same step, with the same input, many times with no file changed between.
+    Repeat,
+    /// The same step failed three times with no file changed between.
+    Failing,
 }
 
 /// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
@@ -809,6 +837,7 @@ impl Message {
             now: None,
             wrap_up: None,
             tool_kit: None,
+            stall: None,
         }
     }
 }
@@ -1171,6 +1200,9 @@ pub struct RunningItem {
     /// The subagent calls of the reply that seem stuck: each needs the person like a question does.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stuck: Vec<String>,
+    /// The agent itself seems stuck (`Message::stall`): it needs the person like a stuck subagent does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stall: Option<Stall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     /// A followed pull request whose checks failed while the quota was tight: its number, and the commit, so each is told once.

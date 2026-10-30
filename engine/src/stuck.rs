@@ -35,6 +35,10 @@ impl Sign {
 pub const REPEATS: u32 = 6;
 /// The same step failing this many times with no file changed between: failed twice, retried once, failed again.
 pub const FAILS: u32 = 3;
+/// The main agent starting the same step this many times with no file changed between, whatever came in between: its own
+/// loops go through a few other steps each time (the owner's conversations: one command 18 and 19 times in a turn), and a
+/// main agent polls a build or a page more than a subagent does.
+pub const MAIN_REPEATS: u32 = 10;
 /// Seconds with no step while nothing runs: thinking, or writing its report.
 pub const QUIET: f64 = 600.0;
 /// Seconds with no step while a command runs: builds and test suites take long and say nothing until they end.
@@ -52,19 +56,22 @@ pub struct Child {
     failed: HashMap<String, u32>,
     /// The steps still running: their key, and whether it is a command.
     open: HashMap<String, (String, bool)>,
+    /// How many times each step started since a file last changed, in any order.
+    seen: HashMap<String, u32>,
 }
 
 fn key(tool: &ToolUse) -> String {
     format!("{}\u{0}{}", tool.name, tool.input)
 }
 
-fn is_command(name: &str) -> bool {
+/// A step that runs a command: it says nothing until it ends.
+pub fn is_command(name: &str) -> bool {
     matches!(name, "Bash" | "PowerShell" | "commandExecution")
 }
 
 impl Child {
     pub fn new(now: f64) -> Self {
-        Child { last: now, action: None, repeats: 0, failed: HashMap::new(), open: HashMap::new() }
+        Child { last: now, action: None, repeats: 0, failed: HashMap::new(), open: HashMap::new(), seen: HashMap::new() }
     }
 
     pub fn started(&mut self, tool: &ToolUse, now: f64) {
@@ -76,6 +83,7 @@ impl Child {
             self.action = Some(key.clone());
             self.repeats = 1;
         }
+        *self.seen.entry(key.clone()).or_default() += 1;
         self.open.insert(tool.id.clone(), (key, is_command(&tool.name)));
     }
 
@@ -91,9 +99,20 @@ impl Child {
         } else {
             self.failed.remove(&key);
             if !crate::nudge::edited(tool).is_empty() {
-                self.failed.clear();
+                self.changed();
             }
         }
+    }
+
+    /// A file changed: what failed or repeated before may go another way now.
+    pub fn changed(&mut self) {
+        self.failed.clear();
+        self.seen.clear();
+    }
+
+    /// Whether this ended step changed a file.
+    pub fn edits(tool: &ToolUse) -> bool {
+        !tool.declined && tool.ok != Some(false) && !crate::nudge::edited(tool).is_empty()
     }
 
     /// The time the person takes to answer is not the subagent's: its clock starts again.
@@ -111,6 +130,17 @@ impl Child {
         }
         let quiet = if self.open.values().any(|(_, command)| *command) { QUIET_COMMAND } else { QUIET };
         (now - self.last > quiet).then_some(Sign::Silent)
+    }
+}
+
+/// What the main agent's own steps say: the same step many times, or the same step failing, with no file changed between.
+/// Its silence is the reply's (`engine/src/engine/silence.rs`), so time plays no part here.
+impl Child {
+    pub fn main_sign(&self) -> Option<Sign> {
+        if self.failed.values().any(|n| *n >= FAILS) {
+            return Some(Sign::Failing);
+        }
+        self.seen.values().any(|n| *n >= MAIN_REPEATS).then_some(Sign::Repeat)
     }
 }
 
@@ -198,6 +228,34 @@ mod tests {
         child.started(&test("t6"), 8.0);
         child.ended(&ended(test("t6"), true), 9.0);
         assert_eq!(child.sign(9.0), None, "the check passed");
+    }
+
+    #[test]
+    fn the_main_agent_shows_the_same_step_ten_times_or_failing_three_times_with_nothing_changed() {
+        let mut main = Child::new(0.0);
+        let test = |n: u32| step(&format!("t{n}"), "Bash", json!({ "command": "npm test" }));
+        let read = |n: u32| step(&format!("r{n}"), "Read", json!({ "file_path": "a.rs" }));
+        for n in 1..MAIN_REPEATS {
+            main.started(&read(n), 1.0);
+            main.ended(&ended(read(n), true), 1.0);
+            main.started(&step(&format!("g{n}"), "Grep", json!({ "pattern": "x" })), 1.0);
+        }
+        assert_eq!(main.main_sign(), None, "nine looks at one file, with others between, are work");
+        main.started(&read(MAIN_REPEATS), 2.0);
+        assert_eq!(main.main_sign(), Some(Sign::Repeat), "the tenth, even with other steps between");
+        let edit = step("e", "Edit", json!({ "file_path": "src/lib.rs" }));
+        main.started(&edit, 3.0);
+        main.ended(&ended(edit, true), 3.0);
+        assert_eq!(main.main_sign(), None, "a change starts the count again");
+        for n in 1..FAILS {
+            main.started(&test(n), 4.0);
+            main.ended(&ended(test(n), false), 4.0);
+        }
+        assert_eq!(main.main_sign(), None, "a failure and its first retry are the work going on");
+        main.started(&test(FAILS), 5.0);
+        main.ended(&ended(test(FAILS), false), 5.0);
+        assert_eq!(main.main_sign(), Some(Sign::Failing));
+        assert_eq!(main.main_sign(), main.main_sign(), "time plays no part");
     }
 
     #[test]

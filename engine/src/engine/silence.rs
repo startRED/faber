@@ -1,6 +1,10 @@
 //! A reply that goes silent (rule 5 of `docs/product/models.md`). The CLI says something every few seconds while it works, so a
 //! reply whose CLI has said nothing for `BOUND`, with no step running and nobody to answer, is hung: Faber stops it like the
 //! person's Stop does (the interrupt, then its end after the driver's grace), and the reply ends with `reason.silent`.
+//! A step of the agent's own that runs (a command, a tool server's call) is not cut, since its process may still be at work
+//! and Faber cannot see it end, but it no longer hides the silence either (task 110): once it has said nothing for longer
+//! than its kind of work allows (`stuck::QUIET`, `stuck::QUIET_COMMAND` while a command runs), the reply says so, with Stop,
+//! until the CLI speaks again. A subagent at work has its own signs (`stuck_watch.rs`).
 //! Cost: one map entry per running reply, written on events that already arrive, and one task that sleeps `EVERY` between two
 //! looks, alive only while a reply runs. No process and no timer per reply.
 use super::*;
@@ -33,6 +37,18 @@ pub(super) struct Heard {
     at: f64,
     /// Faber stopped it for its silence; what follows says so.
     cut: bool,
+    /// Whole minutes a step of its own has run without a word, once past its kind's limit: the reply says so.
+    quiet: Option<u32>,
+}
+
+/// What a running reply waits for, when it is not the CLI's words.
+enum Wait {
+    /// The person, a compaction, or the process closing after a finished answer: never silence.
+    Other,
+    /// A subagent of its own, which has its own signs: its steps are the reply's words.
+    Subagent,
+    /// Steps of the agent's own: never cut, but told once they have said nothing for long; `command` when one runs a command.
+    Steps { command: bool },
 }
 
 impl Core {
@@ -40,7 +56,7 @@ impl Core {
     pub(super) fn listen(&mut self, conv: &str) {
         let Some((turn, sid)) = self.live.get(conv).and_then(|l| Some((l.turn.clone()?, l.sid))) else { return };
         let at = self.secs();
-        self.heard.insert(conv.to_string(), Heard { turn, sid, at, cut: false });
+        self.heard.insert(conv.to_string(), Heard { turn, sid, at, cut: false, quiet: None });
         if std::mem::replace(&mut self.listening, true) {
             return;
         }
@@ -64,7 +80,15 @@ impl Core {
         let at = self.secs();
         if let Some(h) = self.heard.get_mut(conv).filter(|h| h.sid == sid && !h.cut) {
             h.at = at;
+            if h.quiet.take().is_some() {
+                self.show_stall(conv);
+            }
         }
+    }
+
+    /// The minutes a step of this running reply has gone without a word, once past its limit.
+    pub(super) fn quiet_for(&self, conv: &str, turn: &str) -> Option<u32> {
+        self.heard.get(conv).filter(|h| h.turn == turn && !h.cut).and_then(|h| h.quiet)
     }
 
     /// Whether Faber stopped this conversation's running reply for its silence.
@@ -73,16 +97,25 @@ impl Core {
         self.heard.get(conv).is_some_and(|h| h.cut && Some(&h.turn) == turn)
     }
 
-    /// A reply that is waiting for something other than the CLI's words: a step running (a build, a subagent, a helper), a
-    /// question for the person, a compaction, or an answer already finished that only waits for the process to close.
-    fn waits(&self, conv: &str, turn: &str) -> bool {
-        let Some(c) = self.convs.get(conv) else { return true };
-        let Some(m) = c.messages.iter().find(|m| m.id == turn) else { return true };
-        c.compacting
-            || m.status != Some(Status::Streaming)
-            || m.finished_at.is_some()
-            || m.permissions.iter().flatten().next().is_some()
-            || m.tools.iter().flatten().any(|t| t.ok.is_none())
+    /// What a reply waits for other than the CLI's words, if anything: a question for the person, a compaction, an answer
+    /// already finished that only waits for the process to close, a subagent, or steps of its own (a build, a tool server).
+    fn waits(&self, conv: &str, turn: &str) -> Option<Wait> {
+        let Some(c) = self.convs.get(conv) else { return Some(Wait::Other) };
+        let Some(m) = c.messages.iter().find(|m| m.id == turn) else { return Some(Wait::Other) };
+        if c.compacting || m.status != Some(Status::Streaming) || m.finished_at.is_some() || m.permissions.iter().flatten().next().is_some()
+        {
+            return Some(Wait::Other);
+        }
+        let mut open = m.tools.iter().flatten().filter(|t| t.ok.is_none()).peekable();
+        open.peek()?;
+        let mut command = false;
+        for t in open {
+            if t.parent.is_some() || matches!(t.name.as_str(), "Agent" | "Task" | "Helper") {
+                return Some(Wait::Subagent);
+            }
+            command |= crate::stuck::is_command(&t.name);
+        }
+        Some(Wait::Steps { command })
     }
 
     /// Looks at every running reply once; false when none is left to look at.
@@ -95,26 +128,39 @@ impl Core {
         }
         let live = &self.live;
         self.heard.retain(|conv, h| live.get(conv).is_some_and(|l| l.sid == h.sid && l.turn.as_ref() == Some(&h.turn)));
-        let mut silent = vec![];
+        let mut looked = vec![];
         for (conv, h) in &self.heard {
             if h.cut {
                 continue;
             }
-            if self.waits(conv, &h.turn) {
-                silent.push((conv.clone(), None));
-            } else if now - h.at >= BOUND {
-                silent.push((conv.clone(), Some(h.turn.clone())));
-            }
-        }
-        for (conv, turn) in silent {
-            match turn {
+            let quiet = now - h.at;
+            let next = match self.waits(conv, &h.turn) {
                 // What it waits for is not silence: the count starts again when that ends.
-                None => {
-                    if let Some(h) = self.heard.get_mut(&conv) {
-                        h.at = now;
-                    }
+                Some(Wait::Other | Wait::Subagent) => Look::Again,
+                Some(Wait::Steps { command }) => {
+                    let limit = if command { crate::stuck::QUIET_COMMAND } else { crate::stuck::QUIET };
+                    Look::Quiet((quiet >= limit).then(|| (quiet / 60.0) as u32))
                 }
-                Some(_) => self.go_silent(&conv),
+                None if quiet >= BOUND => Look::Cut,
+                None => Look::Quiet(None),
+            };
+            looked.push((conv.clone(), next));
+        }
+        for (conv, next) in looked {
+            let Some(h) = self.heard.get_mut(&conv) else { continue };
+            let quiet = match next {
+                Look::Again => {
+                    h.at = now;
+                    None
+                }
+                Look::Quiet(minutes) => minutes,
+                Look::Cut => {
+                    self.go_silent(&conv);
+                    continue;
+                }
+            };
+            if std::mem::replace(&mut h.quiet, quiet) != quiet {
+                self.show_stall(&conv);
             }
         }
         !self.heard.is_empty()
@@ -128,6 +174,16 @@ impl Core {
         }
         self.interrupt(conv, false);
     }
+}
+
+/// What one look decided for a reply.
+enum Look {
+    /// It waits for something that is not silence: its count starts again.
+    Again,
+    /// Its steps have said nothing for this many minutes past their limit, or it is within its limits.
+    Quiet(Option<u32>),
+    /// Silent for the bound with nothing running: Faber stops it.
+    Cut,
 }
 
 impl Engine {
@@ -278,6 +334,10 @@ mod tests {
         engine.shutdown();
     }
 
+    fn stall(engine: &Engine, id: &str) -> Option<(StallKind, Option<u32>)> {
+        last(engine, id).stall.map(|s| (s.kind, s.minutes))
+    }
+
     #[tokio::test]
     async fn a_step_that_runs_and_a_question_that_waits_are_never_silence() {
         let (engine, id, n, clock, _dir) = running();
@@ -287,11 +347,51 @@ mod tests {
         walk(&engine, &clock, 5.0 * BOUND);
         assert_eq!(stops(&n), 0, "a build the CLI reports as running");
         say(&engine, &id, EngineEvent::ToolResult { id: "build".into(), ok: true, declined: false, text: String::new() });
+        assert_eq!(stall(&engine, &id), None, "a word from the CLI takes the notice away");
         walk(&engine, &clock, 5.0 * BOUND + BOUND - 1.0);
         assert_eq!(stops(&n), 0, "the count starts when the step ends");
         say(&engine, &id, EngineEvent::Permission { request_id: "q".into(), tool: "Write".into(), input: json!({"file_path": "a"}) });
         walk(&engine, &clock, 20.0 * BOUND);
         assert_eq!(stops(&n), 0, "a question the person has not answered");
+        engine.shutdown();
+    }
+
+    // Task 110: an open step used to start the count again at every look, so a command or a tool server that never answers
+    // kept the reply "working" for ever with nothing said. Its silence now shows, with Stop, and nothing is cut.
+    #[tokio::test]
+    async fn a_step_that_says_nothing_past_its_limit_is_told_with_its_minutes_and_never_cut() {
+        let (engine, id, n, clock, _dir) = running();
+        say(&engine, &id, EngineEvent::Tool { id: "q".into(), name: "mcp__db__query".into(), input: json!({}), parent: None });
+        walk(&engine, &clock, crate::stuck::QUIET - 1.0);
+        assert_eq!(stall(&engine, &id), None, "within the limit of a step that is not a command");
+        walk(&engine, &clock, 12.0 * 60.0);
+        assert_eq!(stall(&engine, &id), Some((StallKind::Quiet, Some(12))), "twelve minutes without news");
+        walk(&engine, &clock, 10.0 * BOUND);
+        assert_eq!(stops(&n), 0, "silence alone never stops a step whose end Faber cannot see");
+        assert_eq!(stall(&engine, &id), Some((StallKind::Quiet, Some(150))));
+        say(&engine, &id, EngineEvent::Text("done querying".into()));
+        assert_eq!(stall(&engine, &id), None);
+        engine.shutdown();
+
+        // A command is given longer, since builds and test suites say nothing until they end.
+        let (engine, id, _, clock, _dir) = running();
+        say(
+            &engine,
+            &id,
+            EngineEvent::Tool { id: "b".into(), name: "Bash".into(), input: json!({"command": "cargo build"}), parent: None },
+        );
+        say(&engine, &id, EngineEvent::Tool { id: "r".into(), name: "Read".into(), input: json!({"file_path": "a"}), parent: None });
+        walk(&engine, &clock, crate::stuck::QUIET + 60.0);
+        assert_eq!(stall(&engine, &id), None, "a command runs beside it");
+        walk(&engine, &clock, crate::stuck::QUIET_COMMAND);
+        assert_eq!(stall(&engine, &id), Some((StallKind::Quiet, Some(30))));
+        engine.shutdown();
+
+        // A subagent at work has signs of its own on its row: the reply adds none.
+        let (engine, id, n, clock, _dir) = running();
+        say(&engine, &id, EngineEvent::Tool { id: "a".into(), name: "Agent".into(), input: json!({"prompt": "look"}), parent: None });
+        walk(&engine, &clock, 4.0 * BOUND);
+        assert_eq!((stops(&n), stall(&engine, &id)), (0, None));
         engine.shutdown();
     }
 

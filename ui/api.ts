@@ -176,6 +176,8 @@ export interface Message {
   wake?: { why: string; pr?: number; checks?: string[] };
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
   halt?: string;
+  /** On the latest reply while its work goes on: the agent itself seems stuck (task 110). */
+  stall?: Stall;
   /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
   away?: { minutes: number; turns: number; switches: number; answered: number };
   /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
@@ -537,6 +539,8 @@ export interface RunningItem {
   parkedMore?: number;
   /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
   stuck?: string[];
+  /** The agent itself seems stuck: it needs the person like a stuck subagent. */
+  stall?: Stall;
   waitUntil?: number;
   /** A followed pull request whose checks failed while the quota was tight: its number and commit. */
   held?: [number, string];
@@ -827,6 +831,13 @@ export interface Plural {
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
 /** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
 export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
+
+/** A sign that the agent's own work seems stuck: a step with no news (`quiet`), a long compaction, or the same step again
+ * and again. `minutes` without news for the first two. It never stops anything by itself. */
+export interface Stall {
+  kind: 'quiet' | 'compacting' | 'repeat' | 'failing';
+  minutes?: number;
+}
 
 export interface ShellTexts {
   open: string;
