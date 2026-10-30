@@ -2128,7 +2128,7 @@ export const en = {
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
   'update.downloadingSize': 'Downloading update… {mb} MB',
-  'update.installing': 'Installing…',
+  'update.installing': 'Installing… Faber opens again by itself.',
   'update.ready': 'Update ready, restart',
   'update.readyHint': 'Installs the new version now. Faber closes, opens again and picks up the work that was running.',
   'error.update.busy': 'An install is still running. Restart when it ends.',

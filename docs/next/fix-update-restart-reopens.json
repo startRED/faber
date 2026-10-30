@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "After “Update ready, restart”, Faber now installs the update and opens again by itself, instead of sometimes staying closed with nothing installed.",
+      "pt-BR": "Depois de “Atualização pronta, reiniciar”, o Faber agora instala e abre de novo sozinho, em vez de às vezes ficar fechado sem instalar nada.",
+      "es": "Después de “Actualización lista, reiniciar”, Faber ahora instala la actualización y se vuelve a abrir solo, en lugar de quedarse a veces cerrado sin instalar nada.",
+      "fr": "Après « Mise à jour prête, redémarrer », Faber installe maintenant la mise à jour et se rouvre tout seul, au lieu de rester parfois fermé sans rien installer.",
+      "de": "Nach „Update bereit, neu starten“ installiert Faber das Update jetzt und öffnet sich von selbst wieder, statt manchmal geschlossen zu bleiben, ohne etwas zu installieren."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-30 | On Windows an update install is handed to a copy of Faber in a temporary folder, which waits until Faber has ended, runs the installer (passive when Faber comes back with its window, silent for the tray) and always opens Faber again. The plugin's own install started the installer while Faber was still closing, and the installer gave up without a word. | AI (Erick delegated) |"
+  ]
+}

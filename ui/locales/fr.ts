@@ -2248,7 +2248,7 @@ export const fr: Messages = {
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
   'update.downloadingSize': 'Téléchargement de la mise à jour… {mb} Mo',
-  'update.installing': 'Installation…',
+  'update.installing': 'Installation… Faber se rouvre tout seul.',
   'update.ready': 'Mise à jour prête, redémarrer',
   'update.readyHint': 'Installe la nouvelle version maintenant. Faber se ferme, se rouvre et reprend le travail en cours.',
   'error.update.busy': 'Une installation est encore en cours. Redémarre quand elle sera terminée.',

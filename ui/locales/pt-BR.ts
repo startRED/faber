@@ -2235,7 +2235,7 @@ export const ptBR: Messages = {
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
   'update.downloadingSize': 'Baixando atualização… {mb} MB',
-  'update.installing': 'Instalando…',
+  'update.installing': 'Instalando… O Faber abre de novo sozinho.',
   'update.ready': 'Atualização pronta, reiniciar',
   'update.readyHint': 'Instala a nova versão agora. O Faber fecha, abre de novo e retoma o trabalho que estava rodando.',
   'error.update.busy': 'Uma instalação ainda está em andamento. Reinicie quando ela terminar.',
