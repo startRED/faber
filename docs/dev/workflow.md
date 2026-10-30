@@ -47,15 +47,16 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
-Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
-yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
-numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
+Batches (R190 V3, R220, R481). A pull request is squashed and numbered on top of a queue commit not landed yet
+instead of the base, up to three deep and never with a workflow change, whatever parts both touch: checked side by side
+on the base, the first to pass would land and send the other back for a whole new run. One run
 then checks them together, and when it is green the land job (`land.mjs --land`) moves every branch of the batch to
 its own commit and phase-1-base to the top one, so all of them show merged; the runs under it find themselves landed.
 Before selecting a queued batch, `land.mjs` skips it if any pull request under it is already closed, retargeted, pushed
 again, requeued, or red; the landing job checks again after the suites to catch changes made during the run.
-One under it that was queued again, closed, pushed again or turned red, or a base that moved, sends the top one back to
-be squashed alone. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
+One under it that was queued again, closed, pushed again or turned red sends the top one back to be squashed alone; a
+base that moved (other than by words only, below) sends it back to join a batch on the new base the same way, so the
+ones sent back by one landing are checked together instead of one run each. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
 and each side then answers for itself, so the one whose own run is red is the culprit and gets the red `queue` status.
 `--alone` queues without batching.
 
@@ -184,6 +185,10 @@ that refuses puts the branch back; a later push, a close or another target stops
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
+One move is the exception: when the base moved by words only (no suite reads them, the rule CI skips every suite by;
+`docs/decisions.md` and `docs/next/` left out, since numbers are taken there), the green batch is put on the new base as it
+is and lands at once, provided every file that then differs from the tree CI checked is words too and the docs check
+passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
