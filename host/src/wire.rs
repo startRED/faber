@@ -70,6 +70,33 @@ pub enum Order {
     Awake { on: bool },
     /// Register Faber to start with the system (`on`) or remove it. The sidecar cannot register the shell's own program.
     Autostart { on: bool },
+    /// Ask the person for a path in a dialog that belongs to the window; the shell answers with
+    /// [`ShellNote::Picked`] under the same `id`.
+    Pick {
+        id: u64,
+        mode: PickMode,
+        filter: Option<PickFilter>,
+        /// The file name a save dialog offers.
+        name: Option<String>,
+    },
+    /// Show a file or folder in the file manager, selected and never opened. The host checked the path already.
+    Reveal { path: String },
+}
+
+/// What a dialog asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PickMode {
+    Folder,
+    File,
+    Save,
+}
+
+/// The kind of file a dialog offers: its name and the extensions, without the dot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PickFilter {
+    pub name: String,
+    pub extensions: Vec<String>,
 }
 
 /// The words on the tray's menu.
@@ -86,6 +113,14 @@ pub struct TrayMenu {
 pub enum ShellNote {
     /// Faber's window gained (`true`) or lost the focus; a closed window has none.
     Focus { focused: bool },
+    /// The answer to [`Order::Pick`]: the path picked, none when the person cancelled, or `no_window` when no dialog
+    /// could be shown.
+    Picked {
+        id: u64,
+        path: Option<String>,
+        #[serde(default)]
+        no_window: bool,
+    },
 }
 
 /// A shell's note as it travels: `{"shell":{...}}`.
@@ -156,6 +191,20 @@ mod tests {
         assert_eq!(incoming("{\"shell\":{\"kind\":\"focus\",\"focused\":true}}\n"), Ok(Incoming::Note(ShellNote::Focus { focused: true })));
         assert_eq!(incoming(r#"{"id":3,"cmd":"state"}"#), Ok(Incoming::Request(Request { id: 3, cmd: "state".into(), args: Value::Null })));
         assert_eq!(incoming(r#"{"shell":{"kind":"nap"}}"#), Err("error.host.badRequest".into()));
+        assert_eq!(
+            incoming(r#"{"shell":{"kind":"picked","id":4,"path":"C:\\a","noWindow":false}}"#),
+            Ok(Incoming::Note(ShellNote::Picked { id: 4, path: Some("C:\\a".into()), no_window: false }))
+        );
+        let pick = Order::Pick {
+            id: 4,
+            mode: PickMode::Save,
+            filter: Some(PickFilter { name: "JSON".into(), extensions: vec!["json".into()] }),
+            name: Some("a.json".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&pick).unwrap(),
+            json!({"kind":"pick","id":4,"mode":"save","filter":{"name":"JSON","extensions":["json"]},"name":"a.json"})
+        );
     }
 
     #[test]

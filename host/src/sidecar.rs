@@ -9,16 +9,17 @@
 
 use crate::tray::decide::{Attention, ShellTexts};
 use crate::tray::{self, Deck, Moment};
-use crate::wire::{Order, ShellNote};
-use crate::{Res, Shell, lock};
+use crate::wire::{Order, PickFilter, PickMode, ShellNote};
+use crate::{BoxFuture, Filter, PickError, Picked, Res, Shell, lock};
 use faber_engine::AppEvent;
 use faber_engine::model::{RunningItem, Settings, Vendor};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::runtime::Handle;
+use tokio::sync::oneshot;
 
 /// What [`SidecarShell::new`] needs.
 pub struct SidecarOptions {
@@ -59,6 +60,10 @@ struct Inner {
     chime: fn(&std::path::Path),
     /// Whether Faber's window has the focus, as the shell last said: a question seen there is never notified.
     focused: AtomicBool,
+    /// Dialogs the shell was asked for and has not answered, by id; None once the program closes, so no dialog is asked
+    /// after that and none is left waiting.
+    asks: Mutex<Option<HashMap<u64, oneshot::Sender<Picked>>>>,
+    next_ask: AtomicU64,
     /// The newest running list that came before the engine was attached, shown once it is.
     early: Mutex<Option<(u64, Vec<RunningItem>)>>,
     /// The engine's settings, known once the engine exists ([`SidecarShell::attach`]).
@@ -101,6 +106,8 @@ impl SidecarShell {
             chime,
             focused: AtomicBool::new(false),
             early: Mutex::new(None),
+            asks: Mutex::new(Some(HashMap::new())),
+            next_ask: AtomicU64::new(1),
             settings: OnceLock::new(),
             state: Mutex::new(state),
             saving: Mutex::new(()),
@@ -127,15 +134,57 @@ impl SidecarShell {
     pub fn note(&self, note: ShellNote) {
         match note {
             ShellNote::Focus { focused } => self.0.focused.store(focused, Ordering::SeqCst),
+            ShellNote::Picked { id, path, no_window } => {
+                // An answer nobody waits for (an id never asked, or asked by a closing program) changes nothing.
+                if let Some(waiting) = lock(&self.0.asks).as_mut().and_then(|asks| asks.remove(&id)) {
+                    let _ = waiting.send(answer(path, no_window));
+                }
+            }
         }
     }
 }
 
+/// A dialog's answer as the host reads it. Only a full path on this computer is one; anything else was not local.
+fn answer(path: Option<String>, no_window: bool) -> Picked {
+    if no_window {
+        return Err(PickError::NoWindow);
+    }
+    match path.map(PathBuf::from) {
+        Some(path) if path.is_absolute() => Ok(Some(path)),
+        Some(_) => Err(PickError::NotLocal),
+        None => Ok(None),
+    }
+}
+
 impl Inner {
-    /// Sends orders, in the order given. A hidden run never notifies.
+    /// Asks the shell for a dialog and waits for its answer. A hidden run shows none; a shell that ends first answers
+    /// that there was no window.
+    fn ask(self: &Arc<Self>, mode: PickMode, filter: Option<Filter>, name: Option<String>) -> BoxFuture<'static, Picked> {
+        let inner = self.clone();
+        Box::pin(async move {
+            if inner.hidden {
+                return Err(PickError::NoWindow);
+            }
+            let id = inner.next_ask.fetch_add(1, Ordering::Relaxed);
+            let (answer, answered) = oneshot::channel();
+            match lock(&inner.asks).as_mut() {
+                Some(asks) => asks.insert(id, answer),
+                None => return Err(PickError::NoWindow),
+            };
+            let filter = filter.map(|Filter { name, extensions }| PickFilter {
+                name: name.to_string(),
+                extensions: extensions.iter().map(|extension| extension.to_string()).collect(),
+            });
+            (inner.send)(Order::Pick { id, mode, filter, name });
+            answered.await.unwrap_or(Err(PickError::NoWindow))
+        })
+    }
+
+    /// Sends orders, in the order given. A hidden run never notifies, nor does anyone while Faber's window has the focus.
     fn send_all(&self, orders: impl IntoIterator<Item = Order>) {
         for order in orders {
-            if self.hidden && matches!(order, Order::Notify { .. }) {
+            // Looked at again here: the person may have come back to the window since the notice was decided.
+            if matches!(order, Order::Notify { .. }) && (self.hidden || self.focused()) {
                 continue;
             }
             // The chime is played here: the shell that shows the notice may have no way to play a sound without a window.
@@ -267,7 +316,26 @@ impl Shell for SidecarShell {
         tray::front::game_in_front(self.0.shell_process)
     }
 
+    fn pick_folder(&self) -> BoxFuture<'_, Picked> {
+        self.0.ask(PickMode::Folder, None, None)
+    }
+
+    fn pick_file(&self, filter: Option<Filter>) -> BoxFuture<'_, Picked> {
+        self.0.ask(PickMode::File, filter, None)
+    }
+
+    fn pick_save(&self, filter: Option<Filter>, name: String) -> BoxFuture<'_, Picked> {
+        self.0.ask(PickMode::Save, filter, Some(name))
+    }
+
+    fn reveal(&self, path: PathBuf) -> Res<()> {
+        (self.0.send)(Order::Reveal { path: path.to_string_lossy().into_owned() });
+        Ok(())
+    }
+
     fn shut_down(&self) {
+        // Dialogs still open are answered "no window": their commands end instead of waiting for a shell that is gone.
+        lock(&self.0.asks).take();
         let mut state = lock(&self.0.state);
         state.awake.shutdown();
         self.0.sync_awake(&mut state);
@@ -411,6 +479,51 @@ mod tests {
         });
         let halted = until(&sink, 1).await;
         assert!(matches!(halted.as_slice(), [Order::Notify { conversation_id: Some(id), .. }] if id == "conv"), "{halted:?}");
+    }
+
+    #[tokio::test]
+    async fn a_dialog_is_asked_of_the_shell_and_its_answer_reaches_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, sink) = attached(dir.path(), false, normal);
+        let shell = Arc::new(shell);
+        let asking = {
+            let shell = shell.clone();
+            tokio::spawn(async move { shell.pick_save(Some(Filter { name: "JSON", extensions: &["json"] }), "a.json".into()).await })
+        };
+        let asked = until(&sink, 1).await;
+        let [Order::Pick { id, mode: PickMode::Save, filter: Some(filter), name: Some(name) }] = asked.as_slice() else {
+            panic!("{asked:?}")
+        };
+        assert_eq!((filter.name.as_str(), filter.extensions.as_slice(), name.as_str()), ("JSON", &["json".to_string()][..], "a.json"));
+        let picked = dir.path().join("a.json");
+        shell.note(ShellNote::Picked { id: id + 100, path: None, no_window: false });
+        shell.note(ShellNote::Picked { id: *id, path: Some(picked.to_string_lossy().into()), no_window: false });
+        assert_eq!(asking.await.unwrap(), Ok(Some(picked)), "an id nobody asked for changes nothing");
+        // Cancelled, a path that is not a full one, no window, and a program that closes while a dialog is open.
+        for (path, no_window, expected) in
+            [(None, false, Ok(None)), (Some("a.json".to_string()), false, Err(PickError::NotLocal)), (None, true, Err(PickError::NoWindow))]
+        {
+            let asking = {
+                let shell = shell.clone();
+                tokio::spawn(async move { shell.pick_folder().await })
+            };
+            let asked = until(&sink, 1).await;
+            let [Order::Pick { id, .. }] = asked.as_slice() else { panic!("{asked:?}") };
+            shell.note(ShellNote::Picked { id: *id, path, no_window });
+            assert_eq!(asking.await.unwrap(), expected);
+        }
+        let asking = {
+            let shell = shell.clone();
+            tokio::spawn(async move { shell.pick_file(None).await })
+        };
+        until(&sink, 1).await;
+        shell.shut_down();
+        assert_eq!(asking.await.unwrap(), Err(PickError::NoWindow));
+        assert_eq!(shell.pick_folder().await, Err(PickError::NoWindow), "none is asked once the program closes");
+        // A hidden run never shows one.
+        let (hidden, sink) = attached(dir.path(), true, normal);
+        assert_eq!(hidden.pick_folder().await, Err(PickError::NoWindow));
+        assert!(!taken(&sink).iter().any(|order| matches!(order, Order::Pick { .. })));
     }
 
     #[tokio::test]
