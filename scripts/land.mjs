@@ -24,8 +24,9 @@
 // on CI (the land job's run again on a new base), with no `cargo` here, or while another landing checks on this PC, it
 // queues without one and CI runs every suite as before. A failure here queues nothing.
 //
-// `--sweep` (the land job of ci.yml, after each landing) runs again the landing of the oldest queue run whose gate passed
-// but whose landing GitHub cancelled while it waited for another, so a green queue run is never lost.
+// `--sweep` (also at the end of each `--land`, so after every pull request's landing) runs again the landing of the
+// oldest queue run whose gate passed but whose landing GitHub cancelled while it waited for another, so a green queue run
+// is never lost.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -684,8 +685,8 @@ function sweep() {
       .map((l) => l.split('\t'))
       .map(([sha, ref]) => [ref.slice('refs/heads/'.length), sha]),
   );
-  // Cancelled runs only, so the window spans days of landings: the head check above drops what moved since.
-  const runs = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--status', 'cancelled', '--limit', '100', '--json', 'databaseId,headBranch,headSha,createdAt,status,conclusion']));
+  // Every run, not only cancelled ones: `dropped` keeps a branch's newest, so an older run is never started over a newer one.
+  const runs = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--limit', '200', '--json', 'databaseId,headBranch,headSha,createdAt,status,conclusion']));
   for (const r of dropped(runs, heads)) {
     const { jobs } = JSON.parse(run('gh', ['run', 'view', String(r.databaseId), '--json', 'jobs']));
     if (!landCancelled(jobs)) continue;
@@ -765,7 +766,16 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
   } else if (args.includes('--finish')) {
     process.exitCode = finish(number);
   } else if (args.includes('--land')) {
-    process.exitCode = await landQueued(number, args[args.indexOf('--land') + 1]);
+    try {
+      process.exitCode = await landQueued(number, args[args.indexOf('--land') + 1]);
+    } finally {
+      // Whatever this landing did, the one GitHub dropped while it waited lands next. A sweep that fails only says so.
+      try {
+        sweep();
+      } catch (error) {
+        console.error(`The sweep failed: ${String(error.stderr || error.message).trim()}`);
+      }
+    }
   } else if (args.includes('--split')) {
     // Exit 3: queued again alone, so the report job blames nobody yet.
     process.exitCode = (await split(number, args[args.indexOf('--split') + 1])) ? 3 : 0;
