@@ -11,10 +11,6 @@ publish = false
 # Test builds only (testkit/): the commands the screen's checks report through. Forwarded by the shell's own feature.
 test-hooks = []
 
-[[bin]]
-name = "faber-sidecar"
-path = "src/bin/faber-sidecar.rs"
-
 [dependencies]
 base64 = "0.23"
 # The config folder, for the data folder when `FABER_DATA_DIR` is not set; the shell reads the same call.
