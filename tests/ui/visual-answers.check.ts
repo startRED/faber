@@ -71,6 +71,21 @@ async function until(test: () => unknown, what: string | (() => string) = 'the v
   ok(test(), typeof what === 'string' ? what : what());
 }
 
+// Wakes on what can change `test`: a message a frame posts, a frame's load, a change of the DOM. The 15 s is only the guard;
+// on failure it names the wait and what the frame did, so a failure on a loaded runner says which stage it was.
+function settled(host: HTMLElement, test: () => unknown, what: () => string) {
+  return new Promise<void>((resolve, reject) => {
+    const moves = new MutationObserver(() => wake());
+    const stop = () => { clearTimeout(guard); window.removeEventListener('message', wake); host.removeEventListener('load', wake, true); moves.disconnect(); };
+    const wake = () => { if (test()) { stop(); resolve(); } };
+    const guard = setTimeout(() => { stop(); try { ok(test(), what()); resolve(); } catch (e) { reject(e); } }, 15000);
+    window.addEventListener('message', wake);
+    host.addEventListener('load', wake, true);
+    moves.observe(host, { childList: true, subtree: true, attributes: true });
+    wake();
+  });
+}
+
 check('visual answers: live policy keeps the opaque sandbox, first policy and inert external scripts without a host nonce', () => {
   const source = '<form name="documentElement"><script nonce="host" src="https://cdn.example.com/chart.js"></script></form><script src="http://example.com/plain.js"></script><script>window.ready=true</script>';
   for (const live of [false, true]) {
@@ -90,14 +105,16 @@ check('visual answers: live policy keeps the opaque sandbox, first policy and in
 check('visual answers: web changes apply on the next opened version, keep one frame and do not reload an open page', async () => {
   const host = document.createElement('div'); document.body.append(host);
   let calls = 0;
+  let answered = 0;
   const saved = api.visualPage;
-  api.visualPage = async (id, revision, document) => { calls++; return saved(id, revision, document); };
+  api.visualPage = async (id, revision, document) => { calls++; const page = await saved(id, revision, document); answered++; return page; };
   const a = answer();
   const loaded = loadedVisual(host);
   a.versions = a.versions.map((v) => ({ ...v, source: loaded.source(v.source) }));
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'policy', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
-    await until(() => host.querySelector('iframe'));
+    const seen = () => `${host.querySelector('.visual-version')?.textContent}, previous ${host.querySelector<HTMLButtonElement>('.visual-prev')?.disabled ? 'disabled' : 'enabled'}, pages asked ${calls} and answered ${answered}, frame src ${host.querySelector('iframe')?.src ?? 'none'}, loaded url ${loaded.url() ?? 'none'}, its page live ${prepared.get(loaded.url() ?? '')?.live}; ${loaded.why()}`;
+    await settled(host, () => host.querySelector('iframe'), () => `the first frame of the opened version did not appear: ${seen()}`);
     const frame = host.querySelector('iframe')!;
     const offline = frame.src;
     equal(frame.getAttribute('sandbox'), 'allow-scripts');
@@ -107,14 +124,15 @@ check('visual answers: web changes apply on the next opened version, keep one fr
     await settle();
     equal(frame.src, offline, 'saving the setting leaves current page state intact');
     equal(calls, 1);
+    const before = loaded.url() ? 'had' : 'had not';
     host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
-    await until(() => loaded.url() !== offline && prepared.get(loaded.url() ?? '')?.live === live);
+    await settled(host, () => loaded.url() !== offline && prepared.get(loaded.url() ?? '')?.live === live, () => `the previous version did not load with Live ${live} after .visual-prev (offline page ${offline}, which ${before} reported loading at the click): ${seen()}`);
     equal(host.querySelector('iframe'), frame);
     equal(frame.getAttribute('sandbox'), 'allow-scripts');
     equal(host.querySelector('.side-meta')!.textContent, t(live ? 'visual.live' : 'visual.offline'));
     await api.saveSettings({ webSearch: 'off' });
     host.querySelector<HTMLButtonElement>('.visual-next')!.click();
-    await until(() => prepared.get(loaded.url() ?? '')?.live === false);
+    await settled(host, () => prepared.get(loaded.url() ?? '')?.live === false, () => `the next version did not load offline after .visual-next: ${seen()}`);
     equal(host.querySelector('iframe'), frame);
     equal(calls, 3);
   } finally { dispose(); host.remove(); loaded.stop(); }
