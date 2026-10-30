@@ -53,6 +53,8 @@ pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
         State::Finished => MemberState::Done,
         State::Failed => MemberState::Failed,
         State::Stopped => MemberState::Stopped,
+        // Cut off when Faber closed: not running, and a resume picks it up; the plan says stopped.
+        State::Interrupted => MemberState::Stopped,
     }
 }
 
