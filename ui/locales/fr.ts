@@ -2244,6 +2244,7 @@ export const fr: Messages = {
   'notes.311.better': "Les lignes de quota de la barre latérale nomment désormais chaque IA et disent combien est utilisé, et l'anneau en haut indique qu'il mesure le contexte de la conversation.",
   'notes.312.better': 'Une réponse coupée parce que Faber s’est fermé le dit maintenant, et vous pouvez appuyer sur Continuer pour que l’IA reprenne là où elle s’est arrêtée.',
   'notes.313.fixed': 'Une pull request dont les vérifications sont passées au vert reste suivie jusqu’à sa fusion, donc un échec plus tard parvient encore à l’agent.',
+  'notes.314.fixed': 'Changer de version d’une page juste après l’avoir ouverte ne laisse plus l’ancienne page sous le nouveau numéro.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

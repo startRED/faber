@@ -252,9 +252,17 @@ export function visualDocument(source: string, live = false): string {
 /** One frame navigates between versions; the column's lifecycle releases it on back, close or navigation. */
 export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBack: () => void; onClose: () => void }) {
   let frame: HTMLIFrameElement | undefined;
-  let currentUrl: string | undefined;
+  // WebView2 can drop a navigation asked while the frame's previous one still loads, leaving the old page under the new
+  // counter: so one navigation at a time, the newest page waits for the frame's load, and a silent one gets a new frame.
+  let shown: string | undefined;
+  let pending: string | undefined;
+  let wanted: string | undefined;
+  let retried = false;
+  let silent: ReturnType<typeof setTimeout> | undefined;
   const [navigationFailed, setNavigationFailed] = createSignal(false);
+  const [rebuilding, setRebuilding] = createSignal(false);
   const retire = () => {
+    clearTimeout(silent);
     const old = frame; frame = undefined;
     if (old) { old.src = 'about:blank'; old.remove(); }
   };
@@ -280,7 +288,7 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
   const at = () => Math.min(picked(), props.answer.versions.length - 1);
   const version = createMemo(() => props.answer.versions[at()]!, undefined, { equals: (a, b) => a?.messageId === b.messageId && a?.block === b.block && a?.source === b.source });
   // Snapshot the saved permission only on opening/switching; changing Settings never discards a page's input.
-  const [page] = createResource(() => ({ version: version(), open: props.open }), async ({ version }) => {
+  const [page, { refetch }] = createResource(() => ({ version: version(), open: props.open }), async ({ version }) => {
     const requested = ++revision;
     const id = await lease;
     if (disposed) return undefined;
@@ -289,22 +297,59 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
     if (disposed) return undefined;
     return api.visualPage(id, requested, visualDocument(version.kind === 'mermaid' ? mermaidDocument(source, t('visual.mermaidWeb')) : source, true));
   });
-  createEffect(() => { if (page.error) retire(); });
-  createEffect(() => {
-    if (page.error) return;
-    const next = page();
-    if (!next || next.url === currentUrl) return;
-    setNavigationFailed(false);
+  createEffect(() => { if (page.error) { retried = false; retire(); } });
+  const failed = () => { retried = false; retire(); setNavigationFailed(true); };
+  // A page is single-use and a late load of the old frame cannot be told apart, so a navigation that stays silent is
+  // retried once in a new frame on a fresh page; a second silence shows the failure, never the old page.
+  const watch = () => {
+    clearTimeout(silent);
+    silent = setTimeout(() => {
+      if (retried) return failed();
+      retried = true;
+      retire();
+      void refetch();
+      setRebuilding(true);
+    }, 15_000);
+  };
+  // The new frame waits for the newest request, not the retry's own (a switch meanwhile supersedes it).
+  createEffect(() => { if (rebuilding() && !page.loading) setRebuilding(false); });
+  const go = (url: string) => {
     if (!frame) return;
-    currentUrl = next.url;
+    pending = url;
     try {
       const target = frame.contentWindow;
       if (!target) throw new Error('missing visual frame');
-      target.location.replace(next.url);
+      target.location.replace(url);
+      // Read by the screen checks: which address the pane last asked the frame to open.
+      frame.dataset.asked = url;
     } catch {
-      retire();
-      setNavigationFailed(true);
+      return failed();
     }
+    watch();
+  };
+  const created = (el: HTMLIFrameElement) => {
+    frame = el;
+    shown = undefined;
+    pending = wanted = page()!.url;
+    watch();
+  };
+  const loaded = (e: Event) => {
+    // A page that redraws itself (document.open) loads again without a navigation of ours.
+    if (e.currentTarget !== frame || pending === undefined) return;
+    clearTimeout(silent);
+    shown = pending;
+    pending = undefined;
+    retried = false;
+    if (wanted !== shown) go(wanted!);
+  };
+  createEffect(() => {
+    if (page.error) return;
+    const next = page();
+    if (!next || next.url === wanted) return;
+    setNavigationFailed(false);
+    if (!frame) return;
+    wanted = next.url;
+    if (!pending) go(wanted);
   });
   const move = (by: number) => setPicked(Math.max(0, Math.min(at() + by, props.answer.versions.length - 1)));
   return <div class="visual-pane">
@@ -323,7 +368,7 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
       <span class="side-meta">{t(!page.error && !navigationFailed() && page()?.live ? 'visual.live' : 'visual.offline')}</span>
     </div>
     <Show when={!page.error && !navigationFailed()} fallback={<p class="side-meta" role="alert">{t('visual.failed')}</p>}>
-      <Show when={page()}><iframe ref={(el) => { frame = el; currentUrl = page()!.url; }} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" src={untrack(() => page()!.url)} /></Show>
+      <Show when={page() && !rebuilding()}><iframe ref={created} onLoad={loaded} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" src={untrack(() => page()!.url)} /></Show>
     </Show>
   </div>;
 }
