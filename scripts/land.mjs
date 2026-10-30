@@ -13,10 +13,10 @@
 // instead of a rebase that would collide. A conflict with today's base stops here, with its files. --dry-run shows the
 // commit it would queue and pushes nothing.
 //
-// Batches (R190 V3): a pull request that touches other parts of the repository than one queued and not landed yet is
-// squashed on top of that one instead of the base (at most `BATCH` deep), so one run checks them together and the land
-// job (`--land`) lands them together. A red batch is split: the report job (`--split`) queues the top one again alone,
-// and each side then answers for itself, so the culprit is the one whose own check is red. `--alone` never batches.
+// Batches (R190 V3): a pull request is squashed on top of one queued and not landed yet instead of the base (at most
+// `BATCH` deep), so one run checks them together and the land job (`--land`) lands them together; one sent back because
+// the base moved joins a batch the same way. A red batch is split: the report job (`--split`) queues the top one again
+// alone, and each side then answers for itself, so the culprit is the one whose own check is red. `--alone` never batches.
 //
 // Before it queues, it runs on this PC the suites CI would run for the change (`cargo t --suite <name>`, each whole) on
 // the very commit it queues, in one worktree kept for that (R190 V2). When they pass, it posts the commit status
@@ -153,15 +153,6 @@ export function noCheck(env, args, platform) {
 export const BATCH = 3;
 
 /**
- * The parts of the repository `files` touch: the first folder of each file, with what every landing writes left out (the
- * words, the locales the numbering folds into, the fragments), since two batched changes meet there without conflict.
- */
-export function areas(files) {
-  const words = (f) => WORDS.test(f) || f.startsWith('ui/locales/') || f.startsWith('docs/');
-  return new Set(files.filter((f) => !words(f)).map((f) => (f.includes('/') ? f.slice(0, f.indexOf('/')) : f)));
-}
-
-/**
  * Whether a green batch may land without a new run on a base that moved by the files `moved` since it was checked, its
  * tree then differing from the one checked by `differs`: words only on both sides (`isWords`, the rule CI skips every
  * suite by), and none of them where numbers are taken, since the batch was numbered on the old base.
@@ -177,13 +168,13 @@ export const workflow = (files) => files.some((f) => f.startsWith('.github/workf
 /**
  * The queued commit a change with `files` is checked on top of, or none: `queued` are the queue commits that sit on top
  * of today's base, each `{ commit, files, depth, red }` (`files` what it and the ones under it change, `depth` how many
- * pull requests that is, `red` whether its gate failed). The deepest one that touches other parts, changes no workflow,
- * is not red and has room left wins, so the batch grows instead of starting a second one.
+ * pull requests that is, `red` whether its gate failed). The deepest one that changes no workflow, is not red and has
+ * room left wins, so the batch grows instead of starting a second one. Two that touch the same parts batch too: checked side
+ * by side on the base, the first to pass would land and send the other back to be checked again.
  */
 export function stackOn(queued, files) {
   if (workflow(files)) return null;
-  const mine = areas(files);
-  const fits = queued.filter((q) => q.eligible !== false && !q.red && q.depth < BATCH && !workflow(q.files) && ![...areas(q.files)].some((a) => mine.has(a)));
+  const fits = queued.filter((q) => q.eligible !== false && !q.red && q.depth < BATCH && !workflow(q.files));
   return fits.sort((a, b) => b.depth - a.depth)[0] ?? null;
 }
 
@@ -256,16 +247,16 @@ async function land(number, dry, given, args) {
     tree = settled.tree;
     console.log(`Lines both sides added at one place in ${conflicts(String(error.stdout).split('\n\n')[0]).join(', ')} are kept, the base's first.`);
   }
-  // A change that touches other parts than a pull request queued and not landed yet is checked on top of it, so one run
-  // checks both and lands both (R190 V3). The land job's run again (--head) and --alone never batch.
+  // A change is checked on top of a pull request queued and not landed yet, so one run checks both and lands both (R190
+  // V3); so is one sent back because the base moved. --alone never batches.
   let parent = base;
-  if (!given && !args.includes('--alone') && batches(base)) {
+  if (!args.includes('--alone') && batches(base)) {
     const on = stackOn(queuedOn(base, pr.number), names(base, tree));
     if (on) {
       try {
         tree = git('merge-tree', '--write-tree', '--name-only', on.commit, head).split('\n')[0].trim();
         parent = on.commit;
-        console.log(`Checked together with the ${on.depth} queued under it (${on.commit.slice(0, 9)}): it touches other parts.`);
+        console.log(`Checked together with the ${on.depth} queued under it (${on.commit.slice(0, 9)}).`);
       } catch (error) {
         if (error.status !== 1) throw error;
         console.log(`It does not apply cleanly on ${on.commit.slice(0, 9)}: it is checked alone.`);
@@ -547,10 +538,13 @@ function queuedOn(base, number) {
   });
 }
 
-/** Queues #`number` again alone on today's base, from the head `oid` it was squashed from, and starts its run. */
-async function alone(number, oid, why) {
-  console.log(`${why}: #${number} is squashed again alone on ${BASE} and checked again.`);
-  const code = await land(number, false, oid, ['--alone']);
+/**
+ * Queues #`number` again on today's base, from the head `oid` it was squashed from, and starts its run: alone, or with
+ * `together` on top of a batch queued there (a base that moved says nothing against it, a red batch under it does).
+ */
+async function alone(number, oid, why, together = false) {
+  console.log(`${why}: #${number} is squashed again on ${BASE}${together ? '' : ' alone'} and checked again.`);
+  const code = await land(number, false, oid, together ? [] : ['--alone']);
   if (code === 0) run('gh', ['workflow', 'run', 'ci.yml', '--ref', `queue/pr-${number}`]);
   return code;
 }
@@ -608,7 +602,7 @@ async function landQueued(number, sha) {
   }
   // A base that moved by words only takes the green batch as it is (`onWords`); any other move checks it again.
   const words = ancestor(base, sha) ? null : await onWords(base, sha, batch);
-  if (!ancestor(base, sha) && !words) return alone(number, mine.oid, `${BASE} moved`);
+  if (!ancestor(base, sha) && !words) return alone(number, mine.oid, `${BASE} moved`, true);
   const top = words?.landing ?? sha;
   const under = batch.slice(0, -1);
   for (const m of under) {
@@ -650,7 +644,7 @@ async function landQueued(number, sha) {
       console.error('::error::The push was refused although phase-1-base did not move; the push error is above.');
       return 1;
     }
-    return alone(number, mine.oid, `${BASE} moved`);
+    return alone(number, mine.oid, `${BASE} moved`, true);
   }
   // Green on top of the whole phase-1-base, so main follows at once (R127). Pushes made with this token start no
   // workflow, so main's warm run (R165) and the preview release (R130, R156) are started by hand.
