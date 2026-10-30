@@ -762,6 +762,15 @@ impl Store {
         move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
     }
 
+    /// `kept_decisions` for taking a review back, where a file that cannot be read is an error, as for Keep: one unreadable now,
+    /// or damaged for this version (a newer one may read it), may still hold the review.
+    pub(crate) fn kept_decisions_now(&self, project: &str) -> Result<Vec<KeptDecision>, Fault> {
+        Ok(read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?
+            .unwrap_or_default()
+            .remove(project)
+            .unwrap_or_default())
+    }
+
     /// Called under the engine lock: a stale listing must never overwrite a newer Keep.
     pub(crate) fn migrate_kept_decisions(
         &self,
