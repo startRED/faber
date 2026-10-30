@@ -5,6 +5,7 @@
 //! project's other conversations, asks one of them something (a file changed that it did not change, work that may
 //! overlap), and archives its own conversation once the person's request is done.
 
+use crate::model::Vendor;
 use serde_json::{Value, json};
 
 /// The name both drivers give the call, whatever the CLI calls it.
@@ -26,7 +27,11 @@ const DESCRIPTION: &str = "The other conversations of this project, each with it
 - `start` with `title` and `brief`: a new conversation for a separate piece of work, so it runs in parallel with you. Its \
 agent cannot see this conversation, so the brief must say everything it needs (the goal, the files involved, what done \
 looks like). It answers at once with the new conversation's `id`; the person sees it in the sidebar and may talk to it. \
-When it stops working, its answer is sent to you by itself: never wait or poll for it, go on with your own work. Use it for independent work that takes a while; never for small steps, and never for two pieces that change the same files.\n\
+When it stops working, its answer is sent to you by itself: never wait or poll for it, go on with your own work. Use it for independent work that takes a while; never for small steps, and never for two pieces that change the same files. \
+`ai` says which AI runs it: `same` (yours, the default), `auto` (Faber picks by the task and each AI's quota) or an AI by \
+name (`claude`, `codex`); spread work over the AIs that have room (call `quota` first), and have a review done by the AI \
+that did not write the code. `keep_going` true makes it go through an ordered list of tasks in its brief by itself, one \
+after another, and you get one report when the whole list ends.\n\
 - `read` with `id`: whether a conversation of this project is working, waiting for the person or done, and its latest answer.\n\
 - `list`: the project's conversations the person has not archived, which ones are working now and the folder each works \
 in. When a file you work on changed and neither you nor your helpers changed it, list them and ask the one working there.\n\
@@ -55,6 +60,8 @@ fn schema() -> Value {
             "action": { "type": "string", "enum": ["start", "read", "list", "ask", "archive", "context", "compact", "clear"] },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: everything the new conversation needs to do the work on its own." },
+            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: which AI runs it; same when left out." },
+            "keep_going": { "type": "boolean", "description": "start: true when the brief is an ordered list of tasks it goes through by itself." },
             "id": { "type": "string", "description": "read, ask: the other conversation's id." },
             "message": { "type": "string", "description": "ask: your question for the other conversation's agent." },
             "next": { "type": "string", "description": "compact, clear: everything you need to continue afterwards; sent to you word for word." }
@@ -76,7 +83,7 @@ pub fn mcp_tool() -> Value {
 /// What one call asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
-    Start { title: String, brief: String },
+    Start { title: String, brief: String, ai: Ai, keep_going: bool },
     Read { id: String },
     List,
     Ask { id: String, message: String },
@@ -84,6 +91,17 @@ pub enum Request {
     Context,
     Compact { next: Option<String> },
     Clear { next: String },
+}
+
+/// Which AI runs a conversation an agent starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ai {
+    /// The starting conversation's own model choice.
+    Same,
+    /// Auto routes the brief, whatever the starting conversation is pinned to.
+    Auto,
+    /// This AI at its default model.
+    Named(Vendor),
 }
 
 /// The most of `next` a compaction or a clear carries.
@@ -125,7 +143,14 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
         (Some(id), None) => Ok(Request::Read { id }),
         (None, Some(brief)) => {
             let title: String = text("title").unwrap_or_else(|| "A piece of work".into()).chars().take(60).collect();
-            Ok(Request::Start { title, brief })
+            let ai = match text("ai").as_deref() {
+                None | Some("same") => Ai::Same,
+                Some("auto") => Ai::Auto,
+                Some(name) => {
+                    Ai::Named(Vendor::ALL.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?)
+                }
+            };
+            Ok(Request::Start { title, brief, ai, keep_going: input["keep_going"].as_bool().unwrap_or(false) })
         }
         (None, None) => Err("the brief was empty"),
     }
@@ -337,8 +362,17 @@ mod tests {
     fn a_call_starts_with_a_brief_reads_with_an_id_and_never_both() {
         assert_eq!(
             request(&json!({"title":" Fix the build ","brief":"Make cargo build pass."})),
-            Ok(Request::Start { title: "Fix the build".into(), brief: "Make cargo build pass.".into() })
+            Ok(Request::Start { title: "Fix the build".into(), brief: "Make cargo build pass.".into(), ai: Ai::Same, keep_going: false })
         );
+        let on = |ai: &str| request(&json!({"brief":"x","ai":ai,"keep_going":true}));
+        assert_eq!(
+            on("codex"),
+            Ok(Request::Start { title: "A piece of work".into(), brief: "x".into(), ai: Ai::Named(Vendor::Codex), keep_going: true })
+        );
+        assert!(
+            matches!(on("auto"), Ok(Request::Start { ai: Ai::Auto, .. })) && matches!(on("same"), Ok(Request::Start { ai: Ai::Same, .. }))
+        );
+        assert_eq!(on("gemini"), Err("ai is not one of same, auto, claude or codex"));
         assert_eq!(request(&json!({"id":"abc"})), Ok(Request::Read { id: "abc".into() }));
         assert_eq!(request(&json!({"action":"list","id":"x"})), Ok(Request::List));
         assert_eq!(request(&json!({"action":"archive"})), Ok(Request::Archive));

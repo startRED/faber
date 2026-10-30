@@ -4,7 +4,7 @@
 //! copy, made away from the engine's lock like the person's own first message, so it never runs in the project folder. A
 //! read answers with where that conversation stands and its latest answer.
 use super::*;
-use crate::sibling::{self, Request, State};
+use crate::sibling::{self, Ai, Request, State};
 
 /// Whether a conversation's agent gets the tool: every project conversation's. Only one no other agent started may start
 /// conversations, so one level only.
@@ -84,7 +84,7 @@ impl Core {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
         let (ok, text) = match sibling::request(&input) {
             Err(why) => (false, format!("Nothing was done: {why}.")),
-            Ok(Request::Start { title, brief }) => match self.start_sibling(conv, &title, &brief) {
+            Ok(Request::Start { title, brief, ai, keep_going }) => match self.start_sibling(conv, &title, &brief, ai, keep_going) {
                 Ok((id, true)) => (true, sibling::started(&title, &id)),
                 Ok((id, false)) => (false, sibling::failed(&title, &id)),
                 Err(why) => (false, format!("No conversation was started: {why}.")),
@@ -121,7 +121,7 @@ impl Core {
         }
     }
 
-    fn start_sibling(&mut self, conv: &str, title: &str, brief: &str) -> Result<(String, bool), &'static str> {
+    fn start_sibling(&mut self, conv: &str, title: &str, brief: &str, ai: Ai, keep_going: bool) -> Result<(String, bool), &'static str> {
         if self.goal_out_of_money(conv) {
             return Err(GOAL_CAP);
         }
@@ -136,11 +136,29 @@ impl Core {
             return Err("the job has passed its estimate by half, so no new conversation starts; keep to the plan");
         }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
-        let choice = parent.choice.clone().ok_or("this conversation has no model chosen")?;
+        // A named AI overrides the person's pin for this background work only, never for the conversation that asked.
+        let choice = match ai {
+            Ai::Same => parent.choice.clone().ok_or("this conversation has no model chosen")?,
+            Ai::Auto => Choice { vendor: "auto".into(), model: None, effort: None },
+            Ai::Named(vendor) if self.opts.clis.contains_key(&vendor) => {
+                Choice { vendor: vendor.name().into(), model: None, effort: Some(crate::router::Effort::Medium) }
+            }
+            Ai::Named(_) => return Err("that AI is not connected on this computer; choose another, or leave ai out"),
+        };
         self.sibling_room(&project)?;
-        // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold.
-        let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
-        self.sibling_allowed(&ai)?;
+        // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold, for the AI that
+        // runs it. Auto is held to them once it has routed the brief, like any turn nobody sent by hand.
+        let gate = match ai {
+            Ai::Same => self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string))),
+            Ai::Auto => None,
+            // The family of the default model it will run (Claude's quota is kept per family), as the launch resolves it.
+            Ai::Named(vendor) => {
+                let pick = crate::router::Pick { vendor, model: None, effort: String::new(), reason: String::new(), pace: None };
+                let model = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models).model;
+                Some((vendor, model.as_deref().and_then(family_of).map(str::to_string)))
+            }
+        };
+        self.sibling_allowed(&gate)?;
         let id = self.blank(Area::Project, Some(project.clone()));
         if let Some(c) = self.convs.get_mut(&id) {
             c.started_by = Some(conv.to_string());
@@ -158,7 +176,13 @@ impl Core {
         };
         // The common start path makes its copy off the lock and removes any copy that no longer belongs.
         match self.launch_sibling(&id, req, None) {
-            Ok(()) => Ok((id, true)),
+            Ok(()) => {
+                // Turned on while its first turn runs, Keep going acts when that turn ends, with the chip's own rules.
+                if keep_going {
+                    let _ = self.set_keep_going(&id, true);
+                }
+                Ok((id, true))
+            }
             // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
             Err(_) if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) => Ok((id, false)),
             Err(_) => {
