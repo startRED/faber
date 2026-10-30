@@ -5,6 +5,17 @@
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
 type IpcRendererEvent = import('electron').IpcRendererEvent;
 
+/** The events `ui/api.ts` listens to, as the Tauri shell names them. */
+const EVENTS = new Set([
+  'faber:event',
+  'faber:update',
+  'faber:site',
+  'faber:site-loading',
+  'faber:site-key',
+  'faber:site-tabs',
+  'faber:site-busy',
+]);
+
 contextBridge.exposeInMainWorld('faberShell', {
   invoke: async (command: string, args?: Record<string, unknown>) => {
     try {
@@ -15,8 +26,9 @@ contextBridge.exposeInMainWorld('faberShell', {
       throw message.replace(/^Error invoking remote method 'faber:invoke': (Error: )?/, '');
     }
   },
-  listen: (event: string, listener: (payload: unknown) => void) => {
-    const channel = event === 'faber:event' ? 'faber:event' : `faber:${event.replace(/^faber:/, '')}`;
+  listen: (channel: string, listener: (payload: unknown) => void) => {
+    // Only the events the shell sends the screen; any other name hears nothing.
+    if (!EVENTS.has(channel)) return () => {};
     const handler = (_e: IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on(channel, handler);
     return () => void ipcRenderer.removeListener(channel, handler);
