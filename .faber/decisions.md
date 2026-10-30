@@ -29,3 +29,5 @@
 - Roadmap direction: schedule the discussed EGM-inspired project knowledge, independent plan review and delivery-to-plan checks; implementation details remain proposals. Owner's request, verbatim: "Coloque no plano/roadmap para implementar isso do melhor jeito possivel". [by person]
 
 - Engine construction returns a startup error before Store, catalog or background work when its data directory cannot be opened. Windows keeps its no-follow directory chain open through engine teardown; this entry check does not replace handle-relative I/O, a write sandbox or Chat-workspace relocation. [by AI]
+- Bind each saved project start card to its native session id and exact sent text; changed or unknown context starts a fresh native session with the existing conversation history, while compaction keeps its original card. [by AI]
+- Capture existing contained inline-code file references only at explicit decision consent; recheck their safe existence for each new start card without rewriting approvals or inferring references in older records. [by AI]

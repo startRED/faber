@@ -7,7 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
-use crate::project::memory::AdoptedKind;
+use crate::project::memory::{AdoptedKind, KeptDecision};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -137,6 +137,7 @@ pub struct Store {
     settings: PathBuf,
     recents: PathBuf,
     decisions_kept: PathBuf,
+    rules_sources: PathBuf,
     adoptions: PathBuf,
     budget: PathBuf,
     auto_learned: PathBuf,
@@ -225,6 +226,7 @@ impl Store {
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             decisions_kept: data_dir.join("decisions-kept.json"),
+            rules_sources: data_dir.join("rules-sources.json"),
             adoptions: data_dir.join("faber-trust/adoptions.json"),
             budget: data_dir.join("budget.json"),
             auto_learned: data_dir.join("auto-learned.json"),
@@ -678,6 +680,17 @@ impl Store {
         self.write(&self.recents, recents)
     }
 
+    /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
+    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<(), &'static str> {
+        let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
+        let record = crate::project::rules::refresh_cached(folder, all.get(project))?;
+        if all.get(project) != Some(&record) {
+            all.insert(project.into(), record);
+            self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
+        }
+        Ok(())
+    }
+
     fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
         let all: Adoptions = read_checked(&self.adoptions)?.unwrap_or_default();
         if all.iter().any(|(id, kinds)| {
@@ -736,26 +749,40 @@ impl Store {
         crate::project::memory::read_adopted_tasks(root, &record.target).map(Some)
     }
 
-    /// The AI decisions the person kept in a project's decision list (R16), as hashes of their words. They live here and
+    /// The decisions the person kept (R16), as item identities and content hashes, or legacy body-only hashes. They live here and
     /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
     /// reviewed" again.
-    pub fn kept_decisions(&self, project: &str) -> Vec<String> {
+    pub fn kept_decisions(&self, project: &str) -> Vec<KeptDecision> {
         self.kept_decisions_reader(project)()
     }
 
     /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.
-    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<String> + Send + 'static {
+    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<KeptDecision> + Send + 'static {
         let (path, project) = (self.decisions_kept.clone(), project.to_string());
-        move || read::<BTreeMap<String, Vec<String>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+        move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// Called under the engine lock: a stale listing must never overwrite a newer Keep.
+    pub(crate) fn migrate_kept_decisions(
+        &self,
+        project: &str,
+        expected: &[KeptDecision],
+        upgraded: &[KeptDecision],
+    ) -> Result<bool, Fault> {
+        let mut all: BTreeMap<String, Vec<KeptDecision>> = read_checked(&self.decisions_kept)?.unwrap_or_default();
+        let Some(current) = all.get_mut(project).filter(|current| current.as_slice() == expected) else { return Ok(false) };
+        *current = upgraded.to_vec();
+        self.write(&self.decisions_kept, &all)?;
+        Ok(true)
     }
 
     /// Adds one kept decision without discarding older approvals. Projects that are gone (not in `live`) are dropped.
-    pub fn keep_decision(&self, project: &str, hash: String, live: &[String]) -> Result<(), Fault> {
-        let mut all = read_checked::<BTreeMap<String, Vec<String>>>(&self.decisions_kept)?.unwrap_or_default();
+    pub fn keep_decision(&self, project: &str, record: KeptDecision, live: &[String]) -> Result<(), Fault> {
+        let mut all = read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?.unwrap_or_default();
         all.retain(|id, _| live.contains(id));
         let kept = all.entry(project.into()).or_default();
-        kept.retain(|h| *h != hash);
-        kept.push(hash);
+        kept.retain(|older| !older.matches(&record));
+        kept.push(record);
         self.write(&self.decisions_kept, &all)
     }
 
@@ -826,6 +853,129 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rules_registry_preserves_other_projects_approvals_and_refuses_unsafe_output() {
+        let data = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(&store.decisions_kept, b"approval bytes must stay untouched").unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        store.refresh_rules("second", second.path()).unwrap();
+        let before: serde_json::Value = read(&store.rules_sources).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), before);
+        fs::write(first.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert_eq!(current["second"], before["second"]);
+        let registered = fs::read(&store.rules_sources).unwrap();
+        fs::write(first.path().join(".faber/rules.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let generated = fs::read(first.path().join(".faber/rules.md")).unwrap();
+        fs::write(other.path().join("rules.md"), &generated).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        fs::hard_link(other.path().join("rules.md"), first.path().join(".faber/rules.md")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        fs::rename(first.path().join(".faber"), first.path().join("original")).unwrap();
+        #[cfg(windows)]
+        junction::create(other.path(), first.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(other.path(), first.path().join(".faber")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"approval bytes must stay untouched");
+    }
+    #[test]
+    fn rules_registry_failed_save_keeps_previous_record_and_approvals() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        store.refresh_rules("project", project.path()).unwrap();
+        let before = fs::read(&store.rules_sources).unwrap();
+        fs::write(&store.decisions_kept, b"existing decisions").unwrap();
+        fs::write(project.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(failing.refresh_rules("project", project.path()), Err("error.store.full"));
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), before);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"existing decisions");
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), before);
+    }
+
+    #[test]
+    fn rules_registry_tracks_sources_repairs_planted_output_and_recovers_derived_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        let manifest = project.path().join("package.json");
+        let rules = project.path().join(".faber/rules.md");
+        fs::write(&manifest, r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let generated = fs::read(&rules).unwrap();
+        let registered = fs::read(&store.rules_sources).unwrap();
+        let rules_time = fs::metadata(&rules).unwrap().modified().unwrap();
+        let record_time = fs::metadata(&store.rules_sources).unwrap().modified().unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::metadata(&rules).unwrap().modified().unwrap(), rules_time);
+        assert_eq!(fs::metadata(&store.rules_sources).unwrap().modified().unwrap(), record_time);
+
+        // Unchanged sources do not make a planted output trustworthy.
+        fs::write(&rules, "PLANTED_SYSTEM_AUTHORITY").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::read(&rules).unwrap(), generated);
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+
+        fs::write(&manifest, r#"{"scripts":{"lint":"eslint"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::write(project.path().join("tsconfig.json"), "{}").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("TypeScript"));
+        fs::remove_file(&manifest).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert!(current["project"]["sources"].get("package.json").is_none());
+        assert!(!fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+
+        let mut obsolete = current.clone();
+        obsolete["project"]["version"] = 0.into();
+        fs::write(&store.rules_sources, serde_json::to_vec(&obsolete).unwrap()).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+
+        for damaged in ["{", "{}", r#"{"project":{"version":0,"sources":{},"hash":"old"}}"#] {
+            fs::write(&store.rules_sources, damaged).unwrap();
+            fs::write(&rules, "PLANTED_AGAIN").unwrap();
+            store.refresh_rules("project", project.path()).unwrap();
+            assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+            assert!(!fs::read_to_string(&rules).unwrap().contains("PLANTED"));
+        }
+        fs::remove_file(&store.rules_sources).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+    }
 
     #[test]
     fn adopted_task_approvals_survive_reopen_without_trusting_repository_records() {
@@ -1092,12 +1242,99 @@ mod tests {
     }
 
     #[test]
+    fn kept_item_records_upgrade_without_losing_concurrent_or_other_project_approvals() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir(project.path().join(".faber")).unwrap();
+        fs::write(project.path().join(".faber/decisions.md"), "- Keep exports. [by AI]\n").unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        let encoded = serde_json::to_value(&item).unwrap();
+        let old = encoded["hash"].as_str().unwrap()[..32].to_string();
+        let initial = serde_json::json!({"project": [old, "unmatched legacy"], "other": ["other approval"]});
+        store.write(&store.decisions_kept, &initial).unwrap();
+        let expected = store.kept_decisions("project");
+        let list = memory::list(project.path()).unwrap();
+        let upgraded = memory::upgrade_kept(&list, &expected);
+        assert_eq!(upgraded, vec![item.clone(), KeptDecision::Legacy("unmatched legacy".into())]);
+        assert!(store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), upgraded);
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        let second = KeptDecision::of("- Keep exports.\n  Also keep older formats.");
+        store.keep_decision("project", second.clone(), &["project".into(), "other".into()]).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &upgraded, &expected).unwrap());
+        let after = store.kept_decisions("project");
+        assert!(after.contains(&item) && after.contains(&second), "same heading cannot delete a distinct approval");
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+    }
+
+    #[test]
+    fn kept_file_reference_records_preserve_mixed_approvals_and_metadata_cas() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let old = KeptDecision::of("- Keep exports.");
+        let mut value = serde_json::to_value(&old).unwrap();
+        value["files"] = serde_json::json!(["src/lib.rs"]);
+        let enriched: KeptDecision = serde_json::from_value(value.clone()).unwrap();
+        let live = vec!["project".into(), "other".into()];
+        store.keep_decision("other", KeptDecision::Legacy("other approval".into()), &live).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("unmatched legacy".into()), &live).unwrap();
+        store.keep_decision("project", old, &live).unwrap();
+        let expected = store.kept_decisions("project");
+        store.keep_decision("project", enriched.clone(), &live).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &expected).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), [KeptDecision::Legacy("unmatched legacy".into()), enriched]);
+        assert_eq!(store.kept_decisions("other"), [KeptDecision::Legacy("other approval".into())]);
+        value["files"] = serde_json::json!("not an array");
+        let corrupt = serde_json::to_vec(&serde_json::json!({"project": [value]})).unwrap();
+        fs::write(&store.decisions_kept, &corrupt).unwrap();
+        assert!(store.keep_decision("project", KeptDecision::of("- Another."), &live).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn kept_item_records_refuse_unknown_records_and_preserve_failed_migrations() {
+        use crate::project::memory::KeptDecision;
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        for corrupt in [r#"{"project":[{"id":"id","hash":"hash","authority":true}]}"#, r#"{"project":[null]}"#] {
+            fs::write(&store.decisions_kept, corrupt).unwrap();
+            assert!(store.kept_decisions("project").is_empty());
+            assert_eq!(store.keep_decision("project", item.clone(), &["project".into()]), Err(Fault::Corrupt));
+            assert_eq!(store.migrate_kept_decisions("project", &[], &[]), Err(Fault::Corrupt));
+            assert_eq!(fs::read_to_string(&store.decisions_kept).unwrap(), corrupt);
+        }
+        let old = KeptDecision::Legacy("old".into());
+        store.write(&store.decisions_kept, &BTreeMap::from([("project", vec![old.clone()])])).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        let failed = Store::with_disk(dir.path(), Arc::new(NoReplace));
+        assert!(failed.migrate_kept_decisions("project", &[old], &[item]).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+    }
+
+    #[test]
     fn keeping_a_decision_refuses_corrupt_approvals_without_overwriting_them() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path());
         let corrupt = b"{\"project\":[\"existing approval\"],";
         fs::write(&store.decisions_kept, corrupt).unwrap();
-        assert_eq!(store.keep_decision("project", "new approval".into(), &["project".into()]), Err(Fault::Corrupt));
+        assert_eq!(store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]), Err(Fault::Corrupt));
         assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
     }
 
@@ -1107,11 +1344,11 @@ mod tests {
         let store = Store::new(dir.path());
         let records: Vec<_> = (0..501).map(|i| format!("{i:032x}")).collect();
         store.write(&store.decisions_kept, &BTreeMap::from([("project", &records)])).unwrap();
-        store.keep_decision("project", "new approval".into(), &["project".into()]).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]).unwrap();
         let kept = Store::new(dir.path()).kept_decisions("project");
         assert_eq!(kept.len(), 502, "a new approval must not discard older approvals");
-        assert_eq!(&kept[..501], records);
-        assert_eq!(kept.last().map(String::as_str), Some("new approval"));
+        assert_eq!(&kept[..501], records.into_iter().map(KeptDecision::Legacy).collect::<Vec<_>>());
+        assert_eq!(kept.last(), Some(&KeptDecision::Legacy("new approval".into())));
     }
 
     #[test]

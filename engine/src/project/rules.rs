@@ -2,6 +2,12 @@
 //! shape, never from the repository's prose (own work method, slice 1). The one free line is the manifest's description,
 //! cut to 160 characters; it stays in the file and out of the start card. Rebuilt at every turn start of a project's
 //! conversation and written only when it differs, so an edit by anyone else is replaced on the next turn.
+use serde::Deserializer as _;
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Each field's limits: a description line, a command, and how many commands and scripts a part lists.
@@ -67,6 +73,8 @@ pub struct Facts {
     pub languages: Vec<&'static str>,
     pub manifests: Vec<&'static str>,
     pub instructions: Vec<&'static str>,
+    /// Known dependency identities only; repository prose never supplies stack tags.
+    pub stacks: Vec<&'static str>,
     /// The commands that check work, and where they came from.
     pub checks: Vec<String>,
     pub checks_from: Option<&'static str>,
@@ -192,12 +200,310 @@ fn push_unique(list: &mut Vec<String>, items: impl IntoIterator<Item = String>) 
     }
 }
 
-/// The facts of a project folder, from the files of `MANIFESTS`, `INSTRUCTIONS`, `tsconfig.json` and `.github/workflows`.
-pub fn facts(project: &Path) -> Result<Facts, &'static str> {
-    let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
-    let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
-    let files = super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)?;
-    let workflows = files.iter().filter(|(path, _)| path.starts_with(".github/"));
+fn dependency_stack(manifest: &str, name: &str) -> Option<&'static str> {
+    match (manifest, name) {
+        ("Cargo.toml", "bevy") => Some("bevy"),
+        ("package.json", "expo" | "expo-router") => Some("expo"),
+        ("package.json", "react-native") => Some("react-native"),
+        ("package.json", "prisma" | "@prisma/client") => Some("prisma"),
+        ("package.json", "firebase" | "firebase-admin" | "@google-cloud/firestore") => Some("firestore"),
+        ("package.json", "pg" | "postgres" | "@supabase/supabase-js") => Some("postgres"),
+        ("package.json", "stripe" | "@stripe/stripe-js" | "@stripe/react-stripe-js") => Some("stripe"),
+        ("package.json", "wrangler" | "@cloudflare/workers-types") => Some("cloudflare"),
+        ("package.json", "auth0" | "@auth0/auth0-react" | "@auth0/nextjs-auth0" | "@auth0/auth0-spa-js") => Some("auth0"),
+        ("package.json", "phaser") => Some("phaser"),
+        ("package.json", "pixi.js" | "@pixi/react") => Some("pixijs"),
+        ("package.json", "three" | "@react-three/fiber") => Some("threejs"),
+        _ => None,
+    }
+}
+
+// Keep Value's string, number and depth validation without retaining its tree of unused fields.
+struct JsonShape;
+
+impl<'de> serde::Deserialize<'de> for JsonShape {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Shape;
+        impl<'de> Visitor<'de> for Shape {
+            type Value = JsonShape;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<JsonShape, E> {
+                Ok(JsonShape)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<JsonShape, A::Error> {
+                while sequence.next_element::<JsonShape>()?.is_some() {}
+                Ok(JsonShape)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<JsonShape, A::Error> {
+                while map.next_entry::<JsonShape, JsonShape>()?.is_some() {}
+                Ok(JsonShape)
+            }
+        }
+        deserializer.deserialize_any(Shape)
+    }
+}
+
+// Borrow only the six useful fields; even a valid unknown value must not build an in-memory JSON tree.
+struct PackageFields<'a>([Option<&'a RawValue>; 6]);
+
+impl<'de> serde::Deserialize<'de> for PackageFields<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Fields;
+        impl<'de> Visitor<'de> for Fields {
+            type Value = PackageFields<'de>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a package manifest object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let names = ["description", "scripts", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+                let mut fields = [None; 6];
+                while let Some(name) = map.next_key::<String>()? {
+                    if let Some(index) = names.iter().position(|field| *field == name) {
+                        let value: &'de RawValue = map.next_value()?;
+                        // The wrapper counts this root object's level when validating the borrowed subtree.
+                        serde_json::from_str::<JsonShape>(&format!("[{}]", value.get())).map_err(serde::de::Error::custom)?;
+                        // Match JSON object behavior: the last duplicate field wins.
+                        fields[index] = Some(value);
+                    } else {
+                        map.next_value::<JsonShape>()?;
+                    }
+                }
+                Ok(PackageFields(fields))
+            }
+        }
+        deserializer.deserialize_map(Fields)
+    }
+}
+
+fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections::BTreeMap<String, bool> {
+    struct Names(bool);
+    impl<'de> Visitor<'de> for Names {
+        type Value = std::collections::BTreeMap<String, bool>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a package name map")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut names = std::collections::BTreeMap::new();
+            while let Some(name) = map.next_key::<String>()? {
+                let value: &'de RawValue = map.next_value()?;
+                let known = if self.0 {
+                    dependency_stack("package.json", &name).is_some()
+                } else {
+                    script_name(&name) && CHECK_SCRIPTS.contains(&name.as_str())
+                };
+                if known {
+                    names.insert(name, !self.0 || value.get().trim_start().starts_with('"'));
+                }
+            }
+            Ok(names)
+        }
+    }
+    let Some(raw) = raw.filter(|raw| raw.get().trim_start().starts_with('{')) else { return Default::default() };
+    serde_json::Deserializer::from_str(raw.get()).deserialize_map(Names(dependencies)).unwrap_or_default()
+}
+
+// Facts never inspect array elements. Keep the first value, including its containers, for depth/declaration validation.
+// shortcut: only supported scalars and one level of scalar child arrays are compacted; other values keep full validation.
+fn scalar_array(content: &str, start: usize, allow_nested: bool) -> Option<(usize, std::ops::Range<usize>)> {
+    let bytes = content.as_bytes();
+    let mut at = start;
+    let mut first = start..start;
+    let mut count = 0;
+    let mut expect_value = true;
+    loop {
+        match *bytes.get(at)? {
+            b' ' | b'\t' | b'\n' => at += 1,
+            b'\r' if bytes.get(at + 1) == Some(&b'\n') => at += 2,
+            b'#' => {
+                at += 1;
+                while let Some(&byte) = bytes.get(at) {
+                    if byte == b'\r' || byte == b'\n' {
+                        break;
+                    }
+                    if byte < b' ' && byte != b'\t' || byte == 0x7f {
+                        return None;
+                    }
+                    at += 1;
+                }
+            }
+            b']' => return (count > 1).then_some((at, first)),
+            b',' if !expect_value => {
+                at += 1;
+                expect_value = true;
+            }
+            b'[' if expect_value && allow_nested => {
+                if count > 0 && bytes[first.start] != b'[' {
+                    return None;
+                }
+                let begin = at;
+                let (end, _) = scalar_array(content, at + 1, false)?;
+                at = end + 1;
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            quote @ (b'"' | b'\'') if expect_value && bytes.get(at..at + 3) == Some(&[quote; 3]) => {
+                let source = toml_parser::Source::new(&content[at..]);
+                let token = source.lex().next()?;
+                if !matches!(token.kind(), toml_parser::lexer::TokenKind::MlBasicString | toml_parser::lexer::TokenKind::MlLiteralString) {
+                    return None;
+                }
+                let mut error = None;
+                let kind = source.get(token)?.decode_scalar(&mut (), &mut error);
+                if error.is_some() || kind != toml_parser::decoder::ScalarKind::String {
+                    return None;
+                }
+                let begin = at;
+                at += token.span().end();
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            quote @ (b'"' | b'\'') if expect_value => {
+                let begin = at;
+                let mut escaped = false;
+                at += 1;
+                while *bytes.get(at)? != quote {
+                    let byte = bytes[at];
+                    if byte < b' ' && byte != b'\t' || byte == 0x7f {
+                        return None;
+                    }
+                    if quote == b'"' && byte == b'\\' {
+                        escaped = true;
+                        at += 1;
+                        bytes.get(at)?;
+                    }
+                    at += 1;
+                }
+                at += 1;
+                if escaped {
+                    // The scanner found both ASCII quote boundaries; the decoder validates all intervening escapes.
+                    let raw = toml_parser::Raw::new_unchecked(
+                        &content[begin..at],
+                        Some(toml_parser::decoder::Encoding::BasicString),
+                        toml_parser::Span::new_unchecked(0, at - begin),
+                    );
+                    let mut error = None;
+                    let _ = raw.decode_scalar(&mut (), &mut error);
+                    if error.is_some() {
+                        return None;
+                    }
+                }
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            b't' | b'f' if expect_value => {
+                let begin = at;
+                let value = if bytes[at] == b't' { "true" } else { "false" };
+                if !content[at..].starts_with(value) {
+                    return None;
+                }
+                at += value.len();
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            byte if expect_value && (byte.is_ascii_digit() || byte == b'+' || byte == b'-') => {
+                let begin = at;
+                if byte == b'+' || byte == b'-' {
+                    at += 1;
+                }
+                let digits = at;
+                while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                    at += 1;
+                }
+                if at == digits || at - digits > 1 && bytes[digits] == b'0' {
+                    return None;
+                }
+                if bytes.get(at) == Some(&b'.') {
+                    at += 1;
+                    let fraction = at;
+                    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                        at += 1;
+                    }
+                    if at == fraction || content[begin..at].parse::<f64>().ok().is_none_or(|value| !value.is_finite()) {
+                        return None;
+                    }
+                } else if content[begin..at].parse::<i64>().is_err() {
+                    return None;
+                }
+                count += 1;
+                if count == 1 {
+                    first = begin..at;
+                }
+                expect_value = false;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn compact_scalar_arrays(content: &str) -> std::borrow::Cow<'_, str> {
+    use toml_parser::lexer::TokenKind as K;
+    let mut offset = 0;
+    let mut tokens = toml_parser::Source::new(content).lex();
+    let mut after_equals = false;
+    let mut copied = 0;
+    let mut out = String::new();
+    while let Some(token) = tokens.next() {
+        match token.kind() {
+            K::Whitespace | K::Comment | K::Newline => continue,
+            K::LeftSquareBracket if after_equals => {
+                let start = offset + token.span().end();
+                if let Some((end, first)) = scalar_array(content, start, true) {
+                    out.push_str(&content[copied..start]);
+                    out.push_str(&content[first]);
+                    copied = end;
+                    offset = end;
+                    tokens = toml_parser::Source::new(&content[offset..]).lex();
+                }
+            }
+            _ => {}
+        }
+        after_equals = token.kind() == K::Equals;
+    }
+    if copied == 0 {
+        std::borrow::Cow::Borrowed(content)
+    } else {
+        out.push_str(&content[copied..]);
+        std::borrow::Cow::Owned(out)
+    }
+}
+fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
     let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
     let mut facts = Facts::default();
     let mut scripts = Vec::new();
@@ -209,17 +515,37 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
             facts.languages.push(language);
         }
         let described = match manifest {
-            "package.json" => serde_json::from_str::<serde_json::Value>(content).ok().map(|json| {
-                if let Some(map) = json["scripts"].as_object() {
-                    let names = map.keys().filter(|k| script_name(k) && CHECK_SCRIPTS.contains(&k.as_str()));
-                    scripts.extend(names.map(|k| format!("npm run {k}")));
+            "package.json" => serde_json::from_str::<PackageFields<'_>>(content).ok().map(|fields| {
+                for group in &fields.0[2..] {
+                    for (name, valid) in package_names(*group, true) {
+                        if valid
+                            && let Some(stack) = dependency_stack(manifest, &name)
+                            && !facts.stacks.contains(&stack)
+                        {
+                            facts.stacks.push(stack);
+                        }
+                    }
                 }
-                json["description"].as_str().map(String::from)
+                scripts.extend(package_names(fields.0[1], false).into_keys().map(|name| format!("npm run {name}")));
+                fields.0[0].and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
             }),
-            "Cargo.toml" => toml::from_str::<toml::Value>(content)
-                .ok()
-                .map(|t| t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
-            "pyproject.toml" => toml::from_str::<toml::Value>(content)
+            "Cargo.toml" => toml::from_str::<toml::Value>(&compact_scalar_arrays(content)).ok().map(|t| {
+                for group in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                    if let Some(dependencies) = t.get(group).and_then(toml::Value::as_table) {
+                        for (name, value) in dependencies {
+                            let name = value.get("package").and_then(toml::Value::as_str).unwrap_or(name);
+                            if (value.is_str() || value.is_table())
+                                && let Some(stack) = dependency_stack(manifest, name)
+                                && !facts.stacks.contains(&stack)
+                            {
+                                facts.stacks.push(stack);
+                            }
+                        }
+                    }
+                }
+                t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)
+            }),
+            "pyproject.toml" => toml::from_str::<toml::Value>(&compact_scalar_arrays(content))
                 .ok()
                 .map(|t| t.get("project").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
             _ => None,
@@ -228,6 +554,30 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
             facts.description = described.flatten().as_deref().and_then(description);
         }
     }
+    (facts, scripts)
+}
+
+/// Selection needs manifest identities, not instruction prose or workflow bodies.
+pub(crate) fn kit_facts(project: &Path) -> Result<Facts, &'static str> {
+    let files = super::memory::read_sources(project, &["package.json", "Cargo.toml"], "", &|_| false, 0)?;
+    Ok(manifest_facts(&files).0)
+}
+
+/// The facts of a project folder, from the files of `MANIFESTS`, `INSTRUCTIONS`, `tsconfig.json` and `.github/workflows`.
+pub fn facts(project: &Path) -> Result<Facts, &'static str> {
+    Ok(facts_from_sources(&sources(project)?))
+}
+
+fn sources(project: &Path) -> Result<Vec<(String, String)>, &'static str> {
+    let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
+    let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
+    super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)
+}
+
+fn facts_from_sources(files: &[(String, String)]) -> Facts {
+    let workflows = files.iter().filter(|(path, _)| path.starts_with(".github/"));
+    let text = |name: &str| files.iter().find(|(path, _)| path == name).map(|(_, text)| text.as_str());
+    let (mut facts, scripts) = manifest_facts(files);
     facts.instructions = INSTRUCTIONS.into_iter().filter(|name| text(name).is_some()).collect();
     for name in &facts.instructions {
         push_unique(&mut facts.checks, proof_commands(text(name).unwrap_or_default()));
@@ -245,7 +595,7 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
             facts.checks_from = (!facts.checks.is_empty()).then_some("scripts");
         }
     }
-    Ok(facts)
+    facts
 }
 
 /// Markdown items of backticked names or commands.
@@ -364,12 +714,40 @@ pub fn refresh(project: &Path) -> Result<Facts, &'static str> {
     Ok(facts)
 }
 
+// Bump when source collection, interpretation or rendering changes.
+const RULES_VERSION: u32 = 1;
+
+/// Derived bookkeeping only; never an approval or a source of start-card text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Record {
+    version: u32,
+    sources: BTreeMap<String, String>,
+    hash: String,
+}
+
+fn hash(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Result<Record, &'static str> {
+    let files = sources(project)?;
+    let sources = files.iter().map(|(name, text)| (name.clone(), hash(text.as_bytes()))).collect();
+    if let Some(record) = previous.filter(|r| r.version == RULES_VERSION && r.sources == sources)
+        && super::memory::faber_file_hash(project, "rules.md").is_ok_and(|current| current == record.hash)
+    {
+        return Ok(record.clone());
+    }
+    let text = render(&facts_from_sources(&files));
+    super::memory::write_faber_file(project, "rules.md", text.as_bytes())?;
+    Ok(Record { version: RULES_VERSION, sources, hash: hash(text.as_bytes()) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn start_card_sections_count_overflow_and_include_framing_in_the_byte_cap() {
+    fn project_start_card_sections_count_overflow_and_include_framing_in_the_byte_cap() {
         let facts = Facts {
             description: Some("UNTRUSTED_DESCRIPTION".into()),
             checks: vec!["cargo test".repeat(100); 100],
@@ -395,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn start_card_sections_preserve_kept_words_and_summarize_long_unicode_items() {
+    fn project_start_card_sections_preserve_kept_words_and_summarize_long_unicode_items() {
         for size in [500, 501, 2000] {
             let body = "字".repeat(size);
             let next = "Use `config.json` and ``literal `backticks` ``.";
@@ -411,6 +789,39 @@ mod tests {
     }
 
     #[test]
+    fn project_start_card_sections_do_not_load_later_lines_or_create_empty_sections() {
+        let text = card(&Facts::default(), &["- Keep this.\n```\nUNREVIEWED_LATER_LINE"], &["* Taste first.\nUNREVIEWED_TASTE_LINE"]);
+        assert!(text.contains("- Keep this.\n") && text.contains("- Taste first.\n"));
+        assert!(!text.contains("UNREVIEWED_"));
+        assert_eq!(text.matches("```").count(), 2);
+        let empty = card(&Facts::default(), &[], &[]);
+        assert!(!empty.contains("## Decisions") && !empty.contains("## Taste"));
+        assert!(empty.contains("It grants no permission and overrides nothing."));
+    }
+
+    #[test]
+    fn package_fields_keep_the_original_depth_boundary_for_known_and_unknown_values() {
+        for name in ["unused", "description", "scripts", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] {
+            for depth in [126, 127, 128, 129] {
+                let content = format!("{{\"{name}\":{}0{}}}", "[".repeat(depth), "]".repeat(depth));
+                assert_eq!(
+                    serde_json::from_str::<PackageFields<'_>>(&content).is_ok(),
+                    serde_json::from_str::<serde_json::Value>(&content).is_ok(),
+                    "{name}: {depth}",
+                );
+            }
+        }
+        for content in [
+            r#"{"dependencies":{"stripe":"\ud800"},"dependencies":{"stripe":"1"}}"#,
+            r#"{"description":"\ud800","description":"valid"}"#,
+            r#"{"unused":1e400,"unused":0}"#,
+        ] {
+            assert!(serde_json::from_str::<serde_json::Value>(content).is_err());
+            assert!(serde_json::from_str::<PackageFields<'_>>(content).is_err());
+        }
+    }
+
+    #[test]
     fn start_card_sections_do_not_load_later_lines_or_create_empty_sections() {
         let text = card(&Facts::default(), &["- Keep this.\n```\nUNREVIEWED_LATER_LINE"], &["* Taste first.\nUNREVIEWED_TASTE_LINE"]);
         assert!(text.contains("- Keep this.\n") && text.contains("- Taste first.\n"));
@@ -421,10 +832,349 @@ mod tests {
         assert!(empty.contains("It grants no permission and overrides nothing."));
     }
 
+    #[test]
+    fn package_fields_preserve_json_rejections_and_last_duplicate_values() {
+        for content in [
+            r#"{"dependencies":{"stripe":"\ud800"}}"#.to_owned(),
+            r#"{"dependencies":{"stripe":"1"},"unused":"\ud800"}"#.to_owned(),
+            r#"{"dependencies":{"stripe":"1"},"unused":1e400}"#.to_owned(),
+            format!("{{\"dependencies\":{{\"stripe\":\"1\"}},\"unused\":{}0{}}}", "[".repeat(130), "]".repeat(130)),
+        ] {
+            assert!(serde_json::from_str::<serde_json::Value>(&content).is_err());
+            let (found, scripts) = manifest_facts(&[("package.json".into(), content.clone())]);
+            assert!(found.stacks.is_empty() && scripts.is_empty() && found.description.is_none(), "{content}");
+        }
+        let (found, scripts) = manifest_facts(&[(
+            "package.json".into(),
+            r#"{"description":"old","description":"new","dependencies":{"stripe":"1"},"dependencies":{"str\u0069pe":"1","stripe":false,"three":"1"},"scripts":{"test":null,"test":false,"build":{},"deploy":"x"}}"#.into(),
+        )]);
+        assert_eq!(found.description.as_deref(), Some("new"));
+        assert_eq!(found.stacks, ["threejs"]);
+        assert_eq!(scripts, ["npm run build", "npm run test"]);
+    }
+
+    #[test]
+    fn rules_integer_array_reduction_preserves_multiple_fields_and_inline_tables() {
+        for prefix in [
+            "x=[1,2]\ny=[3,4]\n",
+            "x=[1,2.5]\ny=[3,4]\n",
+            "x=[[1,2],[3,4]]\ny=[5,6]\n",
+            "x={a=[1,2], b=[3,4]}\ny=[5,6]\n",
+            "x={a=[1,2], a=[3,4]}\ny=[5,6]\n",
+            "x={a=[1,2]}\nx.b=3\ny=[5,6]\n",
+            "x=[1,2]\nx=[3,4]\ny=[5,6]\n",
+            "'x.y'=[1,2]\nx.y=[3,4]\n",
+            "x=[1,2] # \u{1}\ny=[3,4]\n",
+            "x=[1,2]\ny=[3,4] trailing\n",
+            "x=[1,2]\ny=[3,4]\n[[x]]\n",
+            "x='''[1,2]\n[3,4]'''\ny=[5,6]\n",
+        ] {
+            let source = format!("{prefix}[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+            let expected = toml::from_str::<toml::Value>(&source).is_ok();
+            let compact = compact_scalar_arrays(&source);
+            assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+            let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+            assert_eq!(facts.stacks.contains(&"bevy"), expected);
+            assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+        }
+    }
+    #[test]
+    fn rules_plain_string_arrays_preserve_validation_and_declarations() {
+        for array in [
+            r#"["x","y"]"#,
+            "['x','y']",
+            r#"["","é😀"]"#,
+            "['literal\\path','x']",
+            r#"["x",1,2]"#,
+            "[1,'x',2]",
+            "[\"x\", # valid\n\"y\"]",
+            "[\"x\", # invalid \u{7f}\n\"y\"]",
+            "[\"x\",\r\n\"y\"]",
+            "[\"x\",\r\"y\"]",
+            r#"["x\n","y"]"#,
+            r#"["x\u0041","y"]"#,
+            "['''multi\nline''','x']",
+            "[\"\"\"multi\nline\"\"\",\"x\"]",
+            r#"["x" "y"]"#,
+            r#"["x",,"y"]"#,
+            r#"["x","unterminated]"#,
+            r#"["x","\q"]"#,
+            r#"["x","\uD800"]"#,
+            "[\"x\",\"bad\u{1}\"]",
+            "[\"x\",\"bad\u{7f}\"]",
+            "[\"x\",\"bad\nline\"]",
+            r#"["x",["y","z"]]"#,
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays(r#"x=["x","y"]"#), r#"x=["x"]"#);
+        assert_eq!(compact_scalar_arrays("x=['x','y']"), "x=['x']");
+    }
+
+    #[test]
+    fn rules_escaped_string_arrays_preserve_official_validation() {
+        for array in [
+            r#"["\b","\t","\n","\f","\r","\"","\\"]"#,
+            r#"["\u0000","\u00E9","\U0001F600"]"#,
+            r#"["\uD7FF","\uE000","\U0010FFFF"]"#,
+            r#"["\uD800","x"]"#,
+            r#"["\uDFFF","x"]"#,
+            r#"["\U00110000","x"]"#,
+            r#"["\u123","x"]"#,
+            r#"["\uZZZZ","x"]"#,
+            r#"["\q","x"]"#,
+            r#"["ends\\","x"]"#,
+            r#"["embedded\"quote","x"]"#,
+            r#"["é\t😀","x"]"#,
+            r#"["bad\é","x"]"#,
+            r#"["\t" "x"]"#,
+            r#"["\t",,"x"]"#,
+            r#"["\t","unterminated]"#,
+            "[\"bad\\\nline\",\"x\"]",
+            "[\"bad\\\r\nline\",\"x\"]",
+            "[\"\"\"multi\\\nline\"\"\",\"x\"]",
+            r#"["\t",["nested","x"]]"#,
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays(r#"x=["\t","x"]"#), r#"x=["\t"]"#);
+    }
+
+    #[test]
+    fn rules_multiline_arrays_preserve_official_validation() {
+        for array in [
+            "[\"\"\"x\"\"\",\"\"\"y\"\"\"]",
+            "['''x''','''y''']",
+            "[\"\"\"\nline\nnext\"\"\",'''other''']",
+            "['''\r\nline\r\nnext''',1]",
+            "[\"\"\"é😀,]#\"\"\",'''x''']",
+            "[\"\"\"x\"\"\"\",\"\"\"y\"\"\"\"\"]",
+            "['''x'''','''y''''']",
+            "[\"\"\"x\\\n  next\"\"\",'''y''']",
+            "[\"\"\"x\\\r\n  next\"\"\",'''y''']",
+            "[\"\"\"\\u00E9\\U0001F600\"\"\",'''y''']",
+            "[\"\"\"\\q\"\"\",'''y''']",
+            "[\"\"\"\\uD800\"\"\",'''y''']",
+            "[\"\"\"\\U00110000\"\"\",'''y''']",
+            "['''bad\u{1}''','''y''']",
+            "[\"\"\"bad\rline\"\"\",'''y''']",
+            "[\"\"\"x\"\"\" '''y''']",
+            "['''x''',,'''y''']",
+            "['''x''','''unterminated]",
+            "[\"\"\"x\"\"\"\"\"\",'''y''']",
+            "['''x''',[1,2]]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=['''x''','''y''']"), "x=['''x''']");
+        assert_eq!(compact_scalar_arrays("x=[\"\"\"x\"\"\",\"\"\"y\"\"\"]"), "x=[\"\"\"x\"\"\"]");
+    }
+
+    #[test]
+    fn rules_boolean_arrays_preserve_validation_and_declarations() {
+        for array in [
+            "[true,false]",
+            "[false,true,]",
+            "[true, # comment\nfalse]",
+            "[true,\r\nfalse]",
+            "[true,1,'x',false]",
+            "[true]",
+            "[]",
+            "[True,false]",
+            "[FALSE,true]",
+            "[truefalse,false]",
+            "[true false]",
+            "[true,,false]",
+            "[false,true",
+            "[true,tru]",
+            "[false,falseé]",
+            "[true, # bad\u{1}\nfalse]",
+            "[true,\rfalse]",
+            "[[true,false],[false,true]]",
+            "[true,{x=1,x=2}]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[true,false]"), "x=[true]");
+        assert_eq!(compact_scalar_arrays("x=[false,true]"), "x=[false]");
+    }
+
+    #[test]
+    fn rules_decimal_float_arrays_preserve_official_validation() {
+        for array in [
+            "[1.0,2.0]",
+            "[-0.0,+1.5,]",
+            "[1e2,2E-3]",
+            "[1_0.2_5,3.0]",
+            "[inf,-inf,+inf,nan,-nan,+nan]",
+            "[true,1.0,'x']",
+            "[1.0]",
+            "[]",
+            "[01.0,2.0]",
+            "[1.,2.0]",
+            "[.1,2.0]",
+            "[1e,2.0]",
+            "[1_e2,2.0]",
+            "[1.0foo,2.0]",
+            "[1.0é,2.0]",
+            "[1.0 2.0]",
+            "[1.0,,2.0]",
+            "[1.0,2.0",
+            "[1.0, # comment\n2.0]",
+            "[1.0,\r\n2.0]",
+            "[1.0,\r2.0]",
+            "[1.0, # bad\u{1}\n2.0]",
+            "[[1.0,2.0],[3.0]]",
+            "[1.0,{x=1,x=2}]",
+            "[1e9999,2.0]",
+            "[0x10,2.0]",
+            "[2026-10-28,1.0]",
+            "[99999999999999999999999.0,2.0]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[1.0,2.0]"), "x=[1.0]");
+    }
+
+    #[test]
+    fn rules_nested_arrays_preserve_validation_and_depth() {
+        for array in [
+            "[[true,false],[false,true]]",
+            "[[1,2],[3,4],]",
+            "[[1,2],true,'x']",
+            "[true,[false,true]]",
+            "[[true,false]]",
+            "[[],[true,false]]",
+            "[[1],[2,3]]",
+            "[[[1,2],[3,4]],[[5,6],[7,8]]]",
+            "[[1,2],[3 4]]",
+            "[[1,2],[3,,4]]",
+            "[[1,2],[3,4]",
+            "[[1,2],[3,4]]extra",
+            "[[1,2], # ok\n [3,4]]",
+            "[[1,2], # bad\u{1}\n [3,4]]",
+            "[[1,2],\r[3,4]]",
+            "[[1,2],\r\n[3,4]]",
+            "[[1,2],[01,2]]",
+            "[[1,2],['x','y']]",
+            "[[1,2],[\"\\q\",\"y\"]]",
+            "[[1,2],[{a=1,a=2},3]]",
+            "[[1,2],{a=1,a=2}]",
+            "[[1,2],[3,4],,]",
+        ] {
+            for suffix in ["", "\nx=3", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let expected = toml::from_str::<toml::Value>(&source).is_ok();
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), expected, "{source:?} -> {compact:?}");
+                let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                assert_eq!(facts.stacks.contains(&"bevy"), expected);
+                assert_eq!(facts.description.as_deref(), expected.then_some("fixture"));
+            }
+        }
+        for depth in [78, 79, 80, 81] {
+            for array in ["[[true,false],[false,true]]", "[true,[false,true]]"] {
+                let source = format!("x={}{array}{}", "{a=".repeat(depth - 1), "}".repeat(depth - 1));
+                // Include an inline table at every outer level, without silently dropping nested depth.
+                let original = toml::from_str::<toml::Value>(&source).is_ok();
+                assert_eq!(original, depth < 80, "official depth contract: {depth}");
+                let compact = compact_scalar_arrays(&source);
+                assert_eq!(toml::from_str::<toml::Value>(&compact).is_ok(), original, "depth={depth}: {source:?}");
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[[true,false],[false,true]]"), "x=[[true,false]]");
+        assert_eq!(compact_scalar_arrays("x=[true,[false,true]]"), "x=[true,[false,true]]");
+    }
+
     fn write(dir: &Path, name: &str, text: &str) {
         let path = dir.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn rules_compact_integer_arrays_without_accepting_invalid_toml() {
+        let arrays = [
+            "[1,2,3]",
+            "[+1,-2,0,]",
+            "[1, # valid comment\n2]",
+            "[1,\r\n2]",
+            "[]",
+            "[1]",
+            "[1 2]",
+            "[1,,2]",
+            "[1,2",
+            "[01,2]",
+            "[1,9223372036854775808]",
+            "[1,-9223372036854775809]",
+            "[2026-99-99,2]",
+            "[25:90:90,2]",
+            "[1.0,2.0]",
+            "[1, # invalid \u{7f}\n2]",
+            "[1, # invalid \u{1}\n2]",
+            "[1,\r2]",
+            "[1,\"unterminated]",
+            "[\"literal [1,2]\",2]",
+            "[{a=1,a=2},2]",
+            "[[1,2],[3,4]]",
+        ];
+        for array in arrays {
+            for suffix in ["", "\nx=3", "\nx=4", "\n[x]", "\n[[x]]", "\nx.y=2"] {
+                let source = format!("x={array}{suffix}\n[dependencies]\nbevy='0.17'\n[package]\ndescription='fixture'\n");
+                let original = toml::from_str::<toml::Value>(&source);
+                let compact = compact_scalar_arrays(&source);
+                let reduced = toml::from_str::<toml::Value>(&compact);
+                assert_eq!(original.is_ok(), reduced.is_ok(), "{source:?} -> {compact:?}");
+                if original.is_ok() {
+                    let (facts, _) = manifest_facts(&[("Cargo.toml".into(), source)]);
+                    assert_eq!(facts.stacks, ["bevy"]);
+                    assert_eq!(facts.description.as_deref(), Some("fixture"));
+                }
+            }
+        }
+        assert_eq!(compact_scalar_arrays("x=[1,2,3]"), "x=[1]");
+        assert_eq!(compact_scalar_arrays("x='[1,2,3]'"), "x='[1,2,3]'");
+        assert_eq!(compact_scalar_arrays("[package]\ndescription='[1,2,3]'"), "[package]\ndescription='[1,2,3]'");
     }
 
     #[test]

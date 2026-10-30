@@ -154,6 +154,11 @@ pub(super) fn first_input(text: String, resources: &mut Option<String>, guide: &
 
 pub(super) fn record_native_kit(conversation: &mut Conversation, native: String, live: Option<&Live>, store: Option<&crate::tools::Store>) {
     let Some(live) = live else { return };
+    if let Some(card) = &live.start_card {
+        conversation.session_start_cards.insert(live.vendor, (native.clone(), card.clone()));
+    } else {
+        conversation.session_start_cards.remove(&live.vendor);
+    }
     let mut ids = live.tool_kit.ids.clone();
     if live.vendor == Vendor::Codex
         && let Some((_, old_ids, _)) = conversation.session_kits.get(&live.vendor)
@@ -254,6 +259,25 @@ pub(super) enum SessionStart {
     Compact,
 }
 
+/// Native resumes can retain their original instructions. Changed context starts a fresh native session with Faber's history.
+pub(super) fn session_card(
+    current: Option<String>,
+    saved: Option<&(String, String)>,
+    native: Option<&String>,
+    earlier: bool,
+    mode: SessionStart,
+) -> (Option<String>, bool) {
+    let previous = saved.filter(|(id, card)| {
+        Some(id) == native && card.len() <= 6 * 1024 && card.starts_with("```faber-start-card\n") && card.ends_with("```")
+    });
+    if mode == SessionStart::Compact {
+        return (previous.map(|(_, card)| card.clone()), false);
+    }
+    // A session picked up from a terminal (no earlier Faber turn, no record) keeps its own thread.
+    let reset = native.is_some() && current.is_some() && (saved.is_some() || earlier) && previous.map(|(_, card)| card) != current.as_ref();
+    (current, reset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +285,24 @@ mod tests {
     use serde_json::{Value, json};
     use std::io::Write;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[test]
+    fn project_start_card_resume_binds_the_native_id_and_compaction_never_adopts_new_words() {
+        let old = "```faber-start-card\nOLD\n```".to_string();
+        let new = "```faber-start-card\nNEW\n```".to_string();
+        let native = "native".to_string();
+        let saved = (native.clone(), old.clone());
+        for mode in [SessionStart::Prepare, SessionStart::Turn] {
+            assert_eq!(session_card(Some(old.clone()), Some(&saved), Some(&native), true, mode), (Some(old.clone()), false));
+            assert_eq!(session_card(Some(new.clone()), Some(&saved), Some(&native), true, mode), (Some(new.clone()), true));
+            assert!(!session_card(Some(old.clone()), None, Some(&native), false, mode).1, "a picked-up session keeps its own thread");
+            for unknown in [None, Some(&("other-native".into(), old.clone())), Some(&(native.clone(), "x".repeat(6145)))] {
+                assert!(session_card(Some(old.clone()), unknown, Some(&native), true, mode).1);
+            }
+        }
+        assert_eq!(session_card(Some(new), Some(&saved), Some(&native), true, SessionStart::Compact), (Some(old), false));
+        assert_eq!(session_card(None, None, Some(&native), true, SessionStart::Compact), (None, false));
+    }
 
     type Arguments = Arc<Mutex<Vec<(String, Vec<String>)>>>;
     type Messages = Arc<Mutex<Vec<(String, Value)>>>;
@@ -617,14 +659,18 @@ mod tests {
         Pick { vendor, model: None, effort: "medium".into(), reason: "reason.manual".into(), pace: None }
     }
 
-    async fn checked_signal(signal: &std::sync::mpsc::Receiver<()>) {
+    async fn checked_signal<T>(signal: &std::sync::mpsc::Receiver<T>) -> T {
         tokio::time::timeout(Duration::from_secs(3), async {
-            while signal.try_recv().is_err() {
-                tokio::task::yield_now().await;
+            loop {
+                match signal.try_recv() {
+                    Ok(value) => return value,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("the off-lock launch check disconnected"),
+                }
             }
         })
         .await
-        .expect("the off-lock launch check did not reach its gate");
+        .expect("the off-lock launch check did not reach its gate")
     }
 
     async fn input_with(messages: &Messages, needle: &str) {
@@ -682,6 +728,476 @@ mod tests {
             assert!(core.kit_checks.is_empty());
             assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
         });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_start_card_isolated_driver_path_excludes_internal_questions() {
+        const CARD: &str = "```faber-start-card\nISOLATED_APPROVED_CARD\n```";
+        for aside in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let delivery = crate::tools::Delivery { start_card: Some(CARD.into()), ..Default::default() };
+            let instructions = aside.then(|| "Internal question only".to_string());
+            let launch = ClaudeLaunch {
+                helper: Default::default(),
+                browse: false,
+                conversations: false,
+                verify: false,
+                progress: false,
+                area: Area::Project,
+                model: None,
+                effort: None,
+                resume: None,
+                user_hooks: false,
+                permissions: Permissions::Isolated,
+                instructions: instructions.clone(),
+                research: None,
+                group_instructions: None,
+                user_name: None,
+                flags: Default::default(),
+                tuning: Default::default(),
+                tools: delivery.clone(),
+            };
+            let argv = crate::claude::claude_args(&launch);
+            assert_eq!(argv.iter().any(|arg| arg.contains(CARD)), !aside);
+            let session = engine.with(|core| {
+                let cli = core.opts.clis[&Vendor::Codex].clone();
+                core.codex_server(Area::Project, false, Permissions::Isolated, &cli).open_with_tools(
+                    CodexThread {
+                        helper: Default::default(),
+                        browse: false,
+                        conversations: false,
+                        verify: false,
+                        progress: false,
+                        cwd: folder.clone(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions,
+                        research: None,
+                        user_name: None,
+                        group_instructions: None,
+                        permissions: Permissions::Isolated,
+                        leave_plan: false,
+                        tuning: Default::default(),
+                    },
+                    Arc::new(|_| {}),
+                    delivery,
+                )
+            });
+            session.send(UserTurn::text("ISOLATED_CARD_TURN"));
+            input_with(&messages, "ISOLATED_CARD_TURN").await;
+            let seen = messages.lock().unwrap();
+            assert!(seen.iter().any(|(_, message)| message["method"] == "config/read"));
+            let opened = seen.iter().find(|(_, message)| message["method"] == "thread/start").unwrap();
+            assert_eq!(opened.1["params"]["developerInstructions"].as_str().is_some_and(|words| words.contains(CARD)), !aside);
+            drop(seen);
+            session.close();
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_selects_latest_beyond_memory_listing_window() {
+        use crate::project::memory::KeptDecision;
+        let dir = crate::workspace::TestRoot::new();
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        std::fs::create_dir(folder.join(".faber")).unwrap();
+        let approved = "- NEWEST_PERSON_KEEP";
+        let mut text = (0..4097).map(|n| format!("- Earlier {n}. [by AI]\n")).collect::<String>();
+        text.push_str(&format!("{approved} [by person]\n"));
+        assert!(text.len() < crate::project::memory::MAX_BYTES);
+        std::fs::write(folder.join(".faber/decisions.md"), text).unwrap();
+        let display = crate::project::memory::list_faber(&folder).unwrap();
+        assert!(display.incomplete);
+        assert_eq!(display.files[0].entries.len(), 4096, "the Memory display window remains bounded");
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.store.keep_decision(&project.id, KeptDecision::of(approved), std::slice::from_ref(&project.id)).unwrap();
+            conversation(core, Area::Project, Some(&project.id), &folder, "CARD_NEWEST_TURN");
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "CARD_NEWEST_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "CARD_NEWEST_TURN").await;
+        let observed = args.lock().unwrap();
+        let prompt = observed.iter().flat_map(|(_, argv)| argv.windows(2)).find(|pair| pair[0] == "--append-system-prompt").unwrap();
+        assert!(prompt[1].contains("NEWEST_PERSON_KEEP"), "the newest kept decision must not be hidden by Memory's display window");
+        drop(observed);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_start_card_stale_file_reference_leaves_the_card_without_losing_approval() {
+        project_start_card_stale_file_reference_captured(Vendor::Claude).await;
+    }
+
+    #[tokio::test]
+    async fn project_start_card_stale_file_reference_codex_preserves_approval() {
+        project_start_card_stale_file_reference_captured(Vendor::Codex).await;
+    }
+
+    async fn project_start_card_stale_file_reference_captured(vendor: Vendor) {
+        use crate::project::memory::Edit;
+        let dir = crate::workspace::TestRoot::new();
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        std::fs::create_dir(folder.join(".faber")).unwrap();
+        std::fs::create_dir(folder.join("src")).unwrap();
+        std::fs::write(folder.join("src/lib.rs"), "pub fn public_api() {}\n").unwrap();
+        let text =
+            "- STALE_FILE_DECISION preserve `src/lib.rs`. [by AI]\n- KEEP_COMMAND_TEXT use `cargo test` and `setting.name`. [by AI]\n";
+        std::fs::write(folder.join(".faber/decisions.md"), text).unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        let list = engine.project_memory(&project.id).unwrap();
+        let file = list.files.iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+        for entry in &file.entries {
+            engine
+                .edit_project_memory(
+                    &project.id,
+                    &Edit {
+                        path: file.path.clone(),
+                        revision: file.revision.clone(),
+                        start: entry.start,
+                        end: entry.end,
+                        text: None,
+                        keep: true,
+                    },
+                )
+                .unwrap();
+        }
+        let approval = engine.with(|core| core.store.kept_decisions(&project.id));
+        assert_eq!(approval.len(), 2);
+        std::fs::remove_file(folder.join("src/lib.rs")).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "STALE_REFERENCE_TURN");
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(vendor), "STALE_REFERENCE_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "STALE_REFERENCE_TURN").await;
+        let prompt = if vendor == Vendor::Claude {
+            args.lock()
+                .unwrap()
+                .iter()
+                .find_map(|(_, argv)| argv.windows(2).find(|pair| pair[0] == "--append-system-prompt").map(|pair| pair[1].clone()))
+                .unwrap()
+        } else {
+            messages
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(_, message)| {
+                    (message["method"] == "thread/start").then(|| message["params"]["developerInstructions"].as_str().unwrap().to_string())
+                })
+                .unwrap()
+        };
+        assert!(
+            !prompt.contains("STALE_FILE_DECISION"),
+            "a kept decision whose recorded file disappeared must leave the actual driver card"
+        );
+        assert!(prompt.contains("KEEP_COMMAND_TEXT"), "commands and settings are never guessed to be missing files");
+        assert_eq!(std::fs::read_to_string(folder.join(".faber/decisions.md")).unwrap(), text);
+        assert_eq!(engine.with(|core| core.store.kept_decisions(&project.id)), approval);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_start_card_preparation_cost_measures_real_worker_and_rules_refresh() {
+        use crate::project::memory::Edit;
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = crate::workspace::TestRoot::new();
+            let work = tempfile::tempdir().unwrap();
+            let folder = work.path().canonicalize().unwrap();
+            std::fs::create_dir(folder.join(".faber")).unwrap();
+            std::fs::write(
+                folder.join("package.json"),
+                r#"{"name":"fixture","scripts":{"test":"node --test","build":"vite build"},"dependencies":{"solid-js":"1"}}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                folder.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n[dependencies]\ntokio = \"1\"\n",
+            )
+            .unwrap();
+            std::fs::write(folder.join("AGENTS.md"), "# Instructions\n\n## Proof commands\n\n```sh\nnpm test\n```\n").unwrap();
+            std::fs::write(folder.join(".faber/decisions.md"), "- COST_APPROVED_DECISION preserve public exports. [by AI]\n").unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            let list = engine.project_memory(&project.id).unwrap();
+            let file = list.files.iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+            let entry = &file.entries[0];
+            engine
+                .edit_project_memory(
+                    &project.id,
+                    &Edit {
+                        path: file.path.clone(),
+                        revision: file.revision.clone(),
+                        start: entry.start,
+                        end: entry.end,
+                        text: None,
+                        keep: true,
+                    },
+                )
+                .unwrap();
+            // Exclude fixture setup and scheduling; include the real rules path's external record write.
+            let refresh = engine.with(|core| {
+                let mut samples = Vec::new();
+                for _ in 0..2 {
+                    let started = std::time::Instant::now();
+                    core.store.refresh_rules(&project.id, &folder).unwrap();
+                    samples.push(started.elapsed());
+                }
+                samples
+            });
+            let rules = std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap();
+            assert!(rules.contains("npm test"));
+            let (started, entered) = std::sync::mpsc::channel();
+            let (finished, ended) = std::sync::mpsc::channel();
+            let gate = Arc::new(std::sync::Barrier::new(2));
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "PREPARATION_COST_TURN");
+                core.synchronous_kit_checks = false;
+                core.kit_check_hook = Some((started, gate.clone(), finished));
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(vendor), "PREPARATION_COST_TURN".into(), vec![], true).unwrap();
+                assert!(!core.live.contains_key("kit"));
+            });
+            checked_signal(&entered).await;
+            gate.wait();
+            let worker = checked_signal(&ended).await;
+            input_with(&messages, "PREPARATION_COST_TURN").await;
+            let prompt = if vendor == Vendor::Claude {
+                args.lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, argv)| argv.windows(2).find(|pair| pair[0] == "--append-system-prompt").map(|pair| pair[1].clone()))
+                    .unwrap()
+            } else {
+                messages
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, message)| {
+                        (message["method"] == "thread/start")
+                            .then(|| message["params"]["developerInstructions"].as_str().unwrap().to_string())
+                    })
+                    .unwrap()
+            };
+            assert!(prompt.contains("COST_APPROVED_DECISION"));
+            assert!(prompt.contains("```faber-start-card"));
+            assert!(prompt.contains("npm test"));
+            assert_eq!(std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap(), rules);
+            eprintln!(
+                "project_start_card_preparation_cost {vendor:?}: rules_rebuild_ms={:.3} rules_unchanged_ms={:.3} worker_ms={:.3} (warm file cache; fixture catalog; excludes scheduling and provider latency; no peak-memory or adopted-content proof)",
+                refresh[0].as_secs_f64() * 1000.0,
+                refresh[1].as_secs_f64() * 1000.0,
+                worker.as_secs_f64() * 1000.0
+            );
+            engine.shutdown();
+        }
+    }
+
+    async fn project_start_card_captured(vendor: Vendor) {
+        use crate::project::memory::KeptDecision;
+        let mut previous_card = None::<String>;
+        for state in ["fresh", "matching", "legacy", "changed", "wrong-native", "revoked"] {
+            let resumed = state != "fresh";
+            let dir = crate::workspace::TestRoot::new();
+            let work = tempfile::tempdir().unwrap();
+            let folder = work.path().canonicalize().unwrap();
+            std::fs::create_dir(folder.join(".faber")).unwrap();
+            std::fs::write(folder.join("package.json"), r#"{"description":"UNTRUSTED_DESCRIPTION","scripts":{"test":"node --test"}}"#)
+                .unwrap();
+            let approved = "- Preserve public exports.";
+            std::fs::write(
+                folder.join(".faber/decisions.md"),
+                format!("{approved} [by person]\n- FORGED_PERSON [by person]\n- UNREVIEWED_AI [by AI]\n"),
+            )
+            .unwrap();
+            std::fs::write(folder.join(".faber/taste.md"), "UNAPPROVED_TASTE [by person]\n").unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                core.store.keep_decision(&project.id, KeptDecision::of(approved), std::slice::from_ref(&project.id)).unwrap();
+                conversation(core, Area::Project, Some(&project.id), &folder, "CARD_CAPTURE_TURN");
+                if resumed {
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.sessions.insert(vendor, "native-history".into());
+                    if state != "legacy" {
+                        let id = if state == "wrong-native" { "another-native" } else { "native-history" };
+                        let card =
+                            if state == "changed" { "```faber-start-card\nOLD_CARD\n```".into() } else { previous_card.clone().unwrap() };
+                        c.session_start_cards.insert(vendor, (id.into(), card));
+                    }
+                    let old_user = Message::new("earlier-user".into(), Role::User, "VERBATIM_OLD_REQUEST".into(), 0);
+                    let old_reply = Message::new("earlier-reply".into(), Role::Assistant, "Earlier answer".into(), 0);
+                    c.messages.splice(0..0, [old_user, old_reply]);
+                }
+                if state == "revoked" {
+                    std::fs::write(
+                        folder.join(".faber/decisions.md"),
+                        "- Preserve public exports.\n  But remove the public API. [by person]\n",
+                    )
+                    .unwrap();
+                }
+                core.synchronous_kit_checks = false;
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(vendor), "CARD_CAPTURE_TURN".into(), vec![], true).unwrap();
+                assert!(!core.live.contains_key("kit"), "source reads must precede spawning outside Core");
+            });
+            input_with(&messages, "CARD_CAPTURE_TURN").await;
+            let prompt = if vendor == Vendor::Claude {
+                args.lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, argv)| argv.windows(2).find(|p| p[0] == "--append-system-prompt").map(|p| p[1].clone()))
+                    .expect("the project persona is sent")
+            } else {
+                messages
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(_, message)| {
+                        (message["method"] == if state == "matching" { "thread/resume" } else { "thread/start" })
+                            .then(|| message["params"]["developerInstructions"].as_str().unwrap_or_default().to_string())
+                    })
+                    .expect("the project thread is opened")
+            };
+            if resumed && state != "matching" {
+                assert!(!args.lock().unwrap().iter().any(|(_, argv)| argv.iter().any(|arg| arg == "--resume")));
+                assert!(
+                    !messages.lock().unwrap().iter().any(|(_, message)| message["method"] == "thread/resume"),
+                    "a legacy native session without a saved card starts fresh with history"
+                );
+            }
+            let card = prompt.split_once("```faber-start-card\n").expect("the real driver sends the project start card").1;
+            assert_eq!(card.contains("Preserve public exports."), state != "revoked", "exact current approved content only: {state}");
+            for denied in ["UNTRUSTED_DESCRIPTION", "FORGED_PERSON", "UNREVIEWED_AI", "UNAPPROVED_TASTE"] {
+                assert!(!prompt.contains(denied), "unapproved repository prose must stay out: {denied}");
+            }
+            assert_eq!(prompt.matches("```faber-start-card\n").count(), 1);
+            assert!(card.split_once("```").unwrap().0.len() + "```faber-start-card\n```".len() <= 6 * 1024);
+            let sent = format!("```faber-start-card\n{}```", card.split_once("```").unwrap().0);
+            if resumed && state != "matching" {
+                assert!(
+                    messages.lock().unwrap().iter().any(|(_, message)| message.to_string().contains("VERBATIM_OLD_REQUEST")),
+                    "native restart preserves Faber's previous requests: {state}"
+                );
+            }
+            engine.with(|core| {
+                let sid = core.live["kit"].sid;
+                core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
+                core.handle("kit", sid, EngineEvent::TurnStarted);
+                assert_eq!(core.convs["kit"].session_start_cards.get(&vendor), Some(&("native-history".into(), sent.clone())));
+            });
+            engine.shutdown();
+            if state == "fresh" {
+                previous_card = Some(sent);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_claude_actual_start_and_resume() {
+        project_start_card_captured(Vendor::Claude).await;
+    }
+
+    #[tokio::test]
+    async fn project_start_card_codex_actual_start_and_resume() {
+        project_start_card_captured(Vendor::Codex).await;
+    }
+
+    #[tokio::test]
+    async fn project_facts_current_working_copy_selects_kit_before_first_spawn() {
+        let dir = crate::workspace::TestRoot::new();
+        let original = tempfile::tempdir().unwrap();
+        let working = tempfile::tempdir().unwrap();
+        std::fs::write(original.path().join("package.json"), r#"{"dependencies":{"expo":"1"}}"#).unwrap();
+        std::fs::write(working.path().join("package.json"), r#"{"dependencies":{"stripe":"1"}}"#).unwrap();
+        let folder = working.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&original.path().to_string_lossy()).unwrap();
+        engine.with(|core| {
+            core.catalog_store = Some(catalog_items(dir.path(), "", &[("stripe-best-practices", "payments"), ("debug", "debugging")]));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Fix the checkout payment bug");
+            core.convs.get_mut("kit").unwrap().copy = Some(crate::project::copy::WorkCopy {
+                path: folder.to_string_lossy().into_owned(),
+                branch: "fixture".into(),
+                root: original.path().to_string_lossy().into_owned(),
+                sub: String::new(),
+                base: None,
+            });
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Codex), "FACTS_KIT_TURN".into(), vec![], true).unwrap();
+            assert!(!core.live.contains_key("kit"));
+        });
+        assert!(args.lock().unwrap().is_empty(), "selection must finish before spawning the session");
+        input_with(&messages, "FACTS_KIT_TURN").await;
+        engine.with(|core| {
+            assert!(
+                core.live["kit"].tool_kit.ids.contains(&"stripe-best-practices".into()),
+                "the actual working copy supplies dependency evidence on the first launch"
+            );
+            assert!(core.live["kit"].tool_kit.ids.contains(&"debug".into()), "unconstrained matching resources remain eligible");
+            assert!(core.kit_checks.is_empty());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_facts_empty_kit_still_selects_outside_the_core_lock() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "What is two plus two?");
+            core.catalog_store = Some(ToolStore::with_catalog(&folder, vec![]));
+            core.synchronous_kit_checks = false;
+            let result = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            assert!(
+                matches!(result, Err(ref error) if error == mcp_servers::CHECK_PENDING),
+                "even an empty selection needs the off-lock project facts check"
+            );
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_facts_leave_chat_warming_unchanged() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let sid = engine.with(|core| {
+            conversation(core, Area::Chat, None, &folder, "Debug this failure");
+            core.convs.get_mut("kit").unwrap().working_folder = None;
+            core.warm_launch("kit", &pick(Vendor::Claude));
+            assert!(core.live["kit"].prepared);
+            core.live["kit"].sid
+        });
+        engine.with(|core| {
+            core.synchronous_kit_checks = false;
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "FACTS_WARM_TURN".into(), vec![], true).unwrap();
+        });
+        input_with(&messages, "FACTS_WARM_TURN").await;
+        engine.with(|core| assert_eq!(core.live["kit"].sid, sid, "Chat still reuses its prepared process"));
+        assert_eq!(args.lock().unwrap().len(), 1);
         engine.shutdown();
     }
 
@@ -1481,6 +1997,7 @@ mod tests {
             let task = if change == "ids" { "Design a landing page" } else { "Debug the next failure too" };
             engine.with(|core| {
                 conversation(core, Area::Chat, None, &folder, "Debug the failure");
+                core.shown = Some("kit".into());
                 let (delivery, report) = core.choose_session_tools("kit", Vendor::Claude, Permissions::FullAccess, &folder);
                 let identity = session_tool_identity(Vendor::Claude, &delivery);
                 let digest = resource_digest(claude_resources(Area::Chat, &delivery).as_deref());
@@ -1494,6 +2011,7 @@ mod tests {
                 core.launch("kit", &pick(Vendor::Claude)).unwrap();
                 let sid = core.live["kit"].sid;
                 core.handle("kit", sid, EngineEvent::Started { session_id: "native-history".into(), model: "fixture".into() });
+                core.handle("kit", sid, EngineEvent::TurnStarted);
                 core.close_when_idle("kit");
             });
             tokio::task::yield_now().await;

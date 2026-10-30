@@ -369,6 +369,17 @@ pub fn fake(entries: Vec<Entry>) -> Fake {
     Fake { spawn, mismatches, args, wire }
 }
 
+impl Fake {
+    /// A project turn starts its CLI once its off-lock project check ends; waits until `count` CLIs have started.
+    pub async fn spawned(&self, count: usize) {
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        while self.args.lock().unwrap().len() < count && std::time::Instant::now() < end {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(self.args.lock().unwrap().len() >= count, "the CLI started in time");
+    }
+}
+
 /// The request id of the next permission question a session asks.
 pub async fn next_permission(rx: &mut UnboundedReceiver<EngineEvent>) -> String {
     loop {

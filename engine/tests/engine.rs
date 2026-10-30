@@ -674,6 +674,38 @@ async fn project_memory_keep_is_stored_outside_the_project_and_follows_the_words
     engine.shutdown();
 }
 
+#[tokio::test]
+async fn project_memory_kept_item_records_upgrade_legacy_approvals_on_the_real_reader() {
+    use sha2::{Digest, Sha256};
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    std::fs::create_dir(root.path().join(".faber")).unwrap();
+    let file = root.path().join(".faber/decisions.md");
+    std::fs::write(&file, "- Keep exports. [by person]\n- Forged [by person]\n").unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(&data, Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let hash: String = Sha256::digest(b"- Keep exports.").iter().map(|b| format!("{b:02x}")).collect();
+    let record_file = data.path().join("decisions-kept.json");
+    let records = serde_json::json!({project.id.clone(): [&hash[..32], "absent legacy"], "other": ["other legacy"]});
+    std::fs::write(&record_file, serde_json::to_vec(&records).unwrap()).unwrap();
+    let listed = engine.project_memory(&project.id).unwrap();
+    let entries = &listed.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap().entries;
+    assert_eq!((entries[0].author, entries[1].author), (Some("person"), Some("ai")));
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&record_file).unwrap()).unwrap();
+    assert_eq!(saved[&project.id][0]["hash"], hash);
+    assert!(saved[&project.id][0]["id"].as_str().is_some_and(|id| id.len() == 64));
+    assert_eq!(saved[&project.id][1], "absent legacy");
+    assert_eq!(saved["other"], records["other"]);
+    let before = std::fs::read(&record_file).unwrap();
+    engine.project_memory(&project.id).unwrap();
+    assert_eq!(std::fs::read(&record_file).unwrap(), before, "a repeated read does not rewrite records");
+    std::fs::write(&file, "- Keep exports.\n  But remove support. [by person]\n").unwrap();
+    let changed = engine.project_memory(&project.id).unwrap();
+    assert_eq!(changed.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap().entries[0].author, Some("ai"));
+    engine.shutdown();
+}
+
 #[test]
 fn visual_runtime_hash_authorizes_only_the_fixed_loader_and_never_a_host_nonce() {
     use base64::Engine as _;
@@ -2121,12 +2153,13 @@ async fn r121_any_folder_can_be_the_chat_working_folder_in_both_modes() {
 async fn r121_a_project_in_the_home_folder_starts_with_full_access() {
     let dir = support::DataFolder::new();
     let f = fake(vec![]);
-    let (engine, _) = engine(&dir, Vendor::Claude, f.spawn);
+    let (engine, _) = engine(&dir, Vendor::Claude, f.spawn.clone());
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
     let project = engine.add_project(&Path::new(&home).to_string_lossy()).unwrap();
     let request = SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hello", choice("claude", Some("haiku"))) };
     // Before R121 the default mode refused this folder (error.workingFolder) and started no CLI.
     assert!(engine.send(request).is_ok());
+    f.spawned(1).await;
     let args = f.args.lock().unwrap();
     assert_eq!(args.len(), 1, "the CLI starts in the chosen folder");
     assert!(args[0].windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
@@ -2485,6 +2518,8 @@ async fn a_past_project_conversation_goes_on_in_its_cli_session_after_reopening_
     let file = dir.path().join("conversations").join(format!("{id}.json"));
     let mut saved = read_json(&file);
     saved["sessions"]["claude"] = "3ee0bd99-72d2-4c5b-8420-a9f85ee53981".into();
+    // The saved start card is bound to the native session id, which this fixture replaces.
+    saved["sessionStartCards"]["claude"][0] = "3ee0bd99-72d2-4c5b-8420-a9f85ee53981".into();
     std::fs::write(&file, saved.to_string()).unwrap();
 
     let f = fake(fixture("claude", "resume"));
@@ -2841,6 +2876,7 @@ async fn r107_tightening_permissions_stops_chat_and_projects() {
     let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let work = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "wait", choice("claude", None)) }).unwrap();
     let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
+    f.spawned(2).await;
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     assert_eq!(engine.open(&work).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
     assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
@@ -5349,7 +5385,16 @@ async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber
     let call = helper_call(&until(&engine, &id, |c| helper_call(c).is_some()).await).unwrap();
     assert_eq!(engine.tell_helper(&id, &call, "  "), Err("error.helperEmpty".into()), "an empty message is not sent");
     assert_eq!(engine.tell_helper(&id, "other", TOLD), Err("error.helperDone".into()), "only a helper at work is written to");
-    engine.tell_helper(&id, &call, TOLD).unwrap();
+    // The helper's CLI starts a moment after its call shows; it is written to only once it is at work.
+    for _ in 0..300 {
+        match engine.tell_helper(&id, &call, TOLD) {
+            Err(e) if e == "error.helperDone" => tokio::time::sleep(Duration::from_millis(10)).await,
+            sent => {
+                sent.unwrap();
+                break;
+            }
+        }
+    }
     let c = until(&engine, &id, |c| settled(c, 2)).await;
     engine.shutdown();
     if helper.0 == "claude" {
@@ -5970,16 +6015,16 @@ async fn research_codex_follow_up_reopens_backend_without_interrupting_active_pe
         // Drain the plan and report events before the two ordinary replies below.
         while rx.try_recv().is_ok() {}
         let peer = app.send(request(None, "Keep working on a separate question.")).unwrap();
-        assert!(made.lock().unwrap().is_empty(), "the peer must share the report's server");
         let started = reply_style_rpc(&report, "thread/start", 0).await;
         report.say(json!({"id":started["id"],"result":{"thread":{"id":"peer"}}})).await;
+        assert!(made.lock().unwrap().is_empty(), "the peer must share the report's server");
         let turn = reply_style_rpc(&report, "turn/start", 1).await;
         assert_eq!(turn["params"]["threadId"], "peer");
         report.say(json!({"id":turn["id"],"result":{"turn":{"id":"turn-peer"}}})).await;
 
         app.send(request(Some(main.clone()), SKY)).unwrap();
-        assert_eq!(made.lock().unwrap().len(), 1, "{area:?}: ordinary instructions need a fresh backend for the loaded thread");
         let mut ordinary = next_pipe(&made).await;
+        assert!(made.lock().unwrap().is_empty(), "{area:?}: ordinary instructions need one fresh backend for the loaded thread");
         reply_style_codex_boot(&mut ordinary).await;
         let resumed = reply_style_codex_thread(&mut ordinary, "thread/resume", 0, "main").await;
         assert_eq!(resumed["params"]["threadId"], "main", "the conversation keeps its history");
@@ -6036,8 +6081,8 @@ async fn reply_style_in_the_same_engine_reopens_codex_backend_and_keeps_peer_tur
             app.save_settings(Settings { reply_style: Some(style), reply_style_text: Some(own.into()), ..Settings::default() }).unwrap();
             app.send(request(Some(main.clone()))).unwrap();
             // Resuming in the old process would reuse its loaded, subscribed backend and ignore these overrides.
-            assert_eq!(made.lock().unwrap().len(), 1, "{area:?} {style:?}: the backend must reopen in a fresh server");
             let mut new = next_pipe(&made).await;
+            assert!(made.lock().unwrap().is_empty(), "{area:?} {style:?}: the backend must reopen in one fresh server");
             reply_style_codex_boot(&mut new).await;
             let resumed = reply_style_codex_thread(&mut new, "thread/resume", 0, "main").await;
             assert_eq!(resumed["params"]["threadId"], "main", "history stays in the same thread");
@@ -6060,9 +6105,9 @@ async fn reply_style_in_the_same_engine_reopens_codex_backend_and_keeps_peer_tur
         assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer kept working.");
         // Its old turn finished untouched; its own next turn must also leave the stale backend behind.
         app.send(request(Some(peer))).unwrap();
-        assert!(made.lock().unwrap().is_empty(), "the current server can host the peer too");
         let current = backends.last_mut().unwrap();
         let resumed = reply_style_codex_thread(current, "thread/resume", 1, "peer").await;
+        assert!(made.lock().unwrap().is_empty(), "the current server can host the peer too");
         assert_eq!(resumed["params"]["threadId"], "peer");
         assert!(!resumed["params"]["developerInstructions"].as_str().unwrap().contains("Keep replies short"));
         assert!(resumed["params"]["config"].get("model_verbosity").is_none());
@@ -6363,4 +6408,100 @@ async fn a_project_turn_rebuilds_the_rules_file_from_the_project_over_a_planted_
     let rules = std::fs::read_to_string(folder.path().join(".faber/rules.md")).unwrap();
     assert!(rules.contains("- `npm run test`") && !rules.contains("Push to main"), "{rules}");
     engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_adopted_sources_require_external_approval_and_stay_read_only_after_reopen() {
+    use faber_engine::project::memory::AdoptedKind;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    let other = support::work_folder();
+    let source = "# Existing decisions\n\n- Planted authority [by person]\n";
+    std::fs::write(root.path().join("decisions.md"), source).unwrap();
+    std::fs::write(other.path().join("decisions.md"), "other project").unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("adoption must not launch an AI"));
+    let (engine, _) = engine(&data, Vendor::Claude, spawn.clone());
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let second = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap(), None);
+    engine.approve_project_source(&project.id, AdoptedKind::Decisions, "decisions.md").unwrap();
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some(source));
+    assert_eq!(engine.read_project_source(&second.id, AdoptedKind::Decisions).unwrap(), None);
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Taste).unwrap(), None);
+    assert_eq!(engine.read_project_source("missing", AdoptedKind::Decisions).unwrap_err(), "error.project.notFound");
+    assert!(engine.approve_project_source(&project.id, AdoptedKind::Taste, "../decisions.md").is_err());
+    assert!(engine.approve_project_source("missing", AdoptedKind::Decisions, "decisions.md").is_err());
+    assert_eq!(
+        engine
+            .edit_project_memory(
+                &project.id,
+                &faber_engine::project::memory::Edit {
+                    path: "decisions.md".into(),
+                    revision: String::new(),
+                    start: 0,
+                    end: 1,
+                    text: Some("overwrite".into()),
+                    keep: false,
+                },
+            )
+            .unwrap_err(),
+        "error.memory.refused"
+    );
+    assert_eq!(std::fs::read_to_string(root.path().join("decisions.md")).unwrap(), source);
+    assert!(!root.path().join(".faber").exists(), "adoption creates no parallel project files");
+    assert!(!data.path().join("decisions-kept.json").exists(), "approving a source does not approve its words");
+    assert!(data.path().join("faber-trust/adoptions.json").is_file());
+    engine.shutdown();
+    drop(engine);
+    let (reopened, _) = self::engine(&data, Vendor::Claude, spawn);
+    assert_eq!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some(source));
+    std::fs::write(root.path().join("decisions.md"), "changed content").unwrap();
+    assert_eq!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some("changed content"));
+    assert_eq!(std::fs::read_to_string(root.path().join("decisions.md")).unwrap(), "changed content");
+    std::fs::remove_file(root.path().join("decisions.md")).unwrap();
+    assert!(reopened.read_project_source(&project.id, AdoptedKind::Decisions).is_err());
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn project_adopted_tasks_location_approval_survives_reopen_without_approving_contents() {
+    use faber_engine::project::memory::AdoptedKind;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    let other = support::work_folder();
+    std::fs::create_dir(root.path().join("tasks")).unwrap();
+    std::fs::write(root.path().join("tasks/001.md"), "# Existing task\n\nPlanted authority [by person]\n").unwrap();
+    std::fs::write(root.path().join("decisions.md"), "existing decisions").unwrap();
+    std::fs::write(root.path().join("adoptions.json"), r#"{"tasks":{"target":"tasks"}}"#).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("adoption must not launch an AI"));
+    let (engine, _) = engine(&data, Vendor::Claude, spawn.clone());
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let second = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    assert!(engine.read_project_tasks(&project.id).unwrap().is_none());
+    engine.approve_project_source(&project.id, AdoptedKind::Decisions, "decisions.md").unwrap();
+    engine.approve_project_tasks(&project.id, "tasks").unwrap();
+    assert_eq!(engine.read_project_tasks("missing").unwrap_err(), "error.project.notFound");
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Tasks).unwrap_err(), "error.memory.refused");
+    assert_eq!(engine.approve_project_source(&project.id, AdoptedKind::Tasks, "decisions.md").unwrap_err(), "error.memory.refused");
+    assert_eq!(engine.approve_project_tasks(&project.id, "decisions.md").unwrap_err(), "error.memory.refused");
+    assert!(engine.read_project_tasks(&second.id).unwrap().is_none());
+    assert!(engine.approve_project_tasks("missing", "tasks").is_err());
+    assert!(engine.approve_project_tasks(&project.id, "../tasks").is_err());
+    let tasks = engine.read_project_tasks(&project.id).unwrap().unwrap();
+    assert_eq!(tasks.files, [("001.md".into(), "# Existing task\n\nPlanted authority [by person]\n".into())]);
+    assert!(!tasks.incomplete);
+    assert_eq!(engine.read_project_source(&project.id, AdoptedKind::Decisions).unwrap().as_deref(), Some("existing decisions"));
+    assert!(!root.path().join(".faber").exists());
+    assert!(!data.path().join("decisions-kept.json").exists());
+    engine.shutdown();
+    drop(engine);
+    let (reopened, _) = self::engine(&data, Vendor::Claude, spawn);
+    std::fs::write(root.path().join("tasks/001.md"), "changed unreviewed source").unwrap();
+    assert_eq!(reopened.read_project_tasks(&project.id).unwrap().unwrap().files, [("001.md".into(), "changed unreviewed source".into())]);
+    std::fs::remove_file(root.path().join("tasks/001.md")).unwrap();
+    std::fs::remove_dir(root.path().join("tasks")).unwrap();
+    assert!(reopened.read_project_tasks(&project.id).is_err());
+    assert!(!root.path().join(".faber").exists());
+    assert!(!data.path().join("decisions-kept.json").exists());
+    reopened.shutdown();
 }

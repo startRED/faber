@@ -242,6 +242,7 @@ pub struct TerminalCommand {
 }
 
 struct Live {
+    start_card: Option<String>,
     tool_kit: crate::tools::kits::Report,
     kit_identity: Option<String>,
     kit_resource_digest: Option<String>,
@@ -433,7 +434,7 @@ struct Core {
     #[cfg(test)]
     synchronous_kit_checks: bool,
     #[cfg(test)]
-    kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<()>)>,
+    kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<Duration>)>,
     background: crate::background::Commands,
     background_pending: bool,
     opts: EngineOptions,
@@ -1273,10 +1274,33 @@ impl Engine {
     pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
         self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
     }
+    /// Person-only location approval; never registered as an agent tool or a review of the source's words.
+    pub fn approve_project_source(&self, id: &str, kind: crate::project::memory::AdoptedKind, target: &str) -> Result<(), String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.approve_adopted_file(id, Path::new(&project.path), kind, target).map_err(str::to_string))
+    }
+    pub fn read_project_source(&self, id: &str, kind: crate::project::memory::AdoptedKind) -> Result<Option<String>, String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.read_adopted_file(id, Path::new(&project.path), kind).map_err(str::to_string))
+    }
+    /// Approves only the task folder's location, not the authority of its contents.
+    pub fn approve_project_tasks(&self, id: &str, target: &str) -> Result<(), String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.approve_adopted_tasks(id, Path::new(&project.path), target).map_err(str::to_string))
+    }
+    pub fn read_project_tasks(&self, id: &str) -> Result<Option<crate::project::memory::AdoptedTasks>, String> {
+        let project = self.project(id)?;
+        self.with(|c| c.store.read_adopted_tasks(id, Path::new(&project.path)).map_err(str::to_string))
+    }
     pub fn project_memory(&self, id: &str) -> Result<crate::project::memory::MemoryList, String> {
         let project = self.project(id)?;
         let mut list = crate::project::memory::list(Path::new(&project.path)).map_err(str::to_string)?;
-        crate::project::memory::mark_kept(&mut list, &self.with(|c| c.store.kept_decisions(id)));
+        let kept = self.with(|c| c.store.kept_decisions(id));
+        let upgraded = crate::project::memory::upgrade_kept(&list, &kept);
+        if upgraded != kept {
+            self.with(|c| c.store.migrate_kept_decisions(id, &kept, &upgraded).map_err(|e| e.key().to_string()))?;
+        }
+        crate::project::memory::mark_kept(&mut list, &kept);
         Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
@@ -1855,7 +1879,7 @@ impl Core {
     fn refresh_rules(&self, id: &str) {
         let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
         if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
-            let _ = crate::project::rules::refresh(Path::new(&project.path));
+            let _ = self.store.refresh_rules(&project.id, Path::new(&project.path));
         }
     }
 
@@ -3946,7 +3970,7 @@ impl Core {
                 &history[..history.len().saturating_sub(2)],
                 &text,
                 &|n| attachment_place(c.area, &self.opts.data_dir, id, n),
-                "Earlier in this conversation, before this session's catalog tool servers changed:",
+                "Earlier in this conversation, before this session's project context or catalog tool servers changed:",
             )
         } else {
             text
@@ -4216,13 +4240,22 @@ impl Core {
             kits::session_tool_identity(pick.vendor, &project_tools)
         };
         // Skills can join a resumed turn; only known changes to the native server configuration require a new thread.
-        let kit_reset = mode != kits::SessionStart::Compact
-            && pick.vendor == Vendor::Codex
-            && (project_tools.catalog_ready || revoked_servers)
-            && resume.is_some()
-            && saved_identity
-                .as_ref()
-                .is_some_and(|key| key.as_deref().is_some_and(|identity| identity.starts_with("servers:")) && key != &kit_identity);
+        let (start_card, card_reset) = kits::session_card(
+            project_tools.start_card.take(),
+            c.session_start_cards.get(&pick.vendor),
+            resume.as_ref(),
+            c.messages.len() > 2,
+            mode,
+        );
+        project_tools.start_card = start_card.clone();
+        let kit_reset = card_reset
+            || (mode != kits::SessionStart::Compact
+                && pick.vendor == Vendor::Codex
+                && (project_tools.catalog_ready || revoked_servers)
+                && resume.is_some()
+                && saved_identity
+                    .as_ref()
+                    .is_some_and(|key| key.as_deref().is_some_and(|identity| identity.starts_with("servers:")) && key != &kit_identity));
         if kit_reset {
             resume = None;
         }
@@ -4346,6 +4379,7 @@ impl Core {
         self.live.insert(
             conv.to_string(),
             Live {
+                start_card,
                 tool_kit,
                 kit_identity,
                 kit_resource_digest,
@@ -4427,6 +4461,7 @@ impl Core {
             copy: None,
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),
+            session_start_cards: BTreeMap::new(),
             session_resource_digests: BTreeMap::new(),
             session_guide_digests: BTreeMap::new(),
             tentative: BTreeMap::new(),
@@ -5288,6 +5323,7 @@ mod tool_in_tests {
         .unwrap();
         let live = |id: &'static str| Live {
             tool_kit: Default::default(),
+            start_card: None,
             kit_identity: None,
             kit_resource_digest: None,
             guide: Default::default(),
@@ -5378,6 +5414,7 @@ mod tool_in_tests {
                     id.into(),
                     Live {
                         tool_kit: Default::default(),
+                        start_card: None,
                         kit_identity: None,
                         kit_resource_digest: None,
                         guide: Default::default(),

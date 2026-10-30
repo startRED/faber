@@ -225,9 +225,10 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
     let dir = crate::support::DataFolder::new();
     let tools = fixture("claude", "tools");
     let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
     // The first two conversations never answer, so they are working; the next two stop at a question.
     let spawn: Spawner = Arc::new(move |_bin, _args, _cwd| {
-        let entries = if calls.fetch_add(1, Ordering::SeqCst) < 2 { vec![] } else { tools.clone() };
+        let entries = if counter.fetch_add(1, Ordering::SeqCst) < 2 { vec![] } else { tools.clone() };
         Ok(replay(entries, Mismatches::default()))
     });
     let (engine, mut rx) = engine(&dir, &[Vendor::Claude], spawn, None);
@@ -243,9 +244,12 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
         (Area::Project, Some(second.id.as_str()), TWO_WRITES),
         (Area::Chat, None, TWO_WRITES),
     ] {
+        let sent = ids.len();
         ids.push(engine.send(request(area, project, text, "claude")).unwrap());
-        // The rows are ordered by when their turn began, so each turn begins a little later than the one before.
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        // Project launches finish a moment after the send: the recordings go out in the order the turns began.
+        while calls.load(Ordering::SeqCst) <= sent {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     }
     let [alpha, bravo, charlie, delta]: [String; 4] = ids.try_into().unwrap();
 

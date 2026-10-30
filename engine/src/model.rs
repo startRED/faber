@@ -924,6 +924,9 @@ pub struct Conversation {
     /// The catalog ids of each native session, including empty kits that have no visible report.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub session_kits: BTreeMap<Vendor, (String, Vec<String>, Option<String>)>,
+    /// The exact project card sent to each native session; another native id cannot inherit it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_start_cards: BTreeMap<Vendor, (String, String)>,
     /// Digest of the exact catalog resource prefix accepted by each native kit; old records resend once.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub session_resource_digests: BTreeMap<Vendor, String>,

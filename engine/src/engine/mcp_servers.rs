@@ -143,6 +143,12 @@ impl Core {
         request: &str,
         cwd: &Path,
     ) -> (crate::tools::Delivery, crate::tools::kits::Report) {
+        let deferred = area == Area::Project;
+        #[cfg(test)]
+        let deferred = deferred && !self.synchronous_kit_checks;
+        if deferred {
+            return Default::default();
+        }
         let disabled = self.project_disabled_servers(project_id);
         let store = self.catalog_store();
         // Chat consumes bounded instructions directly; it never discovers files through a plugin.
@@ -244,7 +250,7 @@ impl Core {
                 raw.1.error = check.ready.as_ref().and_then(|(_, report)| report.error.clone());
             }
         }
-        if raw.0.lease.is_none() && raw.0.servers.is_empty() {
+        if area != Area::Project && raw.0.lease.is_none() && raw.0.servers.is_empty() {
             self.kit_checks.remove(name);
             return Ok(raw);
         }
@@ -273,6 +279,10 @@ impl Core {
             },
         );
         let (me, name, gate) = (self.me.clone(), name.to_string(), self.kit_check_gate.clone());
+        let kept = (area == Area::Project && name == owner)
+            .then(|| self.convs.get(owner).and_then(|c| c.project_id.as_deref()))
+            .flatten()
+            .map(|project| self.store.kept_decisions_reader(project));
         #[cfg(test)]
         let hook = self.kit_check_hook.take();
         self.opts.runtime.spawn(async move {
@@ -291,10 +301,26 @@ impl Core {
                     let _ = started.send(());
                     gate.wait();
                 }
+                #[cfg(test)]
+                let started_at = std::time::Instant::now();
+                // Project selection reads bounded manifest facts only here, never under Core's lock.
+                let mut raw = if key.area == Area::Project {
+                    let mut selected = store.kit_for(key.vendor, &key.request, Some(&key.cwd), key.area, key.permissions, &key.disabled);
+                    selected.0.guide = raw.0.guide;
+                    selected
+                } else {
+                    raw
+                };
+                if let Some(read_kept) = kept {
+                    use crate::project::{memory, rules};
+                    let facts = rules::facts(&key.cwd).unwrap_or_default();
+                    let decisions = memory::kept_for_card(&key.cwd, &read_kept()).unwrap_or_default();
+                    raw.0.start_card = Some(rules::card(&facts, &decisions.iter().map(String::as_str).collect::<Vec<_>>(), &[]));
+                }
                 let checked = verify_kit(store, key, raw);
                 #[cfg(test)]
                 if let Some((_, _, finished)) = hook {
-                    let _ = finished.send(());
+                    let _ = finished.send(started_at.elapsed());
                 }
                 checked
             })

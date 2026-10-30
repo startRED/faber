@@ -202,6 +202,10 @@ fn leave_a_stale_thread(dir: &crate::support::DataFolder, id: &str, engine: &Eng
     let mut saved = engine.open(id).unwrap();
     saved.messages.clear();
     saved.sessions.insert(Vendor::Codex, "never-ran".into());
+    // A recorded start card belongs to the native thread it was sent to; the stale thread keeps it.
+    if let Some(card) = saved.session_start_cards.get_mut(&Vendor::Codex) {
+        card.0 = "never-ran".into();
+    }
     std::fs::write(dir.path().join("conversations").join(format!("{id}.json")), serde_json::to_vec(&saved).unwrap()).unwrap();
 }
 

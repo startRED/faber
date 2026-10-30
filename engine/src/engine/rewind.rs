@@ -1330,6 +1330,7 @@ mod tests {
                 b.clone(),
                 Live {
                     tool_kit: Default::default(),
+                    start_card: None,
                     kit_identity: None,
                     kit_resource_digest: None,
                     guide: Default::default(),

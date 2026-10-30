@@ -1349,6 +1349,10 @@ async fn serve(
             } else {
                 let (method, mut params) = thread_params(area, &$t.params);
                 let delivery = $t.tools.as_ref().unwrap_or(&tools);
+                if area == Area::Project && $t.params.instructions.is_none() && let Some(card) = &delivery.start_card {
+                    let words = params["developerInstructions"].as_str().unwrap_or_default();
+                    params["developerInstructions"] = format!("{words}\n\n{card}").into();
+                }
                 // extraRoots is process-wide; discovery and bounded instructions belong only to this thread.
                 // Faber's own guide (R18): its line goes into a new thread only; a resumed one keeps what it was started with, and the
                 // first input carries the line when the thread has not had it.
@@ -1505,6 +1509,11 @@ async fn serve(
                         continue;
                     };
                     let (method, mut params) = thread_params(area, &t.params);
+                    if area == Area::Project && t.params.instructions.is_none()
+                        && let Some(card) = t.tools.as_ref().and_then(|delivery| delivery.start_card.as_deref()) {
+                        let words = params["developerInstructions"].as_str().unwrap_or_default();
+                        params["developerInstructions"] = format!("{words}\n\n{card}").into();
+                    }
                     let disabled: Map<String, Value> = result.config.mcp_servers.into_keys().map(|name| (name, json!({"enabled":false}))).collect();
                     params["config"]["mcp_servers"] = disabled.into();
                     request!(method, params, Waiting::Thread(key));
