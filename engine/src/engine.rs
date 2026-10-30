@@ -1479,6 +1479,15 @@ impl Engine {
             }
             let ids: Vec<_> = c.convs.keys().cloned().collect();
             for id in ids {
+                // Cut off by the close, not by the person's Stop: a team member owes its leader that report the next time
+                // Faber opens (`restore_parent_reports`), since no turn end will send it. With Keep going on it goes on by
+                // itself instead, and reports when its list ends.
+                if let Some(conv) = c.convs.get_mut(&id).filter(|conv| !conv.stopped)
+                    && let Some(m) = conv.messages.last_mut().filter(|m| m.status == Some(Status::Streaming))
+                {
+                    m.closed = true;
+                    conv.pending_parent_report |= conv.started_by.is_some() && conv.keep_going.is_none();
+                }
                 c.stop_waiting(&id, false);
             }
             c.transfers.clear();

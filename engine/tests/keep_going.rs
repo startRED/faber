@@ -1436,11 +1436,17 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
         assert!(!error, "{said}");
     }
     let mut saved = engine.open(&id).unwrap();
+    let mut questions = engine.open(&titled(&engine, "Questions")).unwrap();
     engine.shutdown();
     // Reproduce an existing Error with older asks still saved, as in a conversation left by an earlier version.
     saved.messages.last_mut().unwrap().status = Some(Status::Error);
     let file = dir.path().join("conversations").join(format!("{id}.json"));
     std::fs::write(file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    // Only the asks wait here: "Questions" is saved as finished, since the report a member cut off by the close owes
+    // (engine.rs, `a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once`) would wake this one first.
+    questions.messages.last_mut().unwrap().status = Some(Status::Done);
+    let file = dir.path().join("conversations").join(format!("{}.json", questions.id));
+    std::fs::write(file, serde_json::to_vec(&questions).unwrap()).unwrap();
     let (spawn, made) = pipes();
     let (again, _rx) = engine_with(&dir, spawn, &[Vendor::Claude]);
     again

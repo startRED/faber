@@ -39,16 +39,23 @@ fn state_of(busy: bool, c: &Conversation) -> State {
         Some(Status::Streaming) => State::Working,
         _ if busy || c.compacting || !c.queued.is_empty() => State::Working,
         Some(Status::Error) => State::Failed,
+        Some(Status::Stopped) if last.is_some_and(|m| m.closed) => State::Interrupted,
         Some(Status::Stopped) => State::Stopped,
         _ => State::Finished,
     }
 }
 
 impl Core {
+    /// Reports owed when Faber opens: those saved as owed (a close that cut a member's turn off marks it, `shutdown`), and
+    /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
+    /// before is not sent again (its id).
     pub(super) fn restore_parent_reports(store: &Store) -> HashMap<String, HashSet<String>> {
         let mut pending: HashMap<String, HashSet<String>> = HashMap::new();
-        for id in store.mentioning("\"pendingParentReport\"") {
-            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report)
+        for id in store.mentioning("\"startedBy\"") {
+            let cut_off = |c: &Conversation| {
+                c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming))
+            };
+            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report || cut_off(c))
                 && let Some(parent) = c.started_by
             {
                 pending.entry(parent).or_default().insert(id);
@@ -71,10 +78,13 @@ impl Core {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
                 continue;
             }
-            self.load(&child);
+            let owed = self.load(&child).is_some_and(|c| c.pending_parent_report);
             self.tell_parent(&child);
             if self.convs.get(&child).is_some_and(|c| c.pending_parent_report) {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
+            } else if !owed {
+                // A crash left its reply streaming on disk: saved settled, it is not found again at the next start.
+                self.save(&child);
             }
         }
     }

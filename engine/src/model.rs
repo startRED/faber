@@ -401,8 +401,8 @@ pub struct Message {
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
-    /// Faber was closed while this reply ran, so no CLI finished it (set only when a conversation loads from disk): the screen
-    /// says so and offers to continue, never the person's own Stop.
+    /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
+    /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
