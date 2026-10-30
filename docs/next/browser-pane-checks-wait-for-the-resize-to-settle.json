@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "An address you are typing in Faber's browser is no longer lost when the window is resized.",
+      "pt-BR": "Um endereço que você está digitando no navegador do Faber não se perde mais quando a janela muda de tamanho.",
+      "es": "Una dirección que estás escribiendo en el navegador de Faber ya no se pierde cuando cambia el tamaño de la ventana.",
+      "fr": "Une adresse que vous tapez dans le navigateur de Faber n'est plus perdue quand la fenêtre change de taille.",
+      "de": "Eine Adresse, die du in Fabers Browser tippst, geht nicht mehr verloren, wenn sich die Fenstergröße ändert."
+    }
+  }
+}

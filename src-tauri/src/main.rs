@@ -1356,9 +1356,9 @@ async fn project_proof_confirm(
 /// Debug test builds only: observed native child geometry and a bounded view of its fixture page.
 #[cfg(all(windows, feature = "test-hooks"))]
 #[tauri::command]
-async fn test_site_probe(app: AppHandle, capture: bool) -> Res<serde_json::Value> {
+async fn test_site_probe(app: AppHandle, capture: bool, quick: Option<bool>) -> Res<serde_json::Value> {
     let pane = app.try_state::<Arc<pane::Pane>>().ok_or("the test browser is unavailable")?.inner().clone();
-    pane.test_probe(capture).await
+    pane.test_probe(capture, quick.unwrap_or(false)).await
 }
 
 /// Resizes the real hidden host, rather than emulating the main page's viewport.

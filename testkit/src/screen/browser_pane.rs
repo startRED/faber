@@ -103,26 +103,35 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
           return new Promise(resolve=>setTimeout(()=>{record('after-resize');resolve();},300));
         })()"#,
         )?;
-        if width < 900 {
-            // The overlay makes its header inert; use the person's actual pane-switching shortcuts.
-            for kind in ["keyDown", "keyUp"] {
-                page.cdp.call(
-                    "Input.dispatchKeyEvent",
-                    json!({"type":kind,"key":";","code":"Semicolon","windowsVirtualKeyCode":186,"modifiers":2}),
-                )?;
+        // The page shows while the 220 ms transition runs, and a busy PC can answer the probe only after it is over: the
+        // observer then says it missed, and the aside and the browser switch again, at most three times.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            if attempt > 1 {
+                page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
             }
-        } else {
-            page.click(&css(".pane-aside"))?;
-        }
-        // Close through the real control in the observed frame; protocol round trips can outlast the 220 ms transition.
-        // Pointer closing is covered separately; this programmatic interruption leaves the product's clock unchanged.
-        page.eval(r#"(() => {
+            if width < 900 {
+                // The overlay makes its header inert; use the person's actual pane-switching shortcuts.
+                for kind in ["keyDown", "keyUp"] {
+                    page.cdp.call(
+                        "Input.dispatchKeyEvent",
+                        json!({"type":kind,"key":";","code":"Semicolon","windowsVirtualKeyCode":186,"modifiers":2}),
+                    )?;
+                }
+            } else {
+                page.click(&css(".pane-aside"))?;
+            }
+            // Close through the real control in the observed frame; protocol round trips can outlast the 220 ms transition.
+            // Pointer closing is covered separately; this programmatic interruption leaves the product's clock unchanged.
+            page.eval(r#"(() => {
           const shell=document.querySelector('.shell');
           window.__widthRecord('after-aside');
           const active=()=>shell.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty) && a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty,time:a.currentTime}));
           window.__interruptPreparation={events:[]};
           window.__interruptTrace=[];
           window.__interruptClick=null;
+          window.__interruptMissed=false;
           let pending=false;
           const observe=event=>{
             if(!['width','grid-template-columns'].includes(event.propertyName))return;
@@ -131,7 +140,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             pending=true;
             const until=performance.now()+1000;
             const close=async()=>{
-              const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false});
+              const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
               window.__interruptPreparation.native={shown:native.shown,x:native.x,t:performance.now()};
               const column=document.querySelector('.runcol');
               const button=column?.querySelector('.site-head button[aria-label="Close the running list"]');
@@ -141,6 +150,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
                 buttonWidth:rect?.width,buttonHeight:rect?.height});
               if(!native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
                 if(performance.now()<until)requestAnimationFrame(close);
+                else{shell.removeEventListener('transitionrun',observe);window.__interruptMissed=true;}
                 return;
               }
               shell.removeEventListener('transitionrun',observe);
@@ -151,7 +161,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
                   const el=document.querySelector('.runcol'),before=el?.getBoundingClientRect();
                   const exiting=el?.dataset.exiting==='true',t=performance.now();
                   const opacity=el?Number(getComputedStyle(el).opacity):null;
-                  const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false});
+                  const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
                   const after=document.querySelector('.runcol')?.getBoundingClientRect();
                   window.__interruptTrace.push({x:before?.x,after:after?.x,opacity,nativeX:native.x,shown:native.shown,viewport:innerWidth,dpr:devicePixelRatio,exiting,t});
                   if(performance.now()<end)requestAnimationFrame(frame);
@@ -167,14 +177,38 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
           window.__widthRecord('listener-installed');
           window.__widthRecord('before-browser');
         })()"#)?;
-        if width < 900 {
-            page.press("Control+Shift+B")?;
-        } else {
-            page.click(&css(".pane-site"))?;
-        }
-        if let Err(error) = page.wait_for("the browser to close in an observed intermediate width frame", "!!window.__interruptClick") {
-            let state = page.eval("({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})").unwrap_or(Value::Null);
-            return Err(format!("{error}; observed preparation: {state}"));
+            // The observer is armed; two frames prove the frame clock runs before the click it has to see.
+            let ticking = page.eval("new Promise(resolve=>{const late=setTimeout(()=>resolve(false),2000);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(late);resolve(true);}));})")?;
+            ensure(ticking == json!(true), || format!("no frame before the click at {width}px"))?;
+            if width < 900 {
+                page.press("Control+Shift+B")?;
+            } else {
+                page.click(&css(".pane-site"))?;
+            }
+            // A screen that draws no frame after the click can run no transition: say that, instead of waiting 15 s for one.
+            let framed = page.eval("new Promise(resolve=>{const late=setTimeout(()=>resolve(false),2000);requestAnimationFrame(()=>{clearTimeout(late);resolve(true);});})")?;
+            if framed != json!(true) {
+                let state = page
+                    .eval("({preparation:window.__interruptPreparation,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})")
+                    .unwrap_or(Value::Null);
+                return Err(format!("no frame after the click at {width}px; observed preparation: {state}"));
+            }
+            let state = "({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})";
+            if let Err(error) = page.wait_for(
+                "the browser to close in an observed intermediate width frame",
+                "!!window.__interruptClick || window.__interruptMissed",
+            ) {
+                return Err(format!("{error}; observed preparation: {}", page.eval(state).unwrap_or(Value::Null)));
+            }
+            if page.eval("!!window.__interruptClick")? == json!(true) {
+                break;
+            }
+            if attempt == 3 {
+                return Err(format!(
+                    "the page was never shown during a running width transition, {attempt} tries at {width}px; observed preparation: {}",
+                    page.eval(state).unwrap_or(Value::Null)
+                ));
+            }
         }
         page.wait_for("the interrupted pane to release its actual content", "!document.querySelector('.site-address')")?;
         let clicked = page.eval("window.__interruptClick")?;
@@ -225,7 +259,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             .map_err(|e| e.to_string())?;
         page.click(&css(".pane-site"))?;
         wait_page(page, &fixture, "one")?;
-        ctx.notes.push(format!("programmatic close during an observed real view-width transition at {width}px: {} observations; native page retained while visible, opaque exit, cleanup and reopening checked; no clock or motion-class changes", samples.len()));
+        ctx.notes.push(format!("programmatic close during an observed real view-width transition at {width}px (try {attempt}): {} observations; native page retained while visible, opaque exit, cleanup and reopening checked; no clock or motion-class changes", samples.len()));
     }
     ctx.close(app.id)
 }
@@ -352,6 +386,10 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
         return true;
     })()"#,
     )?;
+    // The address is typed before the resize: crossing the docking width draws the pane again, and the words must stay.
+    let url = fixture.url("/one");
+    app.page.fill(&css(".site-address"), &url)?;
+    app.page.eval("window.__typedField=document.querySelector('.site-address'); true")?;
     app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{width},height:800}})"))?;
     // Native dimensions can change before resize remounts the column and its address field.
     app.page
@@ -362,9 +400,18 @@ fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
             ),
         )
         .map_err(|error| format!("{error}; resize trace: {:?}", app.page.eval("window.__browserRetryTrace")))?;
+    settle_address(&mut app.page)?;
+    let kept = app.page.eval(
+        "(() => { const f=document.querySelector('.site-address'); return {value:f.value,focused:document.activeElement===f,replaced:window.__typedField!==f}; })()",
+    )?;
+    ensure(kept["replaced"] == true, || format!("the resize to {width}px did not draw the pane again, so nothing was proven: {kept}"))?;
+    ensure(kept["value"] == json!(url) && kept["focused"] == true, || {
+        format!("the resize lost the typed address: {kept}; address trace: {:?}", app.page.eval("window.__browserRetryTrace"))
+    })?;
+    ctx.notes.push(format!("typed address across the resize to {width}px: {kept}"));
     // A failed native open is injected at the command boundary, not presented as a real network failure.
     app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
-    enter(&mut app.page, &fixture.url("/one"))?;
+    app.page.press_on(&css(".site-address"), "Enter")?;
     let failed = app.page.text_of("site.openFailed")?;
     app.page.wait_visible(&css("#running").role("alert", &failed).exact()).map_err(|error| {
         format!(
@@ -450,6 +497,15 @@ fn select_preview(page: &mut crate::page::Page) -> Result {
     let size_label = page.text_with("site.screenSize", &json!({"size":""}), None)?;
     page.click(&css("[role=menuitem]").has_text(size_label.trim()))?;
     page.click(&css("[role=menuitem]").has_text("1920 × 1080"))
+}
+
+/// The column keeps drawing after the window's resize event: wait until the address field is the same element, at the same
+/// place and width, on two frames in a row, inside the new window.
+fn settle_address(page: &mut crate::page::Page) -> Result {
+    page.wait_for(
+        "the address field to settle after the resize",
+        "new Promise(resolve=>{const first=document.querySelector('.site-address'),before=first?.getBoundingClientRect();requestAnimationFrame(()=>requestAnimationFrame(()=>{const field=document.querySelector('.site-address'),now=field?.getBoundingClientRect();resolve(!!field && field===first && now.width>0 && now.width===before.width && now.left===before.left && now.right<=innerWidth);}));})",
+    )
 }
 
 fn resize(page: &mut crate::page::Page, width: u32, height: u32) -> Result {
@@ -578,7 +634,7 @@ fn browser_pane(ctx: &mut Ctx) -> Result {
               const column = document.querySelector('.runcol');
               const box = column?.getBoundingClientRect();
               const opacity = column ? Number(getComputedStyle(column).opacity) : null;
-              const p = await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false});
+              const p = await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
               const after=document.querySelector('.runcol')?.getBoundingClientRect();
           samples.push({x:box?.x,afterX:after?.x,viewport:innerWidth,opacity,shown:p.shown,nativeX:p.x});
               if (performance.now()<end) requestAnimationFrame(frame); else resolve(samples);
