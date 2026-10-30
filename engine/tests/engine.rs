@@ -5164,7 +5164,7 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
     agent.say(list(1)).await;
     assert!(names(&mcp_answer(&agent, "l1").await).contains(&"conversation".to_string()), "a project's own agent gets the tool");
 
-    let input = json!({"title":"Docs","brief":"Write the docs page for the parser."});
+    let input = json!({"title":"Docs","ai":"same","brief":"Write the docs page for the parser."});
     agent.say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_c","name":"mcp__faber__conversation","input":input}]}})).await;
     let call = |rpc: u64, tool: &str, args: &serde_json::Value| {
         json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
@@ -5189,7 +5189,7 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
     assert!(first.to_string().contains("Write the docs page for the parser."), "{first}");
     sibling.say(list(1)).await;
     assert!(names(&mcp_answer(&sibling, "l1").await).contains(&"conversation".to_string()), "every project conversation gets the tool");
-    sibling.say(call(2, "toolu_s", &json!({"title":"More","brief":"Split it again."}))).await;
+    sibling.say(call(2, "toolu_s", &json!({"title":"More","ai":"same","brief":"Split it again."}))).await;
     let refused = mcp_answer(&sibling, "r2").await;
     assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("only a project's own agent"), "one level only: {refused}");
 
@@ -5201,10 +5201,10 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
 
     // Three at once per project, counted from their first message, before their CLI answers anything.
     for rpc in [5, 6] {
-        agent.say(call(rpc, &format!("toolu_{rpc}"), &json!({"title":format!("Part {rpc}"),"brief":"Do a part."}))).await;
+        agent.say(call(rpc, &format!("toolu_{rpc}"), &json!({"title":format!("Part {rpc}"),"ai":"same","brief":"Do a part."}))).await;
         assert_eq!(mcp_answer(&agent, &format!("r{rpc}")).await["result"]["isError"], false);
     }
-    agent.say(call(7, "toolu_7", &json!({"title":"Part 7","brief":"Do a part."}))).await;
+    agent.say(call(7, "toolu_7", &json!({"title":"Part 7","ai":"same","brief":"Do a part."}))).await;
     let refused = mcp_answer(&agent, "r7").await;
     assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("three conversations"), "{refused}");
     assert!(engine.state().conversations.iter().all(|c| c.title != "Part 7"), "a refused start leaves nothing behind");
@@ -5274,7 +5274,7 @@ async fn reading_a_conversation_again_in_one_turn_with_nothing_new_answers_brief
         json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,"_meta":{"claudecode/toolUseId":tool}}}}})
     };
-    agent.say(call(1, "toolu_c", &json!({"title":"Docs","brief":"Write the docs."}))).await;
+    agent.say(call(1, "toolu_c", &json!({"title":"Docs","ai":"same","brief":"Write the docs."}))).await;
     assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
     let docs = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed").id;
     let mut child = next_pipe(&made).await;
@@ -5312,7 +5312,7 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
         .unwrap();
     let mut agent = next_pipe(&made).await;
     agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
-    let input = json!({"title":"Docs","brief":"Write the docs."});
+    let input = json!({"title":"Docs","ai":"same","brief":"Write the docs."});
     agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
     assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
@@ -5352,7 +5352,7 @@ async fn a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once()
     agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
     let mut members = vec![];
     for (rpc, title) in [(1, "Docs"), (2, "Tests"), (3, "Notes")] {
-        let input = json!({"title": title, "brief": "Do it."});
+        let input = json!({"title": title, "ai": "same", "brief": "Do it."});
         agent.say(json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
             "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}})).await;
         assert_eq!(mcp_answer(&agent, &format!("r{rpc}")).await["result"]["isError"], false);
@@ -5410,7 +5410,7 @@ async fn a_conversation_the_agent_started_stops_when_its_ai_turns_out_billed_per
         .unwrap();
     let mut agent = next_pipe(&made).await;
     agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
-    let input = json!({"title":"Docs","brief":"Write the docs."});
+    let input = json!({"title":"Docs","ai":"same","brief":"Write the docs."});
     agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
     assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);

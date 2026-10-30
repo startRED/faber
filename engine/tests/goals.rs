@@ -572,7 +572,7 @@ async fn once_the_days_money_is_gone_a_fix_goes_on_by_no_turn_of_faber_and_its_a
     // Its agent may still ask for another conversation, and is told why not.
     let call = json!({"type":"control_request","request_id":"r2","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conversation",
-        "arguments":{"title":"Docs","brief":"Write the docs."},"_meta":{"claudecode/toolUseId":"toolu_c"}}}}});
+        "arguments":{"title":"Docs","ai":"same","brief":"Write the docs."},"_meta":{"claudecode/toolUseId":"toolu_c"}}}}});
     agent.say(call).await;
     let refused = mcp_answer(&agent, "r2").await;
     let text = refused["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
@@ -721,7 +721,7 @@ async fn a_fix_stays_held_to_the_days_money_and_counts_its_cost_after_its_goal_l
     // The wake after it is refused, and the reply says why. Its agent may start nothing and call no helper.
     until(|| r.engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.halt.as_deref() == Some("reason.goal.cap")))).await;
     assert_eq!(user_lines(&agent), 1, "no second turn went to the agent that took the day past its limit");
-    let (refused, text) = tool(&mut agent, "r2", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "r2", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(refused && text.contains("limit"), "{text}");
     let (refused, text) = tool(&mut agent, "r3", "helper", json!({"title":"Check","brief":"What is the answer?"})).await;
     assert!(refused && text.contains("limit"), "a helper costs too: {refused} {text}");
@@ -774,7 +774,7 @@ fn reload(r: &Rig) {
 
 /// The fix's agent asks for another conversation, and is told the day's limit is why.
 async fn refused_for_the_limit(r: &Rig, agent: &mut support::Pipe) {
-    let (refused, text) = tool(agent, "r9", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(agent, "r9", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(refused && text.contains("limit"), "{text}");
     assert!(r.engine.state().conversations.iter().all(|c| c.title != "Docs"), "no conversation was started");
 }
@@ -825,7 +825,7 @@ async fn a_fix_asks_only_the_conversations_it_started() {
     let _person = support::next_pipe(&r.made).await;
     let (refused, text) = tool(&mut agent, "a1", "conversation", json!({"action":"ask","id":other,"message":"please work on this"})).await;
     assert!(refused && text.contains("only the conversations it started"), "{text}");
-    let (refused, text) = tool(&mut agent, "a2", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "a2", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
     let child = r.engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
     assert_eq!(
@@ -862,7 +862,7 @@ async fn a_report_waiting_in_a_fixs_queue_is_dropped_with_a_reason_when_the_days
     let r = rig(false).await;
     let mut agent = break_it(&r).await;
     let id = r.conversations().remove(0);
-    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
     // Hold a step so the report is still unsent when the turn accounts for its cost.
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
@@ -884,7 +884,7 @@ async fn what_the_person_queued_behind_a_dropped_report_still_goes_out() {
     let r = rig(false).await;
     let mut agent = break_it(&r).await;
     let id = r.conversations().remove(0);
-    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
     // Hold a step so neither the report nor the person's later input has been handed over.
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
@@ -909,7 +909,7 @@ async fn a_child_report_the_cap_refuses_leaves_the_parent_a_reason() {
     let r = rig(false).await;
     let mut agent = break_it(&r).await;
     let id = r.conversations().remove(0);
-    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
     let mut child = support::next_pipe(&r.made).await;
     finish(&mut agent, DAILY_CAP_USD + 0.5).await;
@@ -963,7 +963,7 @@ async fn a_report_waiting_for_quota_does_not_resume_once_the_days_money_is_gone(
     r.engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(plan)]);
     let mut agent = break_it(&r).await;
     let id = r.conversations().remove(0);
-    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","brief":"Write the docs."})).await;
+    let (refused, text) = tool(&mut agent, "c1", "conversation", json!({"title":"Docs","ai":"same","brief":"Write the docs."})).await;
     assert!(!refused, "{text}");
     let mut child = support::next_pipe(&r.made).await;
     finish(&mut agent, 0.2).await;

@@ -61,7 +61,7 @@ fn schema() -> Value {
             "action": { "type": "string", "enum": ["start", "read", "list", "ask", "archive", "context", "compact", "clear"] },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: everything the new conversation needs to do the work on its own." },
-            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: which AI runs it; same when left out." },
+            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: which AI runs it; auto when left out, which spreads the work over both subscriptions by their quota. same keeps your own model." },
             "keep_going": { "type": "boolean", "description": "start: true when the brief is an ordered list of tasks it goes through by itself." },
             "id": { "type": "string", "description": "read, ask: the other conversation's id." },
             "message": { "type": "string", "description": "ask: your question for the other conversation's agent." },
@@ -145,8 +145,9 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
         (None, Some(brief)) => {
             let title: String = text("title").unwrap_or_else(|| "A piece of work".into()).chars().take(60).collect();
             let ai = match text("ai").as_deref() {
-                None | Some("same") => Ai::Same,
-                Some("auto") => Ai::Auto,
+                Some("same") => Ai::Same,
+                // Left out, the work goes where the quota has room (R-next): an agent that starts teams leaves it out most of the time.
+                None | Some("auto") => Ai::Auto,
                 Some(name) => {
                     Ai::Named(Vendor::ALL.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?)
                 }
@@ -372,7 +373,7 @@ mod tests {
     fn a_call_starts_with_a_brief_reads_with_an_id_and_never_both() {
         assert_eq!(
             request(&json!({"title":" Fix the build ","brief":"Make cargo build pass."})),
-            Ok(Request::Start { title: "Fix the build".into(), brief: "Make cargo build pass.".into(), ai: Ai::Same, keep_going: false })
+            Ok(Request::Start { title: "Fix the build".into(), brief: "Make cargo build pass.".into(), ai: Ai::Auto, keep_going: false })
         );
         let on = |ai: &str| request(&json!({"brief":"x","ai":ai,"keep_going":true}));
         assert_eq!(

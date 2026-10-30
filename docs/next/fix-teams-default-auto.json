@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "Conversations a project's agent starts now go to the AI with the most quota to spare, instead of always copying the agent's own model.",
+      "pt-BR": "As conversas que o agente de um projeto abre agora vão para a IA com mais cota sobrando, em vez de sempre copiar o modelo do agente.",
+      "es": "Las conversaciones que abre el agente de un proyecto ahora van a la IA con más cuota libre, en lugar de copiar siempre el modelo del agente.",
+      "fr": "Les conversations qu'ouvre l'agent d'un projet vont maintenant à l'IA qui a le plus de quota libre, au lieu de toujours reprendre le modèle de l'agent.",
+      "de": "Unterhaltungen, die der Agent eines Projekts startet, gehen jetzt an die KI mit dem meisten freien Kontingent, statt immer das Modell des Agenten zu übernehmen."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-30 | A conversation a project's agent starts runs on Auto when the call leaves `ai` out, so teams spread over both subscriptions by their quota pace; `same` keeps the parent's choice. R198 had `same` as the default, and on 2026-10-30 a lead pinned to Claude Opus put all five teams on it (US$ 250 of Claude in a day against US$ 4 of Codex, with Codex 15 points behind its daily line). | AI (owner delegated) |"
+  ]
+}

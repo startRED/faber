@@ -989,7 +989,7 @@ async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_m
     assert_eq!(events(&mut rx), 2, "the plan, then the one warning");
     let (said, error) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
     assert!(!error && said.contains("1 of 2") && said.contains("half as much again"), "{said}");
-    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "ai": "same", "brief": "Write the docs." })).await;
     assert!(error && said.contains("passed its estimate"), "{said}");
     assert_eq!(events(&mut rx), 1, "the advance is the only plan event");
     // The next turn is over the limit too: nothing more is said, nothing is stopped.
@@ -1102,7 +1102,7 @@ async fn the_spend_of_a_job_counts_the_conversations_the_agent_started() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
-    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "ai": "same", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
     let mut child = next_pipe(&made).await;
     until_turns(&child, 1).await;
@@ -1177,7 +1177,7 @@ async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_m
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
-    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "ai": "same", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
     let mut child = next_pipe(&made).await;
     until_turns(&child, 1).await;
@@ -1198,7 +1198,7 @@ async fn a_restart_mid_job_still_counts_the_conversations_the_agent_started() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
-    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
+    let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "ai": "same", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
     let mut child = next_pipe(&made).await;
     until_turns(&child, 1).await;
@@ -1359,7 +1359,8 @@ async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answer
 async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sending_human_messages() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
-    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    let (said, error) =
+        calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "ai": "same", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     // These checks exercise queued wakes after failure, not messages already handed into a safe step.
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
@@ -1420,7 +1421,8 @@ async fn failed_turns_drain_sibling_questions_in_order_without_retrying_or_sendi
 async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
-    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    let (said, error) =
+        calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "ai": "same", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     let mut sibling = next_pipe(&made).await;
     until_turns(&sibling, 1).await;
@@ -1499,7 +1501,8 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
 async fn wakes_that_cannot_start_fail_once_and_drain_the_remaining_wakes() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut agent, id, made) = started_made(&dir, project.path(), &[Vendor::Claude]).await;
-    let (said, error) = calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "brief": "Check the docs." })).await;
+    let (said, error) =
+        calls(&mut agent, "start", "conversation", json!({ "title": "Questions", "ai": "same", "brief": "Check the docs." })).await;
     assert!(!error, "{said}");
     // The billing change must precede delivery, so keep the initial turn inside a step.
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
@@ -1612,7 +1615,9 @@ async fn the_agent_picks_the_ai_of_a_team_conversation_and_one_that_cannot_run_i
 async fn a_team_member_given_a_list_goes_through_it_and_reports_once_when_it_ends() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, _rx, mut pipe, parent, _, made) = started_with(&dir, project.path(), &[Vendor::Claude], &|_| {}).await;
-    let started = start_team_member(&mut pipe, 1, json!({"title":"List","brief":"1. Fix a. 2. Fix b. 3. Fix c.","keep_going":true})).await;
+    let started =
+        start_team_member(&mut pipe, 1, json!({"title":"List","ai":"same","brief":"1. Fix a. 2. Fix b. 3. Fix c.","keep_going":true}))
+            .await;
     assert_eq!(started["isError"], false, "{}", said(&started));
     let child = titled(&engine, "List");
     let mut member = next_pipe(&made).await;

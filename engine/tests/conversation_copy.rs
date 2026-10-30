@@ -707,7 +707,7 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     let parent = engine.send(ask(&project, "Split the work")).unwrap();
     let mut agent = support::next_pipe(&made).await;
     agent.say(serde_json::json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
-    let input = serde_json::json!({"title":"Docs page","brief":"Write the docs page for the parser."});
+    let input = serde_json::json!({"title":"Docs page","ai":"same","brief":"Write the docs page for the parser."});
     agent.say(serde_json::json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
     let mut sibling = support::next_pipe(&made).await;
@@ -735,7 +735,7 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
         let _ = gate.recv_timeout(Duration::from_secs(10));
     }));
     agent.say(serde_json::json!({"type":"control_request","request_id":"r2","request":{"subtype":"mcp_message","server_name":"faber",
-        "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conversation","arguments":{"title":"Discarded docs","brief":"Check the docs."},"_meta":{"claudecode/toolUseId":"toolu_discard"}}}}})).await;
+        "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conversation","arguments":{"title":"Discarded docs","ai":"same","brief":"Check the docs."},"_meta":{"claudecode/toolUseId":"toolu_discard"}}}}})).await;
     for _ in 0..300 {
         if copying.load(std::sync::atomic::Ordering::SeqCst)
             && agent.lines.lock().unwrap().iter().any(|m| m["type"] == "control_response" && m["response"]["request_id"] == "r2")
