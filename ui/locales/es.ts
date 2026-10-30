@@ -2244,6 +2244,7 @@ export const es: Messages = {
   'notes.311.better': 'Las líneas de cuota de la barra lateral ahora nombran cada IA y dicen cuánto se ha usado, y el anillo de arriba dice que mide el contexto de la conversación.',
   'notes.312.better': 'Una respuesta cortada porque Faber se cerró ahora lo dice, y puedes pulsar Continuar para que la IA siga donde se detuvo.',
   'notes.313.fixed': 'Un pull request con las comprobaciones en verde se sigue vigilando hasta que se fusiona, así que un fallo posterior aún llega al agente.',
+  'notes.314.fixed': 'El porcentaje de Claude en la barra lateral y en Ajustes ya no se queda en un número viejo: vuelve a seguir tu uso real de la semana.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
