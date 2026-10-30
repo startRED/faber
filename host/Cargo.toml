@@ -7,14 +7,30 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Test builds only (testkit/): the commands the screen's checks report through. Forwarded by the shell's own feature.
+test-hooks = []
+
+[[bin]]
+name = "faber-sidecar"
+path = "src/bin/faber-sidecar.rs"
+
 [dependencies]
+base64 = "0.23"
+# The config folder, for the data folder when `FABER_DATA_DIR` is not set; the shell reads the same call.
+dirs = "7"
 faber-engine = { path = "../engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync"] }
+tempfile = "3"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+# Whether a drive letter is a network drive (folder.rs); the same version the shell uses.
+winsafe = { version = "0.0.29", features = ["kernel"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true

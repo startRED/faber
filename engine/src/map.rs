@@ -344,7 +344,7 @@ fn commands(lines: &[&str], at: usize, start: usize, push: &mut impl FnMut(Kind,
     }
 }
 
-/// The commands in the host's `table! { ... }` (`host/src/lib.rs`), one per `<Kind> fn name(` line, until the block's
+/// The commands in the host's `table! { ... }` (`host/src/table.rs`), one per `<Kind> fn name(` line, until the block's
 /// closing brace at the start of a line. One behind a test-only `#[cfg(...)]` is left out.
 fn table(lines: &[&str], at: usize, push: &mut impl FnMut(Kind, String, usize)) {
     let mut test_only = false;

@@ -1,8 +1,10 @@
 //! The form a command and its answer take outside the process that holds the [`Host`](crate::Host): one JSON object per
-//! line. A request is `{"id":n,"cmd":"name","args":{...}}`, its answer `{"id":n,"ok":value}` or `{"id":n,"err":"error.key"}`,
-//! and an event, which answers nothing, `{"event":{...}}`. The window's sidecar (if R459 phase 1 picks one) and the command
-//! line's pipe speak it alike, so one reader and one writer serve both.
+//! line. A request is `{"id":n,"cmd":"name","args":{...}}`, its answer `{"id":n,"ok":value}` or `{"id":n,"err":"error.key"}`
+//! (the few failures that name a field carry `{"key","detail"}` instead of the string), and an event, which answers nothing,
+//! `{"event":{...}}`. The window's sidecar (`faber-sidecar`) and the command line's pipe speak it alike, so one reader and one
+//! writer serve both.
 
+use crate::Failure;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -21,7 +23,7 @@ pub struct Request {
 #[serde(untagged)]
 pub enum Reply {
     Ok { id: u64, ok: Value },
-    Err { id: u64, err: String },
+    Err { id: u64, err: Failure },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,7 +32,7 @@ pub struct Event {
 }
 
 impl Reply {
-    pub fn of(id: u64, result: Result<Value, String>) -> Self {
+    pub fn of(id: u64, result: Result<Value, Failure>) -> Self {
         match result {
             Ok(ok) => Reply::Ok { id, ok },
             Err(err) => Reply::Err { id, err },
