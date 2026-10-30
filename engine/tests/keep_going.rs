@@ -151,24 +151,12 @@ fn text_of(content: &Value) -> String {
 }
 
 async fn until_turns(pipe: &Pipe, n: usize) {
-    for _ in 0..300 {
-        if turns(pipe).len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the CLI got {} turns, not {n}: {:?}", turns(pipe).len(), turns(pipe));
+    support::until(&format!("the CLI never got {n} turns"), || turns(pipe).len() >= n).await;
 }
 
 async fn until(engine: &Engine, id: &str, done: impl Fn(&Conversation) -> bool) -> Conversation {
-    for _ in 0..300 {
-        let c = engine.open(id).unwrap();
-        if done(&c) {
-            return c;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the conversation never got there: {:?}", engine.open(id).unwrap());
+    support::until("the conversation never got there", || done(&engine.open(id).unwrap())).await;
+    engine.open(id).unwrap()
 }
 
 fn idle(c: &Conversation) -> bool {
@@ -590,12 +578,7 @@ async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_sto
     until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_some())).await;
     let started = bins.lock().unwrap().len();
     // Ten minutes (here a thousandth of that) later the limit is not taken for granted: a turn goes to the CLI to find out.
-    for _ in 0..300 {
-        if bins.lock().unwrap().len() > started {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the CLI was never tried again", || bins.lock().unwrap().len() > started).await;
     assert!(bins.lock().unwrap().len() > started, "the CLI was tried again: {:?}", bins.lock().unwrap());
     assert!(engine.open(&id).unwrap().keep_going.is_some());
     assert!(halts(&mut rx).is_empty(), "the tray is not woken: nothing needs the person");
@@ -637,12 +620,7 @@ async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room()
     // Claude is out for an hour and Codex is not: the work goes on there, with no wait.
     let c = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.vendor == Some(Vendor::Codex))).await;
     assert_eq!(c.keep_going.as_ref().map(|k| k.switches), Some(1));
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("Codex was never started", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "Codex was started: {:?}", bins.lock().unwrap());
     assert!(c.keep_going.as_ref().is_some_and(|k| k.waiting.is_none()));
     assert!(halts(&mut rx).is_empty());
@@ -680,12 +658,7 @@ async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
         "errors": ["You've hit your usage limit"], "total_cost_usd": 0.0, "usage": {} }))
         .await;
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the work never moved to Codex", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "the work moved to Codex: {:?}", bins.lock().unwrap());
     assert_eq!(engine.open(&id).unwrap().keep_going.map(|k| k.switches), Some(1));
     engine.shutdown();
@@ -770,12 +743,7 @@ async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so()
         .await;
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
     // Ten minutes pass (here 600 ms) and nobody answers: the first choice goes to the agent.
-    for _ in 0..300 {
-        if !pipe.answers().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the unanswered question never got its first choice", || !pipe.answers().is_empty()).await;
     assert_eq!(pipe.answers(), vec![("asked".to_string(), "allow".to_string())]);
     let sent = pipe.lines.lock().unwrap().iter().find(|m| m["type"] == "control_response").cloned().unwrap();
     assert_eq!(sent["response"]["response"]["updatedInput"]["answers"], json!({ "Which stack?": "Rust" }));
@@ -900,15 +868,13 @@ async fn calls(pipe: &mut Pipe, request: &str, tool: &str, input: Value) -> (Str
     pipe.say(json!({ "type": "control_request", "request_id": request,
         "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
         .await;
-    for _ in 0..300 {
-        let answer = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned();
-        if let Some(a) = answer {
-            let result = &a["response"]["response"]["mcp_response"]["result"];
-            return (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("Faber never answered the {tool} call");
+    support::until(&format!("Faber never answered the {tool} call"), || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request)
+    })
+    .await;
+    let a = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned().unwrap();
+    let result = &a["response"]["response"]["mcp_response"]["result"];
+    (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true)
 }
 
 /// Task 017: a project agent keeps its plan, says what it is doing now and closes with a box, through Faber's own tools.
@@ -1130,6 +1096,7 @@ async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Optio
         .await;
     let mut codex = next_pipe(made).await;
     let (mut answered, mut seen) = (0, (None, None));
+    // The loop answers the app-server with .await inside, which a closure cannot hold.
     for _ in 0..600 {
         let lines = codex.lines.lock().unwrap().clone();
         for m in lines.iter().skip(answered) {
@@ -1248,12 +1215,7 @@ async fn a_quick_question_on_the_side_tips_the_spend_of_the_job() {
     let mut side = next_pipe(&made).await;
     side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"It holds the parser."}}})).await;
     side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":1.6,"usage":{}})).await;
-    for _ in 0..300 {
-        if engine.asides(&id).iter().any(|a| a.id == aside && a.state == "done") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the side question never finished", || engine.asides(&id).iter().any(|a| a.id == aside && a.state == "done")).await;
     let c = engine.open(&id).unwrap();
     assert!((c.spent_usd - 1.6).abs() < 1e-9, "the question's cost is in the total: {}", c.spent_usd);
     assert!(!economy_on(&c), "nothing is checked before the agent's own turn ends");
@@ -1555,13 +1517,13 @@ async fn start_team_member(pipe: &mut Pipe, rpc: u64, args: Value) -> Value {
         "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,
         "_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}}))
         .await;
-    for _ in 0..300 {
-        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == format!("r{rpc}")) {
-            return m["response"]["response"]["mcp_response"]["result"].clone();
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("r{rpc} was never answered");
+    support::until(&format!("r{rpc} was never answered"), || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == format!("r{rpc}"))
+    })
+    .await;
+    let lines = pipe.lines.lock().unwrap();
+    let m = lines.iter().find(|m| m["response"]["request_id"] == format!("r{rpc}")).unwrap();
+    m["response"]["response"]["mcp_response"]["result"].clone()
 }
 
 fn said(result: &Value) -> String {
@@ -1583,12 +1545,7 @@ async fn the_agent_picks_the_ai_of_a_team_conversation_and_one_that_cannot_run_i
     let choice = |id: &str| engine.open(id).unwrap().choice.map(|c| c.vendor);
     assert_eq!(choice(&titled(&engine, "Review")).as_deref(), Some("codex"));
     assert_eq!(choice(&parent).as_deref(), Some("claude"), "never the conversation that asked");
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the first turn never started on Codex", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "its first turn runs on Codex: {:?}", bins.lock().unwrap());
     let docs = start_team_member(&mut pipe, 2, json!({"title":"Docs","brief":"Write the docs.","ai":"auto"})).await;
     assert_eq!(docs["isError"], false, "{}", said(&docs));
