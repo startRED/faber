@@ -1,8 +1,8 @@
 // What the host decides and the shell only carries out (`Order` in `host/src/wire.rs`): the tray icon and its menu,
-// notices, keeping the PC awake and starting with the system. Every order says what is true now, so applying one twice
+// notices, keeping the PC awake, starting with the system, the file dialogs and showing a file in the file manager. Every order says what is true now, so applying one twice
 // does no harm; the decisions (the setting, a game in front, one notice per question) were all made in Rust.
 
-import { app, Menu, Notification, nativeImage, powerSaveBlocker, Tray } from 'electron';
+import { app, type BrowserWindow, dialog, Menu, Notification, nativeImage, powerSaveBlocker, shell, Tray } from 'electron';
 
 type TrayOrder = {
   kind: 'tray';
@@ -13,7 +13,23 @@ type TrayOrder = {
   menu: { show: string; quit: string };
 };
 type NotifyOrder = { kind: 'notify'; title: string; body: string; conversationId: string | null; toast: boolean; sound: boolean };
-type Order = TrayOrder | NotifyOrder | { kind: 'awake'; on: boolean } | { kind: 'autostart'; on: boolean };
+type PickOrder = {
+  kind: 'pick';
+  id: number;
+  mode: 'folder' | 'file' | 'save';
+  filter: { name: string; extensions: string[] } | null;
+  name: string | null;
+};
+type Order =
+  | TrayOrder
+  | NotifyOrder
+  | PickOrder
+  | { kind: 'awake'; on: boolean }
+  | { kind: 'autostart'; on: boolean }
+  | { kind: 'reveal'; path: string };
+
+/** The answer to a dialog, as the host reads it (`ShellNote::Picked`). */
+export type Picked = { kind: 'picked'; id: number; path: string | null; noWindow: boolean };
 
 /** What the orders need from the window, which the shell owns. */
 export type Window = {
@@ -21,9 +37,15 @@ export type Window = {
   focused: () => boolean;
   /** Brings the window back (from the tray, or after a notice is clicked). */
   show: () => void;
+  /** The window a dialog belongs to, if one is open. */
+  parent: () => BrowserWindow | null;
+  /** Gives the host a dialog's answer. */
+  answer: (picked: Picked) => void;
   /** A test run shows nothing outside its window and changes nothing on the system. */
   hidden: boolean;
 };
+
+const KINDS = new Set(['tray', 'notify', 'awake', 'autostart', 'pick', 'reveal']);
 
 let tray: Tray | null = null;
 let blocker: number | null = null;
@@ -32,7 +54,7 @@ const shown = new Set<Notification>();
 
 function isOrder(value: unknown): value is Order {
   const kind = (value as { kind?: unknown } | null)?.kind;
-  return kind === 'tray' || kind === 'notify' || kind === 'awake' || kind === 'autostart';
+  return typeof kind === 'string' && KINDS.has(kind);
 }
 
 /** The tray picture from both sizes, so the system picks the one that fits the display instead of scaling one up. */
@@ -87,6 +109,31 @@ function startWithSystem(on: boolean, window: Window): void {
   app.setLoginItemSettings({ openAtLogin: on, args: on ? ['--autostart'] : [] });
 }
 
+/** Asks the person for a folder, a file to open or where to save one, in a dialog that belongs to the window. */
+async function pick(order: PickOrder, window: Window): Promise<void> {
+  const parent = window.parent();
+  if (!parent || window.hidden) {
+    window.answer({ kind: 'picked', id: order.id, path: null, noWindow: true });
+    return;
+  }
+  const filters = order.filter ? [{ name: order.filter.name, extensions: order.filter.extensions }] : [];
+  let path: string | null = null;
+  try {
+    if (order.mode === 'save') {
+      const saved = await dialog.showSaveDialog(parent, { defaultPath: order.name ?? undefined, filters });
+      path = saved.canceled ? null : (saved.filePath ?? null);
+    } else {
+      const properties: ('openDirectory' | 'createDirectory' | 'openFile')[] =
+        order.mode === 'folder' ? ['openDirectory', 'createDirectory'] : ['openFile'];
+      const opened = await dialog.showOpenDialog(parent, { properties, filters });
+      path = opened.canceled ? null : (opened.filePaths[0] ?? null);
+    }
+  } catch {
+    // A dialog that could not run counts as cancelled, as it does in the Tauri shell.
+  }
+  window.answer({ kind: 'picked', id: order.id, path, noWindow: false });
+}
+
 /** Carries out one order from the host; anything that is not an order is ignored. */
 export function apply(value: unknown, window: Window): void {
   if (!isOrder(value)) return;
@@ -102,6 +149,12 @@ export function apply(value: unknown, window: Window): void {
       break;
     case 'autostart':
       startWithSystem(value.on, window);
+      break;
+    case 'pick':
+      void pick(value, window);
+      break;
+    case 'reveal':
+      if (!window.hidden) shell.showItemInFolder(value.path);
       break;
   }
 }
