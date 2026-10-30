@@ -42,6 +42,8 @@ mod changes;
 mod claude_session;
 #[path = "claude_sessions.rs"]
 mod claude_sessions;
+#[path = "cli_versions.rs"]
+mod cli_versions;
 #[path = "codex_session.rs"]
 mod codex_session;
 #[path = "compact.rs"]
