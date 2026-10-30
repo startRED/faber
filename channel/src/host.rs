@@ -30,6 +30,11 @@ impl Backend for Arc<Host> {
             }
         })
     }
+    #[cfg(windows)]
+    fn started_by_an_ai(&self, client: &faber_winproc::PipeClient) -> bool {
+        faber_engine::proc::in_a_job_we_started(|job| client.in_job(job))
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         Host::subscribe(self)
     }

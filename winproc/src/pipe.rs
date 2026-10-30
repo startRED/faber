@@ -18,6 +18,7 @@ use windows_sys::Win32::Security::{
     EqualSid, GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsTokenRestricted, SECURITY_ATTRIBUTES,
     TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_USER, TokenIntegrityLevel, TokenIsAppContainer, TokenUser,
 };
+use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
 
@@ -140,14 +141,50 @@ pub fn user_pipe(name: &str, first: bool) -> io::Result<NamedPipeServer> {
     }
 }
 
-/// Whether the process at the other end of a connected pipe runs as the signed-in user, at this process's integrity or
-/// above and in no sandbox. `client` says which end that is: the server asks about its client, the client about the server.
-pub fn pipe_peer_is_user(pipe: &impl AsRawHandle, client: bool) -> io::Result<bool> {
+fn peer_pid(pipe: &impl AsRawHandle, client: bool) -> io::Result<u32> {
     let mut pid = 0;
     let handle = pipe.as_raw_handle() as HANDLE;
     // SAFETY: the handle is a connected pipe borrowed for the call.
     win(unsafe { if client { GetNamedPipeClientProcessId(handle, &mut pid) } else { GetNamedPipeServerProcessId(handle, &mut pid) } })?;
-    Ok(User::of_pid(pid)?.trusted_by(&User::current()?))
+    Ok(pid)
+}
+
+/// Whether the process at the other end of a connected pipe runs as the signed-in user, at this process's integrity or
+/// above and in no sandbox. `client` says which end that is: the server asks about its client, the client about the server.
+pub fn pipe_peer_is_user(pipe: &impl AsRawHandle, client: bool) -> io::Result<bool> {
+    Ok(User::of_pid(peer_pid(pipe, client)?)?.trusted_by(&User::current()?))
+}
+
+/// The process at the client end of a connected pipe, held open so its id cannot go to another program meanwhile.
+pub struct PipeClient(HANDLE);
+
+// SAFETY: the handle is a process handle owned by this value alone; Windows lets any thread use it.
+unsafe impl Send for PipeClient {}
+unsafe impl Sync for PipeClient {}
+
+impl PipeClient {
+    pub fn of(pipe: &impl AsRawHandle) -> io::Result<PipeClient> {
+        let pid = peer_pid(pipe, true)?;
+        // SAFETY: a null handle is an error; a real one is closed on drop.
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() { Err(io::Error::last_os_error()) } else { Ok(PipeClient(process)) }
+    }
+
+    /// Whether it runs in `job` (a job object handle), or in a job nested inside it. Faber starts every CLI in a job that
+    /// nothing it runs can leave, so a client in one of them is a program an AI started, however it was launched.
+    pub fn in_job(&self, job: isize) -> io::Result<bool> {
+        let mut inside = 0;
+        // SAFETY: both handles are open for the call.
+        win(unsafe { IsProcessInJob(self.0, job as HANDLE, &mut inside) })?;
+        Ok(inside != 0)
+    }
+}
+
+impl Drop for PipeClient {
+    fn drop(&mut self) {
+        // SAFETY: the handle was opened by `of` and is closed once.
+        unsafe { CloseHandle(self.0) };
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +201,16 @@ mod tests {
         server.connect().await.unwrap();
         assert!(pipe_peer_is_user(&server, true).unwrap());
         assert!(pipe_peer_is_user(&client, false).unwrap());
+        // SAFETY: the job is a fresh unnamed one with no limits; this test process joins it and stays in it until it ends.
+        let job = unsafe { windows_sys::Win32::System::JobObjects::CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        assert!(!job.is_null());
+        let process = PipeClient::of(&server).unwrap();
+        assert!(!process.in_job(job as isize).unwrap(), "not yet in the job");
+        // SAFETY: both handles are open.
+        win(unsafe { windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(job, GetCurrentProcess()) }).unwrap();
+        assert!(process.in_job(job as isize).unwrap(), "a process in the job, as every CLI Faber starts");
+        // SAFETY: the job handle is closed once.
+        unsafe { CloseHandle(job) };
     }
 
     #[test]

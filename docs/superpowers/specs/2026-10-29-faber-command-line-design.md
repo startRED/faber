@@ -171,9 +171,12 @@ build it in the first slice or the second is a question for the owner (below).
   (`error.channel.agentDepth`). Every turn shows in the window's running list like any other. What only the person
   decides stays theirs: a marked client never answers a card (its own or another conversation's), approves credits or
   changes Settings, where the permission mode lives (`PERSON_ONLY`, `error.channel.personOnly`), and never starts a
-  closed Faber with its own environment. The mark is the client's own word, so it brakes a loop by accident; it is not a
-  wall against a program of the same user that clears its environment on purpose, which could already drive Faber's
-  files. Finding the caller's place in Faber's own process tree instead is a later step.
+  closed Faber with its own environment. The mark is the client's own word, so on Windows the channel does not take it
+  alone: every CLI runs in a job object that nothing it starts can leave, so a client in one of those jobs counts as an AI
+  whatever it says, even one started through a parent that has ended (`in_a_job_we_started` in `engine/src/proc.rs`,
+  `PipeClient::in_job` in `winproc/src/pipe.rs`; a job that cannot be asked counts as a yes). The person's own terminal
+  tabs run in no such job. Elsewhere the mark brakes a loop by accident; it is not a wall against a program of the same
+  user that clears its environment on purpose, which could already drive Faber's files.
 - **Squatting.** A process of the same user but at a lower integrity or in a sandbox could make the pipe first while
   Faber is closed. Both ends refuse a peer below their own integrity, in an app container or with a restricted token, so
   `faber` never talks to it and Faber never answers it. An elevated terminal therefore reaches only an elevated Faber.

@@ -26,6 +26,12 @@ pub trait Backend: Send + Sync + 'static {
     fn starts_turn(&self, cmd: &str) -> bool;
     fn dispatch(&self, cmd: String, args: Value) -> Answer;
     fn subscribe(&self) -> broadcast::Receiver<Value>;
+    /// Whether a connected client is a program an AI that Faber started runs, whatever its hello says: on Windows, one in
+    /// a job Faber's CLIs run in, which nothing they start can leave. A backend that starts no CLI knows of none.
+    #[cfg(windows)]
+    fn started_by_an_ai(&self, _client: &faber_winproc::PipeClient) -> bool {
+        false
+    }
 }
 
 /// What a client says first.
@@ -72,7 +78,10 @@ async fn serve_pipe(name: &str, backend: Arc<dyn Backend>, guard: Arc<Guard>) ->
         let pipe = std::mem::replace(&mut waiting, next);
         // A client that left before the connection finished is no reason to stop serving the others.
         if connected.is_ok() && faber_winproc::pipe_peer_is_user(&pipe, true).unwrap_or(false) {
-            tokio::spawn(connection(pipe, backend.clone(), guard.clone()));
+            // A program an AI started is held to an AI's limits whatever its hello says: its environment may have lost
+            // the mark. A client that cannot be asked is held to them too.
+            let ours = u32::from(faber_winproc::PipeClient::of(&pipe).map_or(true, |client| backend.started_by_an_ai(&client)));
+            tokio::spawn(connection_at(pipe, backend.clone(), guard.clone(), ours));
         }
     }
 }
@@ -116,6 +125,16 @@ async fn serve_socket(_: &Path, _: Arc<dyn Backend>, _: Arc<Guard>) -> io::Resul
 
 /// One client, from its first line to its last.
 pub async fn connection<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, backend: Arc<dyn Backend>, guard: Arc<Guard>) {
+    connection_at(stream, backend, guard, 0).await;
+}
+
+/// One client whose agent depth is at least `at_least`, whatever its hello says.
+pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
+    stream: S,
+    backend: Arc<dyn Backend>,
+    guard: Arc<Guard>,
+    at_least: u32,
+) {
     let (read, mut write) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::channel::<String>(256);
     let writer = tokio::spawn(async move {
@@ -134,7 +153,7 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, b
         // A line that is not a request has no id to answer: the client broke the wire, so the connection ends.
         let Ok(Request { id, cmd, args }) = serde_json::from_str::<Request>(&line) else { break };
         let answer = |result: Result<Value, String>| wire::reply(id, &result);
-        let depth = hello.as_ref().map(|said| said.agent_depth);
+        let depth = hello.as_ref().map(|said| said.agent_depth.max(at_least));
         match (cmd.as_str(), depth) {
             ("hello", _) => {
                 let said: Hello = serde_json::from_value(args).unwrap_or_default();
@@ -164,16 +183,20 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, b
                 }
                 let Ok(place) = in_flight.clone().acquire_owned().await else { break };
                 let limited = depth > 0 && backend.starts_turn(&cmd);
-                if limited && let Err(key) = guard.admit(std::time::Instant::now()) {
-                    let _ = tx.send(answer(Err(key.into()))).await;
-                    continue;
-                }
-                let (tx, guard, asked) = (tx.clone(), guard.clone(), limited.then(|| args.clone()));
+                let ticket = match limited.then(|| guard.admit(std::time::Instant::now())) {
+                    Some(Err(key)) => {
+                        let _ = tx.send(answer(Err(key.into()))).await;
+                        continue;
+                    }
+                    Some(Ok(ticket)) => Some((ticket, args.clone())),
+                    None => None,
+                };
+                let (tx, guard) = (tx.clone(), guard.clone());
                 let run = backend.dispatch(cmd, args);
                 tokio::spawn(async move {
                     let result = run.await;
-                    if let Some(asked) = asked {
-                        guard.answered(&asked, result.as_ref().ok());
+                    if let Some((ticket, asked)) = ticket {
+                        guard.answered(ticket, &asked, result.as_ref().ok());
                     }
                     let _ = tx.send(wire::reply(id, &result)).await;
                     drop(place);
