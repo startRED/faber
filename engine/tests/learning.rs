@@ -67,7 +67,7 @@ fn by_hand() -> SendRequest {
 
 async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
+        let e = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e
             && message.role == Role::Assistant
             && message.status != Some(Status::Streaming)

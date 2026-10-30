@@ -1578,7 +1578,7 @@ async fn move_chat_to_project_refuses_work_queue_questions_and_failed_writes_wit
     assert_eq!(first.open(&id).unwrap(), before);
     pipe.say(json!({"type":"control_request","request_id":"q","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"x.txt","content":"x"}}})).await;
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        let event = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.unwrap().unwrap();
         if matches!(event, AppEvent::Message { ref message, .. } if message.permissions.as_ref().is_some_and(|p| !p.is_empty())) {
             break;
         }
@@ -1924,7 +1924,7 @@ async fn slash_init_populates_the_conversation_and_vendor_fallback_without_savin
     let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone());
     let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no command announcement").unwrap();
+        let event = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no command announcement").unwrap();
         if let AppEvent::Commands { conversation_id, vendor } = &event {
             assert_eq!(conversation_id, &id);
             assert_eq!(*vendor, Vendor::Claude);
@@ -2183,7 +2183,7 @@ fn answer(engine: &Engine, id: &str, m: &Message, request_id: &str, allow: bool,
 /// Waits for the next finished answer, letting `react` answer what the screen would.
 async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&Message)) -> Message {
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
+        let e = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e {
             react(&message);
             if message.role == Role::Assistant && message.status != Some(Status::Streaming) {
@@ -2463,7 +2463,7 @@ async fn quota_readings_reach_the_screen_with_their_vendor() {
     let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
     engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
     let mut quota = false;
-    while let Ok(Some(e)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
+    while let Ok(Some(e)) = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await {
         quota |= matches!(&e, AppEvent::Quota { vendor: Vendor::Claude, .. });
         if matches!(&e, AppEvent::Message { message, .. } if message.role == Role::Assistant && message.status != Some(Status::Streaming)) {
             break;
@@ -2881,7 +2881,7 @@ async fn r107_tightening_permissions_stops_chat_and_projects() {
     assert_eq!(engine.open(&work).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
     assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
     let _ = finished(&mut rx, |_| {}).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while f.wire.lines_with("interrupt") == 0 {
             tokio::task::yield_now().await;
         }
@@ -4176,7 +4176,7 @@ async fn r124_full_access_answers_yes_except_to_a_request_that_touches_a_credent
     for (id, tool, input, _) in &requests {
         pipe.say(can_use(id, tool, input.clone())).await;
     }
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while pipe.answers().len() < requests.len() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -4213,7 +4213,7 @@ async fn r160_full_access_shows_the_agents_question_and_parks_every_other_reques
         "options": [{ "label": "Rust", "description": "" }] }] });
     pipe.say(can_use("held", "Write", json!({ "file_path": ".claude/settings.json", "content": "x" }))).await;
     pipe.say(can_use("asked", "AskUserQuestion", question)).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while pipe.answers().is_empty() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -4244,7 +4244,7 @@ async fn r124b_ask_refuses_a_credential_request_without_a_card_and_asks_for_the_
             .map(|c| c.messages.iter().flat_map(|m| m.permissions.clone().unwrap_or_default()).map(|p| p.request_id).collect())
             .unwrap_or_default()
     };
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while pipe.answers().is_empty() || cards(&engine).is_empty() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -4362,7 +4362,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
         Arc::new(|_| {}),
     );
     let lines = |p: &Path| std::fs::read_to_string(p).map(|t| t.lines().count()).unwrap_or(0);
-    tokio::time::timeout(Duration::from_secs(20), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while lines(&out) < 2 {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -4481,7 +4481,7 @@ async fn r124c_a_worker_the_cli_starts_as_its_first_act_dies_with_the_job() {
         let proc = faber_engine::proc::spawn_command(cmd).unwrap();
         let out = dir.path().join("out.txt");
         let lines = || std::fs::read_to_string(&out).map(|t| t.lines().count()).unwrap_or(0);
-        tokio::time::timeout(Duration::from_secs(20), async {
+        tokio::time::timeout(crate::support::DEADLINE, async {
             while lines() < 2 {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -6002,7 +6002,7 @@ async fn reply_style_changes_on_resume_without_changing_the_conversations_name()
 }
 
 async fn reply_style_rpc(pipe: &support::Pipe, method: &str, index: usize) -> serde_json::Value {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             let found = pipe.lines.lock().unwrap().iter().filter(|m| m["method"] == method).nth(index).cloned();
             if let Some(message) = found {
@@ -6099,7 +6099,7 @@ async fn research_codex_follow_up_reopens_backend_without_interrupting_active_pe
         assert_eq!(finished(&mut rx, |_| {}).await.text, "Ordinary reply.");
         reply_style_codex_done(&mut report, "peer", "Peer kept working.").await;
         assert_eq!(finished(&mut rx, |_| {}).await.text, "Peer kept working.");
-        tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::time::timeout(crate::support::DEADLINE, async {
             while !report.closed.load(std::sync::atomic::Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }

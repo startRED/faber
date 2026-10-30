@@ -111,7 +111,7 @@ async fn move_chat_to_project_leaves_its_group_and_launches_without_group_contex
             choice: Choice { vendor: vendor.name().into(), model: None, effort: None },
         })
         .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(crate::support::DEADLINE, async {
             while !fake.wire.messages().iter().any(|m| m["type"] == "user" || m["method"] == "turn/start") {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }

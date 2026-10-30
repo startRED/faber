@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 async fn message(rx: &mut UnboundedReceiver<AppEvent>, accept: impl Fn(&Message) -> bool) -> Message {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while let Some(event) = rx.recv().await {
             if let AppEvent::Message { message, .. } = event
                 && accept(&message)
