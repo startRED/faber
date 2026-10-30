@@ -67,7 +67,7 @@ fn by_hand() -> SendRequest {
 
 async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
+        let e = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e
             && message.role == Role::Assistant
             && message.status != Some(Status::Streaming)
@@ -148,12 +148,7 @@ async fn a_router_question_is_a_span_too_and_has_its_own_cost() {
         choice: Choice { vendor: "auto".into(), model: None, effort: None },
     };
     engine.route_draft(typing, text.into());
-    for _ in 0..100 {
-        if !engine.ledger().claude.spans.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
+    support::until("the question never produced a span", || !engine.ledger().claude.spans.is_empty()).await;
     let spans = engine.ledger().claude.spans;
     assert_eq!(spans.len(), 1, "one question, one span");
     assert!(spans[0].cost.is_some_and(|cost| cost > 0.0));

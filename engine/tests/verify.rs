@@ -557,7 +557,7 @@ async fn while_the_checks_run_the_conversation_is_at_work_and_stop_ends_them_wit
         mode: faber_engine::rewind::Mode::Conversation,
         saved_versions: vec![],
     };
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if engine.rewind_preview(request.clone()).unwrap().running.is_empty() {
                 break;

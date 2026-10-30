@@ -42,7 +42,7 @@ fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: faber_engine:
 }
 
 async fn wire(pipe: &Pipe, ready: impl Fn(&Value) -> bool) -> Value {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| ready(m)).cloned() {
                 return m;
@@ -2465,7 +2465,7 @@ async fn settings_search_codex_saved_response_precedes_strict_interrupt() {
         .say(json!({"method":"item/agentMessage/delta","params":{"threadId":"main","turnId":"next","itemId":"reply","delta":"Continued."}}))
         .await;
     resumed.say(json!({"method":"turn/completed","params":{"threadId":"main","turn":{"id":"next","status":"completed"}}})).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if app.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Done) {
                 break;
@@ -2499,7 +2499,7 @@ async fn settings_search_strict_reply_then_next_turn_resumes_without_replaying_p
     pipe.say(json!({"type":"system", "subtype":"init", "session_id":"s1", "model":"claude-haiku-5-5"})).await;
     pipe.say(json!({"type":"assistant", "message":{"content":[{"type":"text", "text":"Continued."}]}})).await;
     pipe.say(json!({"type":"result", "subtype":"success", "is_error":false,"usage":{}})).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if agent.conversation().messages.last().unwrap().status == Some(Status::Done) {
                 break;
