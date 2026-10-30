@@ -29,6 +29,7 @@ of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser pro
   type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
   runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
   port, so those systems skip this suite and run every other check.
+  `FABER_TEST_SHELL=electron` drives the Electron shell (R459); `tests/ui/shell-gaps.ts` skips what its host lacks.
 
 **The window never reaches the person's desktop (Windows).** `FABER_HIDDEN=1` alone is not enough: an offscreen window can
 still become visible and take focus, which matters to someone playing full screen. So the runner (`testkit/src/desktop.rs`)
