@@ -40,7 +40,10 @@ app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
 // The GPU process is ended on purpose whenever the window closes (`releaseGpu`); that must not count as crashes.
 app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// A second Faber hands its arguments to the first and ends at once, before it starts a host of its own on the same data.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+// Windows groups notices and the taskbar by this id; the installed Tauri Faber used the same one.
+if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.faber');
 
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
