@@ -180,6 +180,10 @@ that refuses puts the branch back; a later push, a close or another target stops
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
+One move is the exception: when the base moved by words only (no suite reads them, the rule CI skips every suite by;
+`docs/decisions.md` and `docs/next/` left out, since numbers are taken there), the green batch is put on the new base as it
+is and lands at once, provided every file that then differs from the tree CI checked is words too and the docs check
+passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of

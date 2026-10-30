@@ -28,6 +28,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const BASE = 'phase-1-base';
 
@@ -158,6 +159,16 @@ export const BATCH = 3;
 export function areas(files) {
   const words = (f) => WORDS.test(f) || f.startsWith('ui/locales/') || f.startsWith('docs/');
   return new Set(files.filter((f) => !words(f)).map((f) => (f.includes('/') ? f.slice(0, f.indexOf('/')) : f)));
+}
+
+/**
+ * Whether a green batch may land without a new run on a base that moved by the files `moved` since it was checked, its
+ * tree then differing from the one checked by `differs`: words only on both sides (`isWords`, the rule CI skips every
+ * suite by), and none of them where numbers are taken, since the batch was numbered on the old base.
+ */
+export function wordsOnly(moved, differs, isWords) {
+  const numbered = (f) => f === 'docs/decisions.md' || f.startsWith('docs/next/');
+  return moved.length > 0 && moved.every((f) => isWords(f) && !numbered(f)) && differs.every(isWords);
 }
 
 /** A change to a workflow lands only from a PC (`--finish`), so it is never batched. */
@@ -545,6 +556,42 @@ async function alone(number, oid, why) {
 }
 
 /**
+ * The batch `sha` (its commits `batch`, checked green) put again on `base`, which moved since by words only (`wordsOnly`),
+ * so it lands without a new run: `{ landing, commits }`, the new top and each member's new commit in order. Null when the
+ * base moved by anything else, a member does not apply cleanly, or the docs check fails on the new tree.
+ */
+export async function onWords(base, sha, batch) {
+  // The checked-out queued commit's own rules, as CI's: the base's land.mjs runs from a temporary folder.
+  const { isWords } = await import(pathToFileURL(resolve('scripts/ci-scope.mjs')).href);
+  // Both sides of a rename count: a code file renamed into a folder of words is not words.
+  const plain = (from, to) => git('diff', '--name-only', '--no-renames', from, to).split('\n').filter(Boolean);
+  const moved = plain(git('merge-base', base, sha).trim(), base);
+  if (!wordsOnly(moved, [], isWords)) return null;
+  const dir = mkdtempSync(join(tmpdir(), 'faber-land-'));
+  try {
+    git('worktree', 'add', '--quiet', '--detach', dir, base);
+    git('-C', dir, 'cherry-pick', '--allow-empty', ...batch.map((m) => m.commit));
+    const landing = git('-C', dir, 'rev-parse', 'HEAD').trim();
+    if (!wordsOnly(moved, plain(sha, landing), isWords)) return null;
+    run(process.execPath, ['scripts/docs.mjs'], { cwd: dir });
+    const commits = git('-C', dir, 'rev-list', '--reverse', `${base}..${landing}`).split('\n').filter(Boolean);
+    if (commits.length !== batch.length) return null;
+    console.log(`${BASE} moved by words only (${moved.join(', ')}): the green batch lands on it without a new run.`);
+    return { landing, commits };
+  } catch (error) {
+    const lines = String(error.stderr || error.message).trim().split('\n');
+    console.log(`${BASE} moved by words only, but the batch does not land on it as checked: ${lines.find((l) => /error|conflict/i.test(l)) ?? lines.at(-1)}`);
+    return null;
+  } finally {
+    try {
+      git('worktree', 'remove', '--force', dir);
+    } catch {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
  * The land job's landing of queue/pr-<number> at `sha`, whose gate passed (ci.yml). It carries every pull request
  * batched under it: each branch moves to its own commit, then phase-1-base to `sha` in one push, so GitHub shows each
  * merged. One under it that was queued again, closed, pushed again or whose own gate failed sends this one back alone;
@@ -559,12 +606,15 @@ async function landQueued(number, sha) {
     console.error(`${sha.slice(0, 9)} is not #${number}'s squash on top of ${BASE}.`);
     return 1;
   }
-  if (!ancestor(base, sha)) return alone(number, mine.oid, `${BASE} moved`);
+  // A base that moved by words only takes the green batch as it is (`onWords`); any other move checks it again.
+  const words = ancestor(base, sha) ? null : await onWords(base, sha, batch);
+  if (!ancestor(base, sha) && !words) return alone(number, mine.oid, `${BASE} moved`);
+  const top = words?.landing ?? sha;
   const under = batch.slice(0, -1);
   for (const m of under) {
     if (queuedAt(m.pr) !== m.commit || gate(m.commit) === 'failure') return alone(number, mine.oid, `#${m.pr} under it no longer stands as queued`);
   }
-  const views = batch.map((m) => ({ ...m, view: JSON.parse(run('gh', ['pr', 'view', m.pr, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid'])) }));
+  const views = batch.map((m, i) => ({ ...m, landed: words?.commits[i] ?? m.commit, view: JSON.parse(run('gh', ['pr', 'view', m.pr, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid'])) }));
   for (const m of views) {
     if (!refusal({ ...m.view, isDraft: false }) && m.view.headRefOid === m.oid) continue;
     if (m !== views.at(-1)) return alone(number, mine.oid, `#${m.pr} under it was closed, retargeted or pushed again`);
@@ -578,7 +628,7 @@ async function landQueued(number, sha) {
   const back = () => {
     for (const m of moved) {
       try {
-        git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.commit}`, 'origin', `${m.oid}:refs/heads/${m.view.headRefName}`);
+        git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.landed}`, 'origin', `${m.oid}:refs/heads/${m.view.headRefName}`);
       } catch (error) {
         // Pushed again meanwhile: that newer head stands. The others are still put back.
         console.error(String(error.stderr || error.message).trim());
@@ -587,11 +637,11 @@ async function landQueued(number, sha) {
   };
   try {
     for (const m of views) {
-      git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.oid}`, 'origin', `${m.commit}:refs/heads/${m.view.headRefName}`);
+      git('push', '--quiet', `--force-with-lease=refs/heads/${m.view.headRefName}:${m.oid}`, 'origin', `${m.landed}:refs/heads/${m.view.headRefName}`);
       moved.push(m);
     }
     execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { windowsHide: true });
-    git('push', '--quiet', 'origin', `${sha}:refs/heads/${BASE}`);
+    git('push', '--quiet', 'origin', `${top}:refs/heads/${BASE}`);
   } catch (error) {
     back();
     console.error(String(error.stderr || error.message).trim());
@@ -604,13 +654,13 @@ async function landQueued(number, sha) {
   }
   // Green on top of the whole phase-1-base, so main follows at once (R127). Pushes made with this token start no
   // workflow, so main's warm run (R165) and the preview release (R130, R156) are started by hand.
-  if (ancestor('origin/main', sha)) {
-    git('push', '--quiet', 'origin', `${sha}:refs/heads/main`);
+  if (ancestor('origin/main', top)) {
+    git('push', '--quiet', 'origin', `${top}:refs/heads/main`);
     run('gh', ['workflow', 'run', 'ci.yml', '--ref', 'main', '-f', 'warm=true']);
   }
   for (const m of views) drop(m.pr, m.commit);
-  run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${sha}`]);
-  console.log(`Landed ${sha}${under.length ? `, with ${under.map((m) => `#${m.pr}`).join(', ')} under it` : ''}.`);
+  run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${top}`]);
+  console.log(`Landed ${top}${under.length ? `, with ${under.map((m) => `#${m.pr}`).join(', ')} under it` : ''}.`);
   return 0;
 }
 
