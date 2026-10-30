@@ -148,12 +148,7 @@ async fn a_router_question_is_a_span_too_and_has_its_own_cost() {
         choice: Choice { vendor: "auto".into(), model: None, effort: None },
     };
     engine.route_draft(typing, text.into());
-    for _ in 0..100 {
-        if !engine.ledger().claude.spans.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
+    support::until("the question never produced a span", || !engine.ledger().claude.spans.is_empty()).await;
     let spans = engine.ledger().claude.spans;
     assert_eq!(spans.len(), 1, "one question, one span");
     assert!(spans[0].cost.is_some_and(|cost| cost > 0.0));

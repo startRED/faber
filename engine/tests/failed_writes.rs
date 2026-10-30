@@ -375,13 +375,7 @@ async fn a_delete_that_stops_after_closing_a_live_answer_leaves_a_stopped_reply_
     pipe.say(serde_json::json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Typing"}]}})).await;
     let streaming =
         |app: &Engine| app.open(&id).and_then(|c| c.messages.last().cloned()).is_some_and(|m| m.status == Some(Status::Streaming));
-    for _ in 0..300 {
-        if streaming(&app) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(streaming(&app), "the reply is live");
+    support::until("the reply never went live", || streaming(&app)).await;
     let record = dir.path().join("conversations").join(format!("{id}.json"));
 
     let Some(held) = undeletable(&record, true) else { return };

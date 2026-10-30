@@ -96,13 +96,13 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
 
 /// The answer to a conversation's `n`th message once its model is known (the recording may never answer it).
 async fn routed(engine: &Engine, id: &str, n: usize) -> Message {
-    for _ in 0..200 {
-        if let Some(m) = engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.model.is_some()) {
-            return m;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("message {n} was never routed");
+    let mut found = None;
+    support::until(&format!("message {n} was never routed"), || {
+        found = engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.model.is_some());
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {

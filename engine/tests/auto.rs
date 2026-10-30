@@ -68,13 +68,13 @@ fn verdicts(list: Vec<(&'static str, &'static str)>, calls: Calls) -> Ask {
 
 /// The answer to a conversation's `n`th message once its model is known.
 async fn routed(engine: &Engine, id: &str, n: usize) -> Message {
-    for _ in 0..100 {
-        if let Some(m) = engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.model.is_some()) {
-            return m;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("message {n} was never routed");
+    let mut found = None;
+    support::until(&format!("message {n} was never routed"), || {
+        found = engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.model.is_some());
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -330,7 +330,9 @@ async fn a_second_message_keeps_the_process_the_model_and_the_effort_of_the_firs
     let turn = |engine: &Engine, id: String, reply: usize| {
         let engine = engine.clone();
         async move {
-            for _ in 0..250 {
+            // Each pass answers a permission card (an await `support::until` cannot hold); real time bounds it.
+            let start = std::time::Instant::now();
+            while start.elapsed() < crate::support::DEADLINE {
                 if let Some(m) = engine.open(&id).and_then(|c| c.messages.get(reply).cloned()) {
                     if let Some(p) = m.permissions.as_ref().and_then(|p| p.first()) {
                         let _ = engine.answer(&id, &m.id, &p.request_id, true, false).await;

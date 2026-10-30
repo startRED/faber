@@ -48,25 +48,25 @@ enum Went {
 impl Rig {
     /// Waits for the answer to be routed and started, and says where it went.
     async fn went(&self, id: &str, n: usize) -> (Message, Went) {
-        for _ in 0..150 {
-            let reply = self.engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned());
-            if let Some(reply) = reply.filter(|m| m.vendor.is_some()) {
-                tokio::time::sleep(Duration::from_millis(60)).await;
-                let went = match reply.vendor {
-                    Some(Vendor::Claude) => {
-                        let args = self.claude.args.lock().unwrap().get(n).cloned().unwrap_or_default();
-                        Went::Claude(flag(&args, "--model").unwrap_or_default(), flag(&args, "--effort").unwrap_or_default())
-                    }
-                    _ => ["gpt-6.1-sol", "gpt-6-luna"]
-                        .into_iter()
-                        .find(|m| self.codex.wire.lines_with(&format!("\"model\":\"{m}\"")) > 0)
-                        .map_or(Went::Nowhere, Went::Codex),
-                };
-                return (reply, went);
+        let mut found = None;
+        support::until(&format!("message {n} was never routed"), || {
+            found = self.engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.vendor.is_some());
+            found.is_some()
+        })
+        .await;
+        let reply = found.unwrap();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let went = match reply.vendor {
+            Some(Vendor::Claude) => {
+                let args = self.claude.args.lock().unwrap().get(n).cloned().unwrap_or_default();
+                Went::Claude(flag(&args, "--model").unwrap_or_default(), flag(&args, "--effort").unwrap_or_default())
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        panic!("message {n} was never routed");
+            _ => ["gpt-6.1-sol", "gpt-6-luna"]
+                .into_iter()
+                .find(|m| self.codex.wire.lines_with(&format!("\"model\":\"{m}\"")) > 0)
+                .map_or(Went::Nowhere, Went::Codex),
+        };
+        (reply, went)
     }
 }
 
@@ -408,12 +408,7 @@ async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() 
     let dir = support::DataFolder::new();
     let r = rig_env(&dir, &[Vendor::Claude], verdicts(vec![("chat", "easy")]), true);
     let id = r.engine.send(auto(SKY)).unwrap();
-    for _ in 0..100 {
-        if r.engine.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Error) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the turn never failed", || r.engine.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Error)).await;
     assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().error.as_deref(), Some("error.billedPerUse"));
     assert!(r.claude.args.lock().unwrap().is_empty());
     r.engine.shutdown();
