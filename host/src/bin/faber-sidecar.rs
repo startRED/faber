@@ -3,26 +3,35 @@
 //! concurrently, so replies may come out of order; every engine event is a `{"event":...}` line. When stdin closes the
 //! engine is shut down cleanly and the process ends. It has no window: whatever needs one answers `error.host.noWindow`.
 //!
-//! The data folder is `FABER_DATA_DIR`, else the default under the config folder, as the Tauri shell reads it.
+//! What the shell must show or do, it decides here and says with an `{"order":{...}}` line (`faber_host::wire::Order`, all
+//! written by the same single writer): the tray (tooltip, number, picture, menu words), a notification, keeping the PC
+//! awake, starting with the system. The shell draws them with its own calls and decides nothing.
+//!
+//! The data folder is `FABER_DATA_DIR`, else the default under the config folder, as the Tauri shell reads it. What only the
+//! shell that started this process knows comes as environment variables at spawn:
+//!
+//! - `FABER_VERSION`: the version of the app, which the screen shows (this crate's own version when not set).
+//! - `FABER_AUTOSTART`: `1` or `0`, whether the app is registered to start with the system now. A setting saved later
+//!   updates this process's copy and sends an `autostart` order, since only the shell can register itself.
+//! - `FABER_HIDDEN`: `1` for a test or automated run, which notifies nobody.
+//! - `FABER_SHELL_PID`: the process that owns Faber's window, so a maximized Faber in front is Faber and not a game.
+//!
+//! The shell says what only it sees (its window's focus) with a `{"shell":{...}}` line (`faber_host::wire::ShellNote`).
 
 // A windowed program on Windows, like the Tauri shell: no console is ever made for it (none to flash, no console host
 // process), and its pipes work the same.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use faber_host::wire::{self, Event, Reply};
-use faber_host::{Host, Shell, StartOptions};
+use faber_host::sidecar::{SidecarOptions, SidecarShell};
+use faber_host::wire::{self, Event, Incoming, Ordered, Reply};
+use faber_host::{Host, StartOptions};
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 
 /// How long commands already running may take to finish once stdin closes, before they are stopped.
 const FINISH: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// Every default of the trait: no window, no tray, no updates.
-struct Headless;
-
-impl Shell for Headless {}
 
 fn main() -> ExitCode {
     // The engine starts a CLI through this very program on Windows (a guard that joins a job object first).
@@ -46,21 +55,6 @@ async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
-    let options = StartOptions {
-        data_dir,
-        hidden,
-        runtime: tokio::runtime::Handle::current(),
-        installed_data_dir: faber_host::installed_data_dir(hidden),
-        game_guard: None,
-        browser: None,
-    };
-    let host: Arc<Host> = match faber_host::start(options, Arc::new(Headless)) {
-        Ok(host) => host,
-        Err(error) => {
-            eprintln!("Faber failed to start: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
 
     // One writer, so two lines never mix on stdout.
     let (out, mut lines) = mpsc::unbounded_channel::<String>();
@@ -72,6 +66,45 @@ async fn run() -> ExitCode {
             }
         }
     });
+
+    // The shell, which the host keeps to the end, sends orders through this; it is emptied at the end so the writer can finish.
+    let orders = Arc::new(Mutex::new(Some(out.clone())));
+    let shell = Arc::new(SidecarShell::new(SidecarOptions {
+        data_dir: data_dir.clone(),
+        version: std::env::var("FABER_VERSION").ok().filter(|version| !version.is_empty()),
+        autostart: std::env::var("FABER_AUTOSTART").is_ok_and(|v| v == "1"),
+        hidden,
+        runtime: tokio::runtime::Handle::current(),
+        send: {
+            let orders = orders.clone();
+            Arc::new(move |order| {
+                if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                    let _ = out.send(wire::line(&Ordered { order }));
+                }
+            })
+        },
+        attention: faber_host::tray::front::attention,
+        shell_process: std::env::var("FABER_SHELL_PID").ok().and_then(|pid| pid.parse().ok()),
+        chime: faber_host::tray::chime::play,
+    }));
+    let options = StartOptions {
+        data_dir,
+        hidden,
+        runtime: tokio::runtime::Handle::current(),
+        installed_data_dir: faber_host::installed_data_dir(hidden),
+        game_guard: None,
+        browser: None,
+    };
+    let host: Arc<Host> = match faber_host::start(options, shell.clone()) {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("Faber failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // The engine exists: the tray is told for the first time, and its settings decide the notifications from now on.
+    let engine = host.engine.clone();
+    shell.attach(move || engine.settings());
 
     let events = {
         let (mut heard, out) = (host.subscribe(), out.clone());
@@ -108,10 +141,11 @@ async fn run() -> ExitCode {
             }
             Err("error.host.badRequest".to_string())
         } else {
-            wire::request(&String::from_utf8_lossy(&line))
+            wire::incoming(&String::from_utf8_lossy(&line))
         };
         match answer {
-            Ok(request) => {
+            Ok(Incoming::Note(note)) => shell.note(note),
+            Ok(Incoming::Request(request)) => {
                 let (host, out) = (host.clone(), out.clone());
                 running.spawn(async move {
                     let result = host.dispatch(&request.cmd, request.args).await;
@@ -134,6 +168,7 @@ async fn run() -> ExitCode {
     let closing = host.clone();
     let _ = tokio::task::spawn_blocking(move || closing.shut_down()).await;
     events.abort();
+    orders.lock().unwrap_or_else(|e| e.into_inner()).take();
     drop(out);
     let _ = writer.await;
     ExitCode::SUCCESS

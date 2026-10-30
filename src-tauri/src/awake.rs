@@ -3,9 +3,10 @@
 //! Windows execution state uses `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.
 //! The display is never kept awake (`ES_DISPLAY_REQUIRED` is never set).
 //! A single counted guard tracks active runs and ensures that overlapping runs
-//! cannot release early or leak.
+//! cannot release early or leak. When to keep the PC awake is `faber_host::awake::Policy`; this file only asks the system.
 #![allow(unsafe_code)]
 
+use faber_host::awake::Policy;
 use std::collections::HashSet;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -86,23 +87,13 @@ pub struct CountedAwake {
     power: std::sync::Arc<dyn PowerKeepAwake>,
     commands: Option<std::sync::mpsc::Sender<PowerCommand>>,
     worker: Option<std::thread::JoinHandle<()>>,
-    stopped: bool,
-    enabled: bool,
-    active_runs: HashSet<String>,
+    policy: Policy,
     is_awake: bool,
 }
 
 impl CountedAwake {
     pub fn new(power: Box<dyn PowerKeepAwake>, enabled: bool) -> std::io::Result<Self> {
-        let mut guard = Self {
-            power: power.into(),
-            commands: None,
-            worker: None,
-            stopped: false,
-            enabled,
-            active_runs: HashSet::new(),
-            is_awake: false,
-        };
+        let mut guard = Self { power: power.into(), commands: None, worker: None, policy: Policy::new(enabled), is_awake: false };
         guard.start_worker()?;
         Ok(guard)
     }
@@ -136,32 +127,31 @@ impl CountedAwake {
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
-        if self.enabled != enabled {
-            self.enabled = enabled;
+        if self.policy.enabled() != enabled {
+            self.policy.set_enabled(enabled);
             self.apply();
         }
     }
 
     #[cfg(test)]
     pub fn start_run(&mut self, run_id: impl Into<String>) {
-        self.active_runs.insert(run_id.into());
+        self.policy.start_run(run_id);
         self.apply();
     }
 
     #[cfg(test)]
     pub fn end_run(&mut self, run_id: &str) {
-        self.active_runs.remove(run_id);
+        self.policy.end_run(run_id);
         self.apply();
     }
 
     pub fn sync_runs(&mut self, current_run_ids: HashSet<String>) {
-        self.active_runs = current_run_ids;
+        self.policy.sync_runs(current_run_ids);
         self.apply();
     }
 
     pub fn shutdown(&mut self) {
-        self.stopped = true;
-        self.active_runs.clear();
+        self.policy.shutdown();
         self.apply();
     }
 
@@ -171,7 +161,7 @@ impl CountedAwake {
     }
 
     fn apply(&mut self) {
-        let should_be_awake = !self.stopped && self.enabled && !self.active_runs.is_empty();
+        let should_be_awake = self.policy.wanted();
         if should_be_awake != self.is_awake {
             if self.commands.is_none()
                 && let Err(error) = self.start_worker()
