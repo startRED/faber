@@ -52,7 +52,7 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
   and the third ink when done, an accent ring and the full ink on the current one (`aria-current`), plain when still to
   do; each state is said to a screen reader. A step another conversation does shows that conversation's title under it as a
-  quiet link that opens it, then its state in a helper row's words (amber when it waits for you). What the agent says it is doing now (its `status`, 3 to 6 words) takes the
+  quiet link to open it, then its state in helper-row words (amber when waiting for you). What the agent says it is doing now (its `status`, 3 to 6 words) takes the
   place of the newest step's words under the reply while it works, and an active step shows its current action or thinking under the steps when it adds to the line above. Past half over its estimate (rule 7), one quiet line in the third ink and the small size closes the block: no number, icon or colour. A reply the agent closed with `wrap_up` ends, above
   the actions row, with one box on a hairline: the recap, then at most one question in the semibold weight and its one
   or two replies as buttons, the recommendation the primary one. Only the newest reply, once it is done, offers the
