@@ -660,6 +660,29 @@ impl OwnedTree {
     }
 }
 
+/// The jobs the CLIs and checks Faber started run in, so the command line's channel can tell a program one of them started,
+/// however it was launched: nothing in such a job can leave it.
+#[cfg(windows)]
+static JOBS: Mutex<Vec<std::sync::Weak<TreeState>>> = Mutex::new(Vec::new());
+
+#[cfg(windows)]
+fn known(tree: &Arc<TreeState>) {
+    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    jobs.retain(|tree| tree.strong_count() > 0);
+    jobs.push(Arc::downgrade(tree));
+}
+
+/// Whether `inside` finds a process in one of the jobs Faber's CLIs and checks run in now. A job it cannot ask counts as a
+/// yes: in doubt, the process is held to an AI's limits.
+#[cfg(windows)]
+pub fn in_a_job_we_started(inside: impl Fn(isize) -> io::Result<bool>) -> bool {
+    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    jobs.retain(|tree| tree.strong_count() > 0);
+    jobs.iter()
+        .filter_map(std::sync::Weak::upgrade)
+        .any(|tree| tree.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|job| inside(job.handle()).unwrap_or(true)))
+}
+
 #[cfg(windows)]
 fn join_job(child: &Child) -> io::Result<Containment> {
     let handle = child.raw_handle().ok_or_else(|| io::Error::other("the process already ended"))?;
@@ -670,16 +693,16 @@ fn join_job(child: &Child) -> io::Result<Containment> {
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
     let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
     let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
-    Ok(Containment {
-        tree: Arc::new(TreeState {
-            job: Mutex::new(Some(job)),
-            identity,
-            root: Some(root),
-            confirmed: AtomicBool::new(false),
-            #[cfg(test)]
-            probe: None,
-        }),
-    })
+    let tree = Arc::new(TreeState {
+        job: Mutex::new(Some(job)),
+        identity,
+        root: Some(root),
+        confirmed: AtomicBool::new(false),
+        #[cfg(test)]
+        probe: None,
+    });
+    known(&tree);
+    Ok(Containment { tree })
 }
 
 #[cfg(unix)]
@@ -778,6 +801,25 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn the_channel_knows_the_jobs_of_the_clis_running_now_and_only_those() {
+        let job = win32job::Job::create().unwrap();
+        let handle = job.handle();
+        let tree = Arc::new(TreeState {
+            job: Mutex::new(Some(job)),
+            identity: crate::project::ProcessId { pid: 1, started_at: 1 },
+            root: None,
+            confirmed: AtomicBool::new(false),
+            probe: None,
+        });
+        known(&tree);
+        assert!(in_a_job_we_started(|job| Ok(job == handle)));
+        assert!(in_a_job_we_started(|_| Err(io::Error::other("cannot ask"))), "in doubt, an AI");
+        drop(tree);
+        assert!(!in_a_job_we_started(|job| Ok(job == handle)), "a job that ended no longer counts");
+    }
 
     #[tokio::test]
     async fn rewind_cancelled_command_waits_for_its_pipes_to_close() {

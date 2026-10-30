@@ -32,6 +32,8 @@ pub async fn run(args: &Args) -> i32 {
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut buffer = Vec::new();
     let mut running = tokio::task::JoinSet::new();
+    // Past this many requests in flight, stdin waits: a stalled stdout cannot pile up tasks without end.
+    let in_flight = Arc::new(tokio::sync::Semaphore::new(faber_channel::server::MAX_IN_FLIGHT));
     let mut events_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut code = DONE;
     while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
@@ -78,9 +80,11 @@ pub async fn run(args: &Args) -> i32 {
                 }));
             }
             _ => {
+                let Ok(place) = in_flight.clone().acquire_owned().await else { break };
                 running.spawn(async move {
                     let result = client.call(&cmd, args).await.unwrap_or_else(|_| Err("cli.error.channel".into()));
                     let _ = tx.send(wire::reply(id, &result)).await;
+                    drop(place);
                 });
             }
         }

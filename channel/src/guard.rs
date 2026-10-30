@@ -5,7 +5,7 @@
 //! A conversation cannot carry its own depth, because one Codex process serves every conversation of an area.
 
 use serde_json::Value;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,6 +27,17 @@ struct Seen {
     starts: VecDeque<Instant>,
     /// The conversations running now, from the latest `running` event.
     running: HashSet<String>,
+    /// How many `running` events came so far.
+    snapshots: u64,
+    /// While turns wait for their answer: the `running` event each conversation last came into, and the one it last left.
+    joined: HashMap<String, u64>,
+    left: HashMap<String, u64>,
+}
+
+/// An admitted turn, handed back when its answer comes.
+pub struct Ticket {
+    /// The `running` events seen when it was admitted.
+    seen: u64,
 }
 
 #[derive(Default)]
@@ -60,13 +71,26 @@ impl Guard {
     }
 
     pub fn running(&self, event: &Value) {
-        let running =
+        let running: HashSet<String> =
             event["items"].as_array().into_iter().flatten().filter_map(|i| i["conversationId"].as_str().map(String::from)).collect();
-        self.lock().running = running;
+        let mut seen = self.lock();
+        seen.snapshots += 1;
+        let now = seen.snapshots;
+        if seen.admitted > 0 {
+            let came: Vec<String> = running.difference(&seen.running).cloned().collect();
+            let went: Vec<String> = seen.running.difference(&running).cloned().collect();
+            for id in came {
+                seen.joined.insert(id, now);
+            }
+            for id in went {
+                seen.left.insert(id, now);
+            }
+        }
+        seen.running = running;
     }
 
     /// Whether an AI client may start one more turn now; the refusal's key when not.
-    pub fn admit(&self, now: Instant) -> Result<(), &'static str> {
+    pub fn admit(&self, now: Instant) -> Result<Ticket, &'static str> {
         let mut seen = self.lock();
         while seen.starts.front().is_some_and(|at| now.duration_since(*at) >= HOUR) {
             seen.starts.pop_front();
@@ -77,28 +101,38 @@ impl Guard {
         }
         seen.starts.push_back(now);
         seen.admitted += 1;
-        Ok(())
+        Ok(Ticket { seen: seen.snapshots })
     }
 
     /// An admitted turn was answered. When it started (`answer` is its reply), notes the conversation it went to, from its
     /// answer or its arguments, and counts it as running at once: the next `running` event may come after the next request.
-    pub fn answered(&self, args: &Value, answer: Option<&Value>) {
+    /// Only a conversation seen coming in and then leaving since the turn was admitted is known to have ended already.
+    pub fn answered(&self, ticket: Ticket, args: &Value, answer: Option<&Value>) {
         let mut seen = self.lock();
         seen.admitted = seen.admitted.saturating_sub(1);
-        let Some(answer) = answer else { return };
-        let found = [
-            answer.as_str(),
-            answer["id"].as_str(),
-            args["req"]["conversationId"].as_str(),
-            args["conversationId"].as_str(),
-            args["id"].as_str(),
-        ]
-        .into_iter()
-        .flatten()
-        .next();
+        let found = answer.and_then(|answer| {
+            [
+                answer.as_str(),
+                answer["id"].as_str(),
+                args["req"]["conversationId"].as_str(),
+                args["conversationId"].as_str(),
+                args["id"].as_str(),
+            ]
+            .into_iter()
+            .flatten()
+            .next()
+        });
         if let Some(id) = found {
             seen.started.insert(id.to_string());
-            seen.running.insert(id.to_string());
+            let ended = matches!((seen.joined.get(id), seen.left.get(id)), (Some(&came), Some(&went)) if came > ticket.seen && went > came);
+            if !ended {
+                seen.running.insert(id.to_string());
+            }
+        }
+        // Nothing waits any more, answered or refused: what came and left so far matters to no turn.
+        if seen.admitted == 0 {
+            seen.joined.clear();
+            seen.left.clear();
         }
     }
 }
@@ -112,11 +146,11 @@ mod tests {
     fn an_ai_runs_two_turns_at_once_and_a_third_waits_until_one_ends() {
         let guard = Guard::default();
         let now = Instant::now();
-        guard.admit(now).unwrap();
-        guard.answered(&json!({ "req": {} }), Some(&json!("c1")));
-        guard.admit(now).unwrap();
-        guard.answered(&json!({ "id": "c2" }), Some(&json!(null)));
-        assert_eq!(guard.admit(now), Err("error.channel.agentTurns"));
+        let ticket = guard.admit(now).unwrap();
+        guard.answered(ticket, &json!({ "req": {} }), Some(&json!("c1")));
+        let ticket = guard.admit(now).unwrap();
+        guard.answered(ticket, &json!({ "id": "c2" }), Some(&json!(null)));
+        assert_eq!(guard.admit(now).err(), Some("error.channel.agentTurns"));
         guard.running(&json!({ "items": [{ "conversationId": "c2" }, { "conversationId": "person" }] }));
         assert!(guard.admit(now).is_ok(), "c1 ended, and the person's own turn does not count");
     }
@@ -125,10 +159,10 @@ mod tests {
     fn turns_sent_together_count_before_their_answers_and_a_refused_one_frees_its_place() {
         let guard = Guard::default();
         let now = Instant::now();
+        let ticket = guard.admit(now).unwrap();
         guard.admit(now).unwrap();
-        guard.admit(now).unwrap();
-        assert_eq!(guard.admit(now), Err("error.channel.agentTurns"), "two still waiting for their answer");
-        guard.answered(&json!({}), None);
+        assert_eq!(guard.admit(now).err(), Some("error.channel.agentTurns"), "two still waiting for their answer");
+        guard.answered(ticket, &json!({}), None);
         assert!(guard.admit(now).is_ok(), "the refused one no longer counts");
     }
 
@@ -137,10 +171,35 @@ mod tests {
         let guard = Guard::default();
         let start = Instant::now();
         for _ in 0..MAX_PER_HOUR {
-            guard.admit(start).unwrap();
-            guard.answered(&json!({}), None);
+            let ticket = guard.admit(start).unwrap();
+            guard.answered(ticket, &json!({}), None);
         }
         assert!(guard.admit(start + Duration::from_secs(60)).is_err());
         assert!(guard.admit(start + HOUR).is_ok(), "the hour has passed");
+    }
+
+    #[test]
+    fn a_turn_that_ended_before_its_answer_came_does_not_count_as_running() {
+        let guard = Guard::default();
+        let now = Instant::now();
+        let ticket = guard.admit(now).unwrap();
+        guard.running(&json!({ "items": [{ "conversationId": "c1" }] }));
+        guard.running(&json!({ "items": [] }));
+        guard.answered(ticket, &json!({}), Some(&json!("c1")));
+        let ticket = guard.admit(now).unwrap();
+        guard.answered(ticket, &json!({}), Some(&json!("c2")));
+        assert!(guard.admit(now).is_ok(), "c1 ended before its answer, only c2 runs");
+    }
+
+    #[test]
+    fn a_running_list_from_before_the_turn_began_does_not_free_its_place() {
+        let guard = Guard::default();
+        let now = Instant::now();
+        let ticket = guard.admit(now).unwrap();
+        guard.running(&json!({ "items": [{ "conversationId": "person" }] }));
+        guard.answered(ticket, &json!({}), Some(&json!("c1")));
+        let ticket = guard.admit(now).unwrap();
+        guard.answered(ticket, &json!({}), Some(&json!("c2")));
+        assert_eq!(guard.admit(now).err(), Some("error.channel.agentTurns"), "c1 and c2 still run");
     }
 }
