@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { api, type Message } from '../../ui/api.ts';
-import { t } from '../../ui/i18n.ts';
+import { LANGUAGES, t, templates } from '../../ui/i18n.ts';
 import { renderMarkdown } from '../../ui/markdown.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -316,5 +316,26 @@ check('thread: a held-back command says what it would have done, and Got it on t
     ok(cards()[0]!.textContent?.includes(t('parked.command')), 'a command with no known kind keeps the plain words');
   } finally {
     dispose(); root.remove(); api.parkedSeen = original;
+  }
+});
+
+check('thread: the answer area speaks plain words, never git, cache or CLI words', () => {
+  // The engineering words each language used for these texts before (the locale audit of 2026-10-29).
+  // Whole words only: "programa" holds "rama" and "cliquez" holds "cli".
+  const words = (list: string) => new RegExp(`(^|[^\\p{L}])(${list})($|[^\\p{L}])`, 'iu');
+  const jargon: Record<string, RegExp> = {
+    en: words('branch|cache|CLI|session|assistant'),
+    'pt-BR': words('galho|cache|CLI|sessão|assistente'),
+    es: words('rama|caché|CLI|sesión|asistente'),
+    fr: words('branche|cache|CLI|session|assistant'),
+    de: words('Abzweig\\p{L}*|Cache|CLI|Sitzung|Assistent'),
+  };
+  ok(jargon.es!.test('Crear rama desde aquí') && !jargon.es!.test('el programa de la IA'), 'a word inside another word is not jargon');
+  const keys = ['answer.branchHere', 'mine.sendBranch', 'answer.cacheWarm', 'answer.terminalHint', 'kit.details', 'kit.line', 'error.driverStopped', 'error.sessionLost', 'note.historyResent', 'ask.question.label', 'projects.chat.lead'] as const;
+  for (const { code } of LANGUAGES) {
+    for (const key of keys) {
+      const text = templates(key, code).other;
+      ok(!jargon[code]!.test(text), `${code} ${key} reads plainly: ${text}`);
+    }
   }
 });

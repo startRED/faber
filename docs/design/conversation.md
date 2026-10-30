@@ -143,7 +143,7 @@ and a useful file location is allowed when the person needs to find or open an a
   Claude also omits the resource prefix from an unchanged native resume, including a warmed one; changed ids or snapshot identity send the
   current resources while keeping native history. Projects names native plugin skills without outside Read paths when
   the installed CLI supports the plugin flag; older CLIs and helpers receive the checked Read index instead.
-  A nonempty kit with no other work uses "Session tools" as the fold's heading; empty kits show nothing unless preparation
+  A kit alone heads its fold "Tools ready when the AI started"; an empty kit shows nothing unless preparation
   failed, when the same quiet line explains that catalog tools could not be prepared in the screen's language.
   A clearly missing item may be suggested there
   once across the app, using its localized display name and pointing to Catalog for the person's installation decision. No setting, automatic install, timer or motion

@@ -7,7 +7,7 @@ Faber runs the person's own Claude Code and Codex subscriptions. The sidebar has
 - Right-click a conversation row: "Rename", "Pin" or "Unpin", "Export" (Markdown), "Move to group" (Chat), "Move to project" (an unarchived chat, when projects exist), "Archive" or "Unarchive", "Delete".
 - An archived conversation leaves the sidebar lists. Find it with the sidebar's "Search" or Ctrl+K, marked "archived"; open it and use "Unarchive" in its row menu to work in it again.
 - "Groups" (Chat): "New group" holds instructions and files for every chat in it.
-- Right-click an answer to copy it, retry with another model or "Branch from here" (a new conversation up to that answer). Right-click your own message for "Go back before this message": it restores files, conversation or both. A stronger retry is offered under an answer whose last check failed or whose code changed unchecked; a button there continues in the AI's own terminal.
+- Right-click an answer to copy it, retry with another model or "New conversation from here" (a new conversation up to that answer). Right-click your own message for "Go back before this message": it restores files, conversation or both. A stronger retry is offered under an answer whose last check failed or whose code changed unchecked; a button there continues in the AI's own terminal.
 - Ctrl+F finds words in the conversation. "Quick question" (Ctrl+;, or /btw in the box) asks about it without interrupting the agent.
 
 ## The message box
@@ -68,7 +68,7 @@ Search | Buscar | Buscar | Rechercher | Suchen
 archived | arquivada | archivada | archivée | archiviert
 Groups | Grupos | Grupos | Groupes | Gruppen
 New group | Novo grupo | Nuevo grupo | Nouveau groupe | Neue Gruppe
-Branch from here | Criar galho daqui | Crear rama desde aquí | Créer une branche ici | Ab hier abzweigen
+New conversation from here | Nova conversa a partir daqui | Nueva conversación desde aquí | Nouvelle conversation à partir d’ici | Neue Unterhaltung ab hier
 Go back before this message | Voltar pra antes desta mensagem | Volver a antes de este mensaje | Revenir avant ce message | Vor diese Nachricht zurückgehen
 Quick question | Pergunta rápida | Pregunta rápida | Question rapide | Kurze Frage
 AI: choose for me | IA: escolher por mim | IA: elegir por mí | IA : choisir pour moi | KI: für mich wählen

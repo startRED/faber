@@ -37,7 +37,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/chat-groups.md](design/chat-groups.md) | Chat groups, shared instructions and knowledge files |
 | [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, export, archive and footer |
 | [design/composer.md](design/composer.md) | The shared message box: file mentions, commands, earlier messages and their search |
-| [design/branch.md](design/branch.md) | "Branch from here" and the arrows between the versions of a message |
+| [design/branch.md](design/branch.md) | "New conversation from here" and the arrows between the versions of a message |
 | [design/queue.md](design/queue.md) | Queued messages, in-place editing, keyboard controls and drafts when a message leaves the queue |
 | [design/rewind.md](design/rewind.md) | The message menu's Go back, Redo and recovery confirmation, file preview and saved-message notice |
 | [design/visual-answers.md](design/visual-answers.md) | Reply pages, captured file versions, Mermaid, isolation and measured bounds |
