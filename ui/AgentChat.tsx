@@ -51,7 +51,7 @@ export function Breakable(props: { text: string }) {
  * person opened stays open, with its focus, instead of being made again. */
 function StepChip(props: { id: string; tools: () => ToolUse[] }) {
   const tool = createMemo<ToolUse>((last) => props.tools().find((t) => t.id === props.id) ?? last, props.tools().find((t) => t.id === props.id)!);
-  return <Show when={isAgentCall(tool())} fallback={<ToolChip tool={tool()} full />}>
+  return <Show when={isAgentCall(tool())} fallback={<ToolChip tool={tool()} />}>
     <button type="button" class="btn agent-handoff" onClick={() => {
       const open = openedAgent();
       if (open) showAgent({ ...open, callId: props.id });
@@ -59,27 +59,31 @@ function StepChip(props: { id: string; tools: () => ToolUse[] }) {
   </Show>;
 }
 
-/** One tool a turn or a subagent ran: its kind and what it ran on, struck through when it failed. In the subagent's view
- * (`full`) the line wraps to two lines at most and a click or Enter shows the rest, since there is room to read it; elsewhere
- * it is one line with the middle cut. */
-export function ToolChip(props: { tool: ToolUse; full?: boolean }) {
+/** One tool a turn or a subagent ran: its kind and what it ran on, struck through when it failed, with the running mark on the
+ * step the agent is on (`live`). The line wraps to two lines at most and a click or Enter shows the rest, so a long command is
+ * never cut at the edge. */
+export function ToolChip(props: { tool: ToolUse; live?: boolean }) {
   const [more, setMore] = createSignal(false);
   const toggle = () => setMore((on) => !on);
   return (
     <span
-      classList={{ bad: props.tool.ok === false, full: props.full, more: more() }}
+      class="full"
+      classList={{ bad: props.tool.ok === false, more: more() }}
       title={toolRow(props.tool).detail || props.tool.output}
-      tabindex={props.full ? 0 : undefined}
-      role={props.full ? 'button' : undefined}
-      aria-expanded={props.full ? more() : undefined}
-      onClick={() => props.full && toggle()}
-      onKeyDown={(e) => props.full && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle())}
+      tabindex={0}
+      role="button"
+      aria-expanded={more()}
+      onClick={toggle}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle())}
     >
       <Show when={props.tool.ok === true}>
         <Icon name="check" small />
       </Show>
+      <Show when={props.live}>
+        <b class="live" aria-hidden="true" />
+      </Show>
       <b>{toolRow(props.tool).label}</b>
-      <Show when={toolRow(props.tool).detail}><i>{props.full ? <Breakable text={toolRow(props.tool).detail} /> : middle(toolRow(props.tool).detail)}</i></Show>
+      <Show when={toolRow(props.tool).detail}><i><Breakable text={toolRow(props.tool).detail} /></i></Show>
       <Show when={changeOf(props.tool)}>{(change) => <Delta change={change()} />}</Show>
     </span>
   );

@@ -120,7 +120,7 @@ function Facts(props: { tools: DetailTool[]; follows?: Follow[]; conversationId?
     const tool = () => byId().get(id)!;
     const [outputOpen, setOutputOpen] = createSignal(false);
     return <li data-state={tool().detailState}>
-      <div class="tools"><ToolChip tool={tool()} full /></div>
+      <div class="tools"><ToolChip tool={tool()} /></div>
       <span class="det-state">{t(tool().detailState === 'unknown' ? 'details.state.unknown' : `agent.${tool().detailState as AgentState}`)}</span>
       <Show when={tool().agentAt && props.conversationId}><button type="button" class="btn" aria-controls="running" onClick={() => showAgent({ conversationId: props.conversationId!, ...tool().agentAt! })}>{t('agent.look')}</button></Show>
       <Show when={tool().output}><details class="disclosure" onToggle={(e) => setOutputOpen(e.currentTarget.open)}><summary>{t('details.output')}</summary><Show when={outputOpen()}><pre class="command-output"><LiveText text={tool().output!} follows={props.follows ?? []} /></pre></Show></details></Show>

@@ -149,20 +149,21 @@ and a useful file location is allowed when the person needs to find or open an a
   A clearly missing item may be suggested there
   once across the app, using its localized display name and pointing to Catalog for the person's installation decision. No setting, automatic install, timer or motion
   comes with it. Chat and Projects use the same line, including at 720 px and with reduced motion.
-- Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
-  in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+- Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, in two
+  lines at most (a click shows the rest). The running step has the running mark; seen in the open log, it is not repeated
+  below. Unknown tools keep their name; an MCP tool reads "Using a tool", its server.
 - Steps of one kind in a row (changing, reading, running, searching) read as one phrase with a count: "Changing 3 files",
   "Reading 4 files", "Running 2 commands" (R411). It is the step chip's size and look with a small chevron, and opened it
   takes the whole row and shows the single chips under it, indented. A file counts once however many steps touch it, so three
-  edits to one file stay three chips; a tool server's tool, a skill, a plan or a question is never grouped. When a step in
+  edits to one file are three chips; a tool server's tool, a skill, a plan or a question is never grouped. When a step in
   the run failed, "1 failed" sits beside the phrase in the error ink, since the phrase itself is not struck through. A run the
   person opened stays open as it grows. The status line follows the run: "Reading 3 files · a.ts" (the count so far, then
-  the newest step) instead of each file in turn. Nothing moves and nothing animates beyond the chevron's turn (none in
-  reduced motion). Every step chip, single or grouped, has a real 1 px border, so forced colours still draws its edge.
-- A conversation the agent starts by itself (R198) is one chip like any other, "Working in parallel" with its title (or
-  the id when the agent reads it back); the conversation itself is a normal row in the sidebar, never a step inside.
+  the newest step) instead of each file in turn. Nothing animates beyond the chevron's turn (none in
+  reduced motion). Every chip, single or grouped, has a real 1 px border, so forced colours still draws its edge.
+- A conversation the agent starts by itself (R198) is one chip, "Working in parallel" with its title (or
+  the id when the agent reads it back); the conversation is a normal sidebar row, never a step inside.
 - The agent running Faber's checks (the `verify` tool) is one chip with no detail: "Running the quick checks", or
-  "Running every check" for the full level. What failed is the agent's to read; the chip only says it ran.
+  "Running every check" for the full level. What failed is the agent's to read.
 - Subagent and helper rows have their own page, [subagents.md](subagents.md).
 - While a reply runs and has ended at least one check, a polite line counts them (plain words in Projects) (R161 step 9):
   "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px

@@ -212,10 +212,44 @@ check('thread: a Codex work log reads cleanly: titles on their own lines, tidy c
   }
 });
 
-check('thread: the final answer is never cut, long commands are cut in the middle, and a command that looks like markup stays text', () => {
+// The 2026-10-29 live look: the running command showed in the opened work log and again as the latest line under it.
+check('thread: the running command shows once, in the opened work log or else in the latest line, also inside a run of commands', async () => {
   const root = document.createElement('div');
   document.body.append(root);
-  const long = `START ${'x'.repeat(300)} END`;
+  const running = (id: string, command: string) => ({ id, name: 'Bash', input: { command }, ok: undefined });
+  const [message, setMessage] = createSignal<Message>({ id: 'once', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [running('a', 'cargo build --release')] });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'once', options: [], onBranch: () => {},
+  }), root);
+  const toggled = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const latest = () => root.querySelector('.activity-latest')?.textContent ?? '';
+  try {
+    const log = root.querySelector<HTMLDetailsElement>('details.activity')!;
+    ok(latest().includes('cargo build'), 'closed, the latest line says the command');
+    log.open = true; await toggled();
+    equal(root.querySelector('.activity-latest'), null, 'open, the log is the one place the command shows');
+    ok(log.querySelector('.tools > span .live'), 'and the running step carries the running mark');
+    setMessage({ ...message(), text: 'Building it now.' });
+    equal(root.querySelector('.activity-latest.after'), null, 'nor under the words');
+    log.open = false; await toggled();
+    ok(root.querySelector('.activity-latest.after')?.textContent?.includes('cargo build'), 'closed again, the line under the words comes back');
+    setMessage({ ...message(), text: '', tools: [{ ...running('a', 'cargo build'), ok: true }, { ...running('b', 'cargo test'), ok: true }, running('c', 'cargo clippy')] });
+    log.open = true; await toggled();
+    const run = log.querySelector<HTMLDetailsElement>('details.step-group')!;
+    ok(latest().includes('cargo clippy'), 'a closed run of commands hides the step, so the latest line stays');
+    run.open = true; await toggled();
+    equal(root.querySelector('.activity-latest'), null, 'an opened run shows it, so the line goes');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: the final answer is never cut, a long command wraps inside a 720 px column, and a command that looks like markup stays text', () => {
+  const root = document.createElement('div');
+  root.style.width = '720px';
+  document.body.append(root);
+  const long = `START ${'x'.repeat(200)} END`;
   const markup = '<img src=x onerror=alert(1)> **not bold** & <b>raw</b>';
   const narration = 'Check\n\n';
   const answer = 'Checking files.';
@@ -234,9 +268,12 @@ check('thread: the final answer is never cut, long commands are cut in the middl
     group.open = true;
     equal(root.querySelector('.ai > .md')!.textContent?.trim(), answer, 'a status that only starts the answer does not cut it');
     ok(group.textContent?.includes('Check'), 'and stays in the activity');
+    group.querySelector<HTMLDetailsElement>('details.step-group')!.open = true;
     const [first, second] = [...group.querySelectorAll<HTMLElement>('.tools > span')];
-    const cut = first!.querySelector('i')!.textContent!;
-    ok(cut.includes('…') && cut.length <= 96 && cut.startsWith('START') && cut.endsWith('END'), cut);
+    equal(first!.querySelector('i')!.textContent, long, 'the whole command, never cut at the edge');
+    const box = first!.getBoundingClientRect();
+    ok(box.right <= root.getBoundingClientRect().right + 0.5, `it stays inside the column (${box.right})`);
+    ok(first!.querySelector('i')!.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(first!).lineHeight || '16'), 'it wraps onto a second line');
     equal(first!.title, long, 'the full command is the tooltip');
     equal(second!.querySelector('i')!.textContent, markup);
     equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
