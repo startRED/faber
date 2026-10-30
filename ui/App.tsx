@@ -1957,6 +1957,10 @@ ${copy().path}`}>
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
+                                    onOpenConversation={(id) => {
+                                      const to = state().conversations.find((conversation) => conversation.id === id);
+                                      if (to) openSummary(to);
+                                    }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
                                 )}

@@ -689,6 +689,23 @@ pub struct Estimate {
 pub struct PlanStep {
     pub text: String,
     pub state: StepState,
+    /// The conversation this one started that does the step (task 040), checked when the plan is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    /// For the screen only, like `Plan::estimate`: where that conversation stands now (`Core::shown_plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<MemberState>,
+}
+
+/// Where a plan step's conversation stands, in the words of a subagent row's states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberState {
+    Running,
+    Waiting,
+    Done,
+    Failed,
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -36,10 +36,40 @@ impl Core {
         let spent = c.spent_cents();
         let Some(e) = c.estimate.as_mut().filter(|e| !e.economy && progress::passed(e, spent)) else { return };
         e.economy = true;
-        let plan = c.shown_plan();
         self.save(conv);
+        let plan = self.shown_plan(conv);
         (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
         self.refresh_running();
+    }
+
+    /// The plan as the screen draws it: the estimate in it, and for each step a conversation this one started does, where that
+    /// conversation stands (task 040). One not in memory has run nothing since Faber started, so it reads as finished, as
+    /// the list of conversations reads it.
+    pub(super) fn shown_plan(&self, conv: &str) -> Option<Plan> {
+        let mut plan = self.convs.get(conv)?.shown_plan()?;
+        for step in &mut plan.steps {
+            step.member = step.conversation.as_deref().map(|id| match self.convs.get(id) {
+                Some(c) => siblings::member_state(self.live.get(id).is_some_and(|l| l.turn.is_some()), c),
+                None => MemberState::Done,
+            });
+        }
+        Some(plan)
+    }
+
+    /// The plans of conversations whose steps name one of `changed`, sent again: a step's state follows its conversation.
+    pub(super) fn plans_naming(&mut self, changed: &HashSet<String>) {
+        let leaders: Vec<String> = self
+            .convs
+            .iter()
+            .filter(|(_, c)| {
+                c.plan.as_ref().is_some_and(|p| p.steps.iter().any(|s| s.conversation.as_deref().is_some_and(|id| changed.contains(id))))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in leaders {
+            let plan = self.shown_plan(&id);
+            (self.emit)(AppEvent::Plan { conversation_id: id, plan });
+        }
     }
 
     pub(super) fn progress_call(&mut self, conv: &str, call: String, tool: &'static str, input: serde_json::Value) {
@@ -59,6 +89,17 @@ impl Core {
                 let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
                 let plan = progress::plan(c.plan.as_ref(), input, now())?;
+                // A step may only name a conversation this one started, so the plan never opens someone else's work.
+                let started = |id: &str| match self.convs.get(id) {
+                    Some(m) => m.started_by.as_deref() == Some(conv),
+                    None => self.store.get(id).is_some_and(|m| m.started_by.as_deref() == Some(conv)),
+                };
+                if let Some(id) = plan.iter().flat_map(|p| &p.steps).filter_map(|s| s.conversation.as_deref()).find(|id| !started(id)) {
+                    return Err(format!(
+                        "No step was changed: {id} is not a conversation you started. Give a step only the id that start answered."
+                    ));
+                }
+                let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
                 let mut shown = plan.as_ref().map(|p| p.count()).map_or("The plan is cleared.".to_string(), |n| {
                     format!("The person sees the plan: {} of {} steps done.", n.done, n.total)
                 });
@@ -66,8 +107,8 @@ impl Core {
                     shown = format!("{shown} {}", progress::ECONOMY_LINE);
                 }
                 (c.plan, c.estimate) = (plan, estimate);
-                let plan = c.shown_plan();
                 self.save(conv);
+                let plan = self.shown_plan(conv);
                 (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 self.refresh_running();
                 Ok(shown)
@@ -92,7 +133,7 @@ impl Core {
                 let ended = done && self.convs.get_mut(conv).and_then(|c| c.estimate.take()).is_some();
                 self.save(conv);
                 if ended {
-                    let plan = self.convs.get(conv).and_then(Conversation::shown_plan);
+                    let plan = self.shown_plan(conv);
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 }
                 self.push(conv, Some(&id), true);
