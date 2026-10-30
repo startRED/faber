@@ -5397,6 +5397,63 @@ async fn a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once()
     }
 }
 
+/// A team leader cut off by Faber closing, with no member left to wake it, goes on by itself once Faber opens again, with
+/// the turn Continue sends; a continue that was itself cut waits for the person, and a conversation that started nobody
+/// keeps its Continue button.
+#[tokio::test]
+async fn a_team_leader_cut_off_by_faber_closing_goes_on_once_when_no_member_will_wake_it() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let leader = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title": "Docs", "brief": "Do it."});
+    agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_1"}}}}})).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let mut child = next_pipe(&made).await;
+    child.say(json!({"type":"system","subtype":"init","session_id":"c1","model":"claude-haiku-5-5"})).await;
+    let member = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    let alone = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "on my own", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut own = next_pipe(&made).await;
+    own.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    agent.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Waiting on Docs."}}})).await;
+    until(&engine, &leader, |c| c.messages.last().is_some_and(|m| m.text.contains("Waiting on Docs."))).await;
+    engine.shutdown();
+    drop(engine);
+    // The member had finished and its report was taken in before the close: it owes nothing.
+    let file = dir.path().join("conversations").join(format!("{member}.json"));
+    let mut docs: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    docs.as_object_mut().unwrap().remove("pendingParentReport");
+    let reply = docs["messages"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap();
+    reply.remove("closed");
+    reply.insert("status".into(), json!("done"));
+    std::fs::write(&file, docs.to_string()).unwrap();
+    let continues = |engine: &Engine, id: &str| {
+        let c = engine.open(id).unwrap();
+        let closed = |wake: Option<&faber_engine::model::Wake>| wake.is_some_and(|w| w.why == "wake.closed");
+        c.messages.iter().filter(|m| closed(m.wake.as_ref())).count() + c.queued.iter().filter(|q| closed(q.wake.as_ref())).count()
+    };
+    for (round, expected) in [(0, 1), (1, 1)] {
+        let (spawn, _made) = pipes();
+        let reopened = two_vendors(&dir, spawn);
+        reopened.set_keep_going_pace(0.001);
+        reopened.resume_cut_leaders();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // The second opening finds the continue itself cut by the close: that one is the person's to resume.
+        assert_eq!(continues(&reopened, &leader), expected, "round {round}: one continue for the leader, never a second");
+        assert_eq!(continues(&reopened, &alone), 0, "round {round}: a conversation that started nobody waits for its Continue button");
+        assert!(reopened.open(&leader).unwrap().queued.is_empty(), "round {round}: the continue went out, not into the queue");
+        reopened.shutdown();
+    }
+}
+
 /// A conversation an agent started is never the person's own turn, even on a model picked by hand: once its AI turns out
 /// billed per use, it stops like a helper, while the person's own conversation on the same model goes on.
 #[tokio::test]
