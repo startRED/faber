@@ -2220,6 +2220,7 @@ export const ptBR: Messages = {
   'notes.307.better': 'As regras do projeto agora acompanham suas fontes e evitam ser reconstruídas quando as fontes e o arquivo gerado continuam iguais.',
   'notes.308.better': 'As IAs do projeto recebem suas decisões guardadas ao começar; mudanças nas aprovações renovam o contexto, preservando o histórico da conversa.',
   'notes.309.better': 'As respostas falam mais simples: "Nova conversa a partir daqui" no lugar de "Criar galho daqui", e os erros dizem o que houve sem termos técnicos.',
+  'notes.310.fixed': 'Com os passos abertos, o comando que a IA está rodando aparece uma vez só, e um comando longo quebra a linha em vez de ser cortado.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

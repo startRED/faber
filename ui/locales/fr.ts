@@ -2233,6 +2233,7 @@ export const fr: Messages = {
   'notes.307.better': 'Les règles du projet suivent désormais leurs sources et ne sont pas reconstruites si les sources et le fichier généré restent identiques.',
   'notes.308.better': 'Les IA du projet reçoivent vos décisions conservées au démarrage ; les changements dans vos décisions approuvées renouvellent leur contexte sans perdre la conversation.',
   'notes.309.better': 'Les réponses parlent plus simplement : « Nouvelle conversation à partir d’ici » au lieu de « Créer une branche ici », et les erreurs disent ce qui s’est passé sans mots techniques.',
+  'notes.310.fixed': "Quand les étapes sont ouvertes, la commande que l'IA exécute n'apparaît plus qu'une fois, et une commande longue passe à la ligne au lieu d'être coupée.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

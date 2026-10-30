@@ -2113,6 +2113,7 @@ export const en = {
   'notes.307.better': 'Project rules now track their sources and skip rebuilding when the sources and generated file are unchanged.',
   'notes.308.better': 'Project agents receive your kept decisions when starting; changed approvals refresh their context while preserving the conversation history.',
   'notes.309.better': 'Answers speak plainer: "New conversation from here" instead of "Branch from here", and errors say what happened without technical words.',
+  'notes.310.fixed': 'With the steps open, the command the AI is running shows once instead of twice, and a long one wraps instead of being cut.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

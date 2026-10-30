@@ -2233,6 +2233,7 @@ export const de: Messages = {
   'notes.307.better': 'Projektregeln erfassen jetzt ihre Quellen und werden bei unveränderten Quellen und unveränderter erzeugter Datei nicht neu aufgebaut.',
   'notes.308.better': 'Projekt-KIs erhalten beim Start deine gespeicherten Entscheidungen; geänderte Freigaben erneuern ihren Kontext und bewahren den Gesprächsverlauf.',
   'notes.309.better': 'Antworten sprechen einfacher: „Neue Unterhaltung ab hier“ statt „Ab hier abzweigen“, und Fehler sagen ohne Fachwörter, was passiert ist.',
+  'notes.310.fixed': 'Bei geöffneten Schritten erscheint der Befehl, den die KI gerade ausführt, nur noch einmal, und ein langer Befehl bricht um, statt abgeschnitten zu werden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -2233,6 +2233,7 @@ export const es: Messages = {
   'notes.307.better': 'Las reglas del proyecto ahora registran sus fuentes y evitan reconstruirse cuando las fuentes y el archivo generado siguen iguales.',
   'notes.308.better': 'Las IA del proyecto reciben tus decisiones guardadas al empezar; los cambios de aprobación renuevan el contexto sin perder la conversación.',
   'notes.309.better': 'Las respuestas hablan más claro: "Nueva conversación desde aquí" en lugar de "Crear rama desde aquí", y los errores dicen qué pasó sin palabras técnicas.',
+  'notes.310.fixed': 'Con los pasos abiertos, el comando que la IA está ejecutando aparece una sola vez, y uno largo pasa a la línea siguiente en vez de cortarse.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
