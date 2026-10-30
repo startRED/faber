@@ -32,6 +32,17 @@ from there. Faber's own checks need the Rust paths too, from the project folder'
 | It goes on while the owner is away | Keep going (R199) | product map, Keep going |
 | The owner gets the new build | A landed `feat`, `fix` or `perf` becomes a patch release (R130) and the installed Faber updates itself (R156) | product map, Public self-update |
 
+## Measuring when it splits
+
+`cargo run -p faber-engine --example leader_eval [-- claude|codex]` sends twelve hand-labelled requests (six big, six small)
+to fresh project conversations through the real engine and CLIs, on the owner's subscriptions, each in a throwaway
+repository under the system's temporary folder. A run stops when the reply ends, after three started conversations
+or after 150 seconds, and every conversation is then stopped. It prints, per request,
+the conversations started, the plan's steps and a verdict, then per vendor how many big requests started two or more
+conversations or planned three or more steps, and how many small ones started none (that one must stay 6 of 6), with
+tokens and dollars at API price. Run it before and after a change to the agent's instructions or tools
+(`engine/src/persona.rs`, `engine/src/sibling.rs`); `cargo test -p faber-engine --example leader_eval` checks its counting.
+
 ## What stays the owner's
 
 Direction, taste, money and license (AGENTS.md). The agent asks those in a question card inside its message and goes on
