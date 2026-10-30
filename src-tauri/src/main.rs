@@ -6,7 +6,6 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
-mod feed;
 mod folder;
 mod look;
 #[cfg(windows)]
@@ -38,7 +37,8 @@ use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::project::checks;
-use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
+use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest};
+use faber_host::{Host, Kind, Shell, Wiring};
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -55,6 +55,8 @@ use tauri_plugin_updater::Update;
 
 pub(crate) struct Faber {
     pub(crate) engine: Engine,
+    /// The commands any front end shares (R459); the ones this shell still answers itself are below.
+    pub(crate) host: Arc<Host>,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
     pub(crate) models: Mutex<Vec<ModelInfo>>,
     /// A newer version, already downloaded; it installs at the first idle moment (`update.rs`) or when Faber quits.
@@ -73,8 +75,43 @@ pub(crate) struct Faber {
     pub(crate) hidden: bool,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
-    /// What the screen last heard of each streaming reply, so an update carries only the steps that changed (`feed.rs`).
-    pub(crate) feed: Arc<Mutex<feed::Feed>>,
+}
+
+/// What the host calls back in this shell: the tray and keeping the PC awake hear each event, and the window receives it.
+struct TauriShell {
+    handle: AppHandle,
+    hidden: bool,
+    awake: Arc<Mutex<CountedAwake>>,
+    autostart: Arc<dyn AutostartKeeper>,
+}
+
+impl Shell for TauriShell {
+    fn heard(&self, e: &AppEvent) {
+        // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
+        // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
+        if let AppEvent::Running { revision, items } = e {
+            let active_turns: HashSet<String> = items.iter().map(|i| i.turn_id.clone()).collect();
+            lock(&self.awake).sync_runs(active_turns);
+            if !self.hidden {
+                let (app, revision, items) = (self.handle.clone(), *revision, items.clone());
+                tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+            }
+        }
+        if let AppEvent::Halted { title, why, vendor, .. } = e
+            && !self.hidden
+        {
+            let (app, title, why, vendor) = (self.handle.clone(), title.clone(), why.clone(), *vendor);
+            tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
+        }
+    }
+
+    fn shown_settings(&self, settings: Settings) -> Settings {
+        shown_settings(settings, self.autostart.as_ref())
+    }
+
+    fn emit(&self, event: &Value) {
+        let _ = self.handle.emit("faber:event", event);
+    }
 }
 
 type Res<T> = Result<T, String>;
@@ -144,13 +181,6 @@ fn shown_settings(settings: Settings, keeper: &dyn AutostartKeeper) -> Settings 
     settings
 }
 
-fn event_for_screen(event: AppEvent, keeper: &dyn AutostartKeeper) -> AppEvent {
-    match event {
-        AppEvent::Settings { settings } => AppEvent::Settings { settings: shown_settings(settings, keeper) },
-        event => event,
-    }
-}
-
 #[cfg(test)]
 mod settings_event_tests {
     use super::*;
@@ -165,9 +195,7 @@ mod settings_event_tests {
             appearance: Some(serde_json::from_value(serde_json::json!({"base":"unknown"})).unwrap()),
             ..Settings::default()
         };
-        let AppEvent::Settings { settings } = event_for_screen(AppEvent::Settings { settings: sparse }, &keeper) else {
-            panic!("settings event changed its type");
-        };
+        let settings = shown_settings(sparse, &keeper);
         assert_eq!(settings.notifications, Some(true));
         assert_eq!(settings.notification_sound, Some(true));
         assert_eq!(settings.keep_awake, Some(true));
@@ -176,9 +204,7 @@ mod settings_event_tests {
         assert!(settings.appearance.is_none(), "unusable saved appearances follow the ordinary response");
 
         let off = Settings { notifications: Some(false), notification_sound: Some(false), keep_awake: Some(false), ..Settings::default() };
-        let AppEvent::Settings { settings } = event_for_screen(AppEvent::Settings { settings: off }, &keeper) else {
-            panic!("settings event changed its type");
-        };
+        let settings = shown_settings(off, &keeper);
         assert_eq!(settings.notifications, Some(false));
         assert_eq!(settings.notification_sound, Some(false));
         assert_eq!(settings.keep_awake, Some(false));
@@ -208,62 +234,11 @@ fn main_window(app: &AppHandle) -> Option<tauri::Window> {
 
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
-    lock(&faber.feed).forget();
+    lock(&faber.host.feed).forget();
     let mut state = faber.engine.state();
     state.settings = shown_settings(std::mem::take(&mut state.settings), lock(&faber.autostart).as_ref());
     let look = look::stored(state.settings.appearance.as_ref());
     Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
-}
-
-#[tauri::command]
-async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> {
-    // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
-    lock(&faber.feed).forget();
-    Ok(faber.engine.open_for_screen(&id))
-}
-
-#[tauri::command]
-async fn create_chat_group(faber: State<'_, Faber>, name: String) -> Res<faber_engine::engine::ChatGroup> {
-    faber.engine.create_chat_group(&name)
-}
-
-#[tauri::command]
-async fn save_chat_group(
-    faber: State<'_, Faber>,
-    id: String,
-    name: Option<String>,
-    instructions: Option<String>,
-) -> Res<faber_engine::engine::ChatGroup> {
-    faber.engine.save_chat_group(&id, name.as_deref(), instructions.as_deref())
-}
-
-#[tauri::command]
-async fn add_chat_group_files(
-    faber: State<'_, Faber>,
-    id: String,
-    files: Vec<faber_engine::workspace::Attachment>,
-) -> Res<faber_engine::engine::ChatGroup> {
-    faber.engine.add_chat_group_files(&id, &files)
-}
-
-#[tauri::command]
-async fn remove_chat_group_file(faber: State<'_, Faber>, id: String, file_id: String) -> Res<faber_engine::engine::ChatGroup> {
-    faber.engine.remove_chat_group_file(&id, &file_id)
-}
-
-#[tauri::command]
-async fn remove_chat_group(faber: State<'_, Faber>, id: String) -> Res<()> {
-    faber.engine.remove_chat_group(&id)
-}
-
-#[tauri::command]
-async fn move_chat_to_group(faber: State<'_, Faber>, conversation_id: String, group_id: Option<String>) -> Res<()> {
-    faber.engine.move_chat_to_group(&conversation_id, group_id.as_deref())
-}
-
-#[tauri::command]
-async fn new_group_chat(faber: State<'_, Faber>, group_id: String) -> Res<Conversation> {
-    faber.engine.new_group_chat(&group_id).map(Conversation::for_screen)
 }
 
 struct SearchRequest {
@@ -529,67 +504,6 @@ async fn save_piece_value(faber: State<'_, Faber>, id: String, message_id: Strin
     tauri::async_runtime::spawn_blocking(move || engine.save_piece_value(&id, &message_id, block, value))
         .await
         .map_err(|_| "error.store.write".to_string())?
-}
-
-#[tauri::command]
-fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
-    faber.engine.set_utc_offset(utc_offset);
-}
-
-/// The window was shown, hidden or focused: the quota is read more often while it is open, and at once on focus.
-#[tauri::command]
-fn quota_attention(faber: State<'_, Faber>, visible: bool, focused: bool) {
-    faber.engine.set_attention(visible, focused);
-}
-
-#[tauri::command]
-fn answer_plan(faber: State<'_, Faber>, vendor: Vendor, plan: String) {
-    faber.engine.answer_plan(vendor, &plan);
-}
-#[tauri::command]
-fn approve_credits(faber: State<'_, Faber>, id: String, turn_id: String, vendor: Vendor) -> Res<()> {
-    faber.engine.approve_credits(&id, &turn_id, vendor)
-}
-#[tauri::command]
-fn move_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
-    faber.engine.move_turn(&id, &turn_id)
-}
-/// The person read the requests held back in a reply: they leave the "needs you" list.
-#[tauri::command]
-fn parked_seen(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
-    faber.engine.parked_seen(&id, &turn_id)
-}
-#[tauri::command]
-fn wait_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
-    faber.engine.wait_turn(&id, &turn_id)
-}
-
-#[tauri::command]
-async fn warm(faber: State<'_, Faber>, req: WarmRequest) -> Res<()> {
-    faber.engine.warm(req);
-    Ok(())
-}
-
-#[tauri::command]
-async fn forget_auto_learned(faber: State<'_, Faber>) -> Res<()> {
-    faber.engine.forget_auto_learned()
-}
-
-#[tauri::command]
-async fn route_draft(faber: State<'_, Faber>, req: WarmRequest, text: String) -> Res<()> {
-    faber.engine.route_draft(req, text);
-    Ok(())
-}
-
-#[tauri::command]
-async fn interrupt(faber: State<'_, Faber>, id: String) -> Res<()> {
-    faber.engine.interrupt(&id);
-    Ok(())
-}
-
-#[tauri::command]
-async fn answer(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> Res<()> {
-    faber.engine.answer(&id, &turn_id, &request_id, allow, always).await
 }
 
 #[tauri::command]
@@ -1811,14 +1725,6 @@ fn main() {
                 cookie_held,
                 cookie_forget,
                 state,
-                open,
-                create_chat_group,
-                save_chat_group,
-                add_chat_group_files,
-                remove_chat_group_file,
-                remove_chat_group,
-                move_chat_to_group,
-                new_group_chat,
                 search_messages,
                 prompt_history,
                 send,
@@ -1835,23 +1741,11 @@ fn main() {
                 visual_close,
                 visual_pieces,
                 save_piece_value,
-                warm,
-                set_clock,
-                quota_attention,
-                answer_plan,
-                approve_credits,
-                move_turn,
-                wait_turn,
-                parked_seen,
-                route_draft,
-                forget_auto_learned,
-                interrupt,
                 keep_going,
                 seen,
                 archive,
                 pin,
                 move_to_project,
-                answer,
                 answer_question,
                 approve_plan,
                 rename,
@@ -1955,6 +1849,19 @@ fn main() {
                     invoke.resolver.reject("Faber answers only its own screen");
                     return true;
                 }
+                // A command of the shared table runs there (R459); the rest are this shell's own, listed above.
+                if Host::kind(invoke.message.command()).is_some_and(|kind| kind != Kind::Window) {
+                    let host = invoke.message.webview().state::<Faber>().host.clone();
+                    let command = invoke.message.command().to_string();
+                    let args = match invoke.message.payload() {
+                        tauri::ipc::InvokeBody::Json(args) => args.clone(),
+                        tauri::ipc::InvokeBody::Raw(_) => Value::Null,
+                    };
+                    invoke
+                        .resolver
+                        .respond_async(async move { host.dispatch(&command, args).await.map_err(tauri::ipc::InvokeError::from) });
+                    return true;
+                }
                 handler(invoke)
             }
         })
@@ -1995,30 +1902,12 @@ fn main() {
             };
             let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake();
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
-            let awake_for_emit = awake.clone();
-            let autostart_for_emit = autostart_keeper.clone();
-            let feed = Arc::new(Mutex::new(feed::Feed::default()));
-            let feed_for_emit = feed.clone();
-            let emit = Arc::new(move |e: AppEvent| {
-                // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
-                // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
-                if let AppEvent::Running { revision, items } = &e {
-                    let active_turns: HashSet<String> = items.iter().map(|i| i.turn_id.clone()).collect();
-                    lock(&awake_for_emit).sync_runs(active_turns);
-                    if !hidden {
-                        let (app, revision, items) = (handle.clone(), *revision, items.clone());
-                        tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
-                    }
-                }
-                if let AppEvent::Halted { title, why, vendor, .. } = &e
-                    && !hidden
-                {
-                    let (app, title, why, vendor) = (handle.clone(), title.clone(), why.clone(), *vendor);
-                    tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
-                }
-                let event = lock(&feed_for_emit).shrink(event_for_screen(e, autostart_for_emit.as_ref()));
-                let _ = handle.emit("faber:event", event);
-            });
+            let wiring = Wiring::new(Arc::new(TauriShell {
+                handle: handle.clone(),
+                hidden,
+                awake: awake.clone(),
+                autostart: autostart_keeper.clone(),
+            }));
             let opts = EngineOptions {
                 data_dir: data_dir.clone(),
                 clis: clis.clone(),
@@ -2030,7 +1919,7 @@ fn main() {
                 runtime: tauri::async_runtime::handle().inner().clone(),
                 ask: None,
             };
-            let engine = Engine::new(opts, emit)?;
+            let engine = Engine::new(opts, wiring.emitter())?;
             engine.measure_unix_worker_memory();
             if let Some(dir) = installed_data_dir(hidden) {
                 engine.set_installed_data(dir);
@@ -2058,8 +1947,10 @@ fn main() {
                 let engine = engine.clone();
                 tauri::async_runtime::spawn_blocking(move || engine.sweep_copies());
             }
+            let host = Arc::new(wiring.host(engine.clone()));
             app.manage(Faber {
                 engine,
+                host,
                 models: Mutex::default(),
                 update: Mutex::default(),
                 stage: Mutex::default(),
@@ -2070,7 +1961,6 @@ fn main() {
                 hidden,
                 awake,
                 autostart: Mutex::new(autostart_keeper),
-                feed,
             });
             // R161 step 7: Faber's own browser, for a project's agent. Windows only for now: its page is driven through WebView2.
             #[cfg(windows)]

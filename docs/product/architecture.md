@@ -7,6 +7,7 @@ How Faber is built and updated, what makes it better over time, and the curated 
 ```text
 App (Tauri 2: window, tray, notifications, auto-update)
  └─ UI (SolidJS + TypeScript, in the system webview) ── fixed command list ──┐
+Host (Rust, `host/`): the command table every front end calls (window, command line, tests) ─┘
 Engine (Rust crate inside the app today; a separate process later, so work survives the app)
  ├─ Lead agent: live CLI session + Faber toolbox (MCP)
  ├─ Drivers: Claude Code (stream-json), Codex (app-server)
@@ -24,6 +25,10 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   no choice. The cost: three webviews instead of one Chromium (WebView2, WebKit on macOS, WebKitGTK on Linux), so
   anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
   tagged as `electron-f1`.
+- **Moving to Electron (R459, started 2026-10-29).** One Chromium on every system, with everything that is not
+  Chromium, V8 or the screen in Rust. The commands already live in one table, `host/` (`Host::dispatch`), which the
+  Tauri shell relays to and the Electron one will too; the plan and its phases are in
+  `docs/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
   complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the
   lightest and most responsive result it can reach. Anything that keeps a

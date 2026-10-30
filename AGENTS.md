@@ -107,6 +107,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
   about windows.
+- `host/`: the commands Faber answers, in one table every front end calls (R459): the window, the command line,
+  tests. Being filled while the shell moves from Tauri to Electron.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
 - `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
   The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
