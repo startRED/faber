@@ -1,7 +1,7 @@
 //! The context meter and the agent compacting itself (conversation tool: `context`, `compact`). Claude Code is driven by hand
 //! (`pipes`), Codex by a small app-server that speaks the notifications recorded from Codex 0.162.1 and Claude Code 2.1.302.
 
-use crate::support::{Pipe, next_pipe, pipes};
+use crate::support::{self, Pipe, next_pipe, pipes};
 use faber_engine::cli::Cli;
 use faber_engine::model::{Area, ContextFill, Conversation, Role, RunState, Settings, Status, Vendor};
 use faber_engine::proc::{Proc, Spawner};
@@ -106,24 +106,12 @@ fn text_of(content: &Value) -> String {
 }
 
 async fn until_turns(pipe: &Pipe, n: usize) {
-    for _ in 0..300 {
-        if turns(pipe).len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the CLI got {} turns, not {n}: {:?}", turns(pipe).len(), turns(pipe));
+    support::until(&format!("the CLI never got {n} turns"), || turns(pipe).len() >= n).await;
 }
 
 async fn until(engine: &Engine, id: &str, done: impl Fn(&Conversation) -> bool) -> Conversation {
-    for _ in 0..300 {
-        let c = engine.open(id).unwrap();
-        if done(&c) {
-            return c;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the conversation never got there: {:?}", engine.open(id).unwrap());
+    support::until("the conversation never got there", || done(&engine.open(id).unwrap())).await;
+    engine.open(id).unwrap()
 }
 
 fn idle(c: &Conversation) -> bool {
@@ -161,15 +149,15 @@ async fn tool(agent: &mut Pipe, n: u64, args: Value) -> (bool, String) {
     agent.say(json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "content": [{ "type": "tool_use", "id": format!("toolu_{n}"),
         "name": "mcp__faber__conversation", "input": args }] } })).await;
     agent.say(json!({ "type": "control_request", "request_id": request, "request": { "subtype": "mcp_message", "server_name": "faber", "message": message } })).await;
-    for _ in 0..300 {
-        let found = agent.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request.as_str()).cloned();
-        if let Some(m) = found {
-            let r = &m["response"]["response"]["mcp_response"]["result"];
-            return (r["isError"] == false, r["content"][0]["text"].as_str().unwrap_or_default().to_string());
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{request} was never answered");
+    let mut found = None;
+    support::until(&format!("{request} was never answered"), || {
+        found = agent.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request.as_str()).cloned();
+        found.is_some()
+    })
+    .await;
+    let m = found.unwrap();
+    let r = &m["response"]["response"]["mcp_response"]["result"];
+    (r["isError"] == false, r["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
 /// The line Faber sends to compact: the CLI's command with what the summary must keep.
@@ -405,12 +393,8 @@ async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() 
         })
         .unwrap();
     engine.interrupt(&id);
-    for _ in 0..300 {
-        if agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the CLI was never told to stop", || agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt"))
+        .await;
     assert!(agent.lines.lock().unwrap().iter().any(|m| m["request"]["subtype"] == "interrupt"), "the CLI was never told to stop");
     compacts(&mut agent, 900).await;
     until(&engine, &id, |c| !c.compacting).await;
@@ -602,12 +586,7 @@ async fn compact_now_starts_claude_code_again_when_its_idle_process_was_closed()
     let (engine, _rx, mut agent, id, made) = started_with(&dir, project.path(), Duration::from_millis(100), 3).await;
     answers(&mut agent, "The login page works.", true).await;
     until(&engine, &id, idle).await;
-    for _ in 0..300 {
-        if agent.closed.load(std::sync::atomic::Ordering::SeqCst) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the idle process stayed open", || agent.closed.load(std::sync::atomic::Ordering::SeqCst)).await;
     assert!(agent.closed.load(std::sync::atomic::Ordering::SeqCst), "the idle process stays open");
     engine.compact_now(&id).unwrap();
     let mut again = next_pipe(&made).await;
@@ -639,14 +618,12 @@ async fn the_meter_asks_claude_code_what_fills_the_context_without_a_turn() {
     until(&engine, &id, idle).await;
     assert!(engine.context_parts(&id));
     let mut request = None;
-    for _ in 0..300 {
+    support::until("no get_context_usage request", || {
         request = agent.lines.lock().unwrap().iter().find(|m| m["request"]["subtype"] == "get_context_usage").cloned();
-        if request.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let request = request.expect("no get_context_usage request");
+        request.is_some()
+    })
+    .await;
+    let request = request.unwrap();
     assert_eq!(request["request"]["detail"], "summary", "a summary sends no token-count request");
     assert_eq!(turns(&agent).len(), 1, "no turn for it");
     // The shape of Claude Code's answer (SDKControlGetContextUsageResponse), cut to what Faber reads.
@@ -666,19 +643,17 @@ async fn the_meter_asks_claude_code_what_fills_the_context_without_a_turn() {
             "response": { "categories": categories, "totalTokens": 59000, "maxTokens": 1_000_000, "percentage": 5.9 } } }))
         .await;
     let mut parts = None;
-    for _ in 0..300 {
+    support::until("no parts", || {
         while let Ok(e) = rx.try_recv() {
             if let AppEvent::ContextParts { conversation_id, parts: p } = e {
                 assert_eq!(conversation_id, id);
                 parts = Some(p);
             }
         }
-        if parts.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let parts: Vec<(String, u64)> = parts.expect("no parts").into_iter().map(|p| (p.key, p.tokens)).collect();
+        parts.is_some()
+    })
+    .await;
+    let parts: Vec<(String, u64)> = parts.unwrap().into_iter().map(|p| (p.key, p.tokens)).collect();
     assert_eq!(
         parts,
         vec![
@@ -734,13 +709,10 @@ async fn progress(agent: &mut Pipe, request: &str, tool: &str, input: Value) {
         .say(json!({ "type": "control_request", "request_id": request,
         "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
         .await;
-    for _ in 0..300 {
-        if agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("Faber never answered the {tool} call");
+    support::until(&format!("Faber never answered the {tool} call"), || {
+        agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request)
+    })
+    .await;
 }
 
 /// A Keep going turn whose main thread held `read` tokens, closing a task with a box or not.
@@ -938,13 +910,7 @@ async fn a_compaction_that_takes_too_long_is_told_then_stopped_and_the_queue_goe
     walk(899.0);
     assert!(!interrupted(), "told, not stopped, before the deadline");
     walk(900.0);
-    for _ in 0..300 {
-        if interrupted() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(interrupted(), "the CLI was told to stop at the deadline");
+    support::until("the CLI was never told to stop at the deadline", interrupted).await;
     // The CLI ends it as interrupted: a compaction that failed. The context is the one before, and the queue goes on.
     answers(&mut agent, "", false).await;
     until_turns(&agent, 3).await;

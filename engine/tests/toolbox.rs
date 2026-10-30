@@ -42,7 +42,7 @@ fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: faber_engine:
 }
 
 async fn wire(pipe: &Pipe, ready: impl Fn(&Value) -> bool) -> Value {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(support::DEADLINE, async {
         loop {
             if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| ready(m)).cloned() {
                 return m;
@@ -286,6 +286,7 @@ async fn creative_codex_tool_uses_two_fresh_isolated_threads_without_dynamic_too
     let init = wire(&judges, |m| m["method"] == "initialize").await;
     judges.say(json!({"id":init["id"],"result":{}})).await;
     let mut configs = Vec::new();
+    // Not a poll: each judge reads its config once.
     for _ in 0..2 {
         let config = wire(&judges, |m| m["method"] == "config/read" && !configs.contains(&m["id"])).await;
         judges.say(json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
@@ -570,15 +571,7 @@ async fn a_conversation_whose_project_was_removed_is_told_so_and_searches_nothin
     pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s1", "model": "claude-haiku-5-5" })).await;
     pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
     // A project with a running turn cannot be removed: wait for the turn to end.
-    let mut removed = false;
-    for _ in 0..300 {
-        if app.remove_project(&project).is_ok() {
-            removed = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(removed, "the project could not be removed");
+    support::until("the project could not be removed", || app.remove_project(&project).is_ok()).await;
     let (text, error) = claude_call(&mut pipe, "gone", "memory_search", json!({ "query": "zebra" })).await;
     assert!(error && text.contains("only for a project's own agent") && !text.contains("stripes"), "{text}");
     app.shutdown();
@@ -635,6 +628,7 @@ impl Serve {
         let (seen, gate) = (hits.clone(), open.clone());
         let server = crate::loopback::Server::start(move |_, path, stream| {
             seen.fetch_add(1, SeqCst);
+            // A sync server thread cannot await the shared helper.
             for _ in 0..2000 {
                 if gate.load(SeqCst) {
                     break;
@@ -745,14 +739,9 @@ impl Agent {
     }
 
     async fn card(&self) -> (String, Permission) {
-        for _ in 0..300 {
-            let (turn, mut cards) = self.cards();
-            if !cards.is_empty() {
-                return (turn, cards.remove(0));
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("no install card: {:?}", self.conversation().messages.last());
+        support::until("no install card appeared", || !self.cards().1.is_empty()).await;
+        let (turn, mut cards) = self.cards();
+        (turn, cards.remove(0))
     }
 
     async fn answer(&self, call: &str, allow: bool, always: bool) -> Result<(), String> {
@@ -962,12 +951,7 @@ async fn an_answer_after_the_turn_ended_is_stale_and_installs_nothing() {
     agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
     let (turn, _) = agent.card().await;
     agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-    for _ in 0..300 {
-        if agent.cards().1.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the card did not go with the turn", || agent.cards().1.is_empty()).await;
     assert!(agent.cards().1.is_empty(), "the card goes with the turn");
     assert!(agent.app.answer(&agent.id, &turn, "toolu_i1", true, true).await.unwrap_err().contains("stale"));
     assert_eq!(agent.conversation().allow_always, None);
@@ -991,14 +975,12 @@ async fn codex_asks_before_it_installs_through_its_dynamic_tool_too() {
         "tool":"catalog","arguments":{"install":"ponytail"}}}))
         .await;
     let mut waiting = None;
-    for _ in 0..300 {
+    support::until("the card never came", || {
         let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
-        if let Some(card) = reply.permissions.iter().flatten().find(|p| p.tool == CARD) {
-            waiting = Some((reply.id.clone(), card.clone()));
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+        waiting = reply.permissions.iter().flatten().find(|p| p.tool == CARD).map(|card| (reply.id.clone(), card.clone()));
+        waiting.is_some()
+    })
+    .await;
     let (turn, card) = waiting.expect("the card");
     assert_eq!((card.request_id.as_str(), card.input["id"].as_str()), ("call-910", Some("ponytail")));
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1123,35 +1105,26 @@ async fn an_app_update_waits_for_an_install_the_agent_was_allowed_to_start_even_
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![careful("0123")]).await;
     agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
     agent.answer("toolu_i1", true, false).await.unwrap();
-    for _ in 0..500 {
-        if agent.serve.hits() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the download never began", || agent.serve.hits() > 0).await;
     assert_eq!(agent.serve.hits(), 1, "the download has begun and is held");
     // Stop: the turn ends, nothing is left in the running list, and the install goes on.
     agent.app.interrupt(&agent.id);
     agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-    for _ in 0..500 {
-        if agent.conversation().messages.last().is_some_and(|m| m.status != Some(faber_engine::model::Status::Streaming)) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the turn never ended", || {
+        agent.conversation().messages.last().is_some_and(|m| m.status != Some(faber_engine::model::Status::Streaming))
+    })
+    .await;
     assert!(agent.conversation().messages.last().is_some_and(|m| m.status != Some(faber_engine::model::Status::Streaming)));
     assert!(agent.app.is_working(), "an install in flight is work");
     assert_eq!(agent.app.install_admission().err().as_deref(), Some("error.update.activeOperations"), "so no update installs under it");
 
     agent.serve.open.store(true, SeqCst);
     let mut admitted = None;
-    for _ in 0..500 {
-        if let Ok(guard) = agent.app.install_admission() {
-            admitted = Some(guard);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the update was never admitted", || {
+        admitted = agent.app.install_admission().ok();
+        admitted.is_some()
+    })
+    .await;
     assert!(admitted.is_some(), "the update is admitted once the install ended");
     assert!(!agent.app.is_working());
     let data = agent.dir.path();
@@ -1341,12 +1314,7 @@ async fn a_second_install_of_one_id_while_one_runs_is_refused_and_the_first_fini
     let mut agent = claude_project_with(Permissions::Ask, Serve::new(careful_zip(), true), vec![careful("0123")]).await;
     agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
     agent.call("rpc1", "toolu_i1", json!({ "install": "careful" })).await;
-    for _ in 0..500 {
-        if agent.serve.hits() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the download never began", || agent.serve.hits() > 0).await;
     assert_eq!(agent.serve.hits(), 1, "the first download has begun and is held");
     agent.call("rpc2", "toolu_i2", json!({ "install": "careful" })).await;
     let (text, error) = agent.reply("rpc2").await;
@@ -1424,14 +1392,14 @@ impl Agent {
 
     /// The question card of the offer `call`, once it is on the turn, with the turn's id.
     async fn question(&self, call: &str) -> (String, Permission) {
-        for _ in 0..300 {
+        let mut found = None;
+        support::until("no question card appeared", || {
             let (turn, cards) = self.waiting();
-            if let Some(card) = cards.into_iter().find(|p| p.request_id == call) {
-                return (turn, card);
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("no question card: {:?}", self.conversation().messages.last());
+            found = cards.into_iter().find(|p| p.request_id == call).map(|card| (turn, card));
+            found.is_some()
+        })
+        .await;
+        found.unwrap()
     }
 }
 
@@ -1602,13 +1570,7 @@ async fn a_request_that_carries_the_engine_s_bigger_mark_is_shown_without_it() {
     // The CLI's own question is answered to the CLI, never taken for Faber's offer.
     agent.app.answer_question(&agent.id, &turn, "ask", pick("A")).await.unwrap();
     let answered = || agent.pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "ask");
-    for _ in 0..50 {
-        if answered() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(answered(), "the answer went to the CLI as its control response");
+    support::until("the answer never went to the CLI as its control response", answered).await;
     agent.app.shutdown();
 }
 
@@ -1654,14 +1616,12 @@ async fn codex_offers_the_bigger_version_through_its_dynamic_tool_and_gets_the_a
         "tool":"offer_bigger","arguments":offer()}}))
         .await;
     let mut waiting = None;
-    for _ in 0..300 {
+    support::until("the card never came", || {
         let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
-        if let Some(card) = reply.permissions.iter().flatten().find(|p| p.request_id == "call-920") {
-            waiting = Some((reply.id.clone(), card.clone()));
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+        waiting = reply.permissions.iter().flatten().find(|p| p.request_id == "call-920").map(|card| (reply.id.clone(), card.clone()));
+        waiting.is_some()
+    })
+    .await;
     let (turn, card) = waiting.expect("the card");
     assert_eq!(card.input["questions"][0]["options"], json!([{ "label": ASKED }, { "label": BIGGER }]));
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1744,12 +1704,7 @@ async fn catalog_switch_deny_stale_answer_and_unwritable_log_preserve_the_store(
                 agent.app.interrupt(&agent.id);
             }
             agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-            for _ in 0..300 {
-                if agent.cards().1.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
+            support::until("the card did not go with the turn", || agent.cards().1.is_empty()).await;
             assert!(agent.app.answer(&agent.id, &turn, "off_call", true, true).await.is_err());
             assert!(agent.log().is_empty());
         } else {
@@ -1971,12 +1926,7 @@ async fn catalog_remove_stale_turn_and_parallel_calls_cannot_spend_consent() {
     agent.call("parallel", "parallel", json!({ "remove": "careful" })).await;
     assert!(agent.reply("parallel").await.1);
     agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-    for _ in 0..300 {
-        if agent.cards().1.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the card did not go with the turn", || agent.cards().1.is_empty()).await;
     assert!(agent.app.answer(&agent.id, &turn, "remove_call", true, true).await.is_err());
     assert!(store.installed().contains_key("careful"));
     assert!(agent.log().is_empty());
@@ -2201,12 +2151,7 @@ async fn catalog_repair_cannot_spend_an_ended_turn_or_an_install_grant() {
     agent.call("parallel", "parallel", json!({ "repair": "careful" })).await;
     assert!(agent.reply("parallel").await.1);
     agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-    for _ in 0..300 {
-        if agent.cards().1.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the card did not go with the turn", || agent.cards().1.is_empty()).await;
     assert!(agent.app.answer(&agent.id, &turn, "repair_call", true, true).await.is_err());
     assert!(!store.enabled("careful"));
     assert_eq!(agent.serve.hits(), 0);
@@ -2223,20 +2168,10 @@ async fn catalog_repair_ending_during_download_keeps_original_bytes() {
     agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
     let before = tree(&agent.dir.path().join("tools"));
     agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
-    for _ in 0..500 {
-        if agent.serve.hits() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the download never began", || agent.serve.hits() > 0).await;
     assert_eq!(agent.serve.hits(), 1);
     agent.pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {} })).await;
-    for _ in 0..300 {
-        if agent.conversation().messages.last().unwrap().status == Some(Status::Done) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the turn never finished", || agent.conversation().messages.last().unwrap().status == Some(Status::Done)).await;
     assert_eq!(agent.conversation().messages.last().unwrap().status, Some(Status::Done));
     agent.serve.open.store(true, SeqCst);
     assert!(agent.reply("repair").await.1);
@@ -2269,12 +2204,7 @@ async fn catalog_repair_stop_before_cli_ack_revokes_a_downloaded_replacement() {
     agent.app.save_settings(Settings { faber_trust: Some(true), ..Settings::default() }).unwrap();
     let before = tree(&agent.dir.path().join("tools"));
     agent.call("repair", "repair_call", json!({ "repair": "careful" })).await;
-    for _ in 0..500 {
-        if agent.serve.hits() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the download never began", || agent.serve.hits() > 0).await;
     assert_eq!(agent.serve.hits(), 1);
     agent.app.interrupt(&agent.id);
     agent.serve.open.store(true, SeqCst);
