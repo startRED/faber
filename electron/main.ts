@@ -33,6 +33,11 @@ protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: 
 // Features Faber does not use stay off; each one costs memory in every renderer.
 app.commandLine.appendSwitch('disable-features', 'SpareRendererForSitePerProcess,MediaRouter,Translate');
 app.commandLine.appendSwitch('disable-spell-checking');
+// The screen fetches nothing from the network (its policy allows only its own scheme), so the network service runs
+// inside the main process instead of one of its own: about 10 MB private and 50 MB working set less, measured.
+app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
+// The GPU process is ended on purpose whenever the window closes (`releaseGpu`); that must not count as crashes.
+app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -149,10 +154,27 @@ function createWindow(): BrowserWindow {
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   window.on('closed', () => {
     if (win === window) win = null;
+    releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
   });
   void window.loadURL(`${ORIGIN}/index.html`);
   return window;
+}
+
+/**
+ * With no window open nothing is drawn, yet Chromium keeps its GPU process and the 150 MB or so of buffers it holds
+ * (measured on the owner's PC). It is ended here and Chromium starts a fresh one when a window opens again; the crash
+ * limit is lifted below so closing to the tray many times never drops the screen to software drawing.
+ */
+function releaseGpu(): void {
+  if (BrowserWindow.getAllWindows().length > 0) return;
+  for (const metric of app.getAppMetrics()) {
+    if (metric.type === 'GPU') {
+      try {
+        process.kill(metric.pid);
+      } catch {}
+    }
+  }
 }
 
 function reveal(window: BrowserWindow): void {
