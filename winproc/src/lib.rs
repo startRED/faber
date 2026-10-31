@@ -44,9 +44,13 @@ mod locale;
 pub use locale::user_language;
 #[cfg(windows)]
 mod pipe;
+#[cfg(windows)]
+mod user_file;
 pub use files::{open_catalog_file, open_plain_file};
 #[cfg(windows)]
 pub use pipe::{PipeClient, pipe_peer_is_user, user_pipe};
+#[cfg(windows)]
+pub use user_file::write_user_only;
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]

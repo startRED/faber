@@ -53,8 +53,8 @@ pub fn parse_from_faber(line: &str) -> Option<FromFaber> {
     Some(FromFaber::Reply { id, result: Err(err) })
 }
 
-/// Reads one line without its end. None at the end of the stream; an error for a line past `MAX_LINE` or not UTF-8.
-pub async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R, buffer: &mut Vec<u8>) -> std::io::Result<Option<String>> {
+/// Reads one line without its end. None at the end of the stream; an error for a line past `limit` or not UTF-8.
+pub async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R, buffer: &mut Vec<u8>, limit: usize) -> std::io::Result<Option<String>> {
     buffer.clear();
     loop {
         let chunk = reader.fill_buf().await?;
@@ -67,7 +67,7 @@ pub async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R, buffer: &mut Vec
         };
         buffer.extend_from_slice(&chunk[..taken]);
         reader.consume(taken);
-        if buffer.len() > MAX_LINE {
+        if buffer.len() > limit {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "line too long"));
         }
         if done {
@@ -109,9 +109,9 @@ mod tests {
     async fn lines_end_at_newline_drop_cr_and_keep_the_last_unterminated_one() {
         let mut reader = tokio::io::BufReader::new(&b"one\r\ntwo\nthree"[..]);
         let mut buffer = Vec::new();
-        assert_eq!(read_line(&mut reader, &mut buffer).await.unwrap().as_deref(), Some("one"));
-        assert_eq!(read_line(&mut reader, &mut buffer).await.unwrap().as_deref(), Some("two"));
-        assert_eq!(read_line(&mut reader, &mut buffer).await.unwrap().as_deref(), Some("three"));
-        assert_eq!(read_line(&mut reader, &mut buffer).await.unwrap(), None);
+        assert_eq!(read_line(&mut reader, &mut buffer, MAX_LINE).await.unwrap().as_deref(), Some("one"));
+        assert_eq!(read_line(&mut reader, &mut buffer, MAX_LINE).await.unwrap().as_deref(), Some("two"));
+        assert_eq!(read_line(&mut reader, &mut buffer, MAX_LINE).await.unwrap().as_deref(), Some("three"));
+        assert_eq!(read_line(&mut reader, &mut buffer, MAX_LINE).await.unwrap(), None);
     }
 }

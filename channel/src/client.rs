@@ -34,7 +34,13 @@ fn closed() -> io::Error {
 
 impl Client {
     /// Connects to the Faber whose data is in `data`. `NotFound` means no Faber serves it.
-    pub async fn connect(data: &Path, hello: Hello) -> io::Result<Client> {
+    pub async fn connect(data: &Path, mut hello: Hello) -> io::Result<Client> {
+        if hello.secret.is_empty() {
+            hello.secret = crate::secret::Secret::read(data).map_err(|e| io::Error::new(io::ErrorKind::NotFound, e))?.hex();
+        }
+        if hello.token.is_none() {
+            hello.token = std::env::var("FABER_AGENT_TOKEN").ok();
+        }
         match Address::of(data) {
             Address::Pipe(name) => Client::over(open_pipe(&name).await?, hello).await,
             Address::Socket(path) => Client::over(open_socket(&path).await?, hello).await,
@@ -59,7 +65,7 @@ impl Client {
             let mut reader = BufReader::new(read);
             let mut buffer = Vec::new();
             let mut lagging = false;
-            while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer).await {
+            while let Ok(Some(line)) = wire::read_line(&mut reader, &mut buffer, wire::MAX_LINE).await {
                 match wire::parse_from_faber(&line) {
                     Some(FromFaber::Reply { id, result }) => {
                         let asker = waiting.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|w| w.remove(&id));

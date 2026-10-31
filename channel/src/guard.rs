@@ -13,10 +13,6 @@ pub const MAX_RUNNING: usize = 2;
 pub const MAX_PER_HOUR: usize = 20;
 const HOUR: Duration = Duration::from_secs(3600);
 
-/// What only the person decides, so an AI client never sends it: answering a card (its own or another conversation's),
-/// paying for credits and changing Settings, where the permission mode lives (`error.channel.personOnly`).
-pub const PERSON_ONLY: &[&str] = &["answer", "answer_question", "approve_plan", "answer_plan", "approve_credits", "save_settings"];
-
 #[derive(Default)]
 struct Seen {
     /// Turns admitted whose answer has not come yet: they count as running, so requests sent together cannot pass the limit.

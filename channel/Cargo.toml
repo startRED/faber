@@ -17,6 +17,9 @@ host = ["dep:faber-engine", "dep:faber-host"]
 [dependencies]
 faber-engine = { path = "../engine", optional = true }
 faber-host = { path = "../host", optional = true }
+base64 = "0.23"
+sha2 = "0.10"
+getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
@@ -26,12 +29,12 @@ faber-winproc = { path = "../winproc" }
 
 [target.'cfg(unix)'.dependencies]
 # The user id a peer must share (`geteuid`), without unsafe code here.
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "fs"] }
 
 [dev-dependencies]
 faber-engine = { path = "../engine" }
 tempfile = "3"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time", "test-util"] }
 
 # Faber's real table over the channel, which needs the engine.
 [[test]]
