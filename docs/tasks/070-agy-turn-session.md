@@ -1,35 +1,45 @@
-# A Gemini conversation in a project runs a turn, stops, and resumes
+# An Antigravity conversation runs a turn, stops, and resumes
 
 Area: Projects
 Files: engine/src/agy.rs, engine/src/engine.rs, engine/src/proc.rs, engine/src/events.rs, testkit/src/fake.rs, engine/tests/agy_session.rs, docs/product-map.md
-Depends: agy-reply-parser
-Size: about 400 changed lines
+Depends: antigravity-driver, agy-sign-in-and-setup, agy-reply-parser
+Size: re-estimate after the authenticated ACP recording; no driver implementation is authorized by this brief alone.
 
-Why: with the variant (`gemini-vendor-variant`) and the parser (`agy-reply-parser`), a team conversation can only run on Gemini once
-a process starts it. Sessions are built in `engine/src/engine.rs` (`match pick.vendor { Vendor::Claude => start_claude(...),
-Vendor::Codex => ... }`) and all return `events::Session`, which the engine drives without knowing the AI. Child processes never go
-through a shell and are owned by a job so they die with the turn (AGENTS.md; `engine/src/proc.rs`, `winproc/`); Windows is the
-first target and macOS only keeps compiling.
+Blocked: ACP's own sign-in and authenticated protocol evidence. Do not implement or enable a provider mode until the
+prerequisites below are proved. The sign-in dependency is deliberate: the CLI's existing login did not authenticate
+ACP. The sign-in task must cover the chosen ACP component's own official flow, not just CLI discovery.
 
-Build `agy::start_agy(options, sink) -> Session` for Projects only (Chat and Auto's router do not offer Gemini yet): the command
-line from the facts recorded in `docs/dev/antigravity-cli.md` (print mode with stream-json in and out, `--model`/`--effort`
-from the pick, the working folder, `--add-dir` for the project's other folders as the other drivers pass them, isolation settings
-so the owner's own memory, skills, plugins and MCP servers stay out), Faber's permission modes mapped to what the CLI supports
-(Full access to `--dangerously-skip-permissions`, Accept edits to `--mode accept-edits`, Plan to `--mode plan`, Auto to `--mode
-auto`; Ask, which needs a card the CLI cannot raise in print mode if the recording shows that, runs as Accept edits and the
-screen says so, exactly as Auto already does for a CLI without an auto mode), the prompt on stdin or in the argument as recorded,
-the resume of a conversation with `--conversation <id>` from the id the parser returned, Stop (the interrupt and the end of the
-process tree, no console window on Windows), a turn that ends, and a process that dies. The session offers no Faber tool
-(`conversations`, `helper`, `plan` flags false; a Gemini member reports in its final answer, which `tell_parent` already carries to
-its leader); say so in the product map. Replace the error key of `gemini-vendor-variant` with the real start.
+Read R160, R470, R472 and R482 in `docs/decisions.md`, `010-antigravity-driver.md`, and the dated follow-up in
+`docs/research/2026-10-29-t3code-study.md`. `docs/dev/antigravity-cli.md` records the direct CLI format; it is not an ACP
+contract. Direct-print fixtures cannot prove ACP questions, permissions, cancellation or resume.
 
-Leave out: Faber's tools for Gemini (a later task if the recorded MCP facts allow it), sign-in and setup (`agy-sign-in-and-setup`),
-quota and routing, the screen.
+Evidence on 2026-10-30: direct `agy` 1.4.11 print mode skipped an explicit `ask_question` without an answerable payload.
+ACP 1.4.1 initialized as the truthful client `faber` with protocol 2, then `session/new` returned `-32000`,
+`Authentication required`. Advertised resume capabilities are not proof of an authenticated resumed turn. Selected
+metadata is in `.faber/verify/agy-acp-probe/receipt.log` in the study copy; repeat the probe if unavailable.
+Never read, copy or transfer credentials from the CLI to ACP. The person completes the component's own sign-in.
 
-Done: `engine/tests/agy_session.rs` runs a project conversation on the fake `agy` replaying `tests/fixtures/agy/`: a text turn, a
-turn with a command and a file change, Stop mid-turn leaves no process, a second message resumes the conversation with the
-recorded id, a process that exits early ends the reply with an error key. Fails today (cannot start). Extends: the "Gemini
-(Antigravity)" row of `docs/product-map.md`. No what's-new entry until the person can pick Gemini. Review: the other vendor, plus a
-second security review (a process launcher with a no-prompt flag): both before queueing, per R146. Cost: one CLI process per Gemini
-conversation, counted by the worker-memory registry like the others (`engine/src/engine/worker_memory.rs`); states the measured
-process memory of an idle `agy` session.
+Before implementation, record authenticated ACP exchanges using Faber's truthful identity: a plain reply, a question
+answerable in every enabled mode, command approval before execution, cancellation during a turn, a later turn resuming
+that conversation, and unexpected process exit. Record rejection and denial too. Discover models from the authenticated
+component; do not assume the CLI list carries over or impersonate another client. Prove credential-folder protection
+before execution with harmless canaries, including relevant tool, shell, MCP and path-alias bypasses. Native read/write
+denials alone do not prove the whole boundary. Keep unsupported modes disabled.
+
+Then implement the authenticated transport behind the existing `events::Session` boundary and its question, permission,
+tool, usage and reply events. Reuse child ownership and shutdown in `engine/src/proc.rs` and `winproc/`: no shell, no
+visible console, and Stop leaves no process tree. Define Stop and resume from recordings, keeping the interrupted
+prompt in Faber even if the provider drops it. Never silently replace Ask with Accept edits, skip questions in Full
+access, or enable direct print as a fallback. Preserve the environment scrub and credential protection.
+
+Scope here is the Projects session lifecycle; R472 also requires Chat and Auto, covered by the driver and app tasks.
+Use Antigravity as the provider label; Gemini remains a model name where supplied by the provider. Do not add setup,
+quota routing or screen controls here, or promise Faber tools before authenticated capability tests prove them.
+
+Done: replay recordings in `engine/tests/agy_session.rs` through the fake agent: text and tool turns, answerable questions,
+approval and denial, Stop with no surviving child, resume with the recorded identity, and early-exit errors. Match the
+chosen ACP transport, not direct CLI flags. A new check fails without the implementation. Update the Antigravity
+product-map entry when built; no what's-new entry until the person can pick it. Before queueing, get the independent
+review and second security review required for a process launcher. Measure child memory and processor cost through the
+existing registry; R125 remains unchanged. Until authenticated evidence exists, leave this task blocked and work on
+independent tasks.
