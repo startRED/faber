@@ -1816,7 +1816,7 @@ export const en = {
   "set.projects.goalsHint": "Up to {cap} a day for these fixes. Spent today: {spent}.",
   "set.projects.goalsDesc": "A goal is something this project should always keep true, like every check passing. Faber checks your goals now and then. When one breaks twice in a row, it starts a conversation in a separate copy to fix it, and tells you when it cannot. It is told to leave its changes for you to approve.",
   "set.projects.goalsTech": "Each goal is one of the project's confirmed checks. It runs every 6 hours, and again after 10 minutes once it fails, only while no game is in front and no conversation of the project is working or was written to in the last 15 minutes. At most two fixes start a day, and none once the day's cost reaches the limit (the cost the same turns would have at API prices, checked before a start; a turn already running is not cut). The fix needs separate copies and full access. The check's error text is read on this PC and goes only to the AI you already use for the project.",
-  "crumb.copy": "Works in a separate copy of the project, on its own branch",
+  "details.copy": "Separate copy: {branch}",
   "side.confirmDiscard": "Discard changes?",
   "side.unsavedCopy": "Its copy has changes not saved anywhere else. Delete them with the conversation?",
   "error.copy.failed": "Faber could not make a copy of the project for this conversation. Try again, or turn off separate copies for this project in Settings.",
