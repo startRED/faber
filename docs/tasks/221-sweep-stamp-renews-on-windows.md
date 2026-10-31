@@ -5,7 +5,7 @@ Files: testkit/src/sweep.rs
 Depends: none
 Size: about 30 changed lines
 
-Coordinate with task 220 (`recover-orphaned-nested-build-reservations`), which lists the same file: if it is claimed,
+Coordinate with task 004 (`recover-orphaned-nested-build-reservations`), which lists the same file: if it is claimed,
 agree with its author first, and change only `due()` and its test, never the reservation or eviction code.
 
 Why: `due()` in `testkit/src/sweep.rs` marks a sweep as done with `File::create(stamp).is_ok()`. On Windows,
