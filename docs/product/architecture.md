@@ -76,12 +76,13 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Updates
 
-- **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit or, on
-  Windows, at the first moment no conversation or CLI install runs and the window is hidden (R118). Installing
-  when Faber opens (R141) is not built yet.
-- **The CLIs.** Claude Code and Codex move only to versions that GitHub tested overnight with recorded conversations.
-  If a version breaks, Faber stays on the previous one until a fix arrives as a published file, with no new Faber
-  download.
+- **Faber itself** updates itself. When it opens it looks for a release before any work begins, with a short timeout,
+  and installs one it finds at once when it can (R141). Otherwise it downloads a signed update in the background and
+  installs it on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden
+  (R118) (`src-tauri/src/update.rs`).
+- **The CLIs.** Faber installs the newest release of Claude Code and Codex. Holding one back to a version GitHub tested
+  overnight comes with the live manifest, not built yet
+  ([spec](../superpowers/specs/2026-10-24-cli-tools-live-manifest.md)).
 - **Catalog tools** never update on their own. Faber suggests an update at a good moment, which is when nothing is
   running or when the update fixes something the user is using, and never in the middle of work. If the user agrees,
   Faber runs the update and the check. Before updating, it shows what changed, checks safety and keeps the old version.

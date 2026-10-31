@@ -93,6 +93,12 @@ export function problems(files, read, exists) {
     const bytes = limit && Buffer.byteLength(read(file));
     if (bytes > limit) found.push(`${file}: ${bytes} bytes; agents read it whole before they start, so the limit is ${limit}`);
   }
+  // The first page a newcomer reads says how to install Faber (task 215).
+  if (files.includes('README.md')) {
+    const readme = read('README.md');
+    if (/nothing to install/i.test(readme)) found.push('README.md: says "Nothing to install", but releases exist; keep its Install section');
+    if (!readme.includes('/releases/latest')) found.push('README.md: no link to /releases/latest; its Install section points newcomers there');
+  }
   const index = read('docs/README.md');
   const listed = new Set(links(index).map((href) => posix.join('docs', href.split('#')[0])));
   const anchorsOf = new Map();
