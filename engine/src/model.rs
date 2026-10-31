@@ -687,8 +687,18 @@ pub struct Estimate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanStep {
+    /// Short and stable, so other steps can wait on it (`crate::progress::plan` gives `s1`, `s2`… by position when the agent sends
+    /// none); empty only in a plan stored before ids existed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub text: String,
     pub state: StepState,
+    /// Paths or folders the step expects to change, relative to the project, written with `/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Ids of the steps that must be done before this one starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
