@@ -2248,6 +2248,7 @@ export const de: Messages = {
   'notes.315.fixed': 'Nach „Update bereit, neu starten“ installiert Faber das Update jetzt und öffnet sich von selbst wieder, statt manchmal geschlossen zu bleiben, ohne etwas zu installieren.',
   'notes.316.new': 'Große Anfragen: Die KI teilt die Arbeit auf und führt selbst ein kleines Team; kleine Anfragen erledigt sie weiter direkt.',
   'notes.317.fixed': 'Auf jedem Kontingentbalken zeigt die Markierung jetzt, wie viel Zeit des Fensters schon vergangen ist, und die Zeit bis zum Zurücksetzen nennt auch die Stunden.',
+  'notes.318.better': 'Teilt der Agent eine große Anfrage in Teile auf, laufen die Teile, die verschiedene Dateien ändern, jetzt nebeneinander; die anderen warten, bis sie dran sind.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -980,3 +980,227 @@ async fn r_next_a_restart_before_the_copy_is_attached_still_works_in_the_copy_af
     tokio::time::sleep(Duration::from_millis(200)).await;
     engine.shutdown();
 }
+
+/// The agent calls one of Faber's own tools and reads the answer and whether it was an error.
+async fn tool(pipe: &mut support::Pipe, request: &str, name: &str, args: serde_json::Value) -> (String, bool) {
+    let call = serde_json::json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": name, "arguments": args } });
+    pipe.say(serde_json::json!({ "type": "control_request", "request_id": request,
+        "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
+        .await;
+    let lines = pipe.lines.clone();
+    let answered = || lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request);
+    support::until(&format!("Faber never answered the {name} call"), answered).await;
+    let answer = lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned().unwrap();
+    let result = &answer["response"]["response"]["mcp_response"]["result"];
+    (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true)
+}
+
+/// The leader's plan steps, in order.
+fn steps(engine: &Engine, lead: &str) -> Vec<faber_engine::model::PlanStep> {
+    engine.open(lead).unwrap().plan.expect("the leader has a plan").steps
+}
+
+/// A conversation that reached the end of its first turn, as the agent in its copy would.
+async fn finishes(pipe: &mut support::Pipe) {
+    let lines = pipe.lines.clone();
+    support::until("the brief never reached the agent", || lines.lock().unwrap().iter().any(|m| m["type"] == "user")).await;
+    pipe.say(serde_json::json!({"type":"system","subtype":"init","session_id":"worker","model":"claude-haiku-5-5"})).await;
+    pipe.say(serde_json::json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}})).await;
+    pipe.say(serde_json::json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+}
+
+/// R487, slice 2 of Faber Method 2: ready plan steps that share no file start together, each in a copy that starts from the
+/// leader's own branch, and the step records the branch and the commit; one that overlaps, waits or only reads is refused.
+#[tokio::test]
+async fn ready_plan_steps_with_separate_files_start_together_from_the_leaders_branch() {
+    use faber_engine::model::StepState;
+    let data = support::DataFolder::new();
+    let folder = support::work_folder();
+    let (spawn, made) = support::pipes();
+    let opts = EngineOptions {
+        data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
+    let billing = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(billing)]);
+    let repo = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let git = Git(repo.clone());
+    engine.set_git(Arc::new(move || Some(Box::new(git.clone()) as Box<dyn Executor + Send>)));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let lead = engine.send(ask(&project, "Build the whole thing")).unwrap();
+    ready(&engine, &lead).await;
+    let mut agent = support::next_pipe(&made).await;
+    agent.say(serde_json::json!({"type":"system","subtype":"init","session_id":"lead","model":"claude-haiku-5-5"})).await;
+    let lead_branch = engine.open(&lead).unwrap().copy.unwrap().branch;
+
+    let plan = serde_json::json!({ "steps": [
+        { "text": "Build the model", "state": "pending", "id": "model", "files": ["src/model"] },
+        { "text": "Build the screen", "state": "pending", "id": "screen", "files": ["ui"] },
+        { "text": "Test the model", "state": "pending", "id": "tests", "files": ["src/model/tests"] },
+        { "text": "Write the docs", "state": "pending", "id": "docs", "files": ["docs"], "waits": ["model"] },
+        { "text": "Survey the code", "state": "pending", "id": "survey", "read": true }
+    ]});
+    let (said, error) = tool(&mut agent, "plan", "plan", plan.clone()).await;
+    assert!(!error && said.contains("start together now: model, screen."), "tests overlap model, docs wait, survey reads: {said}");
+
+    let start = |step: &str| serde_json::json!({ "action": "start", "title": step, "brief": "Do your step.", "step": step });
+    for (n, step) in ["model", "screen"].into_iter().enumerate() {
+        let (said, error) = tool(&mut agent, &format!("start{n}"), "conversation", start(step)).await;
+        assert!(!error, "{said}");
+    }
+    // Both run at once, each with its own copy that started from the leader's branch, recorded on its step.
+    let listed = steps(&engine, &lead);
+    assert!(listed.iter().take(2).all(|s| s.state == StepState::Active && s.worker.is_some()), "{listed:?}");
+    let workers: Vec<_> = listed.iter().take(2).map(|s| s.worker.clone().unwrap()).collect();
+    for worker in &workers {
+        ready(&engine, &worker.conversation).await;
+    }
+    let after = steps(&engine, &lead);
+    for (step, worker) in after.iter().zip(&workers) {
+        let copy = engine.open(&worker.conversation).unwrap().copy.unwrap();
+        let recorded = step.worker.as_ref().unwrap();
+        assert_eq!((recorded.branch.as_str(), recorded.base.as_str()), (copy.branch.as_str(), HEAD), "{step:?}");
+        let calls = &repo.lock().unwrap().calls;
+        let from_the_lead = |c: &Vec<String>| {
+            c.starts_with(&["worktree".into(), "add".into(), "-b".into(), copy.branch.clone()]) && c.last() == Some(&lead_branch)
+        };
+        assert!(calls.iter().any(from_the_lead), "its copy starts at the leader's branch, not the person's head: {calls:?}");
+    }
+    assert_ne!(workers[0].conversation, workers[1].conversation);
+
+    // One that may change what a running step changes, one that waits and one that only reads are refused with the reason.
+    for (n, (step, why)) in [("tests", "running step"), ("docs", "waits for a step"), ("survey", "helper")].into_iter().enumerate() {
+        let (said, error) = tool(&mut agent, &format!("refused{n}"), "conversation", start(step)).await;
+        assert!(error && said.contains("No conversation was started") && said.contains(why), "{step}: {said}");
+    }
+    assert!(steps(&engine, &lead)[2..].iter().all(|s| s.worker.is_none()), "nothing was started for them");
+
+    // The model step is done and the plan is sent again with the screen still marked pending: it stays with its conversation.
+    let mut again = plan.clone();
+    again["steps"][0]["state"] = "done".into();
+    let (said, error) = tool(&mut agent, "plan2", "plan", again).await;
+    assert!(!error && said.contains("start together now: tests, docs."), "{said}");
+    let now = steps(&engine, &lead);
+    assert_eq!(now[0].worker, after[0].worker, "a finished step keeps its record");
+    assert_eq!((now[1].state, &now[1].worker), (StepState::Active, &after[1].worker));
+    let (said, error) = tool(&mut agent, "start-tests", "conversation", start("tests")).await;
+    assert!(!error, "overlapping steps start one after the other: {said}");
+
+    // A worker that stops working leaves its step waiting to be joined.
+    for _ in 0..3 {
+        let mut worker = support::next_pipe(&made).await;
+        finishes(&mut worker).await;
+    }
+    let joining = || steps(&engine, &lead)[..3].iter().all(|s| s.worker.as_ref().is_some_and(|w| w.joining));
+    support::until("the steps never waited to be joined", joining).await;
+    assert!(steps(&engine, &lead)[1..3].iter().all(|s| s.state == StepState::Active));
+
+    // The person writes straight into a step's conversation: it works again, so it no longer waits to be joined.
+    let child = steps(&engine, &lead)[1].worker.clone().unwrap().conversation;
+    engine.send(SendRequest { conversation_id: Some(child), ..ask(&project, "One more thing") }).unwrap();
+    let working = || steps(&engine, &lead)[1].worker.as_ref().is_some_and(|w| !w.joining);
+    support::until("a step whose conversation works again still waited to be joined", working).await;
+    engine.shutdown();
+}
+
+/// A repository that makes the first work tree (the leader's) and refuses every other.
+#[derive(Clone)]
+struct OnlyTheFirstAdd(Git, Arc<std::sync::atomic::AtomicUsize>);
+impl Executor for OnlyTheFirstAdd {
+    fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+        let adding = call.args.iter().any(|a| a == "worktree") && call.args.iter().any(|a| a == "add");
+        if adding && self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            return Ok(Output { success: false, stdout: vec![] });
+        }
+        self.0.execute(call)
+    }
+}
+
+/// A leader with a copy and a running agent whose plan has one pending step, `a`, on `src/a`.
+async fn leader_with_a_step(
+    data: &support::DataFolder,
+    folder: &Path,
+    runner: impl Executor + Clone + Send + Sync + 'static,
+) -> (Engine, Arc<Mutex<Vec<support::Pipe>>>, support::Pipe, String, serde_json::Value) {
+    let (spawn, made) = support::pipes();
+    let opts = EngineOptions {
+        data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
+    let billing = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(billing)]);
+    engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
+    let project = engine.add_project(&folder.to_string_lossy()).unwrap().id;
+    let lead = engine.send(ask(&project, "Build the whole thing")).unwrap();
+    ready(&engine, &lead).await;
+    let mut agent = support::next_pipe(&made).await;
+    agent.say(serde_json::json!({"type":"system","subtype":"init","session_id":"lead","model":"claude-haiku-5-5"})).await;
+    let plan = serde_json::json!({ "steps": [{ "text": "Build a", "state": "pending", "id": "a", "files": ["src/a"] }] });
+    let (said, error) = tool(&mut agent, "plan", "plan", plan.clone()).await;
+    assert!(!error && said.contains("start together now: a."), "{said}");
+    (engine, made, agent, lead, plan)
+}
+
+fn start_a() -> serde_json::Value {
+    serde_json::json!({ "action": "start", "title": "A", "brief": "Do a.", "step": "a" })
+}
+
+/// A step whose conversation was deleted is free again: the next plan call lists it, and it may start anew.
+#[tokio::test]
+async fn deleting_the_conversation_of_a_step_frees_the_step() {
+    use faber_engine::model::StepState;
+    let (data, folder) = (support::DataFolder::new(), support::work_folder());
+    let repo = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let (engine, _made, mut agent, lead, plan) = leader_with_a_step(&data, folder.path(), Git(repo)).await;
+    let (said, error) = tool(&mut agent, "start", "conversation", start_a()).await;
+    assert!(!error, "{said}");
+    let worker = steps(&engine, &lead)[0].worker.clone().unwrap().conversation;
+    ready(&engine, &worker).await;
+    engine.remove_with(&worker, true).unwrap();
+    let (said, error) = tool(&mut agent, "plan2", "plan", plan).await;
+    assert!(!error && said.contains("start together now: a."), "the deleted conversation no longer holds the step: {said}");
+    assert_eq!((steps(&engine, &lead)[0].state, steps(&engine, &lead)[0].worker.is_none()), (StepState::Pending, true));
+    let (said, error) = tool(&mut agent, "again", "conversation", start_a()).await;
+    assert!(!error, "{said}");
+    engine.shutdown();
+}
+
+/// A step's conversation whose copy could not be made frees the step and the leader is told.
+#[tokio::test]
+async fn a_step_whose_copy_could_not_be_made_is_free_again_and_the_leader_hears_it() {
+    use faber_engine::model::StepState;
+    let (data, folder) = (support::DataFolder::new(), support::work_folder());
+    let repo = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let runner = OnlyTheFirstAdd(Git(repo), Arc::default());
+    let (engine, _made, mut agent, lead, _) = leader_with_a_step(&data, folder.path(), runner).await;
+    let (said, error) = tool(&mut agent, "start", "conversation", start_a()).await;
+    assert!(!error, "{said}");
+    let freed = || steps(&engine, &lead)[0].worker.is_none();
+    support::until("the step stayed with a conversation that never started", freed).await;
+    assert_eq!(steps(&engine, &lead)[0].state, StepState::Pending);
+    let told = |c: &faber_engine::model::Conversation| {
+        c.queued.iter().map(|q| q.id.as_str()).chain(c.messages.iter().map(|m| m.id.as_str())).any(|id| id.starts_with("report-"))
+    };
+    support::until("the leader was never told", || told(&engine.open(&lead).unwrap())).await;
+    engine.shutdown();
+}

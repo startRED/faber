@@ -89,12 +89,24 @@ impl Core {
     fn write_progress(&mut self, conv: &str, tool: &str, input: &serde_json::Value) -> Result<String, String> {
         match tool {
             progress::PLAN_TOOL => {
+                // A conversation of a step that was deleted frees its step before the list is compared with it.
+                self.free_dead_workers(conv);
                 let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
+                let leads = siblings::offers(c.area) && c.started_by.is_none();
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
-                let plan = progress::plan(c.plan.as_ref(), input, now())?;
+                let mut plan = progress::plan(c.plan.as_ref(), input, now())?;
+                if let Some(had) = &c.plan {
+                    progress::keep_workers(had, &mut plan)?;
+                }
                 let mut shown = plan.as_ref().map(|p| p.count()).map_or("The plan is cleared.".to_string(), |n| {
                     format!("The person sees the plan: {} of {} steps done.", n.done, n.total)
                 });
+                if let Some(p) = plan.as_ref().filter(|_| leads) {
+                    let wave: Vec<_> = progress::wave(p).iter().map(|s| s.id.as_str()).collect();
+                    if !wave.is_empty() {
+                        shown = format!("{shown} Steps that can start together now: {}.", wave.join(", "));
+                    }
+                }
                 if estimate.is_some_and(|e| e.economy) {
                     shown = format!("{shown} {}", progress::ECONOMY_LINE);
                 }

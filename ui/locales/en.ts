@@ -2128,6 +2128,7 @@ export const en = {
   'notes.315.fixed': 'After “Update ready, restart”, Faber now installs the update and opens again by itself, instead of sometimes staying closed with nothing installed.',
   'notes.316.new': 'Big requests: the AI splits the work and runs a small team by itself; small requests are still done directly.',
   'notes.317.fixed': 'On each quota bar, the mark now shows how much of the window\'s time has passed, and "resets in" also counts the hours.',
+  'notes.318.better': 'When the agent splits a big request into parts, the parts that touch different files now run side by side; the others wait their turn.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

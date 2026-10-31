@@ -2248,6 +2248,7 @@ export const es: Messages = {
   'notes.315.fixed': 'Después de “Actualización lista, reiniciar”, Faber ahora instala la actualización y se vuelve a abrir solo, en lugar de quedarse a veces cerrado sin instalar nada.',
   'notes.316.new': 'Pedidos grandes: la IA divide el trabajo y dirige un pequeño equipo por su cuenta; los pedidos pequeños se siguen haciendo directamente.',
   'notes.317.fixed': 'En cada barra de cuota, la marca ahora indica cuánto tiempo de la ventana ya pasó, y "se restablece en" también cuenta las horas.',
+  'notes.318.better': 'Cuando el agente divide una petición grande en partes, las que tocan archivos distintos ahora avanzan en paralelo; las demás esperan su turno.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

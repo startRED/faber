@@ -36,6 +36,8 @@ pub(super) struct Plan {
     from: Option<String>,
     /// The commit the copy starts at (a standing goal's crashed build), when it is not the head.
     at: Option<String>,
+    /// The copy is a plan step's: the commit it starts at is read once it is made, for the step to record.
+    step: bool,
 }
 
 impl Engine {
@@ -211,25 +213,35 @@ impl Core {
         self.copying.insert(id.to_string(), Held { reply: reply.to_string(), tail: Some(tail) });
         let (me, runtime, id) = (self.me.clone(), self.opts.runtime.clone(), id.to_string());
         self.opts.runtime.spawn_blocking(move || {
+            let (step, run) = (plan.step, plan.run.clone());
             let made = Engine::make_copy(Some(plan));
+            let started = made.as_ref().ok().and_then(|m| m.as_ref()).filter(|_| step);
+            let base = started.and_then(|(_, c)| run().and_then(|mut exec| copy::head(&mut *exec, Path::new(&c.path))));
             let Some(core) = me.upgrade() else { return };
             let engine = Engine { core, runtime };
-            let stray = engine.with(|c| c.copy_made(&id, made));
+            let stray = engine.with(|c| c.copy_made(&id, made, base));
             engine.drop_copy(stray);
         });
     }
 
     /// The copy is ready, or git could not make it: attach it, then start what waited for it. An answer stopped or
     /// removed meanwhile starts nothing, and a copy that no longer fits comes back to be removed.
-    fn copy_made(&mut self, id: &str, made: Result<Made, String>) -> Made {
+    fn copy_made(&mut self, id: &str, made: Result<Made, String>, base: Option<String>) -> Made {
         let failed = made.is_err();
         let mut stray = None;
         match made {
             Ok(Some((made_for, copy))) => {
+                let branch = copy.branch.clone();
                 stray = self.attach_copy(&made_for, copy);
                 // Saved now: an answer stopped meanwhile writes nothing else, and the next message must find its copy.
                 if stray.is_none() {
                     self.save(&made_for);
+                    // A plan step's worker: the step records the branch and the leader's commit the copy started at.
+                    self.edit_worker(&made_for, |w| {
+                        if w.branch.is_empty() {
+                            (w.branch, w.base) = (branch, base.unwrap_or_default());
+                        }
+                    });
                 }
             }
             // Not a repository with a commit after all: the conversation works in the folder, and its placeholder goes.
@@ -259,12 +271,16 @@ impl Core {
             return stray;
         }
         match tail {
-            _ if failed => self.fail_reply(id, &reply, "error.copy.failed".into()),
+            _ if failed => {
+                self.fail_reply(id, &reply, "error.copy.failed".into());
+                self.step_not_started(id);
+            }
             Some(Tail { pick, text, images, by_hand }) => {
                 // An agent's brief may have been marked unattended after send returned, while git worked.
                 let by_hand = by_hand && self.transfers.get(id).is_none_or(|t| t.by_hand);
                 if let Err(error) = self.dispatch(id, &reply, &pick, text, images, by_hand) {
                     self.fail_reply(id, &reply, error);
+                    self.step_not_started(id);
                 }
             }
             // Auto's route is not back yet: it starts the answer when it is, and nothing waits for the copy any more.
@@ -293,14 +309,17 @@ impl Core {
             None => return None,
         };
         let data = self.opts.data_dir.clone();
+        // A plan step's conversation starts from the leader's latest work, as a branched one starts from its source.
+        let lead = self.step_lead(id);
         Some(Plan {
             run,
             folder: PathBuf::from(project.path),
             data,
             id: id.to_string(),
             branch,
-            from: None,
+            from: lead.clone().flatten(),
             at: self.goals.at.get(id).cloned(),
+            step: lead.is_some(),
         })
     }
 
@@ -314,7 +333,24 @@ impl Core {
         let id = new_id();
         let branch = copy::branch_for(&req.text, &id);
         let data = self.opts.data_dir.clone();
-        Some(Plan { run, folder: PathBuf::from(project.path), data, id, branch, from: source.copy.map(|c| c.branch), at: None })
+        Some(Plan {
+            run,
+            folder: PathBuf::from(project.path),
+            data,
+            id,
+            branch,
+            from: source.copy.map(|c| c.branch),
+            at: None,
+            step: false,
+        })
+    }
+
+    /// For a conversation started for a plan step: the branch of its leader's copy, None when the leader works in the project
+    /// folder itself. None for any other conversation.
+    fn step_lead(&self, id: &str) -> Option<Option<String>> {
+        let lead = self.convs.get(self.convs.get(id)?.started_by.as_ref()?)?;
+        let is = |s: &PlanStep| s.worker.as_ref().is_some_and(|w| w.conversation == id);
+        lead.plan.as_ref()?.steps.iter().any(is).then(|| lead.copy.as_ref().map(|c| c.branch.clone()))
     }
 
     /// A conversation's copy, whether its agent is at work or about to be (a turn running, a reply still open while Auto

@@ -3918,6 +3918,8 @@ impl Core {
         if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
             return Ok(());
         }
+        // A step's conversation that works again, whoever wrote to it, is no longer waiting to be joined.
+        self.edit_worker(id, |w| w.joining = false);
         if let Some(held) = self.copying.get_mut(id) {
             held.reply = reply_id.to_string();
             held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });

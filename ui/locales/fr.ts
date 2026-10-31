@@ -2248,6 +2248,7 @@ export const fr: Messages = {
   'notes.315.fixed': 'Après « Mise à jour prête, redémarrer », Faber installe maintenant la mise à jour et se rouvre tout seul, au lieu de rester parfois fermé sans rien installer.',
   'notes.316.new': 'Grandes demandes : l’IA découpe le travail et mène seule une petite équipe ; les petites demandes restent faites directement.',
   'notes.317.fixed': 'Sur chaque barre de quota, le repère montre maintenant la part du temps de la fenêtre déjà écoulée, et "se renouvelle dans" compte aussi les heures.',
+  'notes.318.better': "Quand l'agent découpe une grosse demande en parties, celles qui touchent des fichiers différents avancent désormais côte à côte ; les autres attendent leur tour.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

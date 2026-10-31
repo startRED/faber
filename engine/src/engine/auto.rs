@@ -513,6 +513,7 @@ impl Core {
         self.save(id);
         if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {
             self.fail_reply(id, reply_id, error);
+            self.step_not_started(id);
         }
     }
 
