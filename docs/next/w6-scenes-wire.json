@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "The Projects start screen and an empty catalog now have a small drawing that shows what the screen is for.",
+      "pt-BR": "A tela inicial de Projetos e o catálogo vazio agora têm um desenho pequeno que mostra para que serve a tela.",
+      "es": "La pantalla inicial de Proyectos y el catálogo vacío ahora tienen un dibujo pequeño que muestra para qué sirve.",
+      "fr": "L’écran de départ de Projets et le catalogue vide ont maintenant un petit dessin qui montre à quoi sert l’écran.",
+      "de": "Der Startbildschirm von Projekte und der leere Katalog zeigen jetzt eine kleine Zeichnung, die den Zweck der Ansicht zeigt."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-31 | One scene per empty state and the first-run accounts step: static line drawings in the third ink, never behind text; the first-run accounts scene, once shown, is hidden below 800 px height or 900 px width. Extends R170 and docs/design/brand.md. | AI (Erick delegou) |"
+  ]
+}

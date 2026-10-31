@@ -1,0 +1,12 @@
+/* The scenes (docs/design/scenes.md): static line drawings in the third ink. On a ledge one rests on the hairline beside
+   Curioso; the first run's accounts drawing stands in for him when the window is big enough to hold it. The `.peek svg`
+   rules of the stylesheet (his margin, his entrance, the catalog's pulse) are meant for him alone, so each is switched off
+   here with a selector at least as specific. */
+.scene { display: block; flex: none; color: var(--ink-3); pointer-events: none; }
+.peek { position: relative; }
+.peek > .scene, .work:has(.amb-hole[data-intro]) .peek > .scene, .catalog-empty .peek > .scene { position: absolute; bottom: 0; left: 90px; margin: 0; animation: none; transform: none; max-width: calc(100% - 90px); }
+.accounts-scene { display: none; width: min(320px, 100%); height: 96px; }
+@media (min-width: 900px) and (min-height: 800px) {
+  .fr-col .accounts-scene { display: block; }
+  .fr-col:has(.accounts-scene) .peek { display: none; }
+}

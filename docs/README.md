@@ -28,6 +28,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/parity.md](product/parity.md) | What Claude Code, Codex, claude.ai and ChatGPT have that Faber still lacks, how each gap closes, and what is never closed |
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
+| [design/scenes.md](design/scenes.md) | Static drawings for empty screens and first run |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
