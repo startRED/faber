@@ -2,10 +2,10 @@
 
 pub use faber_winproc::process_tree::ProcessIdentity;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
@@ -198,6 +198,13 @@ pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot
 /// then knows an AI is driving it and holds it to the channel's limits on starting turns (`channel/src/guard.rs`).
 pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
 
+static CLI: OnceLock<PathBuf> = OnceLock::new();
+
+/// Sets the command line shipped with this Faber, once at startup.
+pub fn set_cli(path: PathBuf) {
+    let _ = CLI.set(path);
+}
+
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
     Arc::new(|bin, args, cwd| spawn_command(marked(bin, args, cwd)))
@@ -206,6 +213,17 @@ pub fn real_spawner() -> Spawner {
 fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
     let mut cmd = Command::new(bin);
     cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1");
+    if let Some(cli) = CLI.get()
+        && let Some(folder) = cli.parent()
+    {
+        if let Ok(mut path) = std::env::join_paths([folder]) {
+            if let Some(original) = std::env::var_os("PATH") {
+                path.push(if cfg!(windows) { ";" } else { ":" });
+                path.push(original);
+            }
+            cmd.env("FABER_CLI", cli).env("PATH", path);
+        }
+    }
     cmd
 }
 
@@ -863,6 +881,21 @@ mod tests {
         let cmd = marked("cli", &["--x".into()], Path::new("."));
         let marks: Vec<_> = cmd.as_std().get_envs().filter(|(name, _)| *name == AGENT_MARK).collect();
         assert_eq!(marks, [(std::ffi::OsStr::new(AGENT_MARK), Some(std::ffi::OsStr::new("1")))]);
+    }
+
+    #[test]
+    fn marked_commands_find_the_shipped_cli_only_after_it_is_set() {
+        let before = marked("cli", &[], Path::new("."));
+        assert!(!before.as_std().get_envs().any(|(key, _)| key == "FABER_CLI" || key.eq_ignore_ascii_case("PATH")));
+        let cli = std::env::current_dir().unwrap().join("bin").join("faber.exe");
+        set_cli(cli.clone());
+        let after = marked("cli", &[], Path::new("."));
+        let env: Vec<_> = after.as_std().get_envs().collect();
+        assert!(env.iter().any(|(key, value)| *key == "FABER_CLI" && *value == Some(cli.as_os_str())));
+        let path = env.iter().find(|(key, _)| key.eq_ignore_ascii_case("PATH")).unwrap().1.unwrap();
+        let paths: Vec<_> = std::env::split_paths(path).collect();
+        assert_eq!(paths[0], cli.parent().unwrap());
+        assert_eq!(&paths[1..], std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
     }
 
     #[test]
