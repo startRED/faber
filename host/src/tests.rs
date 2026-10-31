@@ -63,6 +63,23 @@ fn the_table_holds_every_command_the_screen_calls_once() {
     }
 }
 
+/// The command line ships the table's exported commands in `cli/commands.json` for its help when Faber is not running, and
+/// the AI's tools are made from the same list: a command anything but the screen may send that the list lacks fails here.
+/// `FABER_WRITE_COMMANDS=1` writes the list again.
+#[test]
+fn the_command_line_lists_every_command_anything_but_the_screen_may_send() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../cli/commands.json");
+    let now = serde_json::to_string_pretty(&Host::exported().collect::<Vec<_>>()).unwrap() + "\n";
+    if std::env::var_os("FABER_WRITE_COMMANDS").is_some() {
+        std::fs::write(&path, &now).unwrap();
+    }
+    let kept = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(kept == now, "cli/commands.json is not the table's exported commands: run this test with FABER_WRITE_COMMANDS=1");
+    for screen_only in ["state", "open", "screen_ready", "site_open"] {
+        assert!(Host::exported().all(|c| c.name != screen_only), "`{screen_only}` is the screen's own");
+    }
+}
+
 #[test]
 fn only_the_browser_pane_the_page_server_and_the_first_paint_are_the_windows() {
     let windows: Vec<&str> = Host::commands().iter().filter(|c| c.kind == Kind::Window).map(|c| c.name).collect();
