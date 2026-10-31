@@ -1,6 +1,6 @@
 // Share a bounded cache pool across checkouts, while keeping each invocation's temp private.
 import { spawn, execFile, execFileSync } from 'node:child_process';
-import { mkdir, lstat, readFile, writeFile, rename, rm, rmdir, realpath, readdir } from 'node:fs/promises';
+import { mkdir, lstat, readFile, writeFile, rename, rm, realpath, readdir, link } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
@@ -40,6 +40,51 @@ async function removeTemp(target, name) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
 
+/** A reservation this old whose recorded processes are all gone frees its cache again. A launcher killed from outside (a
+ * newer verify stopping an older one, a closed terminal) never releases, and three of those used to hold every cache for a
+ * day. Cargo's own lock still guards the folder against any build that outlived its launcher. */
+const GRACE = 10 * 60000;
+/** A reservation with no receipt at all frees its cache after this long. Its launcher records itself right after reserving,
+ * so only a launcher that stopped in between leaves one; the hour covers one merely paused there. */
+const EMPTY_GRACE = 60 * 60000;
+
+/** Keeps an abandoned receipt beside its temp, so the temp is removed later under the day rule (`sweepOrphans`). */
+async function keepOrphan(target, owner) {
+  if (!/^run-[a-zA-Z0-9-]+$/.test(owner.tempName)) throw new Error('Invalid owned temporary directory');
+  const parent = path.join(target, '.faber-tmp');
+  await directory(parent);
+  const file = path.join(parent, `${owner.tempName}.owner.json`);
+  // Created exclusively, so a link planted under that name is never followed.
+  try { await writeFile(file, JSON.stringify(owner), { flag: 'wx' }); } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    const stat = await lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Refusing linked receipt: ${file}`);
+    await rm(file);
+    await writeFile(file, JSON.stringify(owner), { flag: 'wx' });
+  }
+}
+
+/** Removes the temps of freed reservations once the day rule holds: a day old, launcher and child both recorded and gone. A
+ * reservation whose child was never recorded or became uncertain keeps its temp, as before. Runs while holding the lease. */
+async function sweepOrphans(target) {
+  const parent = path.join(target, '.faber-tmp');
+  let names;
+  try { names = await readdir(parent); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  for (const name of names) {
+    const match = /^(run-[a-zA-Z0-9-]+)\.owner\.json$/.exec(name);
+    if (!match) continue;
+    try {
+      const owner = JSON.parse(await readFile(path.join(parent, name), 'utf8'));
+      if (owner.tempName !== match[1] || !Number.isFinite(owner.createdAt) || Date.now() - owner.createdAt < DAY) continue;
+      if (owner.uncertain || owner.childPid == null || !dead(owner.pid) || !dead(owner.childPid)) continue;
+      await removeTemp(target, owner.tempName);
+      await rm(path.join(parent, name));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) console.error(`Temporary build files were preserved: ${error.message}`);
+    }
+  }
+}
+
 async function reap(target) {
   const lease = path.join(target, '.faber-lease');
   const lock = path.join(target, '.faber-reap');
@@ -50,13 +95,28 @@ async function reap(target) {
   }
   try {
     const stat = await lstat(lease);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || Date.now() - stat.mtimeMs < DAY) return;
-    const receipt = path.join(lease, 'owner.json');
-    if (!(await lstat(receipt)).isFile() || (await lstat(receipt)).isSymbolicLink()) return;
-    const owner = JSON.parse(await readFile(receipt, 'utf8'));
-    if (!Number.isFinite(owner.createdAt) || Date.now() - owner.createdAt < DAY || !dead(owner.pid) || !dead(owner.childPid)) return;
+    if (!stat.isDirectory() || stat.isSymbolicLink() || Date.now() - stat.mtimeMs < GRACE) return;
     if (await overlapsLease(target)) return;
-    await removeTemp(target, owner.tempName);
+    const receipt = path.join(lease, 'owner.json');
+    let meta;
+    try { meta = await lstat(receipt); } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      // No receipt: the launcher stopped between reserving and recording, and a child starts only after its receipt is saved,
+      // so nothing ever ran here. A half-written receipt is the only other thing it can hold.
+      if (Date.now() - stat.mtimeMs < EMPTY_GRACE || (await readdir(lease)).some((name) => !/^owner(\.[a-zA-Z0-9-]+)?\.new$/.test(name))) return;
+      await rm(lease, { recursive: true });
+      return true;
+    }
+    if (!meta.isFile() || meta.isSymbolicLink()) return;
+    const owner = JSON.parse(await readFile(receipt, 'utf8'));
+    if (!Number.isFinite(owner.createdAt) || Date.now() - owner.createdAt < GRACE || !dead(owner.pid)) return;
+    // A child whose stop could not be confirmed may have left descendants: that reservation stays, as before. So does a
+    // receipt from before reservations carried a token, where no child recorded could also mean an uncertain one.
+    if (owner.uncertain || (owner.childPid == null ? !owner.token : !dead(owner.childPid))) return;
+    const ran = owner.childPid != null;
+    const day = Date.now() - stat.mtimeMs >= DAY && Date.now() - owner.createdAt >= DAY;
+    if (!ran || day) await removeTemp(target, owner.tempName);
+    else await keepOrphan(target, owner);
     await rm(lease, { recursive: true });
     return true;
   } catch (error) {
@@ -150,6 +210,7 @@ export async function acquireTarget(root, env, signal) {
     ? [path.resolve(root, env.CARGO_TARGET_DIR)]
     : [1, 2, 3].map((slot) => path.join(root, 'target', `build-${slot}`));
   for (const target of targets) await directory(target);
+  let told = false;
   for (;;) {
     signal?.throwIfAborted();
     for (const target of targets) {
@@ -159,17 +220,39 @@ export async function acquireTarget(root, env, signal) {
         if (!await reap(target)) continue;
         try { await mkdir(lease); } catch (error) { if (error.code === 'EEXIST') continue; throw error; }
       }
-      if (await overlapsLease(target)) {
-        await rmdir(lease);
-        continue;
-      }
-      const owner = { pid: process.pid, childPid: null, createdAt: Date.now(), tempName: `run-${randomUUID()}` };
+      // The receipt is written at once, before the slower overlap scan, and carries a token: a reservation another launcher
+      // took over (`reap`) is never written to or released by the one that lost it.
+      const owner = { pid: process.pid, childPid: null, createdAt: Date.now(), tempName: `run-${randomUUID()}`, token: randomUUID() };
       const receipt = path.join(lease, 'owner.json');
-      const save = async () => {
-        await writeFile(path.join(lease, 'owner.new'), JSON.stringify(owner));
+      let saved = false;
+      // Gone or another token means the reservation is lost; a receipt a scanner or reader holds for a moment is read again.
+      const ours = async () => {
         const until = Date.now() + 1000;
         for (;;) {
-          try { await rename(path.join(lease, 'owner.new'), receipt); break; } catch (error) {
+          try { return JSON.parse(await readFile(receipt, 'utf8')).token === owner.token; } catch (error) {
+            if (['ENOENT', 'ENOTDIR'].includes(error.code)) return false;
+            if (Date.now() >= until) throw error;
+            await setTimeout(25);
+          }
+        }
+      };
+      const save = async () => {
+        if (!saved) {
+          // The first receipt is created exclusively: a launcher paused past `EMPTY_GRACE` finds the next owner's there and
+          // gives the slot up instead of replacing it.
+          // Written aside and linked into place, so no reader sees half a receipt and an existing one is never replaced.
+          const first = path.join(lease, `owner.${owner.token}.new`);
+          await writeFile(first, JSON.stringify(owner), { flag: 'wx' });
+          try { await link(first, receipt); } finally { await rm(first, { force: true }); }
+          saved = true;
+          return;
+        }
+        if (!(await ours())) throw new Error('The build cache reservation was taken over by another command');
+        const draft = path.join(lease, `owner.${owner.token}.new`);
+        await writeFile(draft, JSON.stringify(owner));
+        const until = Date.now() + 1000;
+        for (;;) {
+          try { await rename(draft, receipt); break; } catch (error) {
             // Windows readers and scanners can briefly deny atomic replacement.
             if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || Date.now() >= until) throw error;
             await setTimeout(25);
@@ -179,22 +262,41 @@ export async function acquireTarget(root, env, signal) {
       const temp = path.join(target, '.faber-tmp', owner.tempName);
       try {
         await save();
-        await directory(temp);
       } catch (error) {
+        // Another launcher reaped this reservation while this one was paused, and may own the slot now.
+        if (['EEXIST', 'ENOENT'].includes(error.code)) continue;
         await rm(lease, { recursive: true });
         throw error;
       }
+      if (await overlapsLease(target)) {
+        if (await ours()) await rm(lease, { recursive: true });
+        continue;
+      }
+      try {
+        await directory(temp);
+      } catch (error) {
+        if (await ours()) await rm(lease, { recursive: true });
+        throw error;
+      }
+      await sweepOrphans(target).catch((error) => console.error(`Temporary build files were preserved: ${error.message}`));
       return {
         target,
         env: { ...env, CARGO_TARGET_DIR: target, CARGO_INCREMENTAL: env.CARGO_INCREMENTAL ?? '0', TEMP: temp, TMP: temp, TMPDIR: temp },
-        async child(pid) { owner.childPid = pid; await save(); },
-        async interrupt() { owner.childPid = null; await save(); },
+        // Before a spawn, so a launcher killed before it records the child's pid leaves an uncertain reservation, not a free one.
+        async spawning() { owner.uncertain = true; await save(); },
+        async child(pid) { owner.childPid = pid; owner.uncertain = false; await save(); },
+        async interrupt() { owner.childPid = null; owner.uncertain = true; await save(); },
         async release() {
           // Keep the receipt when cleanup fails, so a later invocation can retry safely.
           await removeTemp(target, owner.tempName);
-          await rm(lease, { recursive: true });
+          if (await ours()) await rm(lease, { recursive: true });
         },
       };
+    }
+    // Said once, so a command that waits for a cache never looks frozen to the person or the agent reading its output.
+    if (!told) {
+      told = true;
+      console.error(targets.length > 1 ? `All ${targets.length} build folders are in use; waiting for one to free up.` : `The build folder ${targets[0]} is in use; waiting for it to free up.`);
     }
     await setTimeout(250, undefined, { signal });
   }
@@ -269,6 +371,7 @@ export async function runChild(root, command, args, env, cwd = root, copy = null
     lease = await acquireTarget(root, env, controller.signal);
     if (copy) await adoptTarget(lease.target, copy);
     controller.signal.throwIfAborted();
+    await lease.spawning();
     child = spawn(command, args, { cwd, env: lease.env, stdio: 'inherit', shell: false, windowsHide: true, detached: process.platform !== 'win32' });
     const result = new Promise((resolve, reject) => {
       child.once('error', (error) => { finished = true; reject(error); });
@@ -321,6 +424,7 @@ export async function maintainStorage(root, ownTarget) {
       lease = await acquireTarget(root, { ...process.env, CARGO_TARGET_DIR: tools }, controller.signal);
       controller.signal.throwIfAborted();
       const compiled = path.join(lease.env.TEMP, path.basename(program));
+      await lease.spawning();
       compiler = spawn('rustc', ['--edition=2024', '-O', source, '-o', compiled], {
         cwd: sourceRoot, windowsHide: true, env: lease.env, shell: false, stdio: 'inherit', detached: process.platform !== 'win32',
       });
