@@ -208,7 +208,7 @@ One move is the exception: when the base moved by words only (no suite reads the
 `docs/decisions.md` and `docs/next/` left out, since numbers are taken there), the green batch is put on the new base as it
 is and lands at once, provided every file that then differs from the tree CI checked is words too and the docs check
 passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
-Each landing ends with `land.mjs --sweep`, which lands again the oldest queue run whose gate passed but whose landing GitHub cancelled while it waited.
+Each landing ends with `land.mjs --sweep`, which lands again the oldest queue run whose gate passed but whose landing GitHub cancelled.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
