@@ -60,7 +60,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 ## Screens and surfaces
 
 One window, no router: `ui/App.tsx` swaps what shows by state. First run or the account cards cover everything; Settings
-replaces the shell; otherwise the shell shows the sidebar, the topbar, the work area and the running column.
+replaces the shell; otherwise the shell shows the sidebar, the topbar, the work area and the running column. Decision rows in the conversation use `ui/FaberAct.tsx`.
 
 | Surface | Shows when | What a person does there | Files |
 | :--- | :--- | :--- | :--- |
@@ -260,7 +260,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). On Windows, setup an
 
 | Where | What | Written by |
 | :--- | :--- | :--- |
-| `Message.acts` in `conversations/<id>.json` | Typed records of Faber decisions and messages, carried with the message and omitted when empty; older messages load without them. | `engine/src/act.rs`, `engine/src/model.rs`, `engine/tests/auto.rs`, `engine/tests/keep_going.rs` |
+| `Message.acts` in `conversations/<id>.json` | Typed records of Faber decisions and messages, including wake reasons and helper briefs, carried with the message and omitted when empty; older messages load without them. | `engine/src/act.rs`, `engine/src/model.rs`, `engine/tests/auto.rs`, `engine/tests/keep_going.rs` |
 | `creative-reviews/<generated-uuid>.json` | Private comparison receipts with request, rubric, both text drafts, shown A/B order, judge model/vendor, full scores/reasons or failures, time and call identity. Atomic save; caller cannot choose the path. | `engine/src/store.rs`, `engine/src/engine/creative_judges.rs` |
 | `rewind/<folder-id>/` | An owner-only private SHA-256 `GIT_DIR`, with `objects/`, bounded turn `points/`, `staging/` and durable restore/redo `journals/`. Points keep folder identity, parent/message/turn ids, before/after images or absence, protection, coverage, writers and native cursors. Caps: 8 MiB/file, 64 MiB and 20,000 paths/baseline, 1 GiB total (64 MiB recovery reserve inside it), 256 MiB and 100 points/folder, 30 days; open baselines and recovery are pinned. No user Git index, ref or stash is changed. | `engine/src/rewind.rs`, `engine/src/rewind/store.rs`; engine admission in `engine/src/engine/rewind.rs`; safe disk operations in `winproc/src/rewind/` |
 | Conversation `rewindNotice`, `rewindSummary`, message `rewind` | Saved-message continuation notice/restore summary and the message's point id/coverage, drawn in the thread as a calm notice and a mark where files cannot all go back. Native bindings are invalidated; grants, spend and publication stay current. Later messages, bindings, queued input, plan and context remain in the redo journal; Keep going stays off after restore and redo. Scope and per-file choices live only in the open confirmation, with both scopes and keeping conflicting files as defaults; no browser storage or setting is added. | `engine/src/model.rs`, `engine/src/engine/rewind.rs`, `ui/Thread.tsx`, `ui/Rewind.tsx` |

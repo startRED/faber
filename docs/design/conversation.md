@@ -6,7 +6,7 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 
 ## Faber's decision rows
 
-A quiet labeled row records each decision or message Faber made on its own. It is never the person's voice or the AI's reply. The row names its actor, decision and reason, with a Change action where available; the exact words sent to an AI stay selectable inside a closed disclosure. Rows wrap in narrow windows.
+A quiet labeled row records each decision or message Faber made on its own. It is never the person's voice or the AI's reply. The row names its actor, decision and reason, with a Change action where available; the exact words sent to an AI stay selectable inside a closed disclosure. Wake rows omit a separate reason when their sentence already explains it; helper rows disclose the brief sent to the helper. Rows wrap in narrow windows.
 
 ## Answers
 

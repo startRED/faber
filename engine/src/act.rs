@@ -62,6 +62,13 @@ impl FaberAct {
     }
     pub fn wake(wake: &Wake, sent: &str) -> Self {
         let mut act = Self::new(ActKind::Wake, &wake.why);
+        act.why = match wake.why.as_str() {
+            "wake.keepGoing" => Some("act.why.keepGoing"),
+            "wake.compacted" => Some("act.why.compacted"),
+            "wake.compactFailed" => Some("act.why.compactFailed"),
+            _ => None,
+        }
+        .map(str::to_string);
         if let Some(pr) = wake.pr {
             act.params.insert("pr".into(), pr.to_string());
         }
@@ -98,5 +105,31 @@ impl FaberAct {
         let mut act = Self::new(ActKind::Recovery, what);
         act.why = Some(why.into());
         act
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn wake_reasons_are_specific_and_never_repeated() {
+        for (key, why) in [
+            ("wake.keepGoing", Some("act.why.keepGoing")),
+            ("wake.checksFixing", None),
+            ("wake.checksFailed", None),
+            ("wake.conflict", None),
+            ("wake.goalBroke", None),
+            ("wake.compacted", Some("act.why.compacted")),
+            ("wake.compactFailed", Some("act.why.compactFailed")),
+            ("wake.cleared", None),
+            ("wake.closed", None),
+            ("wake.updated", None),
+            ("wake.approvedPlan", None),
+            ("wake.asked", None),
+            ("wake.childDone", None),
+            ("wake.unknown", None),
+        ] {
+            assert_eq!(FaberAct::wake(&Wake::of(key), "sent").why.as_deref(), why, "{key}");
+        }
     }
 }

@@ -4856,6 +4856,17 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     let claude_args = claude.args.lock().unwrap()[0].clone();
     assert!(claude_args.windows(2).any(|a| a[0] == "--mcp-config" && a[1].contains("\"type\":\"sdk\"")), "{claude_args:?}");
     let reply = &c.messages[1];
+    let act = reply.acts.iter().find(|act| act.kind == faber_engine::act::ActKind::Helper).expect("helper act");
+    let brief = faber_engine::helper::prompt(&serde_json::json!({"title": "Check config", "brief": "Check config.toml for risky values."}))
+        .unwrap();
+    assert_eq!(act.sent.as_deref(), Some(brief.as_str()));
+    assert!(matches!(
+        &act.actor,
+        faber_engine::act::Actor::Ai { vendor: Vendor::Codex, model: Some(_), role: faber_engine::act::ActorRole::Helper }
+    ));
+    assert_eq!(act.what, "act.helper.started");
+    assert_eq!(act.params.get("vendor").map(String::as_str), Some("codex"));
+    assert!(act.params.contains_key("model"));
     let tools = reply.tools.as_ref().unwrap();
     let call = tools.iter().find(|t| t.name == "Helper").expect("the helper call is one step");
     let report = "`config.toml` contains only `timeout = 30` and `retries = 3`.";
