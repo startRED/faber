@@ -2249,6 +2249,7 @@ export const de: Messages = {
   'notes.316.new': 'Große Anfragen: Die KI teilt die Arbeit auf und führt selbst ein kleines Team; kleine Anfragen erledigt sie weiter direkt.',
   'notes.317.fixed': 'Auf jedem Kontingentbalken zeigt die Markierung jetzt, wie viel Zeit des Fensters schon vergangen ist, und die Zeit bis zum Zurücksetzen nennt auch die Stunden.',
   'notes.318.better': 'Teilt der Agent eine große Anfrage in Teile auf, laufen die Teile, die verschiedene Dateien ändern, jetzt nebeneinander; die anderen warten, bis sie dran sind.',
+  'notes.319.fixed': 'Wer direkt nach dem Öffnen die Version einer Seite wechselt, sieht unter der neuen Nummer nicht mehr die alte Seite.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

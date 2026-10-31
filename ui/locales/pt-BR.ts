@@ -2236,6 +2236,7 @@ export const ptBR: Messages = {
   'notes.316.new': 'Pedidos grandes: a IA divide o trabalho e toca uma pequena equipe sozinha; pedidos pequenos continuam sendo feitos direto.',
   'notes.317.fixed': 'Em cada barra de cota, o traço agora mostra quanto do tempo da janela já passou, e "renova em" também conta as horas.',
   'notes.318.better': 'Quando o agente divide um pedido grande em partes, as que mexem em arquivos diferentes agora andam lado a lado; as outras esperam a vez.',
+  'notes.319.fixed': 'Trocar a versão de uma página logo depois de abri-la não deixa mais a página antiga sob o número novo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
