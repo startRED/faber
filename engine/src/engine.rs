@@ -450,6 +450,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
+    /// (`resume_cut_leaders`, which takes them once).
+    quiet_teams: HashMap<String, Vec<String>>,
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
     /// answers briefly. Never saved.
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
@@ -653,7 +656,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
-        let parent_reports = Core::restore_parent_reports(&store);
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -675,6 +678,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),

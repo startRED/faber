@@ -49,20 +49,25 @@ fn state_of(busy: bool, c: &Conversation) -> State {
 impl Core {
     /// Reports owed when Faber opens: those saved as owed (a close that cut a member's turn off marks it, `shutdown`), and
     /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
-    /// before is not sent again (its id).
-    pub(super) fn restore_parent_reports(store: &Store) -> HashMap<String, HashSet<String>> {
+    /// before is not sent again (its id). With them, from the same pass, each leader none of whose members will wake it (none
+    /// owes a report, is on Keep going or has a turn waiting) and its members' ids, for `resume_cut_leaders`.
+    pub(super) fn restore_parent_reports(store: &Store) -> (HashMap<String, HashSet<String>>, HashMap<String, Vec<String>>) {
         let mut pending: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut teams: HashMap<String, (bool, Vec<String>)> = HashMap::new();
         for id in store.mentioning("\"startedBy\"") {
-            let cut_off = |c: &Conversation| {
-                c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming))
-            };
-            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report || cut_off(c))
-                && let Some(parent) = c.started_by
-            {
+            let Some(c) = store.get(&id) else { continue };
+            let Some(parent) = c.started_by.clone() else { continue };
+            let cut_off = c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming));
+            let owes = c.pending_parent_report || cut_off;
+            let team = teams.entry(parent.clone()).or_default();
+            team.0 |= owes || c.keep_going.is_some() || !c.queued.is_empty();
+            team.1.push(id.clone());
+            if owes {
                 pending.entry(parent).or_default().insert(id);
             }
         }
-        pending
+        let quiet = teams.into_iter().filter(|(_, (woken, _))| !woken).map(|(leader, (_, members))| (leader, members)).collect();
+        (pending, quiet)
     }
 
     pub(super) fn refill_parent_reports(&mut self, parent: &str) {
