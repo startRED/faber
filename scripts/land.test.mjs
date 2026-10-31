@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { covered, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
+import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -195,4 +195,19 @@ test('only a landing cancelled after a green gate is dropped', () => {
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'cancelled' }]), true);
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'cancelled' }, { name: 'land', conclusion: 'skipped' }]), false);
   assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'failure' }]), false);
+});
+
+test('a green batch lands on a base moved by words only, and anything else sends it back to be checked again', () => {
+  const task = 'docs/tasks/030-a-task.md';
+  assert.equal(wordsOnly([task, 'docs/dev/workflow.md'], [task, 'docs/dev/workflow.md'], isWords), true);
+  // Code moved the base, or code differs from the tree checked: checked again.
+  assert.equal(wordsOnly([task, 'engine/src/engine.rs'], [task], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/App.tsx'], isWords), false);
+  // A page a test reads is code here, and a locale line moved by the numbering is too.
+  assert.equal(wordsOnly(['docs/product-map.md'], ['docs/product-map.md'], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/locales/en.ts'], isWords), false);
+  // Numbers taken on the base meanwhile could collide with the batch's own.
+  assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
+  assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
+  assert.equal(wordsOnly([], [], isWords), false);
 });
