@@ -2,19 +2,21 @@
 // sidecar and command line, a staged `out/app` with no dependencies, then electron-builder (installer/). CI runs it; on
 // the owner's PC it would make a release build folder of its own, so it is not part of the local proofs.
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 
-export function plan(platform = process.platform) {
+// The command line ships beside the app once the workspace has it (`cli/`, R459).
+export function plan(platform = process.platform, withCli = existsSync(path.join(root, 'cli/Cargo.toml'))) {
   const exe = platform === 'win32' ? '.exe' : '';
+  const packages = withCli ? ['faber-sidecar', 'faber-cli'] : ['faber-sidecar'];
   return {
     target: path.join(root, 'out', 'electron-target'),
-    binaries: ['faber-sidecar', 'faber-cli'].map((name) => `${name}${exe}`),
+    binaries: packages.map((name) => `${name}${exe}`),
     builder: platform === 'win32' ? '--win' : platform === 'darwin' ? '--mac' : '--linux',
-    cargo: ['build', '--release', '-p', 'faber-sidecar', '-p', 'faber-cli', '--locked'],
+    cargo: ['build', '--release', ...packages.flatMap((name) => ['-p', name]), '--locked'],
     triples: platform === 'darwin' ? ['aarch64-apple-darwin', 'x86_64-apple-darwin'] : [],
   };
 }

@@ -5,6 +5,8 @@
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const pkg = require('../package.json');
+// scripts/electron-dist.mjs builds the command line only when the workspace has it.
+const cli = path.join(root, 'out/electron-bin/x64/faber-cli.exe');
 
 module.exports = {
   appId: 'io.github.startred.faber', productName: 'Faber', executableName: 'faber',
@@ -16,7 +18,7 @@ module.exports = {
   asar: true, npmRebuild: false, publish: null, forceCodeSigning: false,
   extraResources: [{ from: path.join(root, 'out/electron-bin/${arch}', process.platform === 'win32' ? 'faber-sidecar.exe' : 'faber-sidecar'), to: process.platform === 'win32' ? 'faber-sidecar.exe' : 'faber-sidecar' }],
   electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false, enableEmbeddedAsarIntegrityValidation: true, onlyLoadAppFromAsar: true, enableCookieEncryption: true, grantFileProtocolExtraPrivileges: false },
-  win: { icon: path.join(root, 'src-tauri/icons/icon.ico'), target: [{ target: 'nsis', arch: ['x64'] }], extraFiles: [{ from: path.join(root, 'out/electron-bin/${arch}/faber-cli.exe'), to: 'bin/faber.exe' }] },
+  win: { icon: path.join(root, 'src-tauri/icons/icon.ico'), target: [{ target: 'nsis', arch: ['x64'] }], extraFiles: require('node:fs').existsSync(cli) ? [{ from: cli, to: 'bin/faber.exe' }] : [] },
   nsis: { oneClick: true, perMachine: false, allowElevation: false, deleteAppDataOnUninstall: false, artifactName: 'Faber_${version}_x64-setup.exe', shortcutName: 'Faber', include: path.join(root, 'installer/windows/faber.nsh') },
   mac: { icon: path.join(root, 'src-tauri/icons/icon.icns'), category: 'public.app-category.productivity', identity: null, target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, { target: 'zip', arch: ['arm64', 'x64'] }] },
   linux: { icon: path.join(root, 'src-tauri/icons/icon.png'), target: ['AppImage', 'deb'] },
