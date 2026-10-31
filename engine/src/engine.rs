@@ -46,6 +46,7 @@ mod evict;
 pub use aside::Aside;
 pub use browse::TabStep;
 pub use copies::GitRunner;
+pub use session::NewSession;
 pub mod facts;
 mod goals;
 #[path = "groups.rs"]
@@ -67,6 +68,7 @@ mod quota_watch;
 mod recovery;
 mod research;
 mod rewind;
+mod session;
 mod settings_change;
 mod siblings;
 mod silence;
@@ -4497,6 +4499,7 @@ impl Core {
             branch_of: None,
             started_by: None,
             pending_parent_report: false,
+            waiting_on: None,
             goal_fix: None,
             spent_usd: 0.0,
             estimate: None,

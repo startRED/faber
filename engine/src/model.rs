@@ -934,6 +934,20 @@ pub struct QueuedTurn {
     pub wake: Option<Wake>,
 }
 
+/// What an agent that called `wait` waits for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingOn {
+    /// The conversations it waits for, all started by it; the marker goes when one of them reports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
+    /// Its own words for what it waits for, at most 200 characters.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    /// When it started waiting, in milliseconds.
+    pub since: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -1001,6 +1015,10 @@ pub struct Conversation {
     /// Its latest completion still needs a place in its parent's bounded inbox.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pending_parent_report: bool,
+    /// The agent declared it waits for the conversations it started (or for a stated reason) instead of being done: its turn
+    /// ending is then not an ending (`crate::sibling` `wait`). Cleared when a conversation it waits for reports, or at its next turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
     /// The project whose standing goal this conversation fixes, or whose goal fix started it: such a conversation is held to the
     /// project's day of money (`engine/goals.rs`) for as long as it lives, whatever becomes of the goal's own pointer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
