@@ -199,7 +199,7 @@ async fn r160_review_full_access_approval_relaunches_projects_with_the_full_tool
 
 #[tokio::test]
 async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_plan_mode() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto, Permissions::FullAccess] {
             let dir = crate::support::DataFolder::new();
             let first = fake(fixture(vendor.name(), "approve-plan"));
@@ -342,7 +342,7 @@ async fn r160_review_claude_approval_queues_immediately_and_stop_removes_the_app
 
 #[tokio::test]
 async fn r160_review_ask_before_plan_is_the_approval_default_even_for_the_first_conversation() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = crate::support::DataFolder::new();
         let engine = engine(&dir, vendor, fake(fixture(vendor.name(), "approve-plan")).spawn);
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
@@ -584,7 +584,7 @@ async fn r160_approval_drains_the_idle_queue_in_order_before_its_approved_work()
             Arc::new(move |bin, args, cwd| if bin == std::ffi::OsStr::new("claude") { a(bin, args, cwd) } else { b(bin, args, cwd) });
         let reopened = engine(&dir, Vendor::Codex, spawn);
         reopened.replace_clis(
-            Vendor::ALL
+            Vendor::RUNNABLE
                 .into_iter()
                 .filter(|v| earlier_outcome != "unavailable" || *v != Vendor::Claude)
                 .map(|v| (v, Cli { command: v.name().into(), prefix: vec![] }))

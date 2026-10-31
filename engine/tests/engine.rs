@@ -743,6 +743,7 @@ fn visual_answers_keep_the_screen_resource_policy_closed_and_authorize_only_the_
 
 fn visual_fixture(vendor: Vendor) -> Vec<Message> {
     let text = match vendor {
+        Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
         Vendor::Claude => include_str!("../../tests/fixtures/visual-answers/claude.json"),
         Vendor::Codex => include_str!("../../tests/fixtures/visual-answers/codex.json"),
     };
@@ -1884,7 +1885,7 @@ async fn research_requires_a_question_and_enabled_web_search_without_starting_a_
 
 #[tokio::test]
 async fn research_send_now_keeps_its_own_turn_and_invalid_queued_requests_are_refused() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for chosen in [vendor.name(), "auto"] {
             let dir = support::DataFolder::new();
             let f = fake(fixture(vendor.name(), "steer"));
@@ -2239,7 +2240,7 @@ async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept(
 #[cfg(windows)]
 #[tokio::test]
 async fn private_chat_reopens_legacy_files_outside_the_protected_data_folder() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let owned = tempfile::tempdir().unwrap();
         // Canonical like the engine's own paths: the runner's temp folder is a short 8.3 name.
         let root = owned.path().canonicalize().unwrap();
@@ -2376,7 +2377,7 @@ async fn r121_full_access_leaves_the_persons_hooks_on_and_ask_keeps_them_off_unt
 
 #[tokio::test]
 async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High)] {
             let dir = support::DataFolder::new();
             let f = fake(fixture(vendor.name(), "chat"));
@@ -2433,7 +2434,7 @@ fn manual_effort_accepts_only_three_levels_and_auto_ignores_a_manual_effort() {
     }
     let before = choice("auto", None);
     let after = Choice { effort: Some(Effort::High), ..before.clone() };
-    assert_eq!(pick_model(&before, &Vendor::ALL, Some("gpt-6-luna")), pick_model(&after, &Vendor::ALL, Some("gpt-6-luna")));
+    assert_eq!(pick_model(&before, &Vendor::RUNNABLE, Some("gpt-6-luna")), pick_model(&after, &Vendor::RUNNABLE, Some("gpt-6-luna")));
 }
 
 #[tokio::test]
@@ -3517,6 +3518,27 @@ async fn a_queued_message_that_cannot_be_dispatched_stays_queued() {
     assert_eq!(second.send_queued(&id, "q1").unwrap_err(), "error.noSubscription");
     assert_eq!(second.open(&id).unwrap().queued.len(), 1, "the message is still there to be sent or removed");
     second.shutdown();
+}
+
+/// Gemini is known (task 055) but nothing discovers, routes or starts it yet.
+#[tokio::test]
+async fn gemini_is_known_but_never_chosen_or_started() {
+    assert_eq!(Vendor::ALL.len(), 3);
+    assert_eq!(serde_json::to_value(Vendor::Gemini).unwrap(), json!("gemini"));
+    assert_eq!(serde_json::from_value::<Vendor>(json!("gemini")).unwrap(), Vendor::Gemini);
+    let old: faber_engine::ledger::Ledger = serde_json::from_value(json!({ "claude": {}, "codex": {} })).unwrap();
+    assert!(old.gemini.readings.is_empty(), "a ledger written before Gemini opens with it empty");
+    for vendor in Vendor::ALL {
+        assert_ne!(faber_engine::helper::other(vendor), Vendor::Gemini, "a helper never comes from Gemini");
+        for name in ["auto", vendor.name()] {
+            let pick = pick_model(&choice(name, None), &Vendor::RUNNABLE, None);
+            assert!(pick.is_none_or(|p| p.vendor != Vendor::Gemini), "{name} picked Gemini");
+        }
+    }
+    let dir = support::DataFolder::new();
+    let (engine, _rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    assert_eq!(engine.send(ask(Area::Chat, SKY, choice("gemini", None))), Err("error.noSubscription".into()));
+    engine.shutdown();
 }
 
 #[tokio::test]
@@ -4810,7 +4832,7 @@ async fn r140_settings_that_cannot_be_read_ask_before_every_change_and_a_missing
 /// An engine with both CLIs connected on a known subscription, as a helper needs (R161).
 fn two_vendors(dir: &support::DataFolder, spawn: Spawner) -> Engine {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let clis = BTreeMap::from(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })));
+    let clis = BTreeMap::from(Vendor::RUNNABLE.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })));
     let opts = EngineOptions {
         data_dir: dir.path().into(),
         #[cfg(windows)]
@@ -5753,7 +5775,7 @@ async fn reply_style_reaches_each_cli_in_chat_and_projects() {
     let short = "Keep replies short and direct, without leaving out necessary facts or warnings.";
     let explained = "Explain replies with enough detail and examples to make the reasoning easy to follow.";
     let own = "Responda com exemplos de jogos.\nSem enrolar.";
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for area in [Area::Chat, Area::Project] {
             for (style, words, verbosity) in [
                 (ReplyStyle::Default, "", None),
@@ -5955,7 +5977,7 @@ fn reply_style_migration_keeps_the_recovery_epoch_after_restart() {
 #[tokio::test]
 async fn reply_style_changes_on_resume_without_changing_the_conversations_name() {
     use faber_engine::model::ReplyStyle;
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::DataFolder::new();
         let f = fake(fixture(vendor.name(), "chat"));
         let (first, mut rx) = engine(&dir, vendor, f.spawn.clone());
@@ -6257,7 +6279,7 @@ async fn reply_style_in_the_same_engine_reopens_claude_and_keeps_peer_turns() {
 
 #[tokio::test]
 async fn rule_2_a_choice_that_names_no_model_or_effort_still_starts_each_cli_on_a_full_model_id_and_an_effort() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::DataFolder::new();
         let f = fake(fixture(vendor.name(), "chat"));
         let (engine, mut rx) = engine(&dir, vendor, f.spawn.clone());

@@ -298,6 +298,7 @@ pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Optio
     let ai = match ai {
         Some(Vendor::Claude) => "Claude",
         Some(Vendor::Codex) => "Codex",
+        Some(Vendor::Gemini) => "Gemini",
         None => "AI",
     };
     fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)

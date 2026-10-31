@@ -18,6 +18,7 @@ fn fixture(vendor: Vendor) -> Message {
         .into_iter()
         .filter(|entry| !entry.input)
         .flat_map(|entry| match vendor {
+            Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
             Vendor::Claude => faber_engine::claude::parse_claude_message(&entry.msg),
             Vendor::Codex => parse_codex_notification(&entry.msg, &mut state),
         })
@@ -62,7 +63,7 @@ fn engine_with_clis(dir: &crate::support::DataFolder, clis: BTreeMap<Vendor, Cli
 
 #[tokio::test]
 async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reopening() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::DataFolder::new();
         let mut initial = conversation(fixture(vendor), Area::Chat);
         initial.working_folder = None;
@@ -109,7 +110,7 @@ async fn branches_edits_and_retries_keep_only_retained_piece_choices_after_reope
 
 #[tokio::test]
 async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_after_reopening() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::DataFolder::new();
         let mut initial = conversation(fixture(vendor), Area::Chat);
         initial.id = "3611dcb7-6387-47c6-8b25-1b6f20903171".into();
@@ -155,7 +156,7 @@ async fn rewind_then_edit_an_earlier_piece_and_redo_recovers_the_saved_choices_a
 
 #[test]
 fn both_cli_fixtures_detect_all_ten_pieces_and_preserve_invalid_source_as_code() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let mut message = fixture(vendor);
         let pieces = detect(&message, &[]);
         assert_eq!(pieces.len(), 10, "{vendor:?}");
@@ -294,7 +295,7 @@ fn arithmetic_has_precedence_decimals_unary_signs_and_explicit_resource_limits()
 
 #[tokio::test]
 async fn both_cli_piece_choices_survive_engine_reopening_in_both_areas() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for area in [Area::Chat, Area::Project] {
             let dir = support::DataFolder::new();
             let initial = conversation(fixture(vendor), area);
@@ -335,7 +336,7 @@ async fn both_cli_piece_choices_survive_engine_reopening_in_both_areas() {
 
 #[tokio::test]
 async fn moving_chat_to_a_project_keeps_both_clis_piece_choices_and_allows_saving_after_reopening() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::DataFolder::new();
         let folder = support::work_folder();
         let mut initial = conversation(fixture(vendor), Area::Chat);

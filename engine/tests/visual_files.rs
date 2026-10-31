@@ -16,7 +16,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for area in [Area::Chat, Area::Project] {
             let data = support::DataFolder::new();
             let folder = support::work_folder();
@@ -29,6 +29,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
                 .position(|entry| {
                     !entry.input
                         && match vendor {
+                            Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
                             Vendor::Claude => entry.msg["type"] == "result",
                             Vendor::Codex => entry.msg["method"] == "turn/completed",
                         }
@@ -36,6 +37,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
                 .unwrap();
             recording.truncate(end + 1);
             let outputs: Vec<Value> = serde_json::from_str(match vendor {
+                Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
                 Vendor::Claude => include_str!("../../tests/fixtures/visual-files/claude.json"),
                 Vendor::Codex => include_str!("../../tests/fixtures/visual-files/codex.json"),
             })
@@ -43,6 +45,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
             let start = outputs
                 .iter()
                 .position(|entry| match vendor {
+                    Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
                     Vendor::Claude => entry["message"]["content"][0]["id"] == "write",
                     Vendor::Codex => entry["params"]["item"]["id"] == "write",
                 })
@@ -149,6 +152,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
 fn fixture(vendor: Vendor, root: &Path) -> Message {
     let root = pin(root).unwrap();
     let source = match vendor {
+        Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
         Vendor::Claude => include_str!("../../tests/fixtures/visual-files/claude.json"),
         Vendor::Codex => include_str!("../../tests/fixtures/visual-files/codex.json"),
     };
@@ -157,6 +161,7 @@ fn fixture(vendor: Vendor, root: &Path) -> Message {
     let mut message = Message::new(vendor.name().into(), Role::Assistant, String::new(), 1);
     for entry in entries {
         let events = match vendor {
+            Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
             Vendor::Claude => faber_engine::claude::parse_claude_message(&entry),
             Vendor::Codex => parse_codex_notification(&entry, &mut state),
         };
@@ -194,7 +199,7 @@ fn both_cli_fixtures_capture_only_written_bounded_visual_files_and_closed_mermai
     std::fs::write(root.join("large.htm"), "x".repeat(FILE_BYTES + 1)).unwrap();
     std::fs::write(dir.path().join("outside.html"), "outside").unwrap();
     std::fs::write(root.join("private.txt"), "unrelated").unwrap();
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let message = fixture(vendor, &root);
         assert_eq!(
             message.visual_files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
@@ -258,7 +263,7 @@ fn reply_titles_cannot_collide_with_file_identity_in_either_order() {
 
 #[test]
 fn file_versions_reopen_from_saved_bytes_after_replacement_and_deletion_without_project_reads() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let dir = support::canonical_tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("page.html"), "<p>First</p>").unwrap();

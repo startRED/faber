@@ -839,6 +839,8 @@ impl Engine {
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
                 Vendor::Claude => claude_quota = self.check_claude_plan(timeout).await,
+                // Not yet: no CLI is discovered for it, so no job is made.
+                Vendor::Gemini => {}
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
                     self.with(|c| {
@@ -4341,6 +4343,8 @@ impl Core {
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
+            // Not yet: no CLI is discovered for it, so the lookup above already refused it.
+            Vendor::Gemini => return Err("error.notConnected".into()),
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -5050,6 +5054,7 @@ impl Core {
         let resume = match vendor {
             Vendor::Claude => vec!["--resume".to_string(), session],
             Vendor::Codex => vec!["resume".to_string(), session],
+            Vendor::Gemini => return None,
         };
         Some(TerminalCommand { command: cli.command, args: cli.prefix.into_iter().chain(resume).collect(), cwd: self.cwd_of(&c).ok()? })
     }

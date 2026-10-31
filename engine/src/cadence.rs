@@ -24,6 +24,8 @@ pub fn gap(vendor: Vendor) -> f64 {
     match vendor {
         Vendor::Claude => CLAUDE_GAP,
         Vendor::Codex => CODEX_GAP,
+        // Not yet read; the longer gap until its limits are known.
+        Vendor::Gemini => CLAUDE_GAP,
     }
 }
 

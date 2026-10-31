@@ -839,7 +839,7 @@ pub(super) mod tests {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Err(std::io::Error::other("this test never starts a process"))
             });
-            c.opts.clis = Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
+            c.opts.clis = Vendor::RUNNABLE.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
             let live = c.live.get_mut(&id).unwrap();
             live.vendor = vendor;
             live.permissions = Permissions::Plan;
@@ -958,7 +958,7 @@ pub(super) mod tests {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Err(std::io::Error::other("this test never starts a process"))
             });
-            c.opts.clis = Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
+            c.opts.clis = Vendor::RUNNABLE.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect();
             let live = c.live.get_mut(&id).unwrap();
             live.vendor = vendor;
             live.permissions = Permissions::Plan;
