@@ -2,10 +2,9 @@
 
 Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
 
-The runner resolves the repository from its current folder or the nearest ancestor containing `Cargo.toml`,
-`testkit/Cargo.toml` and `engine/Cargo.toml`. Run it inside the intended checkout, even when reusing a warmed
-`CARGO_TARGET_DIR`; outside a Faber workspace it fails instead of using the checkout where it was compiled.
-The fake CLI stays beside the runner executable, and the configured target folder is preserved.
+The runner finds the workspace by `Cargo.toml`, `testkit/Cargo.toml` and `engine/Cargo.toml`. Run it in the
+intended checkout, even with a warmed `CARGO_TARGET_DIR`; outside a workspace it fails. The fake CLI stays beside
+the runner, and the configured target folder is preserved.
 
 `Launch::claude_recording` and `codex_recording` can select independent fake replays for a main agent and its helper.
 They add `--faber-recording <path>` to that fake binary's structured argument prefix; the fake removes it before
