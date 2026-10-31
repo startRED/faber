@@ -1316,7 +1316,7 @@ export const es: Messages = {
   "set.permissions": "Permisos para Chat y Proyectos",
   "error.projectSandbox": "Faber no pudo preparar el aislamiento de la carpeta de trabajo. Revisa los permisos de la carpeta e inténtalo de nuevo.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
-  "set.permissionsDontAskBody": "Chat y Proyectos ejecutan comandos y cambian archivos sin preguntar, con acceso a internet, en cualquier carpeta que elijas, salvo carpetas del sistema y de inicio de sesión. Tus propias herramientas conectadas y hooks siguen activos. Una página o un archivo que lee la IA puede llevarla a cambiar archivos o usar la red sin preguntar. Codex puede leer directamente tus carpetas de inicio de sesión y de claves (.claude, .codex, .ssh) y Claude Code puede hacerlo mediante comandos; el bloqueo de esas carpetas en los comandos funciona solo hasta donde es posible, por eso elige Preguntar para lo que no sea de confianza. Detener pide a las herramientas que paren y termina los programas que iniciaron.",
+  "set.permissionsDontAskBody": "Chat y Proyectos ejecutan comandos y cambian archivos sin preguntar, con acceso a internet. Lo hacen en cualquier carpeta que elijas, salvo carpetas del sistema y de inicio de sesión. Tus propias herramientas conectadas y hooks siguen activos.\nUna página o un archivo que lee la IA puede llevarla a cambiar archivos o usar la red sin preguntar.\nCodex puede leer directamente tus carpetas de inicio de sesión y de claves (.claude, .codex, .ssh). Claude Code puede leerlas mediante comandos. El bloqueo de esas carpetas en los comandos funciona solo hasta donde es posible.\nPor eso, para lo que no sea de confianza, elige Preguntar.\nDetener pide a las herramientas que paren y termina los programas que iniciaron.",
   "set.permissionsAskBody": "Chat y Proyectos preguntan antes de cambiar un archivo y antes de ejecutar comandos, salvo los que ya permitiste en los ajustes de la propia herramienta. Claude Code también deja pasar algunos comandos de lectura simples, como listar una carpeta. Detener, y cambiar a este modo, pide a las herramientas que paren y termina los programas que iniciaron.",
   'set.permissions.ask': "Preguntar",
   'set.permissions.acceptEdits': "Aceptar ediciones",
@@ -2251,6 +2251,7 @@ export const es: Messages = {
   'notes.318.better': 'Cuando el agente divide una petición grande en partes, las que tocan archivos distintos ahora avanzan en paralelo; las demás esperan su turno.',
   'notes.319.fixed': 'Cambiar de versión una página justo después de abrirla ya no deja la página anterior bajo el número nuevo.',
   'notes.320.better': 'La rama de una conversación de proyecto ahora está en Detalles técnicos, con su carpeta, y ya no arriba.',
+  'notes.321.better': 'La explicación de Acceso total en Ajustes ahora es una lista corta de frases sencillas, con todas las advertencias.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

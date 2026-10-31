@@ -1155,7 +1155,7 @@ export const fr: Messages = {
   "set.permissions": "Autorisations du Chat et des Projets",
   "error.projectSandbox": "Faber n’a pas pu préparer le bac à sable du dossier de travail. Vérifiez les autorisations du dossier et réessayez.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
-  "set.permissionsDontAskBody": "Le Chat et les Projets exécutent des commandes et modifient des fichiers sans demander, avec accès à internet, dans n’importe quel dossier que vous choisissez, sauf les dossiers système et de connexion. Vos propres outils connectés et hooks restent actifs. Une page ou un fichier lu par l’IA peut l’amener à modifier des fichiers ou à utiliser le réseau sans demander. Codex peut lire directement vos dossiers de connexion et de clés (.claude, .codex, .ssh), et Claude Code le peut par des commandes ; le blocage de ces dossiers pour les commandes ne vaut que dans la mesure du possible ; choisissez donc Demander pour ce qui n’est pas fiable. Arrêter demande aux outils de s’arrêter et met fin aux programmes qu’ils ont lancés.",
+  "set.permissionsDontAskBody": "Le Chat et les Projets exécutent des commandes et modifient des fichiers sans demander, avec accès à internet. Ils le font dans n’importe quel dossier que vous choisissez, sauf les dossiers système et de connexion. Vos propres outils connectés et hooks restent actifs.\nUne page ou un fichier lu par l’IA peut l’amener à modifier des fichiers ou à utiliser le réseau sans demander.\nCodex peut lire directement vos dossiers de connexion et de clés (.claude, .codex, .ssh). Claude Code peut les lire par des commandes. Le blocage de ces dossiers pour les commandes ne vaut que dans la mesure du possible.\nChoisissez donc Demander pour tout ce en quoi vous n’avez pas confiance.\nArrêter demande aux outils de s’arrêter et met fin aux programmes qu’ils ont lancés.",
   "set.permissionsAskBody": "Le Chat et les Projets demandent avant de modifier un fichier et avant d’exécuter des commandes, sauf celles que vous avez déjà autorisées dans les réglages de l’outil lui-même. Claude Code laisse aussi passer quelques commandes de lecture simples, comme lister un dossier. Arrêter, et passer à ce mode, demande aux outils de s’arrêter et met fin aux programmes qu’ils ont lancés.",
   'set.permissions.ask': "Demander",
   'set.permissions.acceptEdits': "Accepter les modifications",
@@ -2251,6 +2251,7 @@ export const fr: Messages = {
   'notes.318.better': "Quand l'agent découpe une grosse demande en parties, celles qui touchent des fichiers différents avancent désormais côte à côte ; les autres attendent leur tour.",
   'notes.319.fixed': 'Changer de version d’une page juste après l’avoir ouverte ne laisse plus l’ancienne page sous le nouveau numéro.',
   'notes.320.better': "La branche d'une conversation de projet est désormais dans Détails techniques, avec son dossier, et non plus en haut.",
+  'notes.321.better': 'L’explication de l’Accès total dans les Réglages est maintenant une courte liste de phrases simples, avec tous les avertissements.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
