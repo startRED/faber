@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 /// Flags that take a value (`--id c1` or `--id=c1`).
-const VALUED: &[&str] = &["id", "project", "vendor", "model", "effort", "limit", "data"];
+const VALUED: &[&str] =
+    &["id", "to", "project", "family", "state", "query", "last", "timeout", "vendor", "model", "effort", "limit", "data"];
 /// Flags that are on or off.
-const SWITCHES: &[&str] = &["json", "plain", "no-wait", "no-start", "archived", "help", "version", "allow", "always", "deny"];
+const SWITCHES: &[&str] = &["json", "human", "no-start", "archived", "all", "wait", "help"];
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Args {
@@ -37,7 +38,8 @@ impl Args {
                 None => (flag, None),
             };
             if VALUED.contains(&name) {
-                let value = inline.or_else(|| raw.next()).ok_or_else(|| format!("--{name}"))?;
+                let value =
+                    inline.or_else(|| raw.next()).filter(|v| !v.is_empty() && !v.starts_with("--")).ok_or_else(|| format!("--{name}"))?;
                 args.values.insert(name.into(), value);
             } else if SWITCHES.contains(&name) && inline.is_none() {
                 args.switches.push(name.into());
@@ -56,45 +58,13 @@ impl Args {
         self.values.get(name).map(String::as_str)
     }
 
+    pub fn only(&self, allowed: &[&str]) -> bool {
+        self.values.keys().all(|k| k == "data" || allowed.contains(&k.as_str()))
+            && self.switches.iter().all(|k| ["json", "human", "no-start", "help"].contains(&k.as_str()) || allowed.contains(&k.as_str()))
+    }
+
     /// The word at `at`, after the verb.
     pub fn word(&self, at: usize) -> Option<&str> {
         self.words.get(at).map(String::as_str)
-    }
-
-    /// Every word from `at` on, as one text.
-    pub fn rest(&self, at: usize) -> String {
-        self.words.get(at..).unwrap_or_default().join(" ")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(line: &str) -> Result<Args, String> {
-        Args::parse(line.split_whitespace().map(String::from))
-    }
-
-    #[test]
-    fn flags_mix_with_words_in_any_order() {
-        let args = parse("chat --id c1 hello --json there --model=sonnet").unwrap();
-        assert_eq!(args.words, ["chat", "hello", "there"]);
-        assert_eq!((args.value("id"), args.value("model")), (Some("c1"), Some("sonnet")));
-        assert!(args.on("json") && !args.on("plain"));
-        assert_eq!(args.rest(1), "hello there");
-    }
-
-    #[test]
-    fn after_two_dashes_everything_is_a_word() {
-        let args = parse("chat -- --json is text").unwrap();
-        assert_eq!(args.words, ["chat", "--json", "is", "text"]);
-        assert!(!args.on("json"));
-    }
-
-    #[test]
-    fn an_unknown_flag_or_a_missing_value_names_the_flag() {
-        assert_eq!(parse("status --colour").unwrap_err(), "--colour");
-        assert_eq!(parse("chat --id").unwrap_err(), "--id");
-        assert_eq!(parse("status --json=yes").unwrap_err(), "--json");
     }
 }

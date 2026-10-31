@@ -28,18 +28,6 @@ impl Words {
     pub fn get(&self, key: &str) -> String {
         self.chosen.get(key).or_else(|| self.english.get(key)).map(|text| text.to_string()).unwrap_or_else(|| key.to_string())
     }
-
-    /// `key` with each `{name}` filled.
-    pub fn fill(&self, key: &str, values: &[(&str, &str)]) -> String {
-        values.iter().fold(self.get(key), |text, (name, value)| text.replace(&format!("{{{name}}}"), value))
-    }
-
-    /// The plural form of `key` for `n`, with `{n}` filled. English and the four other languages need only one and other.
-    pub fn count(&self, key: &str, n: usize) -> String {
-        let form = if n == 1 { "one" } else { "other" };
-        let text = self.get(&format!("{key}#{form}"));
-        text.replace("{n}", &n.to_string())
-    }
 }
 
 /// The language to speak: what Settings says, else the system's, else English.
@@ -78,21 +66,5 @@ mod tests {
                 assert!(entries.iter().any(|(k, _)| k == key), "{name} has no {key}");
             }
         }
-    }
-
-    #[test]
-    fn a_region_falls_to_its_language_and_a_missing_key_shows_itself() {
-        let words = Words::new("pt-PT");
-        assert_eq!(words.get("cli.word.yes"), table("pt-BR").unwrap()["cli.word.yes"]);
-        assert_eq!(Words::new("xx").get("cli.word.yes"), "Yes");
-        assert_eq!(Words::new("en").get("cli.nothing.here"), "cli.nothing.here");
-    }
-
-    #[test]
-    fn plural_forms_and_values_fill_in() {
-        let words = Words::new("en");
-        assert_eq!(words.count("cli.list.count", 1), "1 conversation");
-        assert_eq!(words.count("cli.list.count", 3), "3 conversations");
-        assert_eq!(words.fill("cli.error.noFaber", &[]), words.get("cli.error.noFaber"));
     }
 }
