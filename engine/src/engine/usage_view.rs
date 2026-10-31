@@ -7,7 +7,10 @@ use crate::budget::{Snap, State, elapsed};
 pub struct WindowUsage {
     pub name: String,
     pub used: f64,
+    /// The share of the window gone, weighted by when the person usually works: what pacing decisions use.
     pub elapsed: f64,
+    /// The share of the window's time gone, plain clock time (R88's daily line): the mark on the screen's bar, so it agrees
+    /// with "resets in" beside it.
     pub expected: f64,
     pub resets_at: f64,
     /// When the vendor's counter was read, Unix seconds. `used` is that reading as it was, never adjusted.
@@ -87,7 +90,7 @@ impl Core {
                             name: name.clone(),
                             used: v.readings.get(name).map_or(w.used, |r| r.used),
                             elapsed: e,
-                            expected: e,
+                            expected: if w.length > 0.0 { ((now - (w.resets_at - w.length)) / w.length).clamp(0.0, 1.0) } else { e },
                             resets_at: w.resets_at,
                             read_at: w.read_at,
                             uncounted,

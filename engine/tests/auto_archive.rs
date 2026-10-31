@@ -176,9 +176,10 @@ async fn r_next_a_merged_or_closed_pull_request_archives_its_conversation_and_an
     engine.shutdown();
 }
 
-/// Faber's own flow ends following when the checks pass, before CI merges the pull request: the daily pass reads it once.
+/// A green pull request stays followed until CI merges it (a queue run may still turn it red): the daily pass leaves it, and
+/// archives it once the follow reads it merged.
 #[tokio::test]
-async fn r_next_a_green_pull_request_is_read_once_more_by_the_daily_pass() {
+async fn r_next_a_green_pull_request_is_archived_once_it_is_merged() {
     let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
     let (engine, reads) = boot(&dir, spawn);
@@ -187,10 +188,10 @@ async fn r_next_a_green_pull_request_is_read_once_more_by_the_daily_pass() {
     reads.lock().unwrap().push_back(look(PrState::Open, CiState::Passing));
     engine.look_at_prs().await;
     assert!(!archived(&engine, &id), "green is not merged");
-    reads.lock().unwrap().push_back(look(PrState::Open, CiState::Passing));
     engine.archive_at(now(), None);
-    assert!(!archived(&engine, &id), "still open when read");
+    assert!(!archived(&engine, &id), "still followed: it is not put away");
     reads.lock().unwrap().push_back(look(PrState::Merged, CiState::Passing));
+    engine.look_at_prs().await;
     engine.archive_at(now(), None);
     assert!(archived(&engine, &id));
     engine.shutdown();

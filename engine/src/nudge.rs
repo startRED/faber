@@ -71,7 +71,8 @@ const SCRIPTS: [&str; 4] = ["test", "lint", "typecheck", "build"];
 const SOURCE: [&str; 17] = ["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "java", "kt", "cs", "c", "h", "cpp", "hpp", "swift"];
 
 /// Splits a command line into the words of each command, breaking at `&&`, `||`, `;`, `|`, `&` and newlines outside
-/// quotes. None when the line uses syntax this does not read: substitution, subshells, heredocs, an open quote.
+/// quotes. A heredoc's body is text, not commands, and is skipped. None when the line uses syntax this does not read:
+/// substitution, subshells, here-strings, a heredoc never closed, an open quote.
 pub(crate) fn segments(line: &str) -> Option<Vec<Vec<String>>> {
     read_segments(line, false)
 }
@@ -85,6 +86,8 @@ pub(crate) fn successful_segments(line: &str) -> Option<Vec<Vec<String>>> {
 fn read_segments(line: &str, require_success: bool) -> Option<Vec<Vec<String>>> {
     let (mut all, mut words, mut word, mut started) = (vec![], vec![], String::new(), false);
     let mut quote: Option<char> = None;
+    // The heredocs opened on the current line: their end word, and whether `<<-` lets it be indented with tabs.
+    let mut bodies: Vec<(String, bool)> = vec![];
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         let next = chars.peek().copied();
@@ -97,7 +100,33 @@ fn read_segments(line: &str, require_success: bool) -> Option<Vec<Vec<String>>> 
             (None, '\'' | '"') => (quote, started) = (Some(c), true),
             (None, '`' | '(' | ')') => return None,
             (None, '$') if next == Some('(') => return None,
-            (None, '<') if next == Some('<') => return None,
+            (None, '<') if next == Some('<') => {
+                chars.next();
+                if chars.peek() == Some(&'<') {
+                    return None;
+                }
+                let tabs = chars.next_if_eq(&'-').is_some();
+                while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+                let mut tag = String::new();
+                if let Some(q) = chars.next_if(|c| *c == '\'' || *c == '"') {
+                    loop {
+                        match chars.next() {
+                            Some(c) if c == q => break,
+                            Some('\n') | None => return None,
+                            Some(c) => tag.push(c),
+                        }
+                    }
+                } else {
+                    while let Some(c) = chars.next_if(|c| !c.is_whitespace() && !"&|;<>()'\"`$".contains(*c)) {
+                        tag.push(c);
+                    }
+                }
+                // A tag glued to more quoted or bare text (`<<'E'OF`) is one word to the shell: too rare to read.
+                if tag.is_empty() || chars.peek().is_some_and(|c| !c.is_whitespace() && !"&|;<>()".contains(*c)) {
+                    return None;
+                }
+                bodies.push((tag, tabs));
+            }
             (None, '#') if require_success => return None,
             (None, '&' | '|' | ';' | '\n') => {
                 if require_success && !(c == '&' && next == Some('&')) {
@@ -110,6 +139,27 @@ fn read_segments(line: &str, require_success: bool) -> Option<Vec<Vec<String>>> 
                 all.push(std::mem::take(&mut words));
                 if matches!(c, '&' | '|') && next == Some(c) {
                     chars.next();
+                }
+                // The lines after a heredoc's line are its body, up to its end word.
+                let opened = if c == '\n' { std::mem::take(&mut bodies) } else { vec![] };
+                for (tag, tabs) in opened {
+                    loop {
+                        let mut body = String::new();
+                        let ended = loop {
+                            match chars.next() {
+                                Some('\n') => break false,
+                                Some(c) => body.push(c),
+                                None => break true,
+                            }
+                        };
+                        let body = body.trim_end_matches('\r');
+                        if (if tabs { body.trim_start_matches('\t') } else { body }) == tag {
+                            break;
+                        }
+                        if ended {
+                            return None;
+                        }
+                    }
                 }
             }
             (None, _) if c.is_whitespace() => {
@@ -124,7 +174,7 @@ fn read_segments(line: &str, require_success: bool) -> Option<Vec<Vec<String>>> 
             }
         }
     }
-    if quote.is_some() {
+    if quote.is_some() || !bodies.is_empty() {
         return None;
     }
     if started {
@@ -455,6 +505,19 @@ mod tests {
             r#""C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command "npm run build""#,
         ] {
             assert!(is_check_line(line, 0), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_heredoc_body_is_text_and_the_commands_around_it_are_read() {
+        assert!(is_check_line("cat > notes.md <<'EOF'\nIt's done, don't (worry).\nEOF\ncargo test", 0));
+        assert!(is_check_line("cat <<-EOF > a.txt\n\tline\n\tEOF\ncargo build", 0), "<<- ends at a tab-indented word");
+        assert!(is_check_line("cat > b.md <<\"END\"\r\nx\r\nEND\r\nnpm run lint", 0));
+        assert!(is_check_line("cat <<EOF>out.md\nx\nEOF\ncargo test", 0), "a redirection right after the tag");
+        assert_eq!(segments("cat <<A <<B\na\nA\nb\nB\nls").map(|s| s.len()), Some(2), "two bodies on one line");
+        let glued = ["cat <<'E'OF\nE\ngh pr create\nEOF", "cat <<E'OF'\nx\nEOF"];
+        for line in ["cat <<EOF\ncargo test", "cat <<EOF", "cat <<'EOF\nx", "cat <<<word", "cat << ;"].into_iter().chain(glued) {
+            assert_eq!(segments(line), None, "{line}");
         }
     }
 

@@ -576,6 +576,7 @@ async fn a_codex_project_thread_carries_the_plugin_roles_and_a_chat_thread_none(
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
+                leads: false,
                 verify: false,
                 progress: false,
                 leave_plan: false,

@@ -35,9 +35,11 @@ belongs to them.
   release build writes it into `package.json`. Semver pre-releases are accepted by every bundle (NSIS, DMG, AppImage,
   deb); an MSI would reject them and is not built. Every release carries `SHA256SUMS.txt` and build provenance
   (`gh attestation verify <file> --repo startRED/faber`). `scripts/channel.mjs` holds the rules and its tests run in CI.
-- No paid signing for now. Windows shows a SmartScreen notice that the download page explains. The Microsoft Store and
+- No paid signing for now. Windows shows a SmartScreen notice; the README's [Install](../../README.md#install) section
+  says how to go past it. The Microsoft Store and
   a code-signing certificate come back to the table when everything is complete.
-- macOS builds are not notarized, so users allow the app once in System Settings. Faber updates itself there too. If a
+- macOS builds are not notarized, so users allow the app once in System Settings, as the README's
+  [Install](../../README.md#install) section says. Faber updates itself there too. If a
   hand test on a real Mac shows that an unsigned update cannot install, macOS falls back to a notification about a new
   version.
 - Later: winget and Flathub.

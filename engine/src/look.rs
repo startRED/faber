@@ -241,6 +241,12 @@ mod tests {
     use crate::model::{Role, WrapUp};
     use serde_json::{Value, json};
 
+    /// The search's bounds with time to spare: a busy machine making the files must not end the walk early. Only
+    /// `the_search_stops_in_a_tree_of_empty_folders` tests the time bound itself.
+    fn roomy() -> Limits {
+        Limits { time: std::time::Duration::from_secs(30), ..Limits::AFTER_TURN }
+    }
+
     fn tool(name: &str, input: Value, ok: Option<bool>) -> ToolUse {
         ToolUse {
             id: format!("t{name}{input}"),
@@ -430,17 +436,17 @@ mod tests {
         write(".git/HEAD", bad);
         write("target/debug/out.txt", bad);
         write("blob.bin", &format!("\0{bad}"));
-        let places = search(dir.path(), &[bad.to_string()], Limits::AFTER_TURN);
+        let places = search(dir.path(), &[bad.to_string()], roomy());
         assert_eq!(places, vec!["src/b.rs:2", "src/deep/c.rs:3"]);
         // A text in more places than a mistake spreads to is a common line and is dropped.
         for i in 0..9 {
             write(&format!("common/{i}.rs"), "use std::collections::HashMap;\n");
         }
-        assert!(search(dir.path(), &["use std::collections::HashMap;".to_string()], Limits::AFTER_TURN).is_empty());
+        assert!(search(dir.path(), &["use std::collections::HashMap;".to_string()], roomy()).is_empty());
         // The bounds keep what was found before them.
-        let one = Limits { files: 1, ..Limits::AFTER_TURN };
+        let one = Limits { files: 1, ..roomy() };
         assert!(search(dir.path(), &[bad.to_string()], one).len() <= 1);
-        assert!(search(dir.path(), &[], Limits::AFTER_TURN).is_empty());
+        assert!(search(dir.path(), &[], roomy()).is_empty());
     }
 
     /// Folders count against the bounds too: a tree of empty folders ends at the names limit, and out of time at once.
@@ -454,8 +460,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("z")).unwrap();
         std::fs::write(dir.path().join("z/hit.rs"), bad).unwrap();
         let needles = [bad.to_string()];
-        assert_eq!(search(dir.path(), &needles, Limits::AFTER_TURN), vec!["z/hit.rs:1"]);
-        assert!(search(dir.path(), &needles, Limits { entries: 10, ..Limits::AFTER_TURN }).is_empty());
+        assert_eq!(search(dir.path(), &needles, roomy()), vec!["z/hit.rs:1"]);
+        assert!(search(dir.path(), &needles, Limits { entries: 10, ..roomy() }).is_empty());
         assert!(search(dir.path(), &needles, Limits { time: std::time::Duration::ZERO, ..Limits::AFTER_TURN }).is_empty());
     }
 
@@ -467,7 +473,7 @@ mod tests {
         let bad = "let d = parse(s).unwrap();";
         rustix::fs::mkfifoat(rustix::fs::CWD, dir.path().join("pipe"), rustix::fs::Mode::RWXU).unwrap();
         std::fs::write(dir.path().join("b.rs"), bad).unwrap();
-        assert_eq!(search(dir.path(), &[bad.to_string()], Limits::AFTER_TURN), vec!["b.rs:1"]);
+        assert_eq!(search(dir.path(), &[bad.to_string()], roomy()), vec!["b.rs:1"]);
     }
 
     #[test]

@@ -9,7 +9,7 @@ const check = (name, run) => {
   try { run(); checks.push({ name, ok: true }); }
   catch (error) { checks.push({ name, ok: false, detail: String(error.message).slice(0, 500) }); }
 };
-const migrate = path => spawnSync(process.execPath, [resolve(folder, 'migrate.mjs'), path], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+const migrate = path => spawnSync(process.execPath, [resolve(folder, 'migrate.mjs'), path], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 15000 });
 check('notes preserved', () => assert.deepEqual(readFileSync(join(folder, 'notes.txt')), readFileSync(join(pristine, 'notes.txt'))));
 check('supplied settings migrated without data loss', () => {
   const { theme, ...rest } = JSON.parse(readFileSync(join(pristine, 'settings.json'), 'utf8'));

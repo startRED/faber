@@ -32,6 +32,7 @@ pub mod map;
 pub mod mcp_servers;
 pub mod memory_search;
 pub mod mention;
+pub mod method_log;
 pub mod model;
 pub mod nudge;
 pub mod permissions;

@@ -57,10 +57,13 @@ function ConversationGroup(props: { label: string; children: JSX.Element }) {
   );
 }
 
+/** "5 h", "3 d 13 h": how long until a reset, hours rounded up, so it agrees with the bar's time mark. */
 export function untilReset(resetsAt: number): string {
-  const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
+  const hours = Math.ceil((resetsAt * 1000 - Date.now()) / 3_600_000);
   if (hours <= 0) return t('quota.now');
-  return hours < 24 ? t('quota.hours', { n: Math.ceil(hours) }) : t('quota.days', { n: Math.ceil(hours / 24) });
+  if (hours < 24) return t('quota.hours', { n: hours });
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? t('quota.daysHours', { d: days, h: hours % 24 }) : t('quota.days', { n: days });
 }
 
 /** "now", "4 min ago": how long ago a reading was taken, in plain words. */
