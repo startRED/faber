@@ -23,6 +23,10 @@
 // `faber/verify` with that tree and those suites, and CI leaves them out; the lints still run there. With --no-verify,
 // on CI (the land job's run again on a new base), with no `cargo` here, or while another landing checks on this PC, it
 // queues without one and CI runs every suite as before. A failure here queues nothing.
+//
+// `--sweep` (also at the end of each `--land`, so after every pull request's landing) runs again the landing of the
+// oldest queue run whose gate passed but whose landing GitHub cancelled while it waited for another, so a green queue run
+// is never lost.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -648,6 +652,59 @@ function numberedCommit(commit) {
 }
 
 /**
+ * The queue runs whose landing may have been dropped while it waited, oldest first. GitHub keeps one waiting job in the
+ * `land` group of ci.yml and cancels the older one, so a run whose gate passed can end cancelled with nothing landed.
+ * `runs` are ci.yml runs ({ databaseId, headBranch, headSha, createdAt, status, conclusion }); only the newest of each
+ * queue branch counts, and only while the branch still points at it (`heads`, branch to commit): a
+ * branch pushed again has its own run, and a landed one is deleted.
+ */
+export function dropped(runs, heads) {
+  const newest = new Map();
+  for (const r of runs) {
+    const seen = newest.get(r.headBranch);
+    if (r.headBranch.startsWith('queue/') && (!seen || Date.parse(r.createdAt) > Date.parse(seen.createdAt))) newest.set(r.headBranch, r);
+  }
+  return [...newest.values()]
+    .filter((r) => r.status === 'completed' && r.conclusion === 'cancelled' && heads.get(r.headBranch) === r.headSha)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+/** Whether a run's jobs ({ name, conclusion }) say its gate passed and its landing was cancelled. */
+export const landCancelled = (jobs) =>
+  jobs.some((j) => j.name === 'gate' && j.conclusion === 'success') && jobs.some((j) => j.name === 'land' && j.conclusion === 'cancelled');
+
+/**
+ * Runs again the landing of the oldest queue run dropped while it waited (`dropped`), and only that one: a second would
+ * wait in the same group and cancel it again. Its own landing sweeps again when it ends, so they land one after another.
+ */
+function sweep() {
+  const heads = new Map(
+    git('ls-remote', 'origin', 'refs/heads/queue/*')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\t'))
+      .map(([sha, ref]) => [ref.slice('refs/heads/'.length), sha]),
+  );
+  // Every run, not only cancelled ones: `dropped` keeps a branch's newest, so an older run is never started over a newer one.
+  const runs = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--limit', '200', '--json', 'databaseId,headBranch,headSha,createdAt,status,conclusion']));
+  for (const r of dropped(runs, heads)) {
+    const { jobs } = JSON.parse(run('gh', ['run', 'view', String(r.databaseId), '--json', 'jobs']));
+    if (!landCancelled(jobs)) continue;
+    try {
+      run('gh', ['run', 'rerun', String(r.databaseId), '--failed']);
+    } catch (error) {
+      // GitHub may refuse one (too many attempts, a run too old): the next one still lands.
+      console.error(`Run ${r.databaseId} of ${r.headBranch} could not run again: ${String(error.stderr || error.message).trim()}`);
+      continue;
+    }
+    console.log(`The landing of ${r.headBranch} was dropped while it waited: run ${r.databaseId} lands it again.`);
+    return 0;
+  }
+  console.log('No landing was dropped while it waited.');
+  return 0;
+}
+
+/**
  * Lands from this PC a queued commit that CI checked but could not push itself, because it changes a workflow file
  * (GitHub refuses that to the workflow's token): only when its `gate` passed, it still sits on top of phase-1-base and
  * the pull request is still at the head that was squashed. The same atomic push as the land job of ci.yml.
@@ -701,13 +758,24 @@ function finish(number) {
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.meta.filename)) {
   const args = process.argv.slice(2);
   const number = args.find((a) => /^\d+$/.test(a));
-  if (!number) {
-    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>] | <pull request> --finish');
+  if (args.includes('--sweep')) {
+    process.exitCode = sweep();
+  } else if (!number) {
+    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>] | <pull request> --finish | --sweep');
     process.exitCode = 2;
   } else if (args.includes('--finish')) {
     process.exitCode = finish(number);
   } else if (args.includes('--land')) {
-    process.exitCode = await landQueued(number, args[args.indexOf('--land') + 1]);
+    try {
+      process.exitCode = await landQueued(number, args[args.indexOf('--land') + 1]);
+    } finally {
+      // Whatever this landing did, the one GitHub dropped while it waited lands next. A sweep that fails only says so.
+      try {
+        sweep();
+      } catch (error) {
+        console.error(`The sweep failed: ${String(error.stderr || error.message).trim()}`);
+      }
+    }
   } else if (args.includes('--split')) {
     // Exit 3: queued again alone, so the report job blames nobody yet.
     process.exitCode = (await split(number, args[args.indexOf('--split') + 1])) ? 3 : 0;

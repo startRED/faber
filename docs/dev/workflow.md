@@ -184,6 +184,9 @@ that refuses puts the branch back; a later push, a close or another target stops
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
+A landing that waits for another is never lost: GitHub keeps only one waiting job in the land job's group and cancels
+the older one, so each pull request's landing ends with `land.mjs --sweep`, which runs again the landing of the oldest queue
+run whose gate passed but whose landing was cancelled, one at a time, until none is left.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
