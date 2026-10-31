@@ -2272,5 +2272,8 @@ export const fr: Messages = {
   'piece.discard': "Abandonner la modification",
   'piece.retry': "Réessayer",
   'piece.show': "Afficher {title}",
+  'error.session.refused': "Faber a refusé cette demande. Le détail explique pourquoi.",
+  'error.session.agentOnly': "Cette commande est réservée à une IA dans une conversation Faber. Utilisez send pour envoyer un message.",
+  'error.session.useSession': "Une IA ouvre une conversation avec start_conversation et écrit à une autre avec message_conversation, jamais avec send.",
 
 };

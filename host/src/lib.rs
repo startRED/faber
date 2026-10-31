@@ -351,10 +351,28 @@ impl Host {
 
     /// Runs one command for `caller`, after the rule of who may send it ([`reach::check`]): the screen's own `dispatch` is
     /// this for [`Caller::Screen`]. A name not in the table is `error.host.unknownCommand` whoever asks.
-    pub async fn dispatch_as(&self, caller: &Caller, command: &str, args: Value) -> Result<Value, Failure> {
+    pub async fn dispatch_as(&self, caller: &Caller, command: &str, mut args: Value) -> Result<Value, Failure> {
         if *caller != Caller::Screen {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
+            if command == "send" && matches!(caller, Caller::Agent { .. }) {
+                return Err(Failure::key("error.session.useSession"));
+            }
             reach::check(caller, command, reach, &args, |id| self.family_of(id)).map_err(Failure::key)?;
+        }
+        match caller {
+            Caller::Agent { conversation: Some(id) } => {
+                if args.is_null() {
+                    args = Value::Object(Default::default());
+                }
+                if let Some(map) = args.as_object_mut() {
+                    map.insert("by".into(), Value::String(id.clone()));
+                }
+            }
+            _ => {
+                if let Some(map) = args.as_object_mut() {
+                    map.remove("by");
+                }
+            }
         }
         self.dispatch(command, args).await
     }

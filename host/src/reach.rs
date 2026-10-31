@@ -176,6 +176,10 @@ mod tests {
         assert_eq!(check(&Caller::Person, "save_settings", Reach::Ask, &words, families()), Ok(()));
         assert_eq!(check(&agent("c1"), "save_settings", Reach::Ask, &words, families()), Err(ASK_PERSON));
         assert_eq!(check(&Caller::Person, "interrupt", Reach::Own("/id"), &json!({"id": "c9"}), families()), Ok(()));
-        assert_eq!(check(&agent("c1"), "archive", Reach::Free, &json!({"id": "c9", "on": true}), families()), Ok(()));
+        let archive = Reach::Own("/id");
+        assert_eq!(check(&agent("c1"), "archive", archive, &json!({"id": "c2", "on": true}), families()), Ok(()));
+        assert_eq!(check(&agent("c1"), "archive", archive, &json!({"id": "c9", "on": true}), families()), Err(ASK_PERSON));
+        assert_eq!(check(&Caller::Person, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
+        assert_eq!(check(&Caller::Screen, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
     }
 }

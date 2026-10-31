@@ -2152,6 +2152,9 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.session.refused': "Faber refused this action. The detail explains why.",
+  'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
+  'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
 } as const;
 

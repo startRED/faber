@@ -2259,5 +2259,8 @@ export const ptBR: Messages = {
   'piece.discard': "Descartar alteração",
   'piece.retry': "Tentar de novo",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "O Faber recusou este pedido. O motivo vem no detalhe.",
+  'error.session.agentOnly': "Este comando é só para uma IA dentro de uma conversa do Faber. Para enviar uma mensagem, use send.",
+  'error.session.useSession': "Uma IA abre uma conversa com start_conversation e escreve para outra com message_conversation, nunca com send.",
 
 };

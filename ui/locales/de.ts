@@ -2272,5 +2272,8 @@ export const de: Messages = {
   'piece.discard': "Änderung verwerfen",
   'piece.retry': "Erneut versuchen",
   'piece.show': "{title} anzeigen",
+  'error.session.refused': "Faber hat das abgelehnt. Der Grund steht im Detail.",
+  'error.session.agentOnly': "Dieser Befehl ist nur für eine KI in einem Faber-Gespräch. Nutze stattdessen send.",
+  'error.session.useSession': "Eine KI startet ein Gespräch mit start_conversation und schreibt an eines mit message_conversation, nie mit send.",
 
 };
