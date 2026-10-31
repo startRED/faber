@@ -42,6 +42,10 @@ an empty directory, a dead launcher with an uncertain child, a process count or 
 that particular blocker once through the existing waiting diagnostic and remain cancelable. Do not manufacture a
 replacement owner receipt or automatically clean the legacy empty ancestor observed in the investigation.
 
+`.faber-copy` names a target's cache, not a reservation. Maintenance runs before reservation and adoption and may
+reach other caches, so a target's own reservation never proves a run stays inside it; a snapshot of caches in reach is
+not eligibility. Never change stamps or reservations, or skip or run maintenance on real caches, to learn more.
+
 Keep this narrow: no new command, setting, dependency, build cache, publication protocol or grace-period policy. If
 safe exclusion needs a broader protocol change, keep the failing reproduction local and propose that prerequisite.
 
