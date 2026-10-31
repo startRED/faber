@@ -1923,7 +1923,7 @@ export const ptBR: Messages = {
   "set.projects.goalsHint": "Até {cap} por dia nesses consertos. Gasto hoje: {spent}.",
   "set.projects.goalsDesc": "Uma meta é algo que este projeto deve manter sempre verdadeiro, como todas as verificações passando. O Faber confere suas metas de tempos em tempos. Quando uma quebra duas vezes seguidas, ele inicia uma conversa numa cópia separada para consertar e avisa você quando não consegue. Ele é instruído a deixar as mudanças para você aprovar.",
   "set.projects.goalsTech": "Cada meta é uma das verificações confirmadas do projeto. Ela roda a cada 6 horas, e de novo após 10 minutos quando falha, só enquanto nenhum jogo está em primeiro plano e nenhuma conversa do projeto está trabalhando ou recebeu mensagem nos últimos 15 minutos. No máximo dois consertos começam por dia, e nenhum quando o custo do dia chega ao limite (o custo que esses mesmos turnos teriam com preços de API, conferido antes de começar; um turno já em andamento não é cortado). O conserto exige cópias separadas e acesso total. O texto do erro da verificação é lido neste PC e vai só para a IA que você já usa no projeto.",
-  "crumb.copy": "Trabalha numa cópia separada do projeto, num branch próprio",
+  "details.copy": "Cópia separada: {branch}",
   "side.confirmDiscard": "Descartar mudanças?",
   "side.unsavedCopy": "A cópia dela tem mudanças que não estão salvas em nenhum outro lugar. Apagar junto com a conversa?",
   "error.copy.failed": "O Faber não conseguiu fazer uma cópia do projeto para esta conversa. Tente de novo, ou desligue as cópias separadas deste projeto nas Configurações.",

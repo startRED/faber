@@ -14,13 +14,11 @@ the side chat (`pane-aside`, `aside.title`), the changes (`pane-changes`, `chang
 
 What to build:
 
-- Branch and copy path move out of the topbar into Technical details (`DetailsPane`, `ui/Details.tsx`): one row,
-  "Cópia separada: <branch>" with the path, shown to people who open details. The crumb keeps the title only. The checks
-  that find `crumb-copy` (`testkit/src/screen/app.rs`, `real_work.rs`) move with it.
+- Done in its first pull request: the crumb keeps the title only, and the branch and path are the first row of
+  Technical details ("Cópia separada: <branch>", test id `details-copy`, checked in `tests/ui/details.check.ts`).
 - The three pane buttons get a visible short label or one labelled menu, also at 720 px: this is a taste choice (a
-  label per icon fills the bar at 720 px; one "Painéis" menu hides three actions behind a click), so the first
-  commit proposes both on screenshots and the owner picks in a short card; the task goes on with the other half while
-  the card waits. Whatever is chosen keeps the shortcut hints in the tooltip (`keysOf('aside')` and the others) and
+  label per icon fills the bar at 720 px; one "Painéis" menu hides three actions behind a click), so it waits for
+  the owner's pick between the two. Whatever is chosen keeps the shortcut hints in the tooltip (`keysOf('aside')` and the others) and
   the pressed states.
 
 Check the product map's "Topbar" row, the "Technical details" row and the taste cards whose "Touches" name the topbar
