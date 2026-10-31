@@ -194,19 +194,13 @@ pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot
     }
 }
 
-/// Set to `1` on every CLI Faber starts, and so on everything that CLI runs: Faber's own command line (`faber`, in `cli/`)
-/// then knows an AI is driving it and holds it to the channel's limits on starting turns (`channel/src/guard.rs`).
-pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
-
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    Arc::new(|bin, args, cwd| spawn_command(marked(bin, args, cwd)))
-}
-
-fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
-    let mut cmd = Command::new(bin);
-    cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1");
-    cmd
+    Arc::new(|bin, args, cwd| {
+        let mut cmd = Command::new(bin);
+        cmd.args(args).current_dir(cwd);
+        spawn_command(cmd)
+    })
 }
 
 /// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
@@ -660,29 +654,6 @@ impl OwnedTree {
     }
 }
 
-/// The jobs the CLIs and checks Faber started run in, so the command line's channel can tell a program one of them started,
-/// however it was launched: nothing in such a job can leave it.
-#[cfg(windows)]
-static JOBS: Mutex<Vec<std::sync::Weak<TreeState>>> = Mutex::new(Vec::new());
-
-#[cfg(windows)]
-fn known(tree: &Arc<TreeState>) {
-    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
-    jobs.retain(|tree| tree.strong_count() > 0);
-    jobs.push(Arc::downgrade(tree));
-}
-
-/// Whether `inside` finds a process in one of the jobs Faber's CLIs and checks run in now. A job it cannot ask counts as a
-/// yes: in doubt, the process is held to an AI's limits.
-#[cfg(windows)]
-pub fn in_a_job_we_started(inside: impl Fn(isize) -> io::Result<bool>) -> bool {
-    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
-    jobs.retain(|tree| tree.strong_count() > 0);
-    jobs.iter()
-        .filter_map(std::sync::Weak::upgrade)
-        .any(|tree| tree.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|job| inside(job.handle()).unwrap_or(true)))
-}
-
 #[cfg(windows)]
 fn join_job(child: &Child) -> io::Result<Containment> {
     let handle = child.raw_handle().ok_or_else(|| io::Error::other("the process already ended"))?;
@@ -693,16 +664,16 @@ fn join_job(child: &Child) -> io::Result<Containment> {
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
     let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
     let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
-    let tree = Arc::new(TreeState {
-        job: Mutex::new(Some(job)),
-        identity,
-        root: Some(root),
-        confirmed: AtomicBool::new(false),
-        #[cfg(test)]
-        probe: None,
-    });
-    known(&tree);
-    Ok(Containment { tree })
+    Ok(Containment {
+        tree: Arc::new(TreeState {
+            job: Mutex::new(Some(job)),
+            identity,
+            root: Some(root),
+            confirmed: AtomicBool::new(false),
+            #[cfg(test)]
+            probe: None,
+        }),
+    })
 }
 
 #[cfg(unix)]
@@ -802,25 +773,6 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
 mod lifecycle_tests {
     use super::*;
 
-    #[cfg(windows)]
-    #[test]
-    fn the_channel_knows_the_jobs_of_the_clis_running_now_and_only_those() {
-        let job = win32job::Job::create().unwrap();
-        let handle = job.handle();
-        let tree = Arc::new(TreeState {
-            job: Mutex::new(Some(job)),
-            identity: crate::project::ProcessId { pid: 1, started_at: 1 },
-            root: None,
-            confirmed: AtomicBool::new(false),
-            probe: None,
-        });
-        known(&tree);
-        assert!(in_a_job_we_started(|job| Ok(job == handle)));
-        assert!(in_a_job_we_started(|_| Err(io::Error::other("cannot ask"))), "in doubt, an AI");
-        drop(tree);
-        assert!(!in_a_job_we_started(|job| Ok(job == handle)), "a job that ended no longer counts");
-    }
-
     #[tokio::test]
     async fn rewind_cancelled_command_waits_for_its_pipes_to_close() {
         let (output, writer) = tokio::io::duplex(64);
@@ -857,13 +809,6 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_cli_faber_starts_is_marked_as_an_ai() {
-        let cmd = marked("cli", &["--x".into()], Path::new("."));
-        let marks: Vec<_> = cmd.as_std().get_envs().filter(|(name, _)| *name == AGENT_MARK).collect();
-        assert_eq!(marks, [(std::ffi::OsStr::new(AGENT_MARK), Some(std::ffi::OsStr::new("1")))]);
-    }
 
     #[test]
     fn rewind_member_observation_excludes_only_the_actual_cli_generation() {

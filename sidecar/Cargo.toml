@@ -12,8 +12,6 @@ name = "faber-sidecar"
 path = "src/main.rs"
 
 [dependencies]
-# The command line's channel over the same table, open for as long as the sidecar runs.
-faber-channel = { path = "../channel", features = ["host"] }
 faber-engine = { path = "../engine" }
 faber-host = { path = "../host" }
 serde_json = "1"
