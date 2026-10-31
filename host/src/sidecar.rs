@@ -13,7 +13,7 @@ use crate::wire::{Order, PickFilter, PickMode, ShellNote};
 use crate::{BoxFuture, Filter, PickError, Picked, Res, Shell, lock};
 use faber_engine::AppEvent;
 use faber_engine::model::{RunningItem, Settings, Vendor};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -58,6 +58,11 @@ struct Inner {
     attention: fn(u32) -> Attention,
     shell_process: u32,
     chime: fn(&std::path::Path),
+    /// Whether Faber's window is on screen and not minimized, as the shell last said; true until it says (an update never
+    /// installs under a window that may be looked at).
+    visible: AtomicBool,
+    /// The updater, when updates are on for this app (`attach_updater`): the screen asks it, and it holds installs back.
+    updater: OnceLock<faber_update::Updater>,
     /// Whether Faber's window has the focus, as the shell last said: a question seen there is never notified.
     focused: AtomicBool,
     /// Dialogs the shell was asked for and has not answered, by id; None once the program closes, so no dialog is asked
@@ -104,6 +109,8 @@ impl SidecarShell {
             attention,
             shell_process: shell_process.unwrap_or_else(std::process::id),
             chime,
+            visible: AtomicBool::new(true),
+            updater: OnceLock::new(),
             focused: AtomicBool::new(false),
             early: Mutex::new(None),
             asks: Mutex::new(Some(HashMap::new())),
@@ -130,10 +137,22 @@ impl SidecarShell {
         }
     }
 
+    /// Updates are on: the screen reads where the update is, presses "Update ready, restart", and every install of a CLI or a
+    /// tool counts as work the update waits for. Set once; a second call changes nothing.
+    pub fn attach_updater(&self, updater: faber_update::Updater) {
+        let _ = self.0.updater.set(updater);
+    }
+
+    /// Whether Faber's window is on screen and not minimized, as the shell last said (true until it says).
+    pub fn window_visible(&self) -> bool {
+        self.0.visible.load(Ordering::SeqCst)
+    }
+
     /// What the shell says about itself.
     pub fn note(&self, note: ShellNote) {
         match note {
             ShellNote::Focus { focused } => self.0.focused.store(focused, Ordering::SeqCst),
+            ShellNote::Window { visible } => self.0.visible.store(visible, Ordering::SeqCst),
             ShellNote::Picked { id, path, no_window } => {
                 // An answer nobody waits for (an id never asked, or asked by a closing program) changes nothing.
                 if let Some(waiting) = lock(&self.0.asks).as_mut().and_then(|asks| asks.remove(&id)) {
@@ -280,6 +299,41 @@ impl Shell for SidecarShell {
         self.0.version.clone()
     }
 
+    fn update_status(&self) -> Value {
+        match self.0.updater.get() {
+            Some(updater) => serde_json::to_value(updater.status()).unwrap_or_default(),
+            None => json!({ "phase": "none" }),
+        }
+    }
+
+    fn update_restart(&self) -> BoxFuture<'_, Res<()>> {
+        Box::pin(async move {
+            match self.0.updater.get() {
+                Some(updater) => updater.restart_now().await,
+                None => Err("error.update.none".into()),
+            }
+        })
+    }
+
+    fn hold_install(&self) -> Res<Box<dyn Send>> {
+        match self.0.updater.get() {
+            Some(_) => faber_update::SetupRunning::begin().map(|running| Box::new(running) as Box<dyn Send>),
+            None => Ok(Box::new(())),
+        }
+    }
+
+    fn input_seen(&self) {
+        if let Some(updater) = self.0.updater.get() {
+            updater.input_seen();
+        }
+    }
+
+    fn draft_dirty(&self, dirty: bool) {
+        if let Some(updater) = self.0.updater.get() {
+            updater.draft_dirty(dirty);
+        }
+    }
+
     fn persist_settings(&self, autostart: Option<bool>, persist: &mut dyn FnMut() -> Res<Settings>) -> Res<Settings> {
         let _saving = lock(&self.0.saving);
         let saved = persist()?;
@@ -347,7 +401,6 @@ mod tests {
     use super::*;
     use crate::tray::decide::Attention::{Normal, Silent};
     use faber_engine::model::{Area, Permission, RunState};
-    use serde_json::json;
     use std::time::Duration;
 
     type Sink = Arc<Mutex<Vec<Order>>>;
@@ -425,6 +478,67 @@ mod tests {
 
     fn running(revision: u64, items: Vec<RunningItem>) -> AppEvent {
         AppEvent::Running { revision, items }
+    }
+
+    #[tokio::test]
+    async fn restart_without_an_update_reports_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert_eq!(shell.update_restart().await, Err("error.update.none".into()));
+    }
+
+    #[tokio::test]
+    async fn the_window_counts_as_seen_until_the_shell_says_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert!(shell.window_visible(), "nothing closes a window the shell never reported");
+        shell.note(ShellNote::Window { visible: false });
+        assert!(!shell.window_visible());
+        shell.note(ShellNote::Window { visible: true });
+        assert!(shell.window_visible());
+    }
+
+    #[tokio::test]
+    async fn without_an_updater_the_screen_sees_no_update_and_a_cli_install_is_never_held_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert_eq!(shell.update_status(), json!({ "phase": "none" }));
+        assert!(shell.hold_install().is_ok());
+        shell.input_seen();
+        shell.draft_dirty(true);
+    }
+
+    /// An app with nothing real behind it, for an updater that must never start anything.
+    struct NoApp;
+
+    impl faber_update::App for NoApp {
+        fn previews(&self) -> bool {
+            false
+        }
+        fn window_visible(&self) -> bool {
+            true
+        }
+        fn close_engine(&self, _: faber_update::Who) -> Option<Box<dyn std::any::Any + Send>> {
+            None
+        }
+        fn shut_down(&self, _: bool) {}
+        fn quit(&self) {}
+        fn emit(&self, _: faber_update::Status) {}
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn with_an_updater_the_screen_reads_it_and_a_restart_without_a_kept_update_says_none() {
+        let (dir, program) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        let updater = faber_update::Updater::new(Arc::new(NoApp), "0.4.0", dir.path().to_path_buf(), program.path()).unwrap();
+        shell.attach_updater(updater);
+        assert_eq!(shell.update_status(), json!({ "phase": "none" }), "no update is kept yet");
+        assert_eq!(shell.update_restart().await, Err("error.update.none".into()));
+        shell.input_seen();
+        shell.draft_dirty(true);
+        let held = shell.hold_install().expect("a CLI install may begin while no update is decided");
+        drop(held);
     }
 
     /// Waits for the work `heard` hands to another thread.

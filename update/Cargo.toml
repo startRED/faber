@@ -1,0 +1,31 @@
+[package]
+name = "faber-update"
+description = "Faber's self-updater without a shell: the signed manifest, the download, the install hand-off."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+base64 = "0.23"
+# The same version the Tauri updater plugin verifies with; 0.3 also hashes a stream, so a download is checked as it is
+# written and never held in memory.
+minisign-verify = "0.3"
+# TLS comes from the process (`faber_engine::tls::install`), as for the engine's own client.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable; the overlap guard is tested with one.
+junction = "2"
+
+[lints]
+workspace = true

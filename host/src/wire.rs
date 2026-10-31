@@ -81,6 +81,9 @@ pub enum Order {
     },
     /// Show a file or folder in the file manager, selected and never opened. The host checked the path already.
     Reveal { path: String },
+    /// End the app at once, without waiting for the host: the update installer is about to replace it, and the host has
+    /// already stopped the engine. The host ends right after.
+    Quit,
 }
 
 /// What a dialog asks for.
@@ -113,6 +116,10 @@ pub struct TrayMenu {
 pub enum ShellNote {
     /// Faber's window gained (`true`) or lost the focus; a closed window has none.
     Focus { focused: bool },
+    /// Faber's window is on screen and not minimized (`true`), or is not (closed to the tray, minimized, never opened by a
+    /// start with the system). An update installs unattended only while it is not. Until the shell says, the window counts as
+    /// seen, so nothing closes it under the person.
+    Window { visible: bool },
     /// The answer to [`Order::Pick`]: the path picked, none when the person cancelled, or `no_window` when no dialog
     /// could be shown.
     Picked {
@@ -192,6 +199,11 @@ mod tests {
         assert_eq!(incoming(r#"{"id":3,"cmd":"state"}"#), Ok(Incoming::Request(Request { id: 3, cmd: "state".into(), args: Value::Null })));
         assert_eq!(incoming(r#"{"shell":{"kind":"nap"}}"#), Err("error.host.badRequest".into()));
         assert_eq!(
+            incoming(r#"{"shell":{"kind":"window","visible":false}}"#),
+            Ok(Incoming::Note(ShellNote::Window { visible: false })),
+            "the shell says whether its window is on screen"
+        );
+        assert_eq!(
             incoming(r#"{"shell":{"kind":"picked","id":4,"path":"C:\\a","noWindow":false}}"#),
             Ok(Incoming::Note(ShellNote::Picked { id: 4, path: Some("C:\\a".into()), no_window: false }))
         );
@@ -242,7 +254,8 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(Order::Awake { on: true }).unwrap(), json!({"kind":"awake","on":true}));
         assert_eq!(serde_json::to_value(Order::Autostart { on: false }).unwrap(), json!({"kind":"autostart","on":false}));
-        for order in [tray, notify, Order::Awake { on: false }, Order::Autostart { on: true }] {
+        assert_eq!(line(&Ordered { order: Order::Quit }), "{\"order\":{\"kind\":\"quit\"}}\n");
+        for order in [tray, notify, Order::Awake { on: false }, Order::Autostart { on: true }, Order::Quit] {
             assert_eq!(serde_json::from_str::<Ordered>(&line(&Ordered { order: order.clone() })).unwrap().order, order);
         }
     }

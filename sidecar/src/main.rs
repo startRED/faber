@@ -15,8 +15,13 @@
 //!   updates this process's copy and sends an `autostart` order, since only the shell can register itself.
 //! - `FABER_HIDDEN`: `1` for a test or automated run, which notifies nobody.
 //! - `FABER_SHELL_PID`: the process that owns Faber's window, so a maximized Faber in front is Faber and not a game.
+//! - `FABER_UPDATES` and `FABER_INSTALL_DIR`: `1` and the folder of the app main program, set only for a packaged app that is
+//!   not a hidden run. Then this process keeps the app updated (`faber-update`): it reads the release manifest, downloads and
+//!   verifies the installer, and installs it through a copy of this program (`--faber-update-install`, the first argument
+//!   of a start that only finishes an install). The status of the update is the event `{"type":"update",...}`; the end of the
+//!   app, which the installer is about to replace, is the order `quit`. Without them nothing updates.
 //!
-//! The shell says what only it sees (its window's focus) with a `{"shell":{...}}` line (`faber_host::wire::ShellNote`).
+//! The shell says what only it sees (its window's focus, and whether it is on screen) with a `{"shell":{...}}` line (`faber_host::wire::ShellNote`).
 
 // A windowed program on Windows, like the Tauri shell: no console is ever made for it (none to flash, no console host
 // process), and its pipes work the same.
@@ -30,10 +35,19 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 
+mod updates;
+
 /// How long commands already running may take to finish once stdin closes, before they are stopped.
 const FINISH: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args.first().is_some_and(|arg| arg == faber_update::handoff::FLAG) {
+            return ExitCode::from(u8::try_from(faber_update::handoff::finish(&args[1..])).unwrap_or(1));
+        }
+    }
     // The engine starts a CLI through this very program on Windows (a guard that joins a job object first).
     if let Some(code) = faber_engine::proc::guard_mode() {
         return ExitCode::from(u8::try_from(code).unwrap_or(1));
@@ -87,6 +101,7 @@ async fn run() -> ExitCode {
         shell_process: std::env::var("FABER_SHELL_PID").ok().and_then(|pid| pid.parse().ok()),
         chime: faber_host::tray::chime::play,
     }));
+    let update_data = data_dir.clone();
     let options = StartOptions {
         data_dir,
         hidden,
@@ -105,6 +120,23 @@ async fn run() -> ExitCode {
     // The engine exists: the tray is told for the first time, and its settings decide the notifications from now on.
     let engine = host.engine.clone();
     shell.attach(move || engine.settings());
+
+    // Self-updates, only in a packaged, visible app that says so (`updates`): the screen then sees where the update is.
+    if !hidden
+        && let Some(dir) = updates::install_dir(std::env::var("FABER_UPDATES").ok().as_deref(), std::env::var_os("FABER_INSTALL_DIR"))
+    {
+        let write: updates::Write = {
+            let orders = orders.clone();
+            Arc::new(move |text| {
+                if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                    let _ = out.send(text);
+                }
+            })
+        };
+        let version = std::env::var("FABER_VERSION").ok().filter(|version| !version.is_empty());
+        let version = version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+        updates::start(&host, &shell, write, update_data, &version, dir);
+    }
 
     let events = {
         let (mut heard, out) = (host.subscribe(), out.clone());
