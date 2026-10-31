@@ -957,6 +957,18 @@ fn main() {
                 },
                 shell,
             )?;
+            let channel_data = data_dir.clone();
+            let channel_host = host.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = faber_channel::host::serve(&channel_data, channel_host).await {
+                    update::log_to(&channel_data, update::STARTUP_LOG, "channel", &error.to_string());
+                }
+            });
+            let shipped = app.path().resource_dir().ok().map(|dir| dir.join("bin").join("faber.exe"));
+            let source = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("faber-cli.exe")));
+            if let Some(cli) = shipped.into_iter().chain(source).find(|path| path.is_file()) {
+                faber_engine::proc::set_cli(cli);
+            }
             app.manage(Faber {
                 engine: host.engine.clone(),
                 host,
