@@ -22,6 +22,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/building.md](product/building.md) | How Projects builds software: team, workers, self-development, coherence |
 | [product/frontend.md](product/frontend.md) | Original frontend design/proof skills, how both AIs receive them, what delivery checks do and do not prove |
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |
+| [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |

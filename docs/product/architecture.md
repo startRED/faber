@@ -32,6 +32,12 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   keeping the PC awake and starting with the system are decided in the host too: the sidecar sends them as `order`
   lines and the shell only carries them out. Only the browser pane's commands stay the shell's own; the plan and its phases are in
   `docs/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
+- **One command table for the screen, the command line and the AI's tools.** The table in `host/src/table.rs` serves the
+  window (`Host::dispatch`), the `faber` command line (`cli/`) and the AI's tools (`Host::dispatch_as`). The command line
+  reaches the running Faber over a local channel (`channel/`: a user-only named pipe on Windows or Unix socket, guarded by
+  a per-run secret in `<data>/channel/secret` and per-conversation tokens). Each command in the table declares its reach
+  (`free`, `own`, `ask`, `person`, `screen`), and `Host::dispatch_as` (`host/src/reach.rs`) checks that in Rust before
+  any command runs ([command line](cli.md)).
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
   complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the
   lightest and most responsive result it can reach. Anything that keeps a

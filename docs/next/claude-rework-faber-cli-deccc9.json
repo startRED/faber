@@ -1,0 +1,15 @@
+{
+  "notes": {
+    "new": {
+      "en": "An agent can now list, read, start, stop and archive your conversations by itself, and waits for one to finish before it goes on.",
+      "pt-BR": "Um agente agora pode listar, ler, iniciar, parar e arquivar as suas conversas sozinho, e espera uma terminar antes de continuar.",
+      "es": "Un agente ahora puede listar, leer, iniciar, detener y archivar tus conversaciones por su cuenta, y espera a que una termine antes de continuar.",
+      "fr": "Un agent peut désormais lister, lire, démarrer, arrêter et archiver vos conversations tout seul, et attend qu’une se termine avant de continuer.",
+      "de": "Ein Agent kann Ihre Unterhaltungen jetzt selbst auflisten, lesen, starten, anhalten und archivieren und wartet, bis eine fertig ist, bevor er weitermacht."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-31 | The `faber` command line reaches the running Faber over a local channel (a named pipe on Windows or a Unix socket) open only to the signed-in user, with a secret written new on each run (`<data>/channel/secret`) and `FABER_AGENT_TOKEN` values that name an AI's conversation, never a network port; if Faber is not running, the command line starts it hidden in the tray (`--autostart`). | AI (owner delegated) |",
+    "| R-next-2 | 2026-10-31 | `faber` writes compact single-line JSON when stdout is not a terminal (or `--json` is given) and localized words at a terminal (`--human`), exits with fixed codes (`0` done, `1` refused, `2` usage, `3` not reachable, `4` needs the person, `5` `wait` timed out, `130` interrupted), and offers `watch` (coalesced state-transition JSON lines with the conclusion when a conversation finishes) and `wait` so an AI can wait on another conversation without polling. | AI (owner delegated) |"
+  ]
+}
