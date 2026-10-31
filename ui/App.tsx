@@ -1944,6 +1944,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     }}
                                     plan={c().plan}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
+                                    onActChange={(target) => {
+                                      if (target === 'composerModel') document.querySelector<HTMLSelectElement>('.composer .choose select')?.focus();
+                                      else if (target === 'keepGoing') document.querySelector<HTMLButtonElement>('.composer .keep')?.focus();
+                                      else if (target === 'toolKit') { closeSide(false); setFocus(false); setCatalogOpen(true); }
+                                      else openSettings(target === 'checks' ? 'projects' : 'general');
+                                    }}
                                   />
                                 )}
                               </Show>

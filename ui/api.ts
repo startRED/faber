@@ -115,7 +115,16 @@ export interface Parked {
   does?: 'delete' | 'history' | 'publish' | 'install' | 'network';
   at: number;
 }
+export type FaberActor = { who: 'faber' } | { who: 'ai'; vendor: 'claude' | 'codex'; model?: string; role: 'router' | 'helper' };
+export interface FaberAct {
+  kind: 'route' | 'kit' | 'wake' | 'recovery' | 'helper';
+  actor: FaberActor;
+  what: string; why?: string; params?: Record<string, string>;
+  change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
+  sent?: string;
+}
 export interface Message {
+  acts?: FaberAct[];
   visualFileCount?: number;
   id: string;
   role: 'user' | 'assistant';

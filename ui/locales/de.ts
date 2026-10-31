@@ -1,6 +1,16 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "hat {model} mit Aufwand {effort} gewählt",
+  "act.kit.chose": "hat Werkzeuge für diese Aufgabe gewählt: {ids}",
+  "act.recovery.moved": "hat an {vendor} übergeben, weil das Kontingent der ersten KI aufgebraucht war",
+  "act.helper.started": "hat einer weiteren KI diese Aufgabe gegeben",
+  "act.change": "Ändern",
+  "act.sent": "Was Faber der KI gesagt hat",
+  "act.why": "weil {why}",
+  "act.router": "{name}, KI Auswahl",
+  "act.helper": "{name}, Hilfe",
   "tools.marketing-aso.needs": "Benötigt Webzugriff zum Prüfen der Store-Seiten.",
   "catalog.cliName": "Name im KI-Werkzeug: {name}",
   "catalog.pluginRecord": "Plugin-Eintrag",

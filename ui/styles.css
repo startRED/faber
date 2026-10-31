@@ -1855,3 +1855,10 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
 .goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
 .goal-add .goal-words { flex-basis: 100%; margin: 0; }
+
+.faber-act { min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.faber-act-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.faber-act-line .i { flex: none; }
+.faber-act-line button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.faber-act details { margin-left: 22px; }
+.faber-act-sent { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }

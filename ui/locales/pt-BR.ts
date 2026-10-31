@@ -1,6 +1,16 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "escolheu {model}, esforço {effort}",
+  "act.kit.chose": "escolheu ferramentas para esta tarefa: {ids}",
+  "act.recovery.moved": "passou para {vendor} porque a primeira IA ficou sem cota",
+  "act.helper.started": "deu esta tarefa a uma IA ajudante",
+  "act.change": "Alterar",
+  "act.sent": "O que o Faber disse à IA",
+  "act.why": "porque {why}",
+  "act.router": "{name}, escolha de IA",
+  "act.helper": "{name}, ajudante",
   "tools.marketing-aso.needs": "Precisa de acesso à web pra examinar as páginas das lojas.",
   "catalog.cliName": "Nome na ferramenta de IA: {name}",
   "catalog.job.code": "Programar",

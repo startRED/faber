@@ -12,6 +12,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 
 | Word | What it means | Where it lives |
 | :--- | :--- | :--- |
+| Faber decision rows | Automatic decisions and messages appear as quiet labeled rows with their reason, a change action and a disclosure of words sent where present; older messages retain their existing mark. Texts use `act.*` keys. | `ui/FaberAct.tsx`, `ui/Thread.tsx`, `tests/ui/faber-act.check.ts` |
 | Chat | The area for conversations with one AI at a time. An unarchived idle chat can move into a project from its row menu (Move a chat to a project below). A chat works in a private folder of its own, or in a folder picked before its first message. | `ui/Welcome.tsx`, `ui/Thread.tsx`, `ui/Composer.tsx` |
 | Group | A named folder of chats in the Chat sidebar with shared instructions and knowledge files, applied at each CLI launch. | `ui/ChatGroup.tsx`, `engine/src/groups.rs` |
 | Catalog | The tab for browsing and managing skills, plugins and tool servers, with read-only personal/project discovery per AI; no conversation or composer. | `ui/Catalog.tsx`, `ui/CatalogInventory.tsx`, `engine/src/tool_inventory.rs` |

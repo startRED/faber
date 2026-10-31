@@ -1,6 +1,16 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "act.faber": "Faber",
+  "act.route.chose": "chose {model}, {effort} effort",
+  "act.kit.chose": "picked tools for this task: {ids}",
+  "act.recovery.moved": "moved this to {vendor} because the first AI was out of quota",
+  "act.helper.started": "gave a helper this job",
+  "act.change": "Change",
+  "act.sent": "What Faber said to the AI",
+  "act.why": "because {why}",
+  "act.router": "{name} router",
+  "act.helper": "{name} helper",
   "tools.marketing-aso.needs": "Needs web access to inspect store listings.",
   "catalog.cliName": "Name in the AI tool: {name}",
   "catalog.job.code": "Working on code",
