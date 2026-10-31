@@ -32,3 +32,7 @@
 - Bind each saved project start card to its native session id and exact sent text; changed or unknown context starts a fresh native session with the existing conversation history, while compaction keeps its original card. [by AI]
 - Capture existing contained inline-code file references only at explicit decision consent; recheck their safe existence for each new start card without rewriting approvals or inferring references in older records. [by AI]
 - Antigravity (agy, official CLI, own sign-in; not the plain Gemini CLI) becomes a third supported vendor, replacing the "only Claude and Codex" part of R4; T3 Code ideas are taken as ideas only. [by person]
+- Faber gets its own CLI, like photocraft's, so an AI can do everything a person can do in the app with less dependence on the screen. [by person]
+- The CLI, the AI's faber tools and the screen call one shared command list in Rust, over a local channel that needs a per-run secret; signing in to an AI, granting folder access and money stay with the person. [by AI]
+- A conversation counts as done only when its AI concluded it (wrap_up with done); a turn that ends without that shows as ended without a conclusion, and Faber asks the AI once for its closing summary. [by AI]
+- Conversations speak in the AI's own voice: Faber's added instructions keep the language, safety and evidence rules but no longer make the AI talk as Faber. [by AI]
