@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Switching versions of a page right after opening it no longer leaves the old page under the new number.",
+      "pt-BR": "Trocar a versão de uma página logo depois de abri-la não deixa mais a página antiga sob o número novo.",
+      "es": "Cambiar de versión una página justo después de abrirla ya no deja la página anterior bajo el número nuevo.",
+      "fr": "Changer de version d’une page juste après l’avoir ouverte ne laisse plus l’ancienne page sous le nouveau numéro.",
+      "de": "Wer direkt nach dem Öffnen die Version einer Seite wechselt, sieht unter der neuen Nummer nicht mehr die alte Seite."
+    }
+  }
+}
