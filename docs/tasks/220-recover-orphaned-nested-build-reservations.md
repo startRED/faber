@@ -3,27 +3,28 @@
 Area: none
 Files: scripts/cargo.mjs, scripts/cargo-recovery.test.mjs, testkit/src/sweep.rs, docs/dev/build-folders.md
 Depends: none
-Size: about 250 changed lines; re-estimate on top of #441 before implementation.
+Size: about 250 changed lines; re-estimate once #441 is weighed.
 
-Start after PR #441 (`fix/build-slot-leases`, "free a build cache whose command was killed") lands: this extends its
-launcher. Until then `node scripts/tasks.mjs release` it and take another. Do not amend that PR, duplicate its
-receipt-publication/token work, or start another implementation in parallel with its author.
+PR #441 (open, `fix/build-slot-leases`) is a proposal, not a prerequisite: reuse what is safe of it (receipt
+publication, tokens, tests) on the base, untouched. First find whether it has an active author and share any
+receipt/token work with them instead of duplicating it. Its review
+(`docs/research/2026-10-31-pr441-review.md`) found it unsafe as is: it reclaims an ownerless reservation by age, a
+reaper can delete a receipt a live owner just published, it checks only the launcher and direct child, and with
+#484 adoption can delete fingerprints under an unsafe admission; test each.
 
-Why: today's code keeps an empty reservation because it has no owner receipt; #441 checks overlaps first, so an
-ancestor reservation and slot reservations stop one another before reclamation. This does not prove a real empty
-reservation is abandoned, nor explain every wait.
+Why: today's code keeps an empty reservation (no owner receipt); in #441 ancestor and slot reservations stop one
+another before reclamation. Neither proves a real empty reservation abandoned or explains every wait.
 
 Reproduction (virtual file tree, no real cache, nothing compiled): a root reservation `target/.faber-lease` and slot
-reservations `target/build-1..3/.faber-lease` (as seen on the PC on 2026-10-31: root and build-2/3 empty, build-1 with an
-owner receipt), timestamps old enough to pass every age rule, an already-aborted signal so one pass ends the attempt.
+reservations `target/build-1..3/.faber-lease` (on the PC on 2026-10-31: root and build-2/3 empty, build-1 with an owner
+receipt), timestamps old enough to pass every age rule, a signal aborted after the first pass.
 Four cases, each acquired nothing and removed nothing:
 - today's launcher, root override (`CARGO_TARGET_DIR=target`): stops at the missing receipt (1 probe, no overlap scan);
 - today's launcher, slot pool: stops at the missing receipts (3 probes, no overlap scan);
 - #441's launcher, root override: reaping the root finds a slot lease below it and refuses (overlap, 0 receipt probes);
 - #441's launcher, slot pool: each slot finds the root lease above it and refuses (overlap, 0 receipt probes).
 So in #441 `reap` calls `overlapsLease` before its receipt-less recovery, and root and slots block each other forever.
-Recreate these as self-contained repository tests. Extra reference while it exists: `.faber/verify/` of
-`C:/Users/Erick/AppData/Roaming/Faber/copies/185ae5db-79a7-4462-99b7-dce61ce4e9bb`.
+Recreate these as self-contained repository tests.
 
 Build: extend the existing reaper's decision, under its ownership/exclusion safeguards, so a hierarchy containing only
 eligible, provably ended owners can be recovered without a permanent ancestor/descendant rejection cycle. Preserve
