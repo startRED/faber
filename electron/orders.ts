@@ -103,10 +103,16 @@ function keepAwake(on: boolean): void {
   }
 }
 
+/**
+ * The name of Faber's value in the Windows startup list. The Tauri Faber wrote "Faber" with the same command
+ * (`"<faber.exe>" --autostart`), so an install that moved to Electron keeps reading and changing that one, never a second.
+ */
+export const LOGIN_ITEM = 'Faber';
+
 function startWithSystem(on: boolean, window: Window): void {
   // Only the installed app registers itself: a copy run from source would put a developer's Electron in the startup list.
   if (window.hidden || !app.isPackaged) return;
-  app.setLoginItemSettings({ openAtLogin: on, args: on ? ['--autostart'] : [] });
+  app.setLoginItemSettings({ openAtLogin: on, args: on ? ['--autostart'] : [], name: LOGIN_ITEM });
 }
 
 /** Asks the person for a folder, a file to open or where to save one, in a dialog that belongs to the window. */

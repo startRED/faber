@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { app } from 'electron';
+import { LOGIN_ITEM } from './orders.ts';
 
 /** What the host says on its own: events for the screen, and orders for the shell (`Order` in `host/src/wire.rs`). */
 export type Listeners = { event: (event: unknown) => void; order: (order: unknown) => void };
@@ -27,6 +28,13 @@ function program(): string {
   return path.join(process.resourcesPath, exe);
 }
 
+/** Whether Faber's own startup entry (`LOGIN_ITEM`, the name the Tauri Faber used too) is there and turned on. */
+function startsWithSystem(): boolean {
+  const settings = app.getLoginItemSettings({ args: ['--autostart'] });
+  if (process.platform !== 'win32') return settings.openAtLogin;
+  return settings.launchItems.some((item) => item.name === LOGIN_ITEM && item.enabled);
+}
+
 export class Sidecar {
   private next = 1;
   private alive = true;
@@ -46,7 +54,7 @@ export class Sidecar {
       ...process.env,
       FABER_VERSION: app.getVersion(),
       FABER_SHELL_PID: String(process.pid),
-      FABER_AUTOSTART: app.isPackaged && app.getLoginItemSettings().openAtLogin ? '1' : '0',
+      FABER_AUTOSTART: app.isPackaged && startsWithSystem() ? '1' : '0',
     };
     // No shell, no console window: the host is a plain child of the app.
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
