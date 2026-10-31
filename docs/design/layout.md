@@ -56,7 +56,8 @@ The numbers above are the usual widths. The person can change them, and the shel
 
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
   its native buttons.
-- The topbar has a crumb ("Chat › title" or "Project › title") and the run button. The model is not shown there: it is
+- The topbar has a crumb ("Chat › title" or "Project › title") and the run button. A separate copy's branch and folder are
+  not in the crumb: they are the first row of Technical details. The model is not shown there: it is
   chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
   fill (styled from the absence of the live mark, `.run-btn:not(:has(.live))`); the outline comes back on hover,
   keyboard focus and while the column is open. Otherwise it reads "{n} running". When an

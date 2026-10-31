@@ -3,7 +3,8 @@
 Faber is a source-available desktop app (FSL-1.1-ALv2) with a Chat area and a Projects area that run the official AI CLIs
 with the user's own subscriptions. [docs/README.md](docs/README.md) lists every living page and when to read it: read the
 pages your task needs, never a whole folder. Before changing scope read [docs/product/](docs/product/README.md); before
-changing anything a person sees, sets or calls, [docs/product-map.md](docs/product-map.md). Dated specs, plans and
+changing anything a person sees, sets or calls, search [docs/product-map.md](docs/product-map.md) for its words (never
+read the map or [docs/decisions.md](docs/decisions.md) whole: together they are ~150k tokens). Dated specs, plans and
 research are history, never a source for how Faber works today. This file stays short: each line prevents a real
 mistake, and a rule a test enforces leaves it.
 
@@ -33,40 +34,35 @@ mistake, and a rule a test enforces leaves it.
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
   reason and a measurement ([architecture](docs/product/architecture.md#architecture)).
 - Telemetry stays off by default.
-- One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
-  Commits may group related steps, but never huge: push often, roughly once an hour is the usual pace (a rough
-  average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
-  commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
-  branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
-  and whose title is a commit title (`pr-title` checks it). Right after opening it, `node scripts/land.mjs <number>`
-  (in the background: it runs the suites first) queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
-  system is green. Then the lane goes on to its next task and never watches CI: a red queue run turns the pull
-  request's `queue` check red, which wakes its session, and the fix is pushed and queued again with `land.mjs`
-  (R182; [workflow](docs/dev/workflow.md#merge-on-green)). Queue once, with the fix complete: each push to a queue branch cancels the run before it. `land.mjs` is the
-  only way in: never the merge button or `gh pr merge` (a pull request's own run checks only the lints).
-  A small proven commit goes through the queue too: `git push origin
-  HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when every system is green, and a red
-  one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up,
-  and a conflict only in `.md` files where both sides added lines needs nothing: the landing keeps both (R184).
+- One pull request per coherent change, the biggest slice one AI does well (one feature or fix with its tests,
+  often 300 to 1,000 lines), never a string of 100-line steps of one idea: each pull request costs a queue run. Push
+  proven work at once. Lane work enters `phase-1-base` as one squashed pull request that fills
+  `.github/pull_request_template.md`, titled as a commit (`pr-title` checks it). Right after opening it, run
+  `node scripts/land.mjs <number>` in the background: it runs the suites, squashes and numbers it on `phase-1-base`,
+  and CI lands it once every system is green and lets `main` follow (R126, R127, R162). Then go on and never watch CI:
+  a red queue run turns the pull request's `queue` check red, which wakes the session; push the complete fix and queue
+  it again (R182, [workflow](docs/dev/workflow.md#merge-on-green)). `land.mjs` is the only way in, never the merge
+  button or `gh pr merge`. Never merge the base into a branch only to keep up; a conflict only where both sides added
+  lines to a `.md` file settles itself at landing (R184).
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
   and its `pre-push` hook refuses a push onto it ([workflow](docs/dev/workflow.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
   the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([workflow](docs/dev/workflow.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
 - When a task is done (its pull request queued), take the next with `node scripts/tasks.mjs next` and start it without
-  asking ([workflow](docs/dev/workflow.md#task-queue)). Ask the owner only what is theirs (direction, taste, money), in a
-  short card, and go on with the next task meanwhile; stop when no task is free.
-- Never wait idle, on a helper (a subagent, a Codex run, another session) or on a run. The main session hands out only
-  pieces its own next step does not need, runs them in the background, keeps working and reads each result when its
-  notice comes; work it cannot go on without, it does itself. Research and collecting go to Haiku or Codex
-  `gpt-6-luna`; a review goes to Codex `gpt-6.1-sol` in a fresh read-only session (R146), started together with the
-  local proofs. While proofs, a review or CI run, the next item is already being built, in another worktree or session
-  when it touches other files; work that needs an unmerged branch starts from that branch. A turn ends only when nothing
-  is left, never to wait: notices wake the session (R181).
+  asking ([workflow](docs/dev/workflow.md#task-queue)). Only the owner, or the session he names, adds tasks, and the list
+  holds at most 15. Ask the owner only what is theirs (direction, taste, money), in a short card, and go on with the
+  next task meanwhile; stop when no task is free.
+- Until 2026-11-14 the process machinery is frozen (`scripts/land.mjs`, `scripts/tasks.mjs`, `testkit/`, `.github/`):
+  change it only to fix a red base or a landing that is blocked, never to improve it
+  ([workflow](docs/dev/workflow.md#process-freeze)).
+- Never wait idle on a helper, another session or a run: hand out only pieces your next step does not need, keep
+  working, and read each result when its notice comes; notices wake the session, so a turn ends only when nothing is
+  left (R181). Research and collecting go to a cheap model; reviews go to the other vendor (R146).
 
 ## Before a change a person will see or use
 
-Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](docs/product-map.md) first, then:
+Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map.md](docs/product-map.md) first, then:
 
 - Look in the product map for what already exists, in either area: the same setting, screen, control, words, layout,
   stored value or shell command. Extend it; a second way to do the same thing is a bug. Check its "Known incoherences"
@@ -98,10 +94,10 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   it does not fit>`.
 - The commit body states the memory and processor cost, or why there is none (docs, tests only). CI measures it on
   the queued commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
-- Code nobody can check by reading it once gets a review from a fresh session that did not write it: the other vendor
-  when it is available, the same vendor in a new read-only session when its quota is poor (R146). Security changes get
-  two. Every review follows the review rules of product-rules.md, and a change a person sees also gets its coherence
-  review.
+- A change to engine state, stored data, permissions, processes or security gets a review from a fresh session that
+  did not write it: the other vendor when it is available, the same vendor in a new read-only session when its quota is
+  poor (R146); security changes get two. Words, docs, tests and screen-only changes land on their proofs. Every review
+  follows the review rules of product-rules.md, and a change a person sees also gets its coherence review.
 
 ## Stack
 
