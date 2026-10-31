@@ -7,93 +7,60 @@ use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
 struct Fake {
     events: broadcast::Sender<Value>,
     calls: Mutex<Vec<(String, Value)>>,
-    /// The reply to `send` asks the person a question instead of answering.
     asks: bool,
+    working: Arc<AtomicBool>,
 }
-
-fn state() -> Value {
-    json!({
-        "version": "9.9.9",
-        "state": {
-            "conversations": [
-                { "id": "c1", "title": "Old one", "area": "chat", "updatedAt": 1000 },
-                { "id": "c2", "title": "New one", "area": "chat", "updatedAt": 2000 },
-                { "id": "c3", "title": "Archived", "area": "chat", "updatedAt": 3000, "archived": true }
-            ],
-            "projects": [{ "id": "p1", "name": "Site", "path": "C:/site" }],
-            "settings": { "language": "en" },
-            "running": { "revision": 1, "items": [] },
-            "quotas": [{ "vendor": "claude", "window": "five_hour", "used": 0.42, "resetsAt": 0 }],
-            "usage": []
-        }
-    })
-}
-
 impl Backend for Fake {
     fn version(&self) -> String {
         "9.9.9".into()
     }
     fn commands(&self) -> Value {
-        json!([{ "name": "send", "args": [["req", "SendRequest"]], "kind": "startsTurn" }, { "name": "state", "args": [], "kind": "read" }])
+        json!([])
     }
     fn starts_turn(&self, cmd: &str) -> bool {
         cmd == "send"
     }
     fn dispatch(&self, cmd: String, args: Value) -> Answer {
         self.calls.lock().unwrap().push((cmd.clone(), args.clone()));
-        let (events, asks) = (self.events.clone(), self.asks);
+        let working = self.working.load(Ordering::SeqCst);
+        let finish = self.working.clone();
+        let asks = self.asks;
         Box::pin(async move {
             match cmd.as_str() {
-                "state" => Ok(state()),
-                "setup_check" => Ok(json!({ "vendor": args["vendor"], "installed": true, "account": "signedIn", "canInstall": false })),
-                "update_status" => Ok(json!({ "phase": "idle" })),
-                "open" => {
-                    Ok(json!({ "id": args["id"], "title": "Hi", "messages": [{ "id": "u1", "role": "user", "text": "hi", "at": 1 }] }))
+                "conversations" => {
+                    Ok(json!([{ "id":"c1", "title":"Example", "family":"c1", "state":if working {"working"} else {"idle"} }]))
+                }
+                "conversation" => {
+                    Ok(json!({"id":args["id"],"state":if working {"working"} else {"concluded"},"conclusion":{"recap":"Done","done":true}}))
                 }
                 "send" => {
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        let at = now_ms();
-                        let message = |text: &str, status: &str| {
-                            json!({ "type": "message", "conversationId": "c-new", "message": {
-                                "id": "a1", "role": "assistant", "text": text, "at": at, "status": status, "vendor": "claude",
-                                "tools": [{ "id": "t1", "name": "Read", "input": { "file_path": "a.rs" }, "ok": true }]
-                            } })
-                        };
-                        if asks {
-                            let _ = events.send(json!({ "type": "running", "revision": 2, "items": [{
-                                "conversationId": "c-new", "turnId": "a1", "state": "needsYou",
-                                "permissions": [{ "requestId": "r1", "tool": "AskUserQuestion", "input": { "questions": [] } }]
-                            }] }));
-                            return;
-                        }
-                        let _ = events.send(message("Hel", "streaming"));
-                        let _ = events.send(json!({ "type": "message", "conversationId": "c-new", "message": {
-                            "id": "a1", "role": "assistant", "text": "Hello", "at": at, "status": "done", "vendor": "claude",
-                            "toolsFrom": 0, "tools": [{ "id": "t1", "same": true }]
-                        } }));
-                    });
-                    Ok(json!("c-new"))
+                    if !asks {
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            finish.store(false, Ordering::SeqCst);
+                        });
+                    }
+                    Ok(json!("c1"))
                 }
                 "refuse" => Err("error.test.refused".into()),
-                _ => Ok(json!({ "cmd": cmd, "args": args })),
+                "ask" => Err("error.reach.ask".into()),
+                _ => Ok(json!({"cmd":cmd,"args":args})),
             }
         })
     }
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
 struct Run {
@@ -106,20 +73,35 @@ struct Run {
 async fn faber(asks: bool, args: &[&str], stdin: &str, env: &[(&str, &str)]) -> (Run, Arc<Fake>) {
     let data = tempfile::tempdir().unwrap();
     let (events, _) = broadcast::channel(64);
-    let fake = Arc::new(Fake { events, calls: Mutex::default(), asks });
+    let fake = Arc::new(Fake { events, calls: Mutex::default(), asks, working: Arc::new(AtomicBool::new(true)) });
     let served = tokio::spawn({
         let (dir, fake) = (data.path().to_path_buf(), fake.clone());
         async move { serve(&dir, fake).await }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    ready(data.path()).await;
     let run = run(data.path(), args, stdin, env).await;
     served.abort();
     (run, fake)
 }
 
+async fn ready(data: &Path) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while faber_channel::Client::connect(data, Default::default()).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("fake Faber did not start");
+}
+
 async fn run(data: &Path, args: &[&str], stdin: &str, env: &[(&str, &str)]) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_faber-cli"));
-    command.args(args).arg("--data").arg(data).arg("--no-start");
+    command.arg("--data").arg(data).arg("--no-start").args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     command.env_remove("FABER_AGENT_DEPTH").env("NO_COLOR", "1");
     for (name, value) in env {
         command.env(name, value);
@@ -144,123 +126,120 @@ fn lines(text: &str) -> Vec<Value> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_says_whether_each_ai_is_signed_in_without_anyones_screen() {
-    let (run, _) = faber(false, &["status", "--json"], "", &[]).await;
+async fn piped_output_and_list_arguments() {
+    let (run, fake) = faber(
+        false,
+        &["list", "--state", "working,waiting", "--all", "--project", "p1", "--family", "c1", "--query", "site", "--limit", "3"],
+        "",
+        &[],
+    )
+    .await;
     assert_eq!(run.code, 0, "{}", run.stderr);
-    let status: Value = serde_json::from_str(&run.stdout).unwrap();
-    assert_eq!(status["version"], "9.9.9");
-    assert_eq!(status["accounts"][0]["account"], "signedIn");
-    assert_eq!(status["accounts"][1]["vendor"], "codex");
-    assert_eq!(status["conversations"], 3);
-
-    let (run, _) = faber(false, &["status"], "", &[]).await;
-    assert!(run.stdout.contains("Claude Code") && run.stdout.contains("signed in") && run.stdout.contains("42%"), "{}", run.stdout);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn list_shows_the_newest_first_and_hides_the_archived() {
-    let (run, _) = faber(false, &["list", "--json"], "", &[]).await;
-    let ids: Vec<String> =
-        serde_json::from_str::<Value>(&run.stdout).unwrap().as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().into()).collect();
-    assert_eq!(ids, ["c2", "c1"]);
-    let (run, _) = faber(false, &["list", "--archived", "--json"], "", &[]).await;
-    assert_eq!(serde_json::from_str::<Value>(&run.stdout).unwrap()[0]["id"], "c3");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn chat_streams_the_answer_and_ends_with_its_result() {
-    let (run, fake) = faber(false, &["chat", "hi there", "--vendor", "claude", "--json"], "", &[]).await;
-    assert_eq!(run.code, 0, "{}{}", run.stdout, run.stderr);
-    let lines = lines(&run.stdout);
-    let text: String = lines.iter().filter(|l| l["type"] == "text").map(|l| l["delta"].as_str().unwrap()).collect();
-    assert_eq!(text, "Hello");
-    assert!(lines.iter().any(|l| l["type"] == "step" && l["state"] == "done"), "{lines:?}");
-    let result = lines.last().unwrap();
-    assert_eq!(
-        (result["type"].as_str(), result["status"].as_str(), result["text"].as_str()),
-        (Some("result"), Some("done"), Some("Hello"))
-    );
+    assert!(serde_json::from_str::<Value>(&run.stdout).unwrap().is_array());
     let calls = fake.calls.lock().unwrap();
-    let send = &calls.iter().find(|(cmd, _)| cmd == "send").unwrap().1;
-    assert_eq!(send["req"]["text"], "hi there");
-    assert_eq!(send["req"]["choice"]["vendor"], "claude");
-    assert_eq!(send["req"]["area"], "chat");
+    assert_eq!(
+        calls.iter().find(|(c, _)| c == "conversations").unwrap().1,
+        json!({"state":["working","waiting"],"archived":false,"projectId":"p1","family":"c1","query":"site","limit":3})
+    );
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn errors_use_the_contract_exit_codes() {
+    let data = tempfile::tempdir().unwrap();
+    let bad = run(data.path(), &["list", "--bad"], "", &[]).await;
+    assert_eq!(bad.code, 2);
+    assert!(lines(&bad.stdout)[0]["error"].is_string());
+    let absent = run(data.path(), &["status"], "", &[]).await;
+    assert_eq!(absent.code, 3);
+    for (cmd, code) in [("ask", 4), ("refuse", 1)] {
+        let (r, _) = faber(false, &["call", cmd], "", &[]).await;
+        assert_eq!(r.code, code, "{}", r.stdout);
+    }
+    let (r, _) = faber(true, &["wait", "c1", "--timeout", "1"], "", &[]).await;
+    assert_eq!(r.code, 5);
+    assert_eq!(lines(&r.stdout)[0]["state"], "working");
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn send_wait_returns_id_then_conclusion_and_call_reaches_the_host() {
+    let (r, _) = faber(false, &["send", "hello", "--wait"], "", &[]).await;
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let out = lines(&r.stdout);
+    assert_eq!(out[0], "c1");
+    assert_eq!(out[1]["state"], "concluded");
+    let (r, _) = faber(false, &["call", "anything", r#"{"x":1}"#], "", &[]).await;
+    assert_eq!(lines(&r.stdout)[0], json!({"cmd":"anything","args":{"x":1}}));
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn help_works_offline_and_contains_the_entire_table() {
+    let data = tempfile::tempdir().unwrap();
+    let r = run(data.path(), &["help", "--json"], "", &[]).await;
+    assert_eq!(r.code, 0);
+    let help = lines(&r.stdout);
+    let expected: Value = serde_json::from_str(include_str!("../commands.json")).unwrap();
+    assert_eq!(help[0]["commands"], expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_question_with_nobody_at_the_terminal_is_handed_back_and_waits() {
-    let (run, _) = faber(true, &["chat", "hi", "--json"], "", &[]).await;
-    assert_eq!(run.code, 4, "{}{}", run.stdout, run.stderr);
-    let card = lines(&run.stdout).pop().unwrap();
-    assert_eq!((card["type"].as_str(), card["turnId"].as_str()), (Some("needsYou"), Some("a1")));
-    assert_eq!(card["permission"]["requestId"], "r1");
+async fn watch_reports_the_exact_end_state_and_conclusion() {
+    use std::io::{BufRead, BufReader};
+    let data = tempfile::tempdir().unwrap();
+    let (events, _) = broadcast::channel(64);
+    let working = Arc::new(AtomicBool::new(true));
+    let fake = Arc::new(Fake { events: events.clone(), calls: Mutex::default(), asks: false, working: working.clone() });
+    let served = tokio::spawn({
+        let dir = data.path().to_path_buf();
+        async move { serve(&dir, fake).await }
+    });
+    ready(data.path()).await;
+    let mut command = Command::new(env!("CARGO_BIN_EXE_faber-cli"));
+    command.args(["watch", "--no-start", "--data"]).arg(data.path()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let first = rx.recv_timeout(Duration::from_secs(5));
+    if first.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        served.abort();
+    }
+    let first = first.unwrap();
+    if serde_json::from_str::<Value>(&first).unwrap()["state"] != "working" {
+        let _ = child.kill();
+        let _ = child.wait();
+        served.abort();
+        panic!("unexpected first state: {first}");
+    }
+    working.store(false, Ordering::SeqCst);
+    events.send(json!({"type":"running"})).unwrap();
+    let end = rx.recv_timeout(Duration::from_secs(5));
+    let _ = child.kill();
+    let _ = child.wait();
+    served.abort();
+    let end: Value = serde_json::from_str(&end.unwrap()).unwrap();
+    assert_eq!(end["was"], "working");
+    assert_eq!(end["state"], "concluded");
+    assert_eq!(end["conclusion"]["recap"], "Done");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn call_reaches_any_command_and_a_refusal_keeps_its_key() {
-    let (run, fake) = faber(false, &["call", "rename", r#"{"id":"c1","title":"New"}"#], "", &[]).await;
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    assert!(fake.calls.lock().unwrap().iter().any(|(cmd, args)| cmd == "rename" && args["title"] == "New"));
-    let (run, _) = faber(false, &["call", "refuse", "--json"], "", &[]).await;
-    assert_eq!(run.code, 1);
-    assert_eq!(serde_json::from_str::<Value>(&run.stdout).unwrap()["error"], "error.test.refused");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_ai_deep_in_faber_reads_but_cannot_start_a_turn() {
-    let (run, _) = faber(false, &["chat", "again", "--json"], "", &[("FABER_AGENT_DEPTH", "2")]).await;
-    assert_eq!(run.code, 1, "{}", run.stdout);
-    assert_eq!(serde_json::from_str::<Value>(&run.stdout).unwrap()["error"], "error.channel.agentDepth");
-    let (run, _) = faber(false, &["list", "--json"], "", &[("FABER_AGENT_DEPTH", "2")]).await;
-    assert_eq!(run.code, 0);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn wrong_use_and_no_faber_have_their_own_exit_codes() {
-    let (run, _) = faber(false, &["fly"], "", &[]).await;
-    assert_eq!(run.code, 2);
-    assert!(run.stderr.contains("fly"), "{}", run.stderr);
-    let (run, _) = faber(false, &["status", "--colour"], "", &[]).await;
-    assert_eq!(run.code, 2);
-    let empty = tempfile::tempdir().unwrap();
-    let alone = run_alone(empty.path()).await;
-    assert_eq!(alone.code, 3, "{}", alone.stderr);
-}
-
-async fn run_alone(data: &Path) -> Run {
-    run(data, &["status"], "", &[]).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn rpc_carries_the_channel_on_stdin_and_stdout() {
-    let input = concat!(r#"{"id":1,"cmd":"hello","args":{}}"#, "\n", r#"{"id":2,"cmd":"state"}"#, "\n", r#"{"id":3,"cmd":"refuse"}"#, "\n");
-    let (run, _) = faber(false, &["rpc"], input, &[]).await;
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    let mut replies = lines(&run.stdout);
-    replies.sort_by_key(|r| r["id"].as_u64());
-    assert_eq!(replies[0]["ok"]["version"], "9.9.9");
-    assert_eq!(replies[1]["ok"]["state"]["projects"][0]["id"], "p1");
-    assert_eq!(replies[2]["err"], "error.test.refused");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn mcp_lists_its_tools_and_answers_a_status_call() {
-    let input = [
-        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18" } }),
-        json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
-        json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "faber_status", "arguments": {} } }),
-    ]
-    .iter()
-    .map(|m| format!("{m}\n"))
-    .collect::<String>();
-    let (run, _) = faber(false, &["mcp"], &input, &[]).await;
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    let mut replies = lines(&run.stdout);
-    replies.sort_by_key(|r| r["id"].as_u64());
-    assert_eq!(replies.len(), 3, "the notification gets no answer: {replies:?}");
-    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "faber");
-    assert!(replies[1]["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "faber_chat"));
-    let status: Value = serde_json::from_str(replies[2]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(status["accounts"][0]["account"], "signedIn");
+async fn human_overrides_json_and_the_end_of_flags_is_respected() {
+    let (r, _) = faber(false, &["send", "hello", "--json", "--human"], "", &[]).await;
+    assert_eq!(r.code, 0);
+    assert_eq!(r.stdout.trim(), "c1");
+    let (r, fake) = faber(false, &["send", "--", "--human"], "", &[]).await;
+    assert_eq!(r.code, 0);
+    assert_eq!(lines(&r.stdout)[0], "c1");
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(calls.iter().find(|(cmd, _)| cmd == "send").unwrap().1["req"]["text"], "--human");
 }

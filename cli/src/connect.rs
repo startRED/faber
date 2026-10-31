@@ -22,7 +22,7 @@ pub fn agent_depth() -> u32 {
 }
 
 pub fn hello(client: &str) -> Hello {
-    Hello { client: format!("{client} {}", env!("CARGO_PKG_VERSION")), agent_depth: agent_depth() }
+    Hello { client: format!("{client} {}", env!("CARGO_PKG_VERSION")), agent_depth: agent_depth(), ..Default::default() }
 }
 
 #[derive(Debug)]
