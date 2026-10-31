@@ -273,11 +273,19 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
 /// The programs a screen run starts: what `--build-only` leaves and `--prebuilt` needs. CI hands
 /// exactly these from its build job to its screen parts (R163), so a scenario that needs another one fails there at once.
 pub fn built_programs(paths: &Paths) -> Vec<std::path::PathBuf> {
+    built_for_shell(paths, Shell::chosen())
+}
+
+fn built_for_shell(paths: &Paths, shell: Shell) -> Vec<std::path::PathBuf> {
     let suffix = std::env::consts::EXE_SUFFIX;
     let debug = paths.fake_cli.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut list = vec![paths.app.clone(), paths.fake_cli.clone(), debug.join(format!("faber-test{suffix}"))];
-    if Shell::chosen() == Shell::Electron {
-        list.extend([paths.sidecar(), paths.root.join("out/electron/main.js")]);
+    if shell == Shell::Electron {
+        list.push(paths.sidecar());
+        list.extend(
+            ["main.js", "orders.js", "preload.cjs", "sidecar.js", "testmode.js"].map(|name| paths.root.join("out/electron").join(name)),
+        );
+        list.push(paths.root.join(TEST_DIST).join("index.html"));
     }
     if cfg!(windows) {
         list.push(debug.join(format!("examples/cache_probe{suffix}")));
@@ -361,6 +369,32 @@ fn both(first: impl FnOnce() -> Result<(), String> + Send, second: impl FnOnce()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn electron_prebuilt_includes_the_shell_and_test_screen() {
+        let root = std::path::PathBuf::from("repo");
+        let paths = Paths {
+            app: root.join("electron"),
+            fake_cli: root.join("debug/fake-cli"),
+            fixtures: root.join("fixtures"),
+            shots: root.join("shots"),
+            target: root.join("target/faber-test"),
+            root: root.clone(),
+        };
+        let files = built_for_shell(&paths, Shell::Electron);
+        for file in [
+            "out/electron/main.js",
+            "out/electron/orders.js",
+            "out/electron/preload.cjs",
+            "out/electron/sidecar.js",
+            "out/electron/testmode.js",
+            "dist-test/index.html",
+        ] {
+            assert!(files.contains(&root.join(file)), "missing {file}");
+        }
+        assert!(files.contains(&paths.sidecar()));
+        assert!(!built_for_shell(&paths, Shell::Tauri).contains(&root.join("dist-test/index.html")));
+    }
 
     #[test]
     fn an_empty_dist_is_no_build_but_a_file_in_it_is() {

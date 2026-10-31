@@ -47,9 +47,7 @@ page's whole event loop partway through a run on CI. So the macOS test build (`t
 corner under every other window, ignores the mouse, never takes focus, and sets WebKit's inactive scheduling policy to
 `Disabled` (`background_throttling`, macOS 14+). Windows keeps the offscreen place and its own desktop.
 
-The four audited ancestor folders use compact names because WebView2 adds nested database paths below the private build
-temporary folder. Longer ancestor names reproduced an IndexedDB backing-store open failure in a long Windows cache path;
-shortening their names fixed that fixture without dropping any audit level or moving data outside the sandbox.
+The audited ancestor folders use compact names: long Windows paths caused an IndexedDB backing-store open failure.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
@@ -84,12 +82,12 @@ stable (`promote-stable.yml` starts the run and waits for it). The lints run on 
 suites run only nightly and before stable, and a red night opens a `nightly` issue (R468). One Windows job builds the test app once (`cargo t --build-only`, the fake
 CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
 `testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
-(`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a
+(`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. Electron runs the UI checks and idle
+memory scenario in its own Windows jobs; failures report without blocking the gate (R459). On CI the runner uses every core; on a
 person's PC it keeps to half, and every build it starts there (Cargo, Vite, Tauri) runs at idle priority with no
 console window, so a game in front keeps the processor. A local run builds the test screen with Vite while Cargo builds
-the fake CLI, then the shell; Vite is skipped when `dist-test` already holds the build of the same inputs (by
-content: the screen, its checks, the shell file they import, and the build's configuration and packages; a test fails
-when an import reaches a file outside that list). Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
+the fake CLI, then the shell. Vite skips a build when `dist-test` matches its inputs by content; a test checks that imports
+stay within those inputs. Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
 ring's build script, and everything above it, build again. Each kind of job keeps its own Rust cache, and only `main`
 saves it: a run can read only the caches of its own branch and of `main`, and branches that each saved their own pushed
 the others out of the 10 GB GitHub keeps. Since pushes made by CI start no run, the `land` and `main` jobs start a warm run
@@ -146,8 +144,7 @@ crash included. With all three taken it prints one waiting line and waits. `FABE
 another PC (R129, E3). Idle priority gives the processor away but not the memory, so before its slot a run also waits
 while a full-screen app is in front and the keyboard or mouse was used in the last ten minutes (a game, a
 presentation; a borderless window is not seen; the lock screen of a PC left alone reads as full-screen, R464) or while less memory is free
-than one run takes (8 GB), at most ten minutes for memory, with one `Waiting:` line per reason (R440). On 2026-10-22 three runs left 2.2 GB of 36 free
-under a game. CI never waits.
+than one run takes (8 GB), at most ten minutes for memory, with one `Waiting:` line per reason (R440). CI never waits.
 
 ### What a run prints
 

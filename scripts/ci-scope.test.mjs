@@ -79,11 +79,12 @@ test('main warms every Rust cache the checks read, under the same names, and onl
     ...[...ci.matchAll(/"os":"([a-z-]+)","part":"[^"]*","cache":"([a-z-]+)"/g)].map((m) => `${m[1]} ${m[2]}`),
     ...[...ci.matchAll(/\\"os\\":\\"([a-z-]+)\\",\\"part\\":\\"\$part\\",\\"cache\\":\\"([a-z-]+)\\"/g)].map((m) => `${m[1]} ${m[2]}`),
     ...(/\n {2}app:[\s\S]*?shared-key: app\n/.test(ci) ? ['windows-latest app'] : []),
+    ...(/\n {2}electron-app:[\s\S]*?shared-key: electron-app\n/.test(ci) ? ['windows-latest electron-app'] : []),
   ];
-  assert.equal(read.length, 5, read.join(', '));
+  assert.equal(read.length, 6, read.join(', '));
   assert.deepEqual([...new Set(warmed)].sort(), [...new Set(read)].sort());
-  assert.equal(ci.match(/uses: Swatinem\/rust-cache@v2/g).length, 3, 'check, app and warm');
-  assert.equal(ci.match(/save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/g).length, 2, 'check and app save only on main');
+  assert.equal(ci.match(/uses: Swatinem\/rust-cache@v2/g).length, 4, 'check, app, electron-app and warm');
+  assert.equal(ci.match(/save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/g).length, 3, 'check, app and electron-app save only on main');
 });
 
 test('Windows COM updates stay on the minor line required by WebView2', () => {
