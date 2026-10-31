@@ -190,46 +190,25 @@ async fn sent(engine: &Engine, req: SendRequest) -> String {
 }
 
 async fn ready(engine: &Engine, id: &str) {
-    for _ in 0..200 {
-        // A copy named on the conversation but not attached yet has no repository (`root`).
-        if engine.open(id).and_then(|c| c.copy).is_some_and(|c| !c.root.is_empty() && Path::new(&c.path).is_dir()) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("the copy of {id} was never made");
+    // A copy named on the conversation but not attached yet has no repository (`root`).
+    let made = || engine.open(id).and_then(|c| c.copy).is_some_and(|c| !c.root.is_empty() && Path::new(&c.path).is_dir());
+    support::until(&format!("the copy of {id} was never made"), made).await;
 }
 
 async fn agent_started(cwds: &Mutex<Vec<PathBuf>>, count: usize) {
-    for _ in 0..200 {
-        if cwds.lock().unwrap().len() >= count {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("the agent did not start after history capture");
+    support::until("the agent did not start after history capture", || cwds.lock().unwrap().len() >= count).await;
 }
 
 async fn agent_started_in(cwds: &Mutex<Vec<PathBuf>>, copy: &Path) {
     let expected = copy.canonicalize().unwrap();
-    for _ in 0..200 {
-        if cwds.lock().unwrap().iter().any(|cwd| cwd.canonicalize().is_ok_and(|cwd| cwd == expected)) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("the agent did not start in its copy {expected:?}; starts: {:?}", cwds.lock().unwrap());
+    let started = || cwds.lock().unwrap().iter().any(|cwd| cwd.canonicalize().is_ok_and(|cwd| cwd == expected));
+    support::until(&format!("the agent did not start in its copy {expected:?}"), started).await;
 }
 
 /// A copy is removed away from the engine's lock; give it a moment.
 async fn gone(path: &Path) -> bool {
-    for _ in 0..40 {
-        if !path.exists() {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    false
+    support::until("the copy folder was not removed", || !path.exists()).await;
+    true
 }
 
 #[tokio::test]
@@ -306,12 +285,7 @@ async fn automatic_first_project_turn(asked: bool) {
     assert!(!copy.root.is_empty(), "the copy is made before starting its session");
     assert!(!current.project_start_pending);
     assert_eq!(cwds.lock().unwrap().last(), Some(&copy.folder()), "never in the person's checkout, asked={asked}");
-    for _ in 0..200 {
-        if target.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the turn never reached its agent", || target.lines.lock().unwrap().iter().any(|m| m["type"] == "user")).await;
     let lines = target.lines.lock().unwrap();
     let first = lines.iter().find(|m| m["type"] == "user").expect("the turn reaches its agent");
     assert!(first.to_string().contains("Earlier in this conversation"), "the first turn also carries Chat's history");
@@ -397,12 +371,7 @@ async fn move_chat_to_project_uses_the_current_copy_rule_at_its_first_project_tu
             assert!(s.cwds.lock().unwrap().is_empty(), "enabling copies after a move must block checkout warmup");
             sent(&reopened, SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue") }).await;
             let copy = reopened.open(&id).unwrap().copy.unwrap();
-            for _ in 0..200 {
-                if !s.cwds.lock().unwrap().is_empty() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
+            support::until("no agent started after the move", || !s.cwds.lock().unwrap().is_empty()).await;
             assert_eq!(*s.cwds.lock().unwrap(), vec![copy.folder()]);
         } else {
             assert!(s.cwds.lock().unwrap().is_empty(), "project warmup must wait for the first rewind baseline even without copies");
@@ -452,12 +421,7 @@ async fn move_chat_to_project_makes_its_separate_copy_only_at_the_next_turn_even
     let copy = reopened.open(&id).unwrap().copy.unwrap();
     assert!(!copy.root.is_empty());
     assert_eq!(reopened.open(&id).unwrap().messages.len(), record.messages.len() + 2);
-    for _ in 0..200 {
-        if !s.cwds.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("no agent started in the reopened conversation", || !s.cwds.lock().unwrap().is_empty()).await;
     assert_eq!(*s.cwds.lock().unwrap(), vec![copy.folder()]);
     reopened.shutdown();
 }
@@ -567,12 +531,7 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert!(gone(Path::new(&copy.path)).await, "the copy is removed");
     // The folder goes first; the prune and the branch follow it, on the same background step.
     let branch_gone = vec!["branch".to_string(), "-D".into(), copy.branch.clone()];
-    for _ in 0..40 {
-        if s.git.lock().unwrap().calls.contains(&branch_gone) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    support::until("the copy's branch was never deleted", || s.git.lock().unwrap().calls.contains(&branch_gone)).await;
     let calls = s.git.lock().unwrap().calls.clone();
     assert!(calls.contains(&vec!["worktree".into(), "remove".into(), "--force".into(), "--".into(), copy.path.clone()]), "{calls:?}");
     assert!(calls.contains(&branch_gone), "{calls:?}");
@@ -711,12 +670,10 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     agent.say(serde_json::json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
     let mut sibling = support::next_pipe(&made).await;
-    for _ in 0..300 {
-        if sibling.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the brief never reached the new conversation's agent", || {
+        sibling.lines.lock().unwrap().iter().any(|m| m["type"] == "user")
+    })
+    .await;
     let brief = sibling.lines.lock().unwrap().iter().find(|m| m["type"] == "user").cloned().expect("the brief is sent");
     assert!(brief.to_string().contains("Write the docs page for the parser."), "{brief}");
     let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs page").expect("the new conversation is listed").id;
@@ -736,14 +693,11 @@ async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
     }));
     agent.say(serde_json::json!({"type":"control_request","request_id":"r2","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conversation","arguments":{"title":"Discarded docs","brief":"Check the docs."},"_meta":{"claudecode/toolUseId":"toolu_discard"}}}}})).await;
-    for _ in 0..300 {
-        if copying.load(std::sync::atomic::Ordering::SeqCst)
+    support::until("the child copy did not start while its call was answered", || {
+        copying.load(std::sync::atomic::Ordering::SeqCst)
             && agent.lines.lock().unwrap().iter().any(|m| m["type"] == "control_response" && m["response"]["request_id"] == "r2")
-        {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    })
+    .await;
     assert!(copying.load(std::sync::atomic::Ordering::SeqCst), "the child copy started");
     assert!(agent.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "r2"), "the call answers while git still waits");
     let discarded = engine.state().conversations.into_iter().find(|c| c.title == "Discarded docs").unwrap().id;
@@ -830,13 +784,11 @@ async fn move_chat_to_project_paid_consent_waits_for_its_copy_and_cancel_revokes
         }
         release.send(()).unwrap();
         ready(&s.engine, &id).await;
-        for _ in 0..200 {
+        support::until("the message neither started, failed nor was cancelled", || {
             let current = s.engine.open(&id).unwrap();
-            if cancel || current.messages.last().unwrap().status == Some(Status::Error) || !s.cwds.lock().unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+            cancel || current.messages.last().unwrap().status == Some(Status::Error) || !s.cwds.lock().unwrap().is_empty()
+        })
+        .await;
         let current = s.engine.open(&id).unwrap();
         assert_eq!(s.cwds.lock().unwrap().len(), usize::from(!cancel), "consent must survive until actual dispatch, cancel={cancel}");
         if !cancel {
@@ -887,7 +839,7 @@ async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_w
     let _ = release.send(());
     ready(&s.engine, &id).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), capture_started).await.expect("history capture starts after attachment").unwrap();
+    tokio::time::timeout(support::DEADLINE, capture_started).await.expect("history capture starts after attachment").unwrap();
     assert!(s.cwds.lock().unwrap().is_empty(), "an attached copy must finish its history capture before the agent starts");
     assert!(s.engine.open(&id).unwrap().messages[0].rewind.is_none(), "the held capture has not published its baseline yet");
     finish_capture.send(()).unwrap();
@@ -929,12 +881,7 @@ async fn r_next_a_message_written_after_stopping_a_first_message_waits_for_the_s
     let _ = release.send(());
     ready(&s.engine, &id).await;
     let copy = s.engine.open(&id).unwrap().copy.unwrap();
-    for _ in 0..200 {
-        if !s.cwds.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    support::until("no agent started once the copy was there", || !s.cwds.lock().unwrap().is_empty()).await;
     let cwds = s.cwds.lock().unwrap().clone();
     assert_eq!(cwds.len(), 1, "{cwds:?}");
     assert_eq!(cwds[0].canonicalize().unwrap(), PathBuf::from(&copy.path).canonicalize().unwrap());
@@ -966,14 +913,8 @@ async fn r_next_a_copy_that_cannot_be_made_ends_the_reply_and_the_next_message_t
     let engine = start(&data, &cwds, NoAdd(Git(repo.clone()), adds.clone()));
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = engine.send(ask(&project, "Fix the login page")).unwrap();
-    let mut reply = engine.open(&id).unwrap().messages[1].clone();
-    for _ in 0..200 {
-        if reply.status != Some(Status::Streaming) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-        reply = engine.open(&id).unwrap().messages[1].clone();
-    }
+    support::until("the reply never stopped streaming", || engine.open(&id).unwrap().messages[1].status != Some(Status::Streaming)).await;
+    let reply = engine.open(&id).unwrap().messages[1].clone();
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.copy.failed")));
     assert!(cwds.lock().unwrap().is_empty(), "no agent without its copy");
     // The person writes again in the same conversation: it asks for a copy again instead of working in the folder.
@@ -981,12 +922,7 @@ async fn r_next_a_copy_that_cannot_be_made_ends_the_reply_and_the_next_message_t
     let before = tries();
     let again = SendRequest { conversation_id: Some(id.clone()), ..ask(&project, "Try again") };
     engine.send(again).unwrap();
-    for _ in 0..200 {
-        if tries() > before {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    support::until("the copy was not tried again", || tries() > before).await;
     assert!(tries() > before, "the copy was tried again");
     assert!(cwds.lock().unwrap().is_empty(), "still never in the project folder");
     engine.shutdown();
@@ -1014,12 +950,7 @@ async fn r_next_a_queued_message_sent_now_after_stopping_never_starts_in_the_pro
     // The copy comes: the queued message is the one that starts, in the copy.
     let _ = release.send(());
     ready(&s.engine, &id).await;
-    for _ in 0..200 {
-        if !s.cwds.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    support::until("the queued message never started", || !s.cwds.lock().unwrap().is_empty()).await;
     let cwds = s.cwds.lock().unwrap().clone();
     assert_eq!(cwds.len(), 1, "{cwds:?}");
     assert!(only_in_copy(&cwds, s.data.path(), &id), "started outside the copy: {cwds:?}");

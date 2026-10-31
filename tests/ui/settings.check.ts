@@ -939,7 +939,7 @@ check('settings: the accounts card writes Faber\'s spend in the person\'s format
 
 check('settings: one card per AI with a capitalised plan, one status word, the reset time in full and the notes behind one Details fold', () => signedIn(async () => {
   useLanguage('en');
-  const until = Math.floor(Date.now() / 1000) + 7 * 3600;
+  const until = Math.floor(Date.now() / 1000) + 84.5 * 3600;
   const usage = [{ vendor: 'claude', plan: 'max', state: 'low', learning: true, relearning: false, outsideShare: 0.2, foreignUse: true, overageOn: true, billedPerUse: false,
     billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 1, unmetered: 2, counting: true,
     windows: [{ name: 'seven_day', used: 0.4, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted: null }] }] as unknown as VendorUsage[];
@@ -959,7 +959,7 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
     equal(card.dataset.state, 'connected');
     ok(pill.classList.contains('warn'), 'amber for a window that is really near its limit (C002)');
     const reset = card.querySelector<HTMLElement>('.urow .reset')!;
-    ok(reset.textContent!.startsWith('resets in '), reset.textContent!);
+    equal(reset.textContent, 'resets in 3d 13h', 'days and hours, rounded up, so 3.5 days never reads 4');
     ok(reset.scrollWidth <= reset.clientWidth + 1, 'the reset time is not cut');
     equal(card.querySelectorAll('.hint').length, 0, 'every note is behind the fold');
     const fold = card.querySelector<HTMLButtonElement>('.st-fold-head')!;

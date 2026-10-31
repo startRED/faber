@@ -9,12 +9,11 @@
 //! running, no CLI install from the setup screen, and the window closed to the tray or minimized; or
 //! at once when the person presses "Update ready, restart" (`restart_now`). It never shows a window on its own.
 //!
-//! On Windows the plugin's `install` starts the NSIS installer with `/S /UPDATE /R /ARGS <args>` (`updater.rs`
-//! `updater_parameters`, `config.rs` `nsis_args`) and then ends the process with `exit(0)`. Silent (`/S`) shows no window
-//! and, for the per-user installer (`bundle.windows.nsis.installMode = "currentUser"`, `RequestExecutionLevel user`),
-//! needs no elevation. With `/R` the installer's `.onInstSuccess` starts the new `faber.exe` with the `/ARGS` value: the
-//! arguments of this process, which the plugin copies by itself, then `installer_args` below. So a manual start comes
-//! back with a window, and `--autostart` comes back in the tray.
+//! On Windows the install is handed to a copy of Faber (`handoff`), which waits until this process has ended, runs the NSIS
+//! installer with `/S /UPDATE /D=<folder>` and opens Faber again: with its window for a manual start or the person's
+//! "Update ready, restart", in the tray for `--autostart` and the idle install. Silent (`/S`) shows no window and, for the
+//! per-user installer (`bundle.windows.nsis.installMode = "currentUser"`, `RequestExecutionLevel user`), needs no
+//! elevation. The plugin's own `install` is used only at Quit on other systems.
 //!
 //! Where it lands is decided by the installer's `.onInit` (tauri-bundler's `installer.nsi`): unless the command line has
 //! `/D=<dir>`, it starts from `$LOCALAPPDATA\Faber` and only moves to the folder of an earlier install if the registry
@@ -23,6 +22,9 @@
 //! `%LOCALAPPDATA%\Faber`. Faber therefore always tells the installer its own folder.
 //!
 //! Failures go to `update.log` in the data folder (`log`): a windowless app has nowhere else to say them.
+
+#[cfg(windows)]
+pub(crate) mod handoff;
 
 use crate::autostart::{AUTOSTART_FLAG, is_autostart_arg};
 use crate::{Faber, lock, main_window};
@@ -84,17 +86,6 @@ impl Reopen {
     }
 }
 
-/// What the installer gets after the plugin's own arguments. The plugin already copies this process's arguments after
-/// `/ARGS`, so `--autostart` comes only when the update should come back in the tray; `/D=` is last, as NSIS wants.
-pub(crate) fn installer_args(reopen: Reopen, install_dir: &OsString) -> Vec<OsString> {
-    let mut args = Vec::new();
-    if reopen == Reopen::Tray {
-        args.push(AUTOSTART_FLAG.into());
-    }
-    args.push(install_dir.clone());
-    args
-}
-
 /// A line of the log with nothing of the person's in it: a URL (its query can carry anything) or a path (it holds the user
 /// name) becomes a marker, word by word.
 fn clean(detail: &str) -> String {
@@ -124,8 +115,16 @@ fn clean(detail: &str) -> String {
 /// Adds a line to `update.log`, keeping the file small. Only fixed stage names and the updater's own short error text go
 /// in, with every URL and path taken out (`clean`): never a path of the person's, a command or a credential.
 pub(crate) fn log(data_dir: &Path, stage: &str, detail: &str) {
+    log_to(data_dir, "update.log", stage, detail);
+}
+
+/// How long each start took to show its window (`main.rs` `reveal`), kept small like `update.log`.
+pub(crate) const STARTUP_LOG: &str = "startup.log";
+
+/// `log` into another small file of the data folder.
+pub(crate) fn log_to(data_dir: &Path, name: &str, stage: &str, detail: &str) {
     let at = now_secs();
-    let file = data_dir.join("update.log");
+    let file = data_dir.join(name);
     let before = std::fs::read_to_string(&file).unwrap_or_default();
     let _ = std::fs::write(file, with_line(&before, &format!("{at} {stage} {}", clean(detail))));
 }
@@ -454,10 +453,6 @@ trait Release {
     /// Starts the installer; only a failure comes back.
     fn install(&self) -> Result<(), String>;
     fn relaunch(&self);
-    /// Rebuilds the kept update to come back in the tray, which is where it will be when it installs later.
-    async fn retarget(&self) -> bool;
-    /// Forgets the kept update, so the next check fetches it again.
-    fn discard(&self);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -509,11 +504,8 @@ async fn start_steps(release: &impl Release, check_wait: Duration, download_wait
     release.stage(Phase::Installing);
     match idle_install(|| true, || release.reserve(Who::Start), || release.shut_down(), || release.install(), || release.relaunch()) {
         Idle::Installed => Start::Installed,
-        Idle::Waited if release.retarget().await => Start::Waits,
-        Idle::Waited => {
-            release.discard();
-            Start::Unreachable
-        }
+        // How Faber comes back is decided when it installs (`handoff`), so the kept update waits as it is.
+        Idle::Waited => Start::Waits,
         Idle::Failed => Start::Failed,
     }
 }
@@ -521,6 +513,8 @@ async fn start_steps(release: &impl Release, check_wait: Duration, download_wait
 /// The real world: the plugin, the data folder and the process.
 struct Live {
     app: AppHandle,
+    /// The installer's `/D=<folder>`; only the Windows install (`handoff`) reads it.
+    #[cfg_attr(not(windows), allow(dead_code))]
     install_dir: OsString,
     /// How Faber comes back after this install.
     reopen: Reopen,
@@ -542,11 +536,8 @@ impl Live {
 impl Release for Live {
     async fn check(&self) -> Result<Option<String>, String> {
         let previews = self.app.state::<Faber>().engine.settings().previews == Some(true);
-        let mut builder = self
-            .app
-            .updater_builder()
-            .installer_args(installer_args(self.reopen, &self.install_dir))
-            .version_comparator(move |current, remote| is_upgrade(&current, &remote.version, previews));
+        let mut builder =
+            self.app.updater_builder().version_comparator(move |current, remote| is_upgrade(&current, &remote.version, previews));
         if let Some(feed) = preview_feed(previews) {
             builder = builder.endpoints(vec![feed]).map_err(|e| e.to_string()).inspect_err(|e| self.note("check-setup-failed", e))?;
         }
@@ -617,6 +608,14 @@ impl Release for Live {
         let (update, bytes) = lock(&self.app.state::<Faber>().update).take().ok_or("no update is ready")?;
         // The tried marker was written when the install was decided (`reserve`), before anything was closed.
         // Only a failure comes back: the process is gone otherwise. The update is dropped; the next check fetches it again.
+        #[cfg(windows)]
+        {
+            let data_dir = &self.app.state::<Faber>().data_dir;
+            handoff::start(&bytes, &update.version, &self.install_dir, data_dir, self.reopen == Reopen::Tray)
+                .inspect_err(|e| self.note("install-failed", e))?;
+            std::process::exit(0)
+        }
+        #[cfg(not(windows))]
         update.install(bytes).map_err(|e| e.to_string()).inspect_err(|e| self.note("install-failed", e))
     }
 
@@ -638,31 +637,6 @@ impl Release for Live {
             self.note("relaunch-failed", &error.to_string());
         }
         std::process::exit(0)
-    }
-
-    async fn retarget(&self) -> bool {
-        // A process that was opened in the tray already built the update that way.
-        self.reopen == Reopen::Tray || swap_args(&self.app, &self.install_dir, Reopen::Tray).await
-    }
-
-    fn discard(&self) {
-        *lock(&self.app.state::<Faber>().update) = None;
-        announce(&self.app);
-    }
-}
-
-/// Builds the kept update again with the arguments for `reopen`, from a fresh look at the same release; the bytes already
-/// downloaded (and verified) stay. False when the release cannot be looked at again or is no longer the one kept.
-async fn swap_args(app: &AppHandle, install_dir: &OsString, reopen: Reopen) -> bool {
-    let live = Live::new(app, install_dir, reopen);
-    let Ok(Ok(Some(version))) = timeout(START_CHECK, live.check()).await else { return false };
-    let Some(twin) = lock(&live.found).take() else { return false };
-    match lock(&app.state::<Faber>().update).as_mut() {
-        Some((held, _)) if held.version == version => {
-            *held = twin;
-            true
-        }
-        _ => false,
     }
 }
 
@@ -719,9 +693,7 @@ fn install_when_idle(app: &AppHandle, install_dir: &OsString) {
         return;
     }
     let faber = app.state::<Faber>();
-    // `Reopen::Tray` only decides how a failed install relaunches. What the installer reopens with is in the kept update
-    // itself, built by `Live::check`: the periodic fetch builds it for the tray, and an update kept from the start is
-    // rebuilt that way (`Release::retarget`) before it waits here.
+    // Nobody is looking at the window: Faber comes back in the tray.
     let live = Live::new(app, install_dir, Reopen::Tray);
     let version = || lock(&faber.update).as_ref().map(|(update, _)| update.version.clone());
     let idle = || version().is_some_and(|v| may_install(true, false, window_visible(app)) && !live.tried(&v));
@@ -735,13 +707,9 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
         return Err("error.update.none".into());
     }
     let dir = install_dir(&app).ok_or("error.update.failed")?;
-    let reopen = Reopen::of(std::env::args());
-    let live = Live::new(&app, &dir, reopen);
-    // The kept update was built to come back in the tray. A process that was opened with its window comes back with it.
-    if reopen == Reopen::Window {
-        swap_args(&app, &dir, Reopen::Window).await;
-    }
-    // The person chose this, so a version tried a day ago does not stop it.
+    // The person pressed it in the window, so the window comes back, and the screen says so at once: nothing is looked up
+    // first. A version tried a day ago does not stop it.
+    let live = Live::new(&app, &dir, Reopen::Window);
     live.stage(Phase::Installing);
     let shut_down = || {
         app.state::<Faber>().engine.note_resume();
@@ -766,6 +734,8 @@ pub(crate) fn keep_updated(app: &AppHandle) {
         return;
     };
     let app = app.clone();
+    #[cfg(windows)]
+    handoff::sweep();
     // Set before the screen asks, so its first paint is already the opening screen (the start check begins right after).
     if cfg!(windows) {
         set_stage(&app, Phase::Checking);
@@ -793,10 +763,7 @@ pub(crate) fn keep_updated(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{CHECK_EVERY, RETRY_AFTER, TRIED_FOR, clean, next_check_delay, plain, tried_recently, update_on_start, with_line};
-    use super::{
-        Gate, Idle, LOG_MAX, Release, Reopen, SetupRunning, Start, Who, admit, fetch, fetch_succeeded, idle_install, installer_args,
-        note_tried,
-    };
+    use super::{Gate, Idle, LOG_MAX, Release, Reopen, SetupRunning, Start, Who, admit, fetch, fetch_succeeded, idle_install, note_tried};
     use super::{Meter, PROGRESS_EVERY, Phase, Status, counts_as_visible};
     use super::{PREVIEW_FEED, is_dos_path, is_upgrade, may_install, preview_feed, setups_running};
 
@@ -862,7 +829,6 @@ mod tests {
     }
 
     use std::cell::{Cell, RefCell};
-    use std::ffi::OsString;
     use std::time::Duration;
 
     fn v(text: &str) -> semver::Version {
@@ -1132,7 +1098,6 @@ mod tests {
         /// This version was tried less than a day ago.
         tried: bool,
         install: Result<(), String>,
-        retarget: bool,
         busy: Cell<bool>,
         editing: Cell<bool>,
         seen: RefCell<Vec<&'static str>>,
@@ -1149,7 +1114,6 @@ mod tests {
                 typing_during_download: false,
                 tried: false,
                 install: Ok(()),
-                retarget: true,
                 busy: Cell::new(false),
                 editing: Cell::new(false),
                 seen: RefCell::new(vec![]),
@@ -1203,13 +1167,6 @@ mod tests {
         fn relaunch(&self) {
             self.seen.borrow_mut().push("relaunch");
         }
-        async fn retarget(&self) -> bool {
-            self.seen.borrow_mut().push("retarget");
-            self.retarget
-        }
-        fn discard(&self) {
-            self.seen.borrow_mut().push("discard");
-        }
     }
 
     const WAIT: Duration = Duration::from_millis(50);
@@ -1252,8 +1209,8 @@ mod tests {
         assert_eq!(start(&release).await, Start::Waits);
         assert_eq!(
             release.saw(),
-            ["checking", "check", "downloading", "download", "installing", "reserve", "retarget", "none"],
-            "no cleanup, no installer, no relaunch; the kept update is rebuilt for the tray"
+            ["checking", "check", "downloading", "download", "installing", "reserve", "none"],
+            "no cleanup, no installer, no relaunch; the kept update waits as it is"
         );
     }
 
@@ -1263,16 +1220,9 @@ mod tests {
         assert_eq!(start(&release).await, Start::Waits);
         assert_eq!(
             release.saw(),
-            ["checking", "check", "downloading", "download", "installing", "reserve", "retarget", "none"],
+            ["checking", "check", "downloading", "download", "installing", "reserve", "none"],
             "the decision reads the draft inside the lock and gives way"
         );
-    }
-
-    #[tokio::test]
-    async fn an_update_that_waits_is_rebuilt_for_the_tray_or_dropped() {
-        let release = Fake { work_during_download: true, retarget: false, ..Fake::found() };
-        assert_eq!(start(&release).await, Start::Unreachable);
-        assert!(release.saw().ends_with(&["discard", "none"]), "an update that would open a window from the tray is not kept");
     }
 
     #[tokio::test]
@@ -1327,12 +1277,8 @@ mod tests {
 
     #[test]
     fn faber_comes_back_the_way_it_was_opened() {
-        let dir: OsString = r"/D=E:\Apps\Faber".into();
         assert_eq!(Reopen::of(["faber.exe".to_string()]), Reopen::Window, "a manual start");
         assert_eq!(Reopen::of(["faber.exe".to_string(), "--autostart".to_string()]), Reopen::Tray, "the Windows login start");
-        assert_eq!(installer_args(Reopen::Window, &dir), std::slice::from_ref(&dir), "no autostart flag for a window");
-        assert_eq!(installer_args(Reopen::Tray, &dir), [OsString::from("--autostart"), dir.clone()]);
-        assert_eq!(installer_args(Reopen::Tray, &dir).last(), Some(&dir), "NSIS wants /D= last");
     }
 
     #[test]

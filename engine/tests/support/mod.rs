@@ -485,6 +485,8 @@ pub struct Pipe {
     pub lines: Arc<Mutex<Vec<Value>>>,
     /// The driver closed the process's input (the end of a session).
     pub closed: Arc<std::sync::atomic::AtomicBool>,
+    /// The arguments the process was started with.
+    pub args: Vec<String>,
 }
 
 impl Pipe {
@@ -513,7 +515,7 @@ impl Pipe {
 pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
     let made: Arc<Mutex<Vec<Pipe>>> = Arc::default();
     let queue = made.clone();
-    let spawn: Spawner = Arc::new(move |_bin, _argv, _cwd| {
+    let spawn: Spawner = Arc::new(move |_bin, argv, _cwd| {
         let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
         let (fake_out, driver_out) = tokio::io::duplex(1 << 20);
         let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
@@ -528,7 +530,7 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
             }
             done.store(true, Ordering::SeqCst);
         });
-        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
+        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed, args: argv.to_vec() });
         Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
     });
     (spawn, made)
@@ -554,4 +556,53 @@ pub fn assert_no_user_customizations(args: &[String]) {
     assert_eq!(after("--setting-sources"), "", "{args:?}");
     let settings: Value = serde_json::from_str(&after("--settings")).unwrap();
     assert_eq!(settings["disableAllHooks"], true, "{args:?}");
+}
+
+/// Writes a conversation of about `bytes` on disk through `Store::save_checked`, shaped like the owner's biggest one (102 MB:
+/// 1,362 messages, 35,902 tool records): a user turn, then an assistant reply with 52 tool records, 70 % of them a helper's
+/// (`parent` set), each output under the engine's 4000-character cut and every 50th input a written file. Stand-in data
+/// only, built in the given folder, and returned so a test can compare what comes back.
+pub fn big_conversation(data: &std::path::Path, bytes: usize) -> faber_engine::model::Conversation {
+    use faber_engine::model::{Conversation, Message, Role, ToolUse};
+    let mut conversation: Conversation = serde_json::from_str(include_str!("../../../tests/fixtures/conversation-export.json")).unwrap();
+    conversation.piece_values.clear();
+    conversation.browser = None;
+    conversation.messages.clear();
+    let line = "test result: ok. 42 passed; 0 failed; finished in 0.31s\n";
+    let text = |chars: usize| line.repeat(chars / line.len() + 1)[..chars].to_string();
+    let (mut size, mut record) = (0, 0usize);
+    while size < bytes {
+        let n = conversation.messages.len() as u64;
+        conversation.messages.push(Message::new(format!("u{n}"), Role::User, text(300), 1_700_000_000_000 + n * 1000));
+        let mut reply = Message::new(format!("a{n}"), Role::Assistant, text(800), 1_700_000_000_500 + n * 1000);
+        let agent = format!("agent-{n}");
+        let tools = (0..52)
+            .map(|i| {
+                record += 1;
+                let input = if record % 50 == 0 {
+                    json!({ "file_path": format!("src/part{record}.rs"), "content": text(20_000) })
+                } else {
+                    json!({ "command": format!("cargo test --filter case{record}"), "description": text(200) })
+                };
+                let output = text(record * 997 % 4000 + 1);
+                size += input.to_string().len() + output.len() + 200;
+                let tool = json!({
+                    "id": format!("call-{record}"),
+                    "name": if record % 50 == 0 { "Write" } else { "Bash" },
+                    "input": input,
+                    "ok": true,
+                    "output": output,
+                    "parent": (i % 10 < 7).then(|| agent.clone()),
+                    "started": 1_700_000_000_000u64 + record as u64,
+                    "ended": 1_700_000_000_100u64 + record as u64,
+                });
+                serde_json::from_value::<ToolUse>(tool).unwrap()
+            })
+            .collect();
+        reply.tools = Some(tools);
+        size += 1100;
+        conversation.messages.push(reply);
+    }
+    faber_engine::store::Store::new(data).save_checked(&conversation).unwrap();
+    conversation
 }

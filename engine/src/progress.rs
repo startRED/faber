@@ -27,6 +27,19 @@ pub const STATUS_CHARS: usize = 50;
 const RECAP_CHARS: usize = 400;
 const ASK_CHARS: usize = 120;
 const ACTION_CHARS: usize = 40;
+/// What a step's `id`, `files` and `waits` may hold. The agent reads these keys in the error of a refused `plan` call (they never
+/// reach the screen, so the locales have no line for them), each followed by what to fix.
+const ID_CHARS: usize = 24;
+pub const MAX_FILES: usize = 20;
+const FILE_CHARS: usize = 200;
+pub const BAD_ID: &str = "error.plan.badId";
+pub const DUPLICATE_ID: &str = "error.plan.duplicateId";
+pub const BAD_FILE: &str = "error.plan.badFile";
+pub const TOO_MANY_FILES: &str = "error.plan.tooManyFiles";
+pub const UNKNOWN_WAIT: &str = "error.plan.unknownWait";
+pub const SELF_WAIT: &str = "error.plan.selfWait";
+pub const CYCLE: &str = "error.plan.cycle";
+pub const NO_TEXT: &str = "error.plan.noText";
 
 const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a short checklist, kept with the conversation \
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
@@ -60,7 +73,10 @@ fn plan_schema() -> Value {
                     "type": "object",
                     "properties": {
                         "text": { "type": "string", "description": "A short imperative step." },
-                        "state": { "type": "string", "enum": ["pending", "in_progress", "done"] }
+                        "state": { "type": "string", "enum": ["pending", "in_progress", "done"] },
+                        "id": { "type": "string", "description": "Short id for waits; default s1, s2 by position." },
+                        "files": { "type": "array", "maxItems": MAX_FILES, "items": { "type": "string" }, "description": "Paths or folders it will change, relative to the project." },
+                        "waits": { "type": "array", "items": { "type": "string" }, "description": "Ids of steps to finish first." }
                     },
                     "required": ["text", "state"],
                     "additionalProperties": false
@@ -183,30 +199,60 @@ pub fn estimate(had: Option<Estimate>, input: &Value, spent: u64) -> Result<Opti
 }
 
 /// The plan after a `plan` call, from the one before: a new list replaces it, `advance` moves it one step on. At most one
-/// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix.
+/// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix: a
+/// list whose ids, files or waits are wrong is refused whole with an `error.plan.*` key, never trimmed to something else.
 pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan>, String> {
     let mut steps = match input.get("steps").and_then(Value::as_array) {
         Some(list) => {
             let mut active = false;
-            let steps: Vec<PlanStep> = list
-                .iter()
-                .filter_map(|s| {
-                    let text = text_of(&s["text"], STEP_CHARS)?;
-                    let state = match s["state"].as_str() {
-                        Some("done") => StepState::Done,
-                        Some("in_progress") if !active => {
-                            active = true;
-                            StepState::Active
-                        }
-                        _ => StepState::Pending,
-                    };
-                    Some(PlanStep { text, state })
-                })
-                .take(MAX_STEPS)
-                .collect();
+            let mut steps: Vec<PlanStep> = Vec::new();
+            for s in list {
+                let Some(text) = text_of(&s["text"], STEP_CHARS) else {
+                    // A blank step is skipped, but one that carries an id, files or waits would drop them unseen.
+                    if ["id", "files", "waits"].iter().any(|k| !s[*k].is_null()) {
+                        return Err(format!("{NO_TEXT}: a step with an id, files or waits needs its text"));
+                    }
+                    continue;
+                };
+                if steps.len() == MAX_STEPS {
+                    break;
+                }
+                let state = match s["state"].as_str() {
+                    Some("done") => StepState::Done,
+                    Some("in_progress") if !active => {
+                        active = true;
+                        StepState::Active
+                    }
+                    _ => StepState::Pending,
+                };
+                // No id sent: `s<position>`, so a rewrite of the same list keeps every id and waits on the position stay valid.
+                let id = match &s["id"] {
+                    Value::Null => format!("s{}", steps.len() + 1),
+                    Value::String(id) if !id.is_empty() && id.chars().count() <= ID_CHARS && !id.contains(char::is_whitespace) => {
+                        id.clone()
+                    }
+                    other => return Err(format!("{BAD_ID}: {}", line(&other.to_string(), ID_CHARS))),
+                };
+                let files = names(&s["files"], BAD_FILE)?;
+                if files.len() > MAX_FILES {
+                    return Err(format!("{TOO_MANY_FILES}: {id} has {}, at most {MAX_FILES}", files.len()));
+                }
+                let files = files
+                    .into_iter()
+                    .map(|f| path_of(f).ok_or_else(|| format!("{BAD_FILE}: {}", line(f, FILE_CHARS))))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut waits: Vec<String> = Vec::new();
+                for w in names(&s["waits"], UNKNOWN_WAIT)? {
+                    if !waits.iter().any(|seen| seen == w) {
+                        waits.push(w.to_string());
+                    }
+                }
+                steps.push(PlanStep { id, text, state, files, waits });
+            }
             if steps.is_empty() {
                 return Ok(None);
             }
+            check_waits(&steps)?;
             steps
         }
         None => before.map(|p| p.steps.clone()).ok_or("There is no plan yet: send the whole list in steps first.")?,
@@ -220,6 +266,70 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
         }
     }
     Ok(Some(Plan { steps, at, estimate: None }))
+}
+
+/// The strings of an optional list; anything that is not a string becomes "" (so the checks after refuse it), anything that
+/// is not a list is refused with `key`.
+fn names<'a>(v: &'a Value, key: &str) -> Result<Vec<&'a str>, String> {
+    match v {
+        Value::Null => Ok(vec![]),
+        Value::Array(items) => Ok(items.iter().map(|i| i.as_str().unwrap_or("")).collect()),
+        _ => Err(key.to_string()),
+    }
+}
+
+/// A file or folder as the plan keeps it: relative to the project, written with `/`, without a leading `./` or a trailing
+/// `/`. None when it is empty, too long, absolute (a root, a drive or a UNC share) or leaves the project with `..`.
+fn path_of(raw: &str) -> Option<String> {
+    let path = raw.trim().replace('\\', "/");
+    let path = path.trim_start_matches("./").trim_end_matches('/');
+    let outside = path.is_empty()
+        || path == "."
+        || path.starts_with('/')
+        || path.as_bytes().get(1) == Some(&b':')
+        || path.contains('\0')
+        || path.split('/').any(|part| part == "..")
+        || path.chars().count() > FILE_CHARS;
+    (!outside).then(|| path.to_string())
+}
+
+/// Refuses ids used twice, a step waiting on itself or on an id the plan does not have, and waits that go round in a circle.
+fn check_waits(steps: &[PlanStep]) -> Result<(), String> {
+    for (i, s) in steps.iter().enumerate() {
+        if steps[..i].iter().any(|before| before.id == s.id) {
+            return Err(format!("{DUPLICATE_ID}: {}", s.id));
+        }
+    }
+    for s in steps {
+        for w in &s.waits {
+            if *w == s.id {
+                return Err(format!("{SELF_WAIT}: {}", s.id));
+            }
+            if !steps.iter().any(|other| other.id == *w) {
+                return Err(format!("{UNKNOWN_WAIT}: {} waits on {w}", s.id));
+            }
+        }
+    }
+    // Start with the steps that wait on nothing and keep adding the ones whose waits are all in: what is left never starts.
+    let (mut left, mut started): (Vec<&PlanStep>, Vec<&str>) = (steps.iter().collect(), vec![]);
+    loop {
+        let (go, stay): (Vec<_>, Vec<_>) = left.into_iter().partition(|s| s.waits.iter().all(|w| started.contains(&w.as_str())));
+        if go.is_empty() {
+            return match stay.is_empty() {
+                true => Ok(()),
+                false => Err(format!("{CYCLE}: {}", stay.iter().map(|s| s.id.as_str()).collect::<Vec<_>>().join(", "))),
+            };
+        }
+        started.extend(go.iter().map(|s| s.id.as_str()));
+        left = stay;
+    }
+}
+
+/// The steps that can start now: pending, with every step they wait on done. A plan stored before waits existed has none, so
+/// all its pending steps are ready, as before.
+pub fn ready(plan: &Plan) -> Vec<&PlanStep> {
+    let done = |id: &String| plan.steps.iter().any(|s| s.state == StepState::Done && s.id == *id);
+    plan.steps.iter().filter(|s| s.state == StepState::Pending && s.waits.iter().all(done)).collect()
 }
 
 /// What a `status` call shows.
@@ -349,6 +459,127 @@ mod tests {
         let tuning = crate::model::Tuning::default();
         let persona = crate::persona::persona(&crate::persona::PersonaInput { name: None, tuning: &tuning, research: None });
         assert!(!persona.contains("same kind of mistake"), "the persona weighs on every turn of both areas");
+    }
+
+    fn refused(input: Value) -> String {
+        plan(None, &input, 1).unwrap_err()
+    }
+
+    #[test]
+    fn a_step_names_its_files_and_the_steps_it_waits_on_and_the_plan_round_trips() {
+        let list = json!({ "steps": [
+            { "text": "Build the model", "state": "in_progress", "id": "model", "files": ["src/model.rs", "./src\\db/", "src/model.rs"] },
+            { "text": "Build the screen", "state": "pending", "files": ["ui"], "waits": ["model", "model"] },
+            { "text": "Check it", "state": "pending", "waits": ["model", "s2"] }
+        ]});
+        let p = plan(None, &list, 1).unwrap().unwrap();
+        let ids: Vec<_> = p.steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["model", "s2", "s3"], "an id left out is its position");
+        assert_eq!(p.steps[0].files, ["src/model.rs", "src/db", "src/model.rs"], "paths use / with no ./ or trailing /");
+        assert_eq!(
+            (p.steps[1].waits.as_slice(), p.steps[2].waits.as_slice()),
+            (&["model".to_string()][..], &["model".into(), "s2".into()][..])
+        );
+        let again: Plan = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(again, p, "stored and loaded back");
+        // A rewrite of the same list keeps every id, and an advance only moves the states.
+        assert_eq!(plan(Some(&p), &list, 2).unwrap().unwrap().steps, p.steps);
+        let moved = plan(Some(&p), &json!({ "advance": true }), 3).unwrap().unwrap();
+        assert_eq!((moved.steps[1].id.as_str(), moved.steps[1].waits.len()), ("s2", 1));
+    }
+
+    #[test]
+    fn a_plan_stored_before_ids_files_and_waits_loads_and_every_pending_step_is_ready() {
+        let old =
+            r#"{"steps":[{"text":"Read","state":"done"},{"text":"Fix","state":"pending"},{"text":"Check","state":"pending"}],"at":5}"#;
+        let p: Plan = serde_json::from_str(old).unwrap();
+        assert!(p.steps.iter().all(|s| s.id.is_empty() && s.files.is_empty() && s.waits.is_empty()));
+        assert_eq!(ready(&p).len(), 2);
+        let stored = serde_json::to_string(&p).unwrap();
+        assert!(!stored.contains("\"id\"") && !stored.contains("files") && !stored.contains("waits"), "nothing new is written for them");
+        let advanced = plan(Some(&p), &json!({ "advance": true }), 6).unwrap().unwrap();
+        assert_eq!(advanced.steps[1].state, StepState::Active);
+    }
+
+    #[test]
+    fn an_unknown_wait_a_wait_on_itself_a_cycle_and_a_repeated_id_are_refused_with_their_keys() {
+        let wait = |waits: Value| {
+            refused(json!({ "steps": [
+                { "text": "A", "state": "pending" },
+                { "text": "B", "state": "pending", "waits": waits }
+            ]}))
+        };
+        assert!(wait(json!(["s9"])).starts_with(UNKNOWN_WAIT), "an id the plan does not have");
+        assert!(wait(json!([7])).starts_with(UNKNOWN_WAIT), "a wait that is no id");
+        assert!(wait(json!("s1")).starts_with(UNKNOWN_WAIT), "waits that is no list");
+        assert!(wait(json!(["s2"])).starts_with(SELF_WAIT));
+        let round = refused(json!({ "steps": [
+            { "text": "A", "state": "pending", "waits": ["s3"] },
+            { "text": "B", "state": "pending", "waits": ["s1"] },
+            { "text": "C", "state": "pending", "waits": ["s1"] },
+            { "text": "D", "state": "pending" }
+        ]}));
+        assert!(round.starts_with(CYCLE) && round.ends_with("s1, s2, s3"), "{round}: the steps that never start, not the ones that do");
+        let twice = refused(json!({ "steps": [{ "text": "A", "state": "pending", "id": "s2" }, { "text": "B", "state": "pending" }] }));
+        assert!(twice.starts_with(DUPLICATE_ID), "{twice}");
+        assert!(refused(json!({ "steps": [{ "text": "A", "state": "pending", "id": "two words" }] })).starts_with(BAD_ID));
+        assert!(refused(json!({ "steps": [{ "text": "A", "state": "pending", "id": "x".repeat(25) }] })).starts_with(BAD_ID));
+        for id in [json!(" "), json!(""), json!(3)] {
+            assert!(
+                refused(json!({ "steps": [{ "text": "A", "state": "pending", "id": id }] })).starts_with(BAD_ID),
+                "{id} is sent, so never replaced"
+            );
+        }
+        // A blank step that carries a wait would otherwise vanish with it, and an all-blank list would clear the plan.
+        let blank = refused(json!({ "steps": [{ "text": "", "state": "pending", "id": "a", "waits": ["missing"] }] }));
+        assert!(blank.starts_with(NO_TEXT), "{blank}");
+        // A refused list changes nothing: the plan before stays, since the engine writes it only on Ok.
+        let before = plan(None, &json!({ "steps": [{ "text": "A", "state": "pending" }] }), 1).unwrap();
+        assert!(plan(before.as_ref(), &json!({ "steps": [{ "text": "A", "state": "pending", "waits": ["A"] }] }), 2).is_err());
+    }
+
+    #[test]
+    fn a_file_stays_inside_the_project_and_a_step_names_at_most_twenty() {
+        let files = |files: Value| refused(json!({ "steps": [{ "text": "A", "state": "pending", "files": files }] }));
+        for bad in
+            ["/etc/passwd", "\\\\server\\share\\a", "C:\\work\\a.rs", "c:a.rs", "../x", "src/../../x", "a\\..\\..\\x", "", "./", " ", "."]
+        {
+            assert!(files(json!([bad])).starts_with(BAD_FILE), "{bad:?}");
+        }
+        assert!(files(json!(["a".repeat(201)])).starts_with(BAD_FILE), "too long is refused, never cut");
+        assert!(files(json!([3])).starts_with(BAD_FILE) && files(json!("a.rs")).starts_with(BAD_FILE));
+        let ok = json!({ "steps": [{ "text": "A", "state": "pending", "files": ["a".repeat(200), "..hidden/x", "a..b"] }] });
+        assert_eq!(plan(None, &ok, 1).unwrap().unwrap().steps[0].files.len(), 3);
+        let many = |n: usize| json!((0..n).map(|i| format!("f{i}.rs")).collect::<Vec<_>>());
+        assert!(files(many(21)).starts_with(TOO_MANY_FILES));
+        assert!(plan(None, &json!({ "steps": [{ "text": "A", "state": "pending", "files": many(20) }] }), 1).is_ok());
+    }
+
+    #[test]
+    fn ready_follows_the_waits_of_the_pending_steps() {
+        let list = json!({ "steps": [
+            { "text": "A", "state": "in_progress", "id": "a" },
+            { "text": "B", "state": "pending", "id": "b" },
+            { "text": "C", "state": "pending", "id": "c", "waits": ["a"] },
+            { "text": "D", "state": "pending", "id": "d", "waits": ["b", "c"] }
+        ]});
+        let ids = |p: &Plan| ready(p).iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        let mut p = plan(None, &list, 1).unwrap().unwrap();
+        assert_eq!(ids(&p), ["b"], "C waits on a step in progress, D on two that are not done");
+        p.steps[0].state = StepState::Done;
+        assert_eq!(ids(&p), ["b", "c"], "a started or finished step is not ready to start");
+        p.steps[1].state = StepState::Done;
+        p.steps[2].state = StepState::Done;
+        assert_eq!(ids(&p), ["d"]);
+        p.steps[3].state = StepState::Done;
+        assert!(ready(&p).is_empty());
+    }
+
+    #[test]
+    fn the_plan_tool_offers_the_new_fields_and_the_lead_is_asked_for_them() {
+        let props = &plan_schema()["properties"]["steps"]["items"]["properties"];
+        assert!(props["id"].is_object() && props["files"]["maxItems"] == MAX_FILES && props["waits"]["type"] == "array");
+        assert!(crate::persona::LEADS.contains("(files)") && crate::persona::LEADS.contains("(waits)"));
     }
 
     #[test]
