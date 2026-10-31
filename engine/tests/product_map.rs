@@ -51,10 +51,10 @@ fn commands() -> Vec<String> {
     names
 }
 
-/// The host's `table! { ... }` in `host/src/lib.rs`: one `<Kind> fn name(` line per command.
+/// The host's `table! { ... }` in `host/src/table.rs`: one `<Kind> <Reach> fn name(` line per command.
 fn host_commands() -> Vec<String> {
-    let lib = read("host/src/lib.rs");
-    let table = lib.split("\ntable! {\n").nth(1).expect("table! in host/src/lib.rs");
+    let lib = read("host/src/table.rs");
+    let table = lib.split("\ntable! {\n").nth(1).expect("table! in host/src/table.rs");
     let table = table.split("\n}\n").next().unwrap_or_default();
     let mut names = Vec::new();
     let mut test_only = false;
@@ -63,8 +63,8 @@ fn host_commands() -> Vec<String> {
             test_only = line.contains(r#"feature = "test-hooks""#) && !line.contains("not(");
             continue;
         }
-        let mut words = line.splitn(3, ' ');
-        if let (Some("Read" | "Write" | "StartsTurn" | "Window"), Some("fn"), Some(rest)) = (words.next(), words.next(), words.next()) {
+        let Some((head, rest)) = line.split_once(" fn ") else { continue };
+        if let Some("Read" | "Write" | "StartsTurn" | "Window") = head.split(' ').next() {
             let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
             if !std::mem::take(&mut test_only) {
                 names.push(name);
@@ -195,7 +195,7 @@ fn the_project_map_read_from_faber_s_code_finds_what_the_product_map_is_checked_
     };
     let set = |names: Vec<String>| names.into_iter().collect::<BTreeSet<String>>();
     let (files, keys) = screen_files_and_keys();
-    assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs" || f == "host/src/lib.rs"), set(commands()));
+    assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs" || f == "host/src/table.rs"), set(commands()));
     assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/")), set(settings_keys()));
     assert_eq!(of(Kind::Screen, &|f| f.starts_with("ui/") && !f[3..].contains('/')), set(files));
     assert_eq!(of(Kind::Stored, &|f| f.starts_with("ui/")), set(keys));

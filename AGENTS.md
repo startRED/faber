@@ -18,7 +18,7 @@ mistake, and a rule a test enforces leaves it.
 - Do not use vendor names (Claude, Anthropic, Codex, OpenAI, ChatGPT, Gemini, Google) in product, feature or package
   names. Plain-text statements such as "runs Claude Code" are fine.
 - Child processes never go through a shell. On Windows, npm's `.cmd` shims cannot start without one, so the engine
-  resolves the real executable (`engine/src/cli.rs`). Anything that does build a shell line (`src-tauri/src/terminal.rs`)
+  resolves the real executable (`engine/src/cli.rs`). Anything that does build a shell line (`host/src/terminal.rs`)
   checks every piece first.
 - Every text on screen lives in `ui/locales/`. Each language is written by hand, never machine-translated; English
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
@@ -108,8 +108,9 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
   about windows.
 - `host/`: the commands Faber answers, in one table every front end calls (R459): the window, the command line,
-  tests. Being filled while the shell moves from Tauri to Electron.
-- `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
+  tests; `faber-sidecar` runs it behind stdin and stdout for the Electron shell. What needs a window is a method of its
+  `Shell` trait.
+- `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the commands that need the window (the browser pane).
 - `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
   The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
   `pane/native.rs`);
