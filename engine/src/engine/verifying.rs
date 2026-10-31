@@ -230,6 +230,7 @@ impl Core {
     // ponytail: with no state yet (a conversation's first reply) the agent may write before git has hashed the folder; its
     // turn needs a round trip to the model first, git a fraction of a second.
     pub(super) fn note_before(&mut self, conv: &str) {
+        self.count_correction(conv);
         if self.before.contains_key(conv) {
             return;
         }

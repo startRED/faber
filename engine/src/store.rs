@@ -485,7 +485,12 @@ impl Store {
     }
 
     pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
-        self.write(&self.projects, &projects)
+        self.write(&self.projects, &projects)?;
+        // A project that left the list takes its local method count with it (`method_log`).
+        if let Some(dir) = self.projects.parent() {
+            crate::method_log::forget(dir, &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>());
+        }
+        Ok(())
     }
 
     pub fn chat_groups(&self) -> Result<Vec<crate::engine::ChatGroup>, Fault> {
