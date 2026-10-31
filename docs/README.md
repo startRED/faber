@@ -63,6 +63,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
 | [tasks/README.md](tasks/README.md) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
+| [Antigravity driver](tasks/010-antigravity-driver.md), [Antigravity in the app](tasks/020-antigravity-in-the-app.md), [needs-you-first list](tasks/030-needs-you-first.md), [readable turns](tasks/040-readable-turns.md), [palette and queue](tasks/050-palette-and-queue.md), [several models at once](tasks/060-several-models-at-once.md), [switch vendor mid-conversation](tasks/070-switch-vendor-mid-conversation.md) | The T3 Code study tasks, in order (Antigravity first); a finished one is deleted by its pull request |
 | [brand/](brand/) | Logo sources |
 
 ## Dated pages
