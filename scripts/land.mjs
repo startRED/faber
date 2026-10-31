@@ -610,6 +610,12 @@ async function landQueued(number, sha) {
   }
   for (const m of views) drop(m.pr, m.commit);
   run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${sha}`]);
+  // The board follows the landing (docs/dev/workflow.md#board); one that fails to publish never fails the landing.
+  try {
+    run('node', ['scripts/tasks.mjs', 'board', '--push']);
+  } catch (e) {
+    console.log(`The board was not updated: ${e.message.split('\n')[0]}`);
+  }
   console.log(`Landed ${sha}${under.length ? `, with ${under.map((m) => `#${m.pr}`).join(', ')} under it` : ''}.`);
   return 0;
 }

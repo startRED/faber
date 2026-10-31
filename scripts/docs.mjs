@@ -20,6 +20,12 @@ export const LARGE = {
   'docs/security-r97-review.md': 'a verified review kept as written; only its R121/R124 section changes',
 };
 
+/**
+ * Files an agent reads whole before it starts, each with a lower limit than a page: every session loads the guide, and
+ * a task's session loads its brief. Past it, a line moves out to a page the guide links, or the task splits in two.
+ */
+export const READ_FIRST = { 'AGENTS.md': 14_000, task: 6_000 };
+
 const HISTORY = ['docs/superpowers/', 'docs/research/', 'docs/brand/'];
 
 /** A task of the queue: a brief that leaves with the pull request that does it, listed by docs/tasks/README.md. */
@@ -82,6 +88,11 @@ export function mentions(text) {
 export function problems(files, read, exists) {
   const found = [];
   const pages = files.filter(isLiving);
+  for (const file of files) {
+    const limit = file === 'AGENTS.md' ? READ_FIRST['AGENTS.md'] : isTask(file) ? READ_FIRST.task : 0;
+    const bytes = limit && Buffer.byteLength(read(file));
+    if (bytes > limit) found.push(`${file}: ${bytes} bytes; agents read it whole before they start, so the limit is ${limit}`);
+  }
   const index = read('docs/README.md');
   const listed = new Set(links(index).map((href) => posix.join('docs', href.split('#')[0])));
   const anchorsOf = new Map();
