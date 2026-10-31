@@ -20,7 +20,7 @@ Build:
   written before it.
 - Not carried to Keep going: a proposal never counts as "done" and never blocks it.
 
-Leave out: follow-ups and the done card (task follow-ups-in-next-md), and loading taste into the card beyond what
+Leave out: follow-ups and the done card (task follow-ups-as-task-files), and loading taste into the card beyond what
 task start-card-in-sessions already reads.
 
 Done: engine tests that fail today parse and bound both fields; a screen check shows the proposal, Keep writing the file

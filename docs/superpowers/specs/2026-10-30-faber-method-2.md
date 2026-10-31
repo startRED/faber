@@ -1,6 +1,7 @@
 # Faber Method 2: one way of working, for Faber and for every project
 
-Status: proposal waiting for the owner's yes. It replaces the approved own work method (R435) and the Faber Flow
+Status: approved by the owner on 2026-10-30 (R484, the owner's answer: "pode construir"), as of commit 307e8d4d. Its new parts
+are tasks 041 to 049; the queued tasks of R435 it keeps (900 to 935) go on, with 922 rewritten for task files. It replaces the approved own work method (R435) and the Faber Flow
 proposal (`2026-10-22-faber-framework/`, never adopted) with one design. Everything R435 approved that is built or queued
 is kept; what changes is how work is split, run in parallel, shown and measured.
 
