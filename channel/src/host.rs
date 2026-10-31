@@ -1,8 +1,8 @@
 //! The channel over Faber's own command table (`faber_host::Host`), for the process that runs the engine. Behind the
 //! `host` feature, so the command line itself never builds the engine.
 
-use crate::server::{Answer, Backend};
-use faber_host::{Host, Kind};
+use crate::server::{Answer, Backend, Who};
+use faber_host::{Caller, Host, Kind};
 use serde_json::Value;
 use std::io;
 use std::path::Path;
@@ -16,18 +16,22 @@ impl Backend for Arc<Host> {
         env!("CARGO_PKG_VERSION").into()
     }
     fn commands(&self) -> Value {
-        serde_json::to_value(Host::commands()).unwrap_or_default()
+        serde_json::to_value(Host::exported().collect::<Vec<_>>()).unwrap_or_default()
     }
     fn starts_turn(&self, cmd: &str) -> bool {
         Host::kind(cmd) == Some(Kind::StartsTurn)
     }
-    fn dispatch(&self, cmd: String, args: Value) -> Answer {
+    fn dispatch(&self, who: &Who, cmd: String, args: Value) -> Answer {
         let host = self.clone();
+        let caller = match who {
+            Who::Person => Caller::Person,
+            Who::Agent { conversation, .. } => Caller::Agent { conversation: conversation.clone() },
+        };
         Box::pin(async move {
             match Host::kind(&cmd) {
                 Some(Kind::Window) => Err("error.host.noWindow".into()),
                 // The command line shows the key; the field a look error names (its detail) stays with the screen.
-                _ => Host::dispatch(&host, &cmd, args).await.map_err(|failure| failure.key),
+                _ => host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| failure.key),
             }
         })
     }

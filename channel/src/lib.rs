@@ -12,12 +12,13 @@ pub mod guard;
 #[cfg(feature = "host")]
 pub mod host;
 pub mod place;
+pub mod secret;
 pub mod server;
 pub mod wire;
 
 pub use client::Client;
 pub use place::Address;
-pub use server::{Backend, Hello, serve};
+pub use server::{Backend, Hello, Who, serve};
 
 /// The protocol level this build speaks. A newer Faber keeps answering older clients; a change that cannot raises it.
 pub const PROTOCOL: u32 = 1;

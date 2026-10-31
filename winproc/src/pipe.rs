@@ -117,9 +117,8 @@ impl User {
     }
 }
 
-/// Makes one instance of the pipe `name` that only the signed-in user can open, from this machine only. The first instance
-/// fails when the name is already taken, by another Faber or by anyone else.
-pub fn user_pipe(name: &str, first: bool) -> io::Result<NamedPipeServer> {
+/// Uses a protected descriptor naming only the current user.
+pub(crate) fn with_user_security<T>(use_attributes: impl FnOnce(&mut SECURITY_ATTRIBUTES) -> io::Result<T>) -> io::Result<T> {
     let sid = User::current()?.sid_string()?;
     // Protected list (`P`): full access for this user, nothing for anyone else, nothing inherited.
     let sddl: Vec<u16> = OsStr::new(&format!("D:P(A;;GA;;;{sid})")).encode_wide().chain(Some(0)).collect();
@@ -132,13 +131,23 @@ pub fn user_pipe(name: &str, first: bool) -> io::Result<NamedPipeServer> {
             lpSecurityDescriptor: descriptor,
             bInheritHandle: 0,
         };
-        let pipe = ServerOptions::new()
-            .first_pipe_instance(first)
-            .reject_remote_clients(true)
-            .create_with_security_attributes_raw(name, (&mut attributes as *mut SECURITY_ATTRIBUTES).cast());
+        let result = use_attributes(&mut attributes);
         LocalFree(descriptor);
-        pipe
+        result
     }
+}
+
+/// Makes a pipe with access for the current user only.
+pub fn user_pipe(name: &str, first: bool) -> io::Result<NamedPipeServer> {
+    with_user_security(|attributes| {
+        // SAFETY: the descriptor remains valid until this call returns.
+        unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(name, (attributes as *mut SECURITY_ATTRIBUTES).cast())
+        }
+    })
 }
 
 fn peer_pid(pipe: &impl AsRawHandle, client: bool) -> io::Result<u32> {
@@ -222,5 +231,43 @@ mod tests {
         assert!(!low.trusted_by(&us), "a Low integrity process of the same account");
         let boxed = User { sandboxed: true, ..User::current().unwrap() };
         assert!(!boxed.trusted_by(&us), "an app container or a restricted token");
+    }
+
+    #[test]
+    fn user_file_has_only_the_current_user_and_cannot_replace_an_existing_file() {
+        use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows_sys::Win32::Security::{ACCESS_ALLOWED_ACE, DACL_SECURITY_INFORMATION, GetAce};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+        crate::write_user_only(&path, b"secret").unwrap();
+        assert_eq!(crate::write_user_only(&path, b"replacement").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).unwrap(), b"secret");
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: Windows allocates the descriptor, and all pointers remain valid until it is freed.
+        unsafe {
+            let mut acl = std::ptr::null_mut();
+            let mut descriptor = std::ptr::null_mut();
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    name.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    &mut acl,
+                    std::ptr::null_mut(),
+                    &mut descriptor
+                ),
+                0
+            );
+            assert!(!acl.is_null());
+            assert_eq!((*acl).AceCount, 1);
+            let mut ace = std::ptr::null_mut();
+            win(GetAce(acl, 0, &mut ace)).unwrap();
+            let allowed = &*ace.cast::<ACCESS_ALLOWED_ACE>();
+            assert_eq!(allowed.Header.AceType, 0);
+            assert_ne!(EqualSid((&allowed.SidStart as *const u32).cast_mut().cast(), User::current().unwrap().sid()), 0);
+            LocalFree(descriptor);
+        }
     }
 }
