@@ -1498,9 +1498,21 @@ fn show(app: &AppHandle) {
     }
 }
 
+/// When this process started, for `startup.log`.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+/// Milliseconds from the start to the first window built, for `startup.log`.
+static WINDOW_BUILT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Only the first window of a run is written down.
+static STARTUP_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn ms_since_start() -> u64 {
+    STARTED.get().map_or(0, |at| at.elapsed().as_millis().try_into().unwrap_or(u64::MAX))
+}
+
 /// Shows the window once, when the screen has painted its first frame or the failsafe says so, so a person never sees an
-/// empty one. Automated runs build theirs shown (offscreen) and skip this.
-fn reveal(app: &AppHandle) {
+/// empty one. Automated runs build theirs shown (offscreen) and skip this. The first one of a run writes down how long the
+/// start took, so a slow one can be explained afterwards.
+fn reveal(app: &AppHandle, by: &str) {
     let faber = app.state::<Faber>();
     if faber.revealed.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -1511,12 +1523,16 @@ fn reveal(app: &AppHandle) {
         let _ = w.set_focus();
         faber.engine.set_attention(true, true);
     }
+    if !STARTUP_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let window = WINDOW_BUILT_MS.load(std::sync::atomic::Ordering::SeqCst);
+        update::log_to(&faber.data_dir, update::STARTUP_LOG, "shown", &format!("window={window}ms shown={}ms by={by}", ms_since_start()));
+    }
 }
 
 /// The screen painted its first frame: the window may show now.
 #[tauri::command]
 fn screen_ready(app: AppHandle) {
-    reveal(&app);
+    reveal(&app, "paint");
 }
 
 /// The screen's view of the update (`update.rs`): its phase and the download's progress. Changes arrive as `faber:update`.
@@ -1661,20 +1677,35 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         let _ = window.set_ignore_cursor_events(true);
     }
     visual_network::install(&window);
+    let _ = WINDOW_BUILT_MS.compare_exchange(
+        0,
+        ms_since_start().max(1),
+        std::sync::atomic::Ordering::SeqCst,
+        std::sync::atomic::Ordering::SeqCst,
+    );
     if !hidden {
         // The failsafe: a screen that never reports its first paint still shows up.
         let handle = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            reveal(&handle);
+            reveal(&handle, "failsafe");
         });
     }
     Ok(window)
 }
 
 fn main() {
+    STARTED.get_or_init(std::time::Instant::now);
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
+    }
+    // A copy of Faber in a temporary folder that finishes an update install (`update/handoff.rs`): no window, no app.
+    #[cfg(windows)]
+    {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args.first().is_some_and(|arg| arg == update::handoff::FLAG) {
+            std::process::exit(update::handoff::finish(&args[1..]));
+        }
     }
     let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");

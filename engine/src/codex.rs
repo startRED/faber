@@ -799,6 +799,8 @@ pub struct CodexThread {
     pub browse: bool,
     /// Faber's conversation tool, as for `ClaudeLaunch::conversations`.
     pub conversations: bool,
+    /// Told when to lead a small team, as for `ClaudeLaunch::leads`.
+    pub leads: bool,
     /// Faber's checks, as for `ClaudeLaunch::verify`.
     pub verify: bool,
     /// The plan, the status and the closing box, as for `ClaudeLaunch::progress`.
@@ -1111,6 +1113,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             words.push_str(crate::persona::PROJECT_DETAILS);
             if t.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
+            }
+            if t.leads {
+                words.push_str(crate::persona::LEADS);
             }
         }
         if let Some(instructions) = &t.group_instructions {
@@ -2422,6 +2427,7 @@ mod rewind_tests {
                 helper: crate::helper::Helper::Off,
                 browse: false,
                 conversations: false,
+                leads: false,
                 verify: false,
                 progress: false,
             },

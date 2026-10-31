@@ -1,7 +1,7 @@
 # A base that moved only by words lands a green queued commit without checking it again
 
 Area: none
-Files: scripts/land.mjs, scripts/land.test.mjs, .github/workflows/ci.yml, docs/dev/workflow.md
+Files: .github/workflows/ci.yml, docs/dev/workflow.md
 Depends: none
 Size: about 150 changed lines; the ci.yml part (plain queue branches) may follow as a second pull request
 
@@ -12,6 +12,11 @@ landing moves phase-1-base and the land job then sends every queued commit back 
 rebase and `gh workflow run` at the end of the land job in `ci.yml`). Five of the six moves of the base in those two hours
 were commits of task files only (`docs/tasks/*.md`), which no suite reads (`scripts/ci-scope.mjs`: `isWords`). With runs of
 about 20 minutes and a landing every 15, almost nothing reaches the end of a run.
+
+Done in the first pull request (#480): a pull request's green queue batch lands on a base moved by words only
+(`wordsOnly` and `onWords` in `scripts/land.mjs`, tested in `scripts/land.test.mjs`, described in workflow.md). Left: the
+same for plain `queue/<name>` branches (the rebase and `gh workflow run` at the end of the land job in `ci.yml`), and the
+real case in a run log below.
 
 Build: when the base moved, compare the tree the queue run checked with the tree that would land (the commit squashed or
 rebased again on the new base). When every file that differs between them is words by `isWords` (the same rule CI uses to

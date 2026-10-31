@@ -53,15 +53,60 @@ impl Core {
         }
     }
 
+    /// Method 2, slice 6: a done closing box is one line in the project's local count (`method_log`), with the seconds since
+    /// the person's last message. shortcut: that is the time of one attempt, not of the request to its accepted close; keep the
+    /// request's first message if the whole task's time is ever needed.
+    fn count_close(&self, conv: &str) {
+        let Some((project, c)) = self.method_project(conv) else { return };
+        let Some(last) = c.messages.iter().rev().find(|m| m.role == Role::User).map(|m| m.at) else { return };
+        let at = now();
+        let (dir, secs) = (self.opts.data_dir.clone(), at.saturating_sub(last) / 1000);
+        self.opts.runtime.spawn_blocking(move || crate::method_log::note(&dir, &project, at, "closed", secs));
+    }
+
+    /// Method 2, slice 6: a message from the person right after a done closing box says the result was not accepted as it
+    /// stood. It is read once the message and its reply are in the conversation (`note_before`, on every path that starts
+    /// or steers a turn), so a send that was refused counts nothing; Faber's own messages (`wake`) are not the person's, and
+    /// a turn started again shows the same message, whose time the log takes once. shortcut: any next message counts, with
+    /// no reading of its words (a thanks counts too); classify it if the number turns out too noisy.
+    pub(super) fn count_correction(&self, conv: &str) {
+        let Some((project, c)) = self.method_project(conv) else { return };
+        let [.., closing, question, reply] = c.messages.as_slice() else { return };
+        let done = closing.role == Role::Assistant && closing.wrap_up.as_ref().is_some_and(|w| w.done);
+        if !done || question.role != Role::User || question.wake.is_some() || reply.role != Role::Assistant {
+            return;
+        }
+        let (dir, at) = (self.opts.data_dir.clone(), question.at);
+        self.opts.runtime.spawn_blocking(move || crate::method_log::note(&dir, &project, at, "corrected", 0));
+    }
+
+    /// A project's own conversation and the project, the only place the count is kept.
+    fn method_project(&self, conv: &str) -> Option<(String, &Conversation)> {
+        let c = self.convs.get(conv).filter(|c| c.area == Area::Project)?;
+        Some((c.project_id.clone()?, c))
+    }
+
     fn write_progress(&mut self, conv: &str, tool: &str, input: &serde_json::Value) -> Result<String, String> {
         match tool {
             progress::PLAN_TOOL => {
+                // A conversation of a step that was deleted frees its step before the list is compared with it.
+                self.free_dead_workers(conv);
                 let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
+                let leads = siblings::offers(c.area) && c.started_by.is_none();
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
-                let plan = progress::plan(c.plan.as_ref(), input, now())?;
+                let mut plan = progress::plan(c.plan.as_ref(), input, now())?;
+                if let Some(had) = &c.plan {
+                    progress::keep_workers(had, &mut plan)?;
+                }
                 let mut shown = plan.as_ref().map(|p| p.count()).map_or("The plan is cleared.".to_string(), |n| {
                     format!("The person sees the plan: {} of {} steps done.", n.done, n.total)
                 });
+                if let Some(p) = plan.as_ref().filter(|_| leads) {
+                    let wave: Vec<_> = progress::wave(p).iter().map(|s| s.id.as_str()).collect();
+                    if !wave.is_empty() {
+                        shown = format!("{shown} Steps that can start together now: {}.", wave.join(", "));
+                    }
+                }
                 if estimate.is_some_and(|e| e.economy) {
                     shown = format!("{shown} {}", progress::ECONOMY_LINE);
                 }
@@ -87,6 +132,9 @@ impl Core {
                 let done = box_.done;
                 m.wrap_up = Some(box_);
                 let id = m.id.clone();
+                if done {
+                    self.count_close(conv);
+                }
                 // The job is over only when the agent says so: its estimate, and economy mode with it, go; a later list starts
                 // with none. The spend stays, and a new estimate counts from it.
                 let ended = done && self.convs.get_mut(conv).and_then(|c| c.estimate.take()).is_some();
