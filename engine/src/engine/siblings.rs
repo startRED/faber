@@ -4,7 +4,8 @@
 //! copy, made away from the engine's lock like the person's own first message, so it never runs in the project folder. A
 //! read answers with where that conversation stands and its latest answer.
 use super::*;
-use crate::sibling::{self, Request, State};
+use crate::progress;
+use crate::sibling::{self, Ai, Request, State};
 
 /// Whether a conversation's agent gets the tool: every project conversation's. Only one no other agent started may start
 /// conversations, so one level only.
@@ -39,16 +40,23 @@ fn state_of(busy: bool, c: &Conversation) -> State {
         Some(Status::Streaming) => State::Working,
         _ if busy || c.compacting || !c.queued.is_empty() => State::Working,
         Some(Status::Error) => State::Failed,
+        Some(Status::Stopped) if last.is_some_and(|m| m.closed) => State::Interrupted,
         Some(Status::Stopped) => State::Stopped,
         _ => State::Finished,
     }
 }
 
 impl Core {
+    /// Reports owed when Faber opens: those saved as owed (a close that cut a member's turn off marks it, `shutdown`), and
+    /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
+    /// before is not sent again (its id).
     pub(super) fn restore_parent_reports(store: &Store) -> HashMap<String, HashSet<String>> {
         let mut pending: HashMap<String, HashSet<String>> = HashMap::new();
-        for id in store.mentioning("\"pendingParentReport\"") {
-            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report)
+        for id in store.mentioning("\"startedBy\"") {
+            let cut_off = |c: &Conversation| {
+                c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming))
+            };
+            if let Some(c) = store.get(&id).filter(|c| c.pending_parent_report || cut_off(c))
                 && let Some(parent) = c.started_by
             {
                 pending.entry(parent).or_default().insert(id);
@@ -71,10 +79,13 @@ impl Core {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
                 continue;
             }
-            self.load(&child);
+            let owed = self.load(&child).is_some_and(|c| c.pending_parent_report);
             self.tell_parent(&child);
             if self.convs.get(&child).is_some_and(|c| c.pending_parent_report) {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
+            } else if !owed {
+                // A crash left its reply streaming on disk: saved settled, it is not found again at the next start.
+                self.save(&child);
             }
         }
     }
@@ -84,11 +95,13 @@ impl Core {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
         let (ok, text) = match sibling::request(&input) {
             Err(why) => (false, format!("Nothing was done: {why}.")),
-            Ok(Request::Start { title, brief }) => match self.start_sibling(conv, &title, &brief) {
-                Ok((id, true)) => (true, sibling::started(&title, &id)),
-                Ok((id, false)) => (false, sibling::failed(&title, &id)),
-                Err(why) => (false, format!("No conversation was started: {why}.")),
-            },
+            Ok(Request::Start { title, brief, ai, keep_going, step }) => {
+                match self.start_sibling(conv, &title, &brief, ai, keep_going, step) {
+                    Ok((id, true)) => (true, sibling::started(&title, &id)),
+                    Ok((id, false)) => (false, sibling::failed(&title, &id)),
+                    Err(why) => (false, format!("No conversation was started: {why}.")),
+                }
+            }
             Ok(Request::Read { id }) => match self.read_sibling(conv, &id) {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing to read: {why}.")),
@@ -121,10 +134,19 @@ impl Core {
         }
     }
 
-    fn start_sibling(&mut self, conv: &str, title: &str, brief: &str) -> Result<(String, bool), &'static str> {
+    fn start_sibling(
+        &mut self,
+        conv: &str,
+        title: &str,
+        brief: &str,
+        ai: Ai,
+        keep_going: bool,
+        step: Option<String>,
+    ) -> Result<(String, bool), &'static str> {
         if self.goal_out_of_money(conv) {
             return Err(GOAL_CAP);
         }
+        self.free_dead_workers(conv);
         let parent = self.convs.get(conv).ok_or("the conversation is gone")?;
         let fix = parent.goal_fix.clone();
         if !offers(parent.area) || parent.started_by.is_some() {
@@ -135,17 +157,44 @@ impl Core {
         if self.economy(conv) {
             return Err("the job has passed its estimate by half, so no new conversation starts; keep to the plan");
         }
+        // A plan step starts only inside the wave: ready, and sharing no file with a step that runs (`crate::progress::can_start`).
+        if let Some(step) = &step {
+            progress::can_start(parent.plan.as_ref().ok_or("there is no plan: send the plan with its steps first")?, step)?;
+        }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
-        let choice = parent.choice.clone().ok_or("this conversation has no model chosen")?;
+        // A named AI overrides the person's pin for this background work only, never for the conversation that asked.
+        let choice = match ai {
+            Ai::Same => parent.choice.clone().ok_or("this conversation has no model chosen")?,
+            Ai::Auto => Choice { vendor: "auto".into(), model: None, effort: None },
+            Ai::Named(vendor) if self.opts.clis.contains_key(&vendor) => {
+                Choice { vendor: vendor.name().into(), model: None, effort: Some(crate::router::Effort::Medium) }
+            }
+            Ai::Named(_) => return Err("that AI is not connected on this computer; choose another, or leave ai out"),
+        };
         self.sibling_room(&project)?;
-        // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold.
-        let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
-        self.sibling_allowed(&ai)?;
+        // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold, for the AI that
+        // runs it. Auto is held to them once it has routed the brief, like any turn nobody sent by hand.
+        let gate = match ai {
+            Ai::Same => self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string))),
+            Ai::Auto => None,
+            // The family of the default model it will run (Claude's quota is kept per family), as the launch resolves it.
+            Ai::Named(vendor) => {
+                let pick = crate::router::Pick { vendor, model: None, effort: String::new(), reason: String::new(), pace: None };
+                let model = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models).model;
+                Some((vendor, model.as_deref().and_then(family_of).map(str::to_string)))
+            }
+        };
+        self.sibling_allowed(&gate)?;
         let id = self.blank(Area::Project, Some(project.clone()));
         if let Some(c) = self.convs.get_mut(&id) {
             c.started_by = Some(conv.to_string());
             c.goal_fix = fix;
             c.title = title.to_string();
+        }
+        // Linked before the first message, so the copy it waits for starts from the leader's latest work.
+        if let Some(step) = &step {
+            let worker = StepWorker { conversation: id.clone(), branch: String::new(), base: String::new(), joining: false };
+            self.edit_step(conv, |s| s.id == *step, |s| (s.state, s.worker) = (StepState::Active, Some(worker)));
         }
         let req = SendRequest {
             conversation_id: Some(id.clone()),
@@ -158,14 +207,80 @@ impl Core {
         };
         // The common start path makes its copy off the lock and removes any copy that no longer belongs.
         match self.launch_sibling(&id, req, None) {
-            Ok(()) => Ok((id, true)),
-            // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
-            Err(_) if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) => Ok((id, false)),
+            Ok(()) => {
+                // Turned on while its first turn runs, Keep going acts when that turn ends, with the chip's own rules.
+                if keep_going {
+                    let _ = self.set_keep_going(&id, true);
+                }
+                Ok((id, true))
+            }
             Err(_) => {
+                // Its step is free to start again, whatever becomes of the conversation.
+                self.edit_worker_step(conv, &id, |s| (s.state, s.worker) = (StepState::Pending, None));
+                // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
+                if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) {
+                    return Ok((id, false));
+                }
                 let _ = self.remove(&id);
                 Err("the conversation could not start")
             }
         }
+    }
+
+    /// Changes the first plan step of conversation `lead` that `is` picks, and tells the screen and the disk when it changed
+    /// (then true).
+    pub(super) fn edit_step(&mut self, lead: &str, is: impl Fn(&PlanStep) -> bool, edit: impl FnOnce(&mut PlanStep)) -> bool {
+        let Some(c) = self.load(lead) else { return false };
+        let Some(step) = c.plan.as_mut().and_then(|p| p.steps.iter_mut().find(|s| is(s))) else { return false };
+        let before = step.clone();
+        edit(step);
+        if *step == before {
+            return false;
+        }
+        let plan = c.shown_plan();
+        self.save(lead);
+        (self.emit)(AppEvent::Plan { conversation_id: lead.to_string(), plan });
+        true
+    }
+
+    /// Changes the plan step of `lead` that conversation `child` works on.
+    fn edit_worker_step(&mut self, lead: &str, child: &str, edit: impl FnOnce(&mut PlanStep)) -> bool {
+        self.edit_step(lead, |s| s.worker.as_ref().is_some_and(|w| w.conversation == child), edit)
+    }
+
+    /// A step's conversation is gone (deleted): its step is free again, so no deleted conversation keeps files reserved.
+    pub(super) fn free_dead_workers(&mut self, lead: &str) {
+        let workers: Option<Vec<_>> =
+            self.convs.get(lead).and_then(|c| c.plan.as_ref()).map(|p| p.steps.iter().filter_map(|s| s.worker.clone()).collect());
+        for w in workers.unwrap_or_default() {
+            if self.load(&w.conversation).is_none() {
+                self.edit_worker_step(lead, &w.conversation, |s| {
+                    s.worker = None;
+                    if s.state == StepState::Active {
+                        s.state = StepState::Pending;
+                    }
+                });
+            }
+        }
+    }
+
+    /// A step's conversation failed before its agent started (its copy could not be made, or its first answer could not
+    /// start): the step may start again, and the agent that started it hears so. A later turn that fails leaves the step alone.
+    pub(super) fn step_not_started(&mut self, child: &str) {
+        let Some(c) = self.convs.get(child) else { return };
+        if c.messages.iter().filter(|m| m.role == Role::Assistant).count() > 1 {
+            return;
+        }
+        let Some(lead) = c.started_by.clone() else { return };
+        if self.edit_worker_step(&lead, child, |s| (s.state, s.worker) = (StepState::Pending, None)) {
+            self.tell_parent(child);
+        }
+    }
+
+    /// Changes the worker record of the plan step that conversation `child` works on, in the plan of the agent that started it.
+    pub(super) fn edit_worker(&mut self, child: &str, edit: impl FnOnce(&mut StepWorker)) {
+        let Some(lead) = self.convs.get(child).and_then(|c| c.started_by.clone()) else { return };
+        self.edit_worker_step(&lead, child, |s| _ = s.worker.as_mut().map(edit));
     }
 
     /// Whether the parent's AI may run work an agent started (a helper's rules); no live process means nothing to check.
@@ -306,6 +421,8 @@ impl Core {
         let report_id = format!("report-{conv}-{}", reply.map_or("empty", |m| m.id.as_str()));
         let last = reply.map(Message::said).unwrap_or_default();
         let text = sibling::finished(&c.title, conv, state, &last);
+        // Stopped working: the plan step waits for its work to be joined.
+        self.edit_worker(conv, |w| w.joining = true);
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
             self.finish_parent_report(conv, &parent);
             return;

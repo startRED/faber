@@ -345,3 +345,47 @@ test('a missing Windows tree stopper preserves the uncertain lease and temp', { 
   assert.equal(path.basename(next.target), 'build-2');
   await next.release();
 });
+
+test('a cache another copy built in forgets only the workspace crates, once per change of copy', async (t) => {
+  const root = await fixture(t);
+  const copy = async (name) => {
+    const dir = path.join(root, name);
+    await mkdir(path.join(dir, 'engine'), { recursive: true });
+    await mkdir(path.join(dir, 'src-tauri'), { recursive: true });
+    await writeFile(path.join(dir, 'Cargo.toml'), '[workspace]\nmembers = ["engine", "src-tauri"]\n');
+    await writeFile(path.join(dir, 'engine', 'Cargo.toml'), '[package]\nname = "faber-engine"\n');
+    await writeFile(path.join(dir, 'src-tauri', 'Cargo.toml'), '[package]\nname = "faber"\n');
+    return dir;
+  };
+  const [a, b] = [await copy('a'), await copy('b')];
+  const target = path.join(root, 'build-1');
+  const own = ['debug/.fingerprint/faber-engine-0123456789abcdef', 'faber-test/debug/.fingerprint/faber-fedcba9876543210'];
+  const kept = ['debug/.fingerprint/serde-0123456789abcdef', 'debug/.fingerprint/faber-engine-sys-0123456789abcdef', 'debug/deps/faber-0123456789abcdef'];
+  const make = () => Promise.all([...own, ...kept].map((p) => mkdir(path.join(target, p), { recursive: true })));
+  const left = () => [...own, ...kept].filter((p) => existsSync(path.join(target, p)));
+  await make();
+  assert.equal(await launcher.adoptTarget(target, a), true, 'a cache with no stamp may hold any copy');
+  assert.deepEqual(left(), kept);
+  await make();
+  assert.equal(await launcher.adoptTarget(target, a), false, 'the same copy keeps its fingerprints');
+  assert.deepEqual(left(), [...own, ...kept]);
+  assert.equal(await launcher.adoptTarget(target, b), true, 'another copy rebuilds the workspace crates');
+  assert.deepEqual(left(), kept);
+  assert.equal(readFileSync(path.join(target, '.faber-copy'), 'utf8'), b);
+});
+
+test('a cache is never marked adopted when the workspace cannot be read or its stamp is a link', async (t) => {
+  const root = await fixture(t);
+  const target = path.join(root, 'build-1');
+  await mkdir(path.join(target, 'debug', '.fingerprint', 'faber-0123456789abcdef'), { recursive: true });
+  const glob = path.join(root, 'glob');
+  await mkdir(glob);
+  await writeFile(path.join(glob, 'Cargo.toml'), '[workspace]\nmembers = ["crates/*"]\n');
+  await assert.rejects(launcher.adoptTarget(target, glob), /member pattern/);
+  assert.equal(existsSync(path.join(target, '.faber-copy')), false);
+  const elsewhere = path.join(root, 'elsewhere');
+  await mkdir(elsewhere);
+  await symlink(elsewhere, path.join(target, '.faber-copy'), 'junction');
+  await assert.rejects(launcher.adoptTarget(target, glob), /linked or unusual cache stamp/);
+  assert.equal(existsSync(path.join(target, 'debug', '.fingerprint', 'faber-0123456789abcdef')), true);
+});

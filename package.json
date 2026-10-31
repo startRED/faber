@@ -24,7 +24,7 @@
     "lint": "oxlint ui tests/ui",
     "typecheck": "tsc --noEmit",
     "docs": "node scripts/docs.mjs",
-    "test:scripts": "node --test --test-concurrency=2 scripts/docs.test.mjs scripts/release-notes.test.mjs scripts/channel.test.mjs scripts/shots.test.mjs scripts/ci-scope.test.mjs scripts/base.test.mjs scripts/numbers.test.mjs scripts/land.test.mjs scripts/tasks.test.mjs scripts/pace.test.mjs scripts/owed.test.mjs scripts/direction.test.mjs scripts/screen-costs.test.mjs scripts/woff2-only.test.mjs scripts/first-user.test.mjs scripts/visual-runtime.test.mjs scripts/bench/run.test.mjs scripts/bench/sources.test.mjs scripts/bench/practical.test.mjs scripts/bench/todo.test.mjs scripts/bench/organize.test.mjs scripts/sidebar-navigation.test.mjs scripts/cargo.test.mjs scripts/live-manifest.test.mjs scripts/cli-qualification.test.mjs scripts/persona-eval.test.mjs",
+    "test:scripts": "node --test --test-concurrency=2 scripts/docs.test.mjs scripts/release-notes.test.mjs scripts/channel.test.mjs scripts/shots.test.mjs scripts/ci-scope.test.mjs scripts/base.test.mjs scripts/numbers.test.mjs scripts/land.test.mjs scripts/tasks.test.mjs scripts/pace.test.mjs scripts/owed.test.mjs scripts/direction.test.mjs scripts/screen-costs.test.mjs scripts/woff2-only.test.mjs scripts/arrow-cursor.test.mjs scripts/first-user.test.mjs scripts/visual-runtime.test.mjs scripts/bench/run.test.mjs scripts/bench/sources.test.mjs scripts/bench/practical.test.mjs scripts/bench/todo.test.mjs scripts/bench/organize.test.mjs scripts/sidebar-navigation.test.mjs scripts/cargo.test.mjs scripts/live-manifest.test.mjs scripts/cli-qualification.test.mjs scripts/persona-eval.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

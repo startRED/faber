@@ -59,7 +59,7 @@ impl Core {
                     && !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait"))
             })
             // An open pull request is watched by its timer (an old one nobody watches any more is not).
-            && follow.is_none_or(|f| !f.state.open() || !self.follows.contains_key(&c.id));
+            && follow.is_none_or(|f| !f.state.watched() || !self.follows.contains_key(&c.id));
         if !rests {
             return None;
         }

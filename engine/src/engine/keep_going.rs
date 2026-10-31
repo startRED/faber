@@ -290,7 +290,7 @@ impl Engine {
 }
 
 impl Core {
-    fn set_keep_going(&mut self, id: &str, on: bool) -> Result<(), String> {
+    pub(super) fn set_keep_going(&mut self, id: &str, on: bool) -> Result<(), String> {
         let c = self.load(id).ok_or("error.conversationGone")?;
         if on && c.area != Area::Project {
             return Err("error.keepGoing".into());
@@ -329,6 +329,10 @@ impl Core {
         {
             self.go_on(id, &reply);
         }
+        // Turned off between two turns of a list, a conversation an agent started has ended: its parent hears now.
+        if !on {
+            self.tell_parent(id);
+        }
         Ok(())
     }
 
@@ -345,6 +349,7 @@ impl Core {
     /// The person stopped the conversation: nothing more goes out by itself.
     pub(super) fn keep_going_off(&mut self, id: &str) {
         let mut cleared = vec![];
+        let was_on = self.convs.get(id).is_some_and(|c| c.keep_going.is_some());
         if let Some(c) = self.convs.get_mut(id)
             && c.keep_going.is_some()
         {
@@ -363,6 +368,10 @@ impl Core {
         }
         for reply in cleared {
             self.push(id, Some(&reply), true);
+        }
+        // A conversation an agent started reports once, when its list ends, not at every turn of it.
+        if was_on {
+            self.tell_parent(id);
         }
     }
 
@@ -884,6 +893,7 @@ impl Core {
         }
         self.list_changed();
         (self.emit)(AppEvent::Halted { conversation_id: conv.into(), title, why: why.into(), vendor });
+        self.tell_parent(conv);
     }
 
     /// Another move to an AI with room inside the turn that runs, while the count allows it.

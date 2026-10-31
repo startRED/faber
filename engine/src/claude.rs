@@ -42,6 +42,8 @@ pub struct ClaudeLaunch {
     pub browse: bool,
     /// Faber's conversation tool (`crate::sibling`): a project's own agent that no other agent started.
     pub conversations: bool,
+    /// Told when to split a big request into a small team (`persona::LEADS`): a project conversation no agent started and no goal's fix.
+    pub leads: bool,
     /// Faber's checks (`crate::verify`): a project's agent in full access, where the shell gives a runner.
     pub verify: bool,
     /// The plan, the status and the closing box (`crate::progress`): a project's own agent.
@@ -431,6 +433,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             words.push_str(crate::persona::PROJECT_DETAILS);
             if launch.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
+            }
+            if launch.leads {
+                words.push_str(crate::persona::LEADS);
             }
         }
         if let Some(instructions) = &launch.group_instructions {
@@ -1292,6 +1297,7 @@ mod allow_tests {
             helper: Default::default(),
             browse: false,
             conversations: false,
+            leads: false,
             verify: false,
             progress: false,
             tools: Default::default(),

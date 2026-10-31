@@ -26,6 +26,10 @@ test('each path picks the suites of the table testkit tests too (testkit/src/pla
     ['docs/product-map.md', ['rust']],
     ['docs/design.md', []],
     ['engine/NOTES.md', []],
+    ['scripts/land.mjs', []],
+    ['scripts/land.test.mjs', []],
+    ['scripts/ci-scope.mjs', ['rust', 'ui', 'screen']],
+    ['scripts/numbers.mjs', ['rust', 'ui', 'screen']],
   ];
   for (const [path, want] of cases) assert.deepEqual(suitesFor(path), want, path);
 });
@@ -41,6 +45,21 @@ test('a change set adds its suites together, words need nothing and an empty set
   assert.deepEqual(scope(['tests/ui/a.check.ts']), { lints: true, rust: false, ui: true, screen: false });
   assert.deepEqual(scope(['docs/roadmap.md', 'AGENTS.md']), { lints: false, rust: false, ui: false, screen: false });
   assert.deepEqual(scope([]), { lints: true, rust: true, ui: true, screen: true });
+});
+
+test('the queue and release scripts and the scripts tests run the lints only, which run those tests', () => {
+  for (const file of ['scripts/land.mjs', 'scripts/tasks.mjs', 'scripts/channel.mjs', 'scripts/pace.mjs', 'scripts/direction.mjs', 'scripts/bench/run.test.mjs']) {
+    assert.ok(!isWords(file), file);
+    assert.deepEqual(scope([file, 'docs/dev/workflow.md']), { lints: true, rust: false, ui: false, screen: false }, file);
+  }
+  // Every scripts test the lints job runs is in the rule, and no script a suite or the runner reads is.
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const file of pkg.scripts['test:scripts'].split(' ').filter((w) => w.endsWith('.test.mjs'))) {
+    assert.deepEqual(suitesFor(file), [], file);
+  }
+  for (const file of ['scripts/base.mjs', 'scripts/owed.mjs', 'scripts/ci-scope.mjs', 'scripts/docs.mjs', 'scripts/numbers.mjs', 'scripts/release-notes.mjs', 'scripts/screen-costs.mjs', 'scripts/shots.mjs', 'scripts/woff2-only.mjs', 'scripts/first-user.mjs', 'scripts/cargo.mjs', 'scripts/persona-eval.mjs']) {
+    assert.deepEqual(suitesFor(file), ['rust', 'ui', 'screen'], file);
+  }
 });
 
 test('the command reads the list from its input and prints one output line per decision', () => {
