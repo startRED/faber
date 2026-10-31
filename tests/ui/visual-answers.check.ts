@@ -61,7 +61,7 @@ function loadedVisual(host: HTMLElement) {
       return end < 0 ? text + script : text.slice(0, end) + script + text.slice(end);
     },
     url: () => url,
-    why: () => `reports ${seen.reports}, from another frame ${seen.otherSource}, other origin ${seen.otherOrigin || 'none'}, frame loads ${seen.loads}, frame insertions ${seen.inserted}, frame src ${host.querySelector('iframe')?.src ?? 'none'}`,
+    why: () => `reports ${seen.reports}, from another frame ${seen.otherSource}, other origin ${seen.otherOrigin || 'none'}, frame loads ${seen.loads}, frame insertions ${seen.inserted}, frame src ${host.querySelector('iframe')?.src ?? 'none'}, the pane asked it to open ${host.querySelector('iframe')?.dataset.asked ?? 'nothing'}`,
     stop: () => { window.removeEventListener('message', listen); host.removeEventListener('load', load, true); moves.disconnect(); },
   };
 }

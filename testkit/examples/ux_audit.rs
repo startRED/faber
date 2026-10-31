@@ -40,6 +40,9 @@ fn main() -> Result<(), String> {
     if let Some(project) = project {
         launch.git_bin = project.git_bin;
     }
+    if let Some(name) = args.iter().position(|a| a == "--recording").and_then(|i| args.get(i + 1)) {
+        launch.recording = Some(paths.fixtures.join(name));
+    }
     let mut app = ctx.launch(launch)?;
     println!("READY");
     for line in io::stdin().lock().lines() {

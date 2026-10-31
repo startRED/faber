@@ -1,11 +1,7 @@
 # Task queue
 
-What a session does next when it finishes a task, without asking (docs/dev/workflow.md#task-queue). One file per task:
-`<order>-<name>.md`, lowest order first (`010-`, `020-`; leave gaps to slot one in). The file holds a `# Title` line and
-then the brief a fresh session needs: the task, the files or area, what done looks like. The owner decides what goes here
-and in what order; a session may add a follow-up it found, after the owner's tasks. A brief stays under 6,000 bytes
-(`npm run docs`): a bigger task splits into tasks that each fit one pull request.
+The queue holds only the tasks for Faber 1.0, with at most 15 active task files. The owner decides what enters and its order; only the owner, through the manager session, adds a task. Everything else waits in `docs/tasks/later/` in the same brief format. `tasks.mjs next` does not take tasks from `later/`. A task found while working goes there unless the owner moves it into the active queue.
 
-`node scripts/tasks.mjs next` claims the first free task and prints it, `list` shows who holds what, `release <name>`
-gives one back. The pull request that finishes a task deletes its file. The
-[board](https://github.com/startRED/faber/blob/board/BOARD.md) shows the same list to people (docs/dev/workflow.md#board).
+One file per task: `<order>-<name>.md`, lowest order first. Each brief gives a fresh session the area, files, dependencies, size, reason, work, exclusions and proof of completion. Keep each under 6,000 bytes (`npm run docs`). A grouped brief can name two sequential pull requests when one would be too large.
+
+`node scripts/tasks.mjs next` claims the first free active task whose dependencies have landed; `list` shows the claims and `release <name>` gives one back. The pull request that finishes a task deletes its file. The [board](https://github.com/startRED/faber/blob/board/BOARD.md) shows the list; [workflow](../dev/workflow.md#task-queue) explains how it works.
