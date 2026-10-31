@@ -16,6 +16,7 @@ mod failure;
 mod feed;
 pub mod folder;
 pub mod look;
+pub mod pane;
 mod project_commands;
 mod queues;
 pub mod reach;

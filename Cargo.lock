@@ -1090,7 +1090,6 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "regex",
- "rusqlite",
  "semver",
  "serde",
  "serde_json",
@@ -1150,11 +1149,15 @@ dependencies = [
  "faber-engine",
  "faber-update",
  "faber-winproc",
+ "junction",
  "png",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
+ "uuid",
  "winsafe",
 ]
 
