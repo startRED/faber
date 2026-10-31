@@ -62,7 +62,7 @@ and each side then answers for itself, so the one whose own run is red is the cu
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
 (`faber-wt-landing` beside the main checkout, marked as its own and building into `target/landing`, one landing at a
-time, on Windows only, where the screen suite runs). When they pass, it
+time, on Windows only, where the screen suite runs). Before them it runs the cheap checks the change needs (`cargo fmt --check` and the first Clippy proof for Rust, `npm run lint`, `npm run typecheck`, always `scripts/docs.mjs`); CI still runs its own. When they pass, it
 posts the commit status `faber/verify` with the owner's own `gh` sign-in, saying the tree and the suites
 (`tree <hash> covers rust ui screen`), and only then pushes the queue branch. The `changes` job takes that status only
 from the repository's owner, only on a queue branch and only for the tree it names, and leaves those suites out: the
@@ -208,6 +208,7 @@ One move is the exception: when the base moved by words only (no suite reads the
 `docs/decisions.md` and `docs/next/` left out, since numbers are taken there), the green batch is put on the new base as it
 is and lands at once, provided every file that then differs from the tree CI checked is words too and the docs check
 passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
+Each landing ends with `land.mjs --sweep`, which lands again the oldest queue run whose gate passed but whose landing GitHub cancelled.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
 makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
