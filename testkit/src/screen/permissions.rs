@@ -41,7 +41,8 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     // The details are in Settings.
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
-    let dont_ask_body = page.text_of("set.permissionsDontAskBody")?;
+    // Full access is a short list, one paragraph per line: its first line stands for it.
+    let dont_ask_body = page.text_of("set.permissionsDontAskBody")?.lines().next().unwrap_or_default().to_string();
     // The long text sits behind the "?" of the row: it is not on the page until that is opened (R140).
     ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the long risk text is on the page while closed".into())?;
     page.click(&css("#set-permissions-q"))?;
