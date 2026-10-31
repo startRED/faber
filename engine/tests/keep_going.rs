@@ -1436,11 +1436,17 @@ async fn a_new_sibling_question_after_an_error_waits_behind_older_questions() {
         assert!(!error, "{said}");
     }
     let mut saved = engine.open(&id).unwrap();
+    let mut questions = engine.open(&titled(&engine, "Questions")).unwrap();
     engine.shutdown();
     // Reproduce an existing Error with older asks still saved, as in a conversation left by an earlier version.
     saved.messages.last_mut().unwrap().status = Some(Status::Error);
     let file = dir.path().join("conversations").join(format!("{id}.json"));
     std::fs::write(file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    // Only the asks wait here: "Questions" is saved as finished, since the report a member cut off by the close owes
+    // (engine.rs, `a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once`) would wake this one first.
+    questions.messages.last_mut().unwrap().status = Some(Status::Done);
+    let file = dir.path().join("conversations").join(format!("{}.json", questions.id));
+    std::fs::write(file, serde_json::to_vec(&questions).unwrap()).unwrap();
     let (spawn, made) = pipes();
     let (again, _rx) = engine_with(&dir, spawn, &[Vendor::Claude]);
     again
@@ -1624,5 +1630,68 @@ async fn a_team_member_given_a_list_goes_through_it_and_reports_once_when_it_end
     until(&engine, &parent, |c| reports(c) == 1).await;
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert_eq!(reports(&engine.open(&parent).unwrap()), 1, "one report, when the list ended");
+    engine.shutdown();
+}
+
+/// Method 2, slice 6: the project's local count (`method/<project id>.jsonl`) takes a done closing box, and the person's next
+/// message after it as a correction. A box that is not done, or a project that is gone, leaves nothing.
+#[tokio::test]
+async fn a_message_after_a_done_closing_box_is_counted_as_a_correction_and_a_first_close_is_not() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+    let project_id = engine.open(&id).unwrap().project_id.unwrap();
+    let count = || faber_engine::method_log::counts(dir.path(), &project_id);
+    let wait = |want: faber_engine::method_log::Counts| async move {
+        for _ in 0..300 {
+            if count() == want {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the count is {:?}, not {want:?}", count());
+    };
+    // A box that is not done is no close, and the message after it is no correction.
+    calls(&mut pipe, "w0", "wrap_up", json!({ "recap": "The login page works. The rest is not done." })).await;
+    answers(&mut pipe, "Login fixed.", true).await;
+    until(&engine, &id, idle).await;
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    let follow = |text: &str| SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: text.into(),
+        images: vec![],
+        files: vec![],
+        choice: choice.clone(),
+    };
+    engine.send(follow("Now the rest")).unwrap();
+    until_turns(&pipe, 2).await;
+    echo(&mut pipe, 1).await;
+    // A done box is a close, and no correction before the person writes again.
+    calls(&mut pipe, "w1", "wrap_up", json!({ "recap": "Everything is fixed and checked.", "done": true })).await;
+    answers(&mut pipe, "All fixed.", true).await;
+    until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
+    for _ in 0..300 {
+        if count().closed == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!((count().closed, count().corrected), (1, 0));
+    // A send the engine refuses (a file it will not take) joins nothing, so it is no correction, however often it is retried.
+    for _ in 0..2 {
+        let refused = SendRequest {
+            files: vec![faber_engine::workspace::Attachment { name: ".npmrc".into(), base64: "c3ludGhldGlj".into() }],
+            ..follow("The button is still wrong")
+        };
+        assert_eq!(engine.send(refused).unwrap_err(), "error.projectSandbox");
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(count().corrected, 0);
+    engine.send(follow("The button is still wrong")).unwrap();
+    until_turns(&pipe, 3).await;
+    wait(faber_engine::method_log::Counts { closed: 1, corrected: 1, close_secs: count().close_secs }).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(count().corrected, 1, "one message, one correction");
     engine.shutdown();
 }

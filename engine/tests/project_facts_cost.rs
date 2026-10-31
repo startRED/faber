@@ -1,5 +1,6 @@
 //! A sampled lower bound on the public Facts reader's cost, in its own test process.
-//! Fixtures warm the file cache. A sample above the budget can reject it; a lower sample cannot certify peak usage.
+//! Fixtures warm the file cache. The fastest of ten reads above the budget rejects it; a lower memory sample cannot
+//! certify peak usage.
 //! Only the two manifests exist: this exercises the same parser as kit_facts, with the public reader's extra name checks.
 
 use faber_engine::project::{memory::MAX_BYTES, rules};
@@ -63,26 +64,36 @@ impl Drop for Sampler {
 }
 
 fn measure(folder: &Path, label: &str) -> u64 {
-    let (sampler, baseline, cpu_before) = Sampler::start();
-    let mut times = Vec::new();
-    for _ in 0..10 {
-        let started = Instant::now();
+    let read = || {
         let facts = rules::facts(folder).unwrap();
-        times.push(started.elapsed().as_secs_f64() * 1000.0);
         assert_eq!(facts.stacks, ["bevy", "stripe"], "the measured input must actually be parsed");
         assert_eq!(facts.description.as_deref(), Some("fixture"));
+    };
+    // Memory first, so the first reads of this input are sampled too.
+    let (sampler, baseline, cpu_before) = Sampler::start();
+    for _ in 0..10 {
+        read();
     }
     let (peak, cpu_after) = sampler.finish();
     let growth = peak.saturating_sub(baseline);
+    // Then the time, with no sampler thread competing for the cores. A busy machine only adds time, so the fastest read is
+    // the closest to the reader's own cost: one stalled sample cannot fail it, though a machine slow for all ten still can.
+    let mut times = Vec::new();
+    for _ in 0..10 {
+        let started = Instant::now();
+        read();
+        times.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    let fastest = times.iter().copied().fold(f64::INFINITY, f64::min);
     eprintln!(
-        "project_facts_cost {label}: first_ms={:.3} repeated_max_ms={:.3} baseline_rss_bytes={baseline} sampled_peak_rss_bytes={peak} sampled_growth_bytes={growth} process_cpu_ms={} (sampler included; warm file cache; lower-bound peak only)",
-        times[0],
-        times[1..].iter().copied().fold(0.0, f64::max),
+        "project_facts_cost {label}: fastest_ms={fastest:.3} slowest_ms={:.3} baseline_rss_bytes={baseline} sampled_peak_rss_bytes={peak} sampled_growth_bytes={growth} process_cpu_ms={} (ten sampled reads, sampler included; warm file cache; lower-bound peak only)",
+        times.iter().copied().fold(0.0, f64::max),
         cpu_after.saturating_sub(cpu_before),
     );
-    // The 20 ms budget is for the shipped build; the unoptimized test build parses the largest inputs several times slower.
+    // The 20 ms budget is for the shipped build; the unoptimized test build (`cargo t --suite rust` builds the dev profile,
+    // debug assertions on) parses the largest inputs several times slower.
     let budget = if cfg!(debug_assertions) { 120.0 } else { 20.0 };
-    assert!(times.iter().all(|time| *time <= budget), "the measured reader exceeded {budget} ms: {times:?}");
+    assert!(fastest <= budget, "the measured reader exceeded {budget} ms even at its fastest: {times:?}");
     growth
 }
 

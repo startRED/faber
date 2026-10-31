@@ -12,20 +12,28 @@ const { rules } = JSON.parse(readFileSync(new URL('../testkit/suites.json', impo
 
 export const SUITES = ['rust', 'ui', 'screen'];
 
-/** The suites one path needs: the first rule that matches wins, and a path no rule matches needs every suite. */
-export function suitesFor(file) {
+/** The first rule that matches a path, or none. */
+function ruleFor(file) {
   const path = file.replace(/^\.\//, '');
-  const rule = rules.find(
+  return rules.find(
     (r) =>
       (r.files ?? []).includes(path) ||
       (r.prefixes ?? []).some((p) => path.startsWith(p)) ||
       (r.suffixes ?? []).some((s) => path.endsWith(s)),
   );
-  return rule ? rule.suites : SUITES;
 }
 
-/** Words need no suite and no lint: a document a test reads is code here, since its rule names a suite. */
-export const isWords = (file) => suitesFor(file).length === 0;
+/** The suites one path needs: the first rule that matches wins, and a path no rule matches needs every suite. */
+export function suitesFor(file) {
+  return ruleFor(file)?.suites ?? SUITES;
+}
+
+/** Words need no suite and no lint: a document a test reads is code here, since its rule names a suite, and so is a
+ * script whose rule asks for the lints. */
+export function isWords(file) {
+  const rule = ruleFor(file);
+  return rule !== undefined && rule.suites.length === 0 && !rule.lints;
+}
 
 /** Every decision for a change set. */
 export function scope(files) {

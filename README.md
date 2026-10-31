@@ -17,7 +17,30 @@ It has two areas:
 Faber works with Claude only, Codex only, or both. It supports no other vendor. The subscription is the main path, so
 nobody needs an API key. Faber never reads or stores your logins: you sign in through each tool's own flow.
 
-> **Status:** early development. Nothing to install yet. Follow the [roadmap](docs/product/README.md).
+## Install
+
+Open [the latest version](https://github.com/startRED/faber/releases/latest), find **Assets** at the bottom (click it if
+it is folded) and download the one file for your computer. `<version>` is the number shown on that page.
+
+| Computer | File |
+| :--- | :--- |
+| Windows | `Faber_<version>_x64-setup.exe` |
+| Mac with Apple silicon (M1 and later; Apple menu > About This Mac says "Chip") | `Faber_<version>_aarch64.dmg` |
+| Mac with an Intel processor (About This Mac says "Processor") | `Faber_<version>_x64.dmg` |
+| Linux | `Faber_<version>_amd64.AppImage`, or `Faber_<version>_amd64.deb` on Debian and Ubuntu |
+
+Skip the other files (`.sig`, `.app.tar.gz`, `latest.json`, `SHA256SUMS.txt` and the source code): Faber uses them
+to update itself.
+
+- **Windows:** double-click the `.exe` and follow the installer. Faber is not code-signed yet, so Windows may show
+  "Windows protected your PC": click **More info**, then **Run anyway**.
+- **Mac:** open the `.dmg`, drag Faber into **Applications** and open it from there. Faber is not notarized by Apple
+  yet, so the Mac may say it cannot check the app: close that message, open **System Settings > Privacy & Security**,
+  click **Open Anyway** next to Faber, confirm, and open Faber again.
+- After that Faber checks for updates by itself.
+
+Faber is in early development. Follow the [roadmap](docs/product/README.md), and see what is being built, what comes next
+and what just landed on the [board](https://github.com/startRED/faber/blob/board/BOARD.md).
 
 ## What works today
 

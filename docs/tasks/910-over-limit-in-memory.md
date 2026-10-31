@@ -7,7 +7,7 @@ Size: about 250 changed lines
 
 Why: slice 2 of `docs/superpowers/specs/2026-10-22-own-work-method.md` (section "Staying small and current"; approved
 as of commit 4fc1324d, R435; a design change goes to the owner first). Each `.faber/` file has a soft target for what is
-kept: `rules.md` 3 KB, `decisions.md` 8 KB, `taste.md` 1 KB, `lessons.md` 2 KB, `next.md` 12 lines. The card's shares are
+kept: `rules.md` 3 KB, `decisions.md` 8 KB, `taste.md` 1 KB, `lessons.md` 2 KB, a task file in `.faber/tasks/` 6 KB. The card's shares are
 hard limits on what is loaded; the file targets only mark. Today `memory::list_faber` lists those files with their
 entries (`MemoryFile`) and nothing says when one is too big.
 

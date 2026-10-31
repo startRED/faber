@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { covered, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, eligibleStack, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, workflow } from './land.mjs';
+import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -172,4 +172,42 @@ test('a failed local proof names the suite and its exit status even when its out
   assert.equal(localProofFailure('ui', { status: null, signal: 'SIGTERM' }), 'Local ui proof failed (signal SIGTERM). Nothing was queued.');
   assert.equal(localProofFailure('screen', { code: 'ENOENT' }), 'Local screen proof failed (start error ENOENT). Nothing was queued.');
   assert.equal(localProofFailure('rust', {}), 'Local rust proof failed (no exit status). Nothing was queued.');
+});
+
+test('the sweep picks green queue runs whose landing was dropped, oldest first, and skips the rest', () => {
+  const r = (databaseId, headBranch, headSha, createdAt, conclusion = 'cancelled', status = 'completed') => ({ databaseId, headBranch, headSha, createdAt, conclusion, status });
+  const runs = [
+    r(5, 'queue/pr-5', 'e', '2026-10-30T10:05:00Z'),
+    r(1, 'queue/pr-1', 'a', '2026-10-30T10:01:00Z'),
+    r(2, 'queue/pr-2', 'b', '2026-10-30T10:02:00Z', 'failure'), // red: its author fixes it
+    r(3, 'queue/pr-3', 'old', '2026-10-30T10:03:00Z'), // pushed again since: the new commit has its own run
+    r(4, 'queue/pr-4', 'd', '2026-10-30T10:04:00Z'), // landed: its branch is gone
+    r(7, 'queue/pr-7', 'g', '2026-10-30T10:07:00Z'),
+    r(8, 'queue/pr-7', 'g', '2026-10-30T10:08:00Z', null, 'in_progress'), // a newer run of the same branch is on it
+    r(9, 'phase-1-base', 'h', '2026-10-30T10:09:00Z'),
+  ];
+  const heads = new Map([['queue/pr-1', 'a'], ['queue/pr-2', 'b'], ['queue/pr-3', 'new'], ['queue/pr-5', 'e'], ['queue/pr-7', 'g']]);
+  assert.deepEqual(dropped(runs, heads).map((x) => x.databaseId), [1, 5]);
+  assert.deepEqual(dropped([], heads), []);
+});
+
+test('only a landing cancelled after a green gate is dropped', () => {
+  assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'cancelled' }]), true);
+  assert.equal(landCancelled([{ name: 'gate', conclusion: 'cancelled' }, { name: 'land', conclusion: 'skipped' }]), false);
+  assert.equal(landCancelled([{ name: 'gate', conclusion: 'success' }, { name: 'land', conclusion: 'failure' }]), false);
+});
+
+test('a green batch lands on a base moved by words only, and anything else sends it back to be checked again', () => {
+  const task = 'docs/tasks/030-a-task.md';
+  assert.equal(wordsOnly([task, 'docs/dev/workflow.md'], [task, 'docs/dev/workflow.md'], isWords), true);
+  // Code moved the base, or code differs from the tree checked: checked again.
+  assert.equal(wordsOnly([task, 'engine/src/engine.rs'], [task], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/App.tsx'], isWords), false);
+  // A page a test reads is code here, and a locale line moved by the numbering is too.
+  assert.equal(wordsOnly(['docs/product-map.md'], ['docs/product-map.md'], isWords), false);
+  assert.equal(wordsOnly([task], [task, 'ui/locales/en.ts'], isWords), false);
+  // Numbers taken on the base meanwhile could collide with the batch's own.
+  assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
+  assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
+  assert.equal(wordsOnly([], [], isWords), false);
 });

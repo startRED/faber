@@ -12,7 +12,7 @@ deletes any stored item and its record goes with it; `rules.md` is built, so Mem
 
 Build:
 
-- Deleting an entry of `decisions.md`, `taste.md`, `lessons.md` or `next.md` also removes its record, in the same
+- Deleting an entry of `decisions.md`, `taste.md`, `lessons.md` or a task file in `.faber/tasks/` also removes its record, in the same
   operation, so a later item with the same words is not silently approved again.
 - One click in `ui/ProjectMemory.tsx` (the existing entry row, using the existing delete if the row has one) with an
   undo toast kept only in memory; `rules.md` rows show no delete control.
