@@ -2252,6 +2252,7 @@ export const fr: Messages = {
   'notes.319.fixed': 'Changer de version d’une page juste après l’avoir ouverte ne laisse plus l’ancienne page sous le nouveau numéro.',
   'notes.320.better': "La branche d'une conversation de projet est désormais dans Détails techniques, avec son dossier, et non plus en haut.",
   'notes.321.better': 'L’explication de l’Accès total dans les Réglages est maintenant une courte liste de phrases simples, avec tous les avertissements.',
+  'notes.322.fixed': 'La part de Claude dans la barre latérale et dans Réglages ne reste plus bloquée sur un ancien chiffre : elle suit de nouveau votre usage réel de la semaine.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

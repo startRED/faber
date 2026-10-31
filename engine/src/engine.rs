@@ -550,6 +550,9 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// When a Claude probe (`account::claude_probe`) last gave no clean reading: what it saw about extra usage may be lost, so
+    /// only word newer than this lets the next one run.
+    probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
@@ -716,6 +719,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,

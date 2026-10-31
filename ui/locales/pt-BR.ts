@@ -2239,6 +2239,7 @@ export const ptBR: Messages = {
   'notes.319.fixed': 'Trocar a versão de uma página logo depois de abri-la não deixa mais a página antiga sob o número novo.',
   'notes.320.better': 'O branch de uma conversa de projeto agora fica em Detalhes técnicos, com a pasta, e não mais no topo.',
   'notes.321.better': 'A explicação do Acesso total nas Configurações agora é uma lista curta de frases simples, com todos os avisos mantidos.',
+  'notes.322.fixed': 'A porcentagem do Claude na barra lateral e em Ajustes não fica mais presa num número antigo: ela volta a acompanhar o seu uso real da semana.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -2252,6 +2252,7 @@ export const es: Messages = {
   'notes.319.fixed': 'Cambiar de versión una página justo después de abrirla ya no deja la página anterior bajo el número nuevo.',
   'notes.320.better': 'La rama de una conversación de proyecto ahora está en Detalles técnicos, con su carpeta, y ya no arriba.',
   'notes.321.better': 'La explicación de Acceso total en Ajustes ahora es una lista corta de frases sencillas, con todas las advertencias.',
+  'notes.322.fixed': 'El porcentaje de Claude en la barra lateral y en Ajustes ya no se queda en un número viejo: vuelve a seguir tu uso real de la semana.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
