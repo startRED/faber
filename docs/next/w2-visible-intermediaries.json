@@ -7,5 +7,8 @@
       "fr": "Vous voyez pourquoi Faber a poursuivi une conversation et ce qu’il a demandé à un assistant.",
       "de": "Du siehst, warum Faber ein Gespräch fortgesetzt und was es einem Helfer aufgetragen hat."
     }
-  }
+  },
+  "decisions": [
+    "| R-next | 2026-10-31 | Every intermediary between Faber and the AI is visible and honest (the owner asked that Faber make each one visible). Whenever Faber decides something or speaks to the AI by itself, the engine stores a typed Faber act on the message it belongs to (`Message.acts`: kind route, kit, wake, recovery or helper; the actor, Faber or a named AI such as the router or a helper; what it did; one plain reason; where to change it; and, for a message it sent, the exact words). The screen draws each as a small row labeled with its actor, never as the person's words and never as the AI's: a model Auto chose and why (with the router AI named when it classified the request), the tools picked for a task, a Keep going nudge or any other message Faber sent on its own with its words one click away, a move to another subscription, a helper's brief. A model the person picked, or a message they wrote, adds none. Replaces R241's \"Faber's own plumbing takes no row\" and its loop mark in a reply's header. | Erick (2026-10-31 rework) |"
+  ]
 }
