@@ -173,6 +173,8 @@ fn summary(c: &Conversation) -> Summary {
         started_by: c.started_by.clone(),
         ended: c.ended.clone(),
         plan: c.plan.as_ref().map(crate::model::Plan::count),
+        results: Some(crate::results::tally(c)).filter(|r| r.cost.turns > 0),
+        stuck: c.stuck.is_some(),
         id: c.id.clone(),
         title: c.title.clone(),
         area: c.area,
