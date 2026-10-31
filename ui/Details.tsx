@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show, type ComponentProps } from 'solid-js';
-import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse } from './api.ts';
+import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
 import { CommandStop } from './Commands.tsx';
 import { ChangesFiles } from './Changes.tsx';
@@ -157,7 +157,7 @@ function BackgroundList(props: { rows: BackgroundWork[]; conversationId: string;
 
 /** A view of facts in the existing column, mounted only while open. Task 019 extends the live running list here. */
 export function DetailsPane(props: {
-  conversationId: string; messages: Message[]; background: BackgroundCommand[];
+  conversationId: string; messages: Message[]; background: BackgroundCommand[]; copy?: WorkCopy;
   changes: ComponentProps<typeof ChangesFiles>;
   onBack: () => void; onClose: () => void;
 }) {
@@ -178,6 +178,8 @@ export function DetailsPane(props: {
       <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={props.onClose}><Icon name="close" /></button>
     </div>
     <div class="rc-body side-body details-view">
+      {/* The copy's branch and folder stay here, for people who look, instead of in the topbar. */}
+      <Show when={props.copy}>{(copy) => <p class="det-copy" data-testid="details-copy">{t('details.copy', { branch: copy().branch })}<span>{copy().path}</span></p>}</Show>
       <Show when={work().length}><section class="det-g"><h3>{t('background.title')}</h3>
         <BackgroundList rows={work()} conversationId={props.conversationId} follows={follows()} />
       </section></Show>
