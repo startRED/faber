@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "A decision you kept and then deleted in Memory no longer comes back as kept when an agent writes it again: it reads not reviewed.",
+      "pt-BR": "Uma decisão que você manteve e depois apagou na Memória não volta como mantida quando um agente a escreve de novo: ela aparece como não revisada.",
+      "es": "Una decisión que conservaste y luego borraste en Memoria ya no vuelve como conservada si un agente la escribe otra vez: aparece sin revisar.",
+      "fr": "Une décision gardée puis supprimée dans Mémoire ne revient plus comme gardée quand un agent la réécrit : elle apparaît non relue.",
+      "de": "Eine Entscheidung, die du behalten und dann im Gedächtnis gelöscht hast, gilt nicht mehr als behalten, wenn ein Agent sie neu schreibt: Sie erscheint als nicht geprüft."
+    }
+  }
+}

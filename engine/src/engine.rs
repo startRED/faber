@@ -1309,7 +1309,24 @@ impl Engine {
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
         let project = self.project(id)?;
-        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
+        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16). Words an
+        // edit takes away lose their review first: a failed revocation keeps the text, and one whose write then fails only
+        // leaves the words "not reviewed". Not under the memory write lock, which the engine lock is held around.
+        if let Some(gone) = crate::project::memory::removes(Path::new(&project.path), edit).map_err(str::to_string)? {
+            self.with(|c| {
+                let kept = c.store.kept_decisions_now(id).map_err(|e| e.key().to_string())?;
+                let left: Vec<_> = kept.iter().filter(|older| !older.matches(&gone)).cloned().collect();
+                // Legacy records included; nothing is written when none matches.
+                if left.len() == kept.len() {
+                    return Ok(());
+                }
+                match c.store.migrate_kept_decisions(id, &kept, &left) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => Err("error.memory.write".to_string()),
+                    Err(e) => Err(e.key().to_string()),
+                }
+            })?;
+        }
         if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
             self.with(|c| {
                 let live: Vec<_> = c.store.projects_checked().map_err(|e| e.key().to_string())?.into_iter().map(|p| p.id).collect();
