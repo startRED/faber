@@ -1032,6 +1032,10 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
     pub messages: Vec<Message>,
+    /// Only on a copy for the screen that holds the newest messages (`Engine::open_for_screen_window`): how many came before
+    /// them, read with `Engine::messages_before`. Never saved with a value: a stored conversation keeps every message.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub earlier: usize,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub piece_values: Vec<crate::pieces::SavedValue>,
@@ -1567,8 +1571,8 @@ pub enum Setup {
     Skipped,
 }
 
-fn is_zero(n: &u32) -> bool {
-    *n == 0
+fn is_zero<T: Default + PartialEq>(n: &T) -> bool {
+    *n == T::default()
 }
 
 fn is_zero_usd(n: &f64) -> bool {
