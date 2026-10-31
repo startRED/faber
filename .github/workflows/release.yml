@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
 
-# Electron (R459) is a dev dependency; no job here starts it yet, so npm ci skips its 100 MB binary.
+# Jobs that do not package Electron skip its binary download.
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
@@ -63,17 +63,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            args: ''
-          # One build per chip.
-          - os: macos-latest
-            args: --target aarch64-apple-darwin
-          - os: macos-latest
-            args: --target x86_64-apple-darwin
-          - os: ubuntu-latest
-            args: ''
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ''
     steps:
       - uses: actions/checkout@v7
       - name: webview libraries (Linux)
@@ -86,20 +79,80 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      # No Rust cache: a tag can read only its own caches and main's, which never hold a release build, so it restored nothing,
-      # and the four it saved per tag pushed the checks' caches out of the 10 GB GitHub keeps (R165).
+      # A tag cannot reuse a release cache from another tag (R165).
       - run: npm ci
-      # The tag is the version; package.json only moves on hand-made bumps.
+      - run: npm ci
+        working-directory: installer
+      - run: node node_modules/electron/install.js
+      # Both macOS packages are made together; electron-builder needs the other chip's Electron too.
+      - name: Download the other macOS Electron
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          native=$(node -p 'process.arch')
+          if [ "$native" = arm64 ]; then other=x64; else other=arm64; fi
+          mkdir -p out
+          mv node_modules/electron/dist out/electron-native
+          rm -f node_modules/electron/path.txt
+          npm_config_arch="$other" node node_modules/electron/install.js
+          mv node_modules/electron/dist "out/electron-dist-$other"
+          mv out/electron-native node_modules/electron/dist
       - run: npm pkg set version="${GITHUB_REF_NAME#v}"
         shell: bash
-      - uses: tauri-apps/tauri-action@v1
+      - run: npm run dist:electron
+      - name: Check the Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signs the update files; each build also merges its platform into the release's latest.json.
+          FABER_SMOKE_DISPOSABLE: '1'
+        run: node scripts/electron-smoke.mjs "out/installer/Faber_${GITHUB_REF_NAME#v}_x64-setup.exe"
+      - name: Sign and upload packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p "$RUNNER_TEMP/entries"
+          sign() {
+            local platform=$1 file=$2 name signature url
+            # The key has no password; saying so keeps the signer from asking for one on a runner with no terminal.
+            npx --no-install tauri signer sign --password '' "$file"
+            signature=$(cat "$file.sig")
+            name=$(basename "$file")
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name"
+            jq -n --arg platform "$platform" --arg signature "$signature" --arg url "$url" \
+              '{platform: $platform, signature: $signature, url: $url}' > "$RUNNER_TEMP/entries/$platform.json"
+          }
+          case "$RUNNER_OS" in
+            Windows)
+              file="out/installer/Faber_${version}_x64-setup.exe"
+              sign windows-x86_64 "$file"
+              gh release upload "$GITHUB_REF_NAME" "$file" --clobber
+              ;;
+            macOS)
+              for pair in 'arm64 aarch64 mac-arm64' 'x64 x86_64 mac'; do
+                read -r arch platform folder <<< "$pair"
+                file="out/installer/Faber_${version}_${arch}.app.tar.gz"
+                tar -czf "$file" -C "out/installer/$folder" Faber.app
+                sign "darwin-$platform" "$file"
+              done
+              gh release upload "$GITHUB_REF_NAME" out/installer/*.dmg out/installer/*.zip out/installer/*.app.tar.gz --clobber
+              ;;
+            Linux)
+              files=(out/installer/*.AppImage)
+              [ "${#files[@]}" -eq 1 ] && [ -f "${files[0]}" ]
+              sign linux-x86_64 "${files[0]}"
+              gh release upload "$GITHUB_REF_NAME" "${files[0]}" out/installer/*.deb --clobber
+              ;;
+          esac
+      - uses: actions/upload-artifact@v4
         with:
-          releaseId: ${{ needs.create.outputs.id }}
-          args: ${{ matrix.args }}
+          name: latest-${{ matrix.os }}
+          path: ${{ runner.temp }}/entries/*.json
+          if-no-files-found: error
 
   # Publishes only after every platform uploaded and latest.json is there, so the updater never sees a release without
   # it. A failed platform leaves the draft for a person to look at. A stable becomes the latest release, which stable
@@ -110,6 +163,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: latest-*
+          path: entries
+          merge-multiple: true
+      - name: Merge and upload the update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create.outputs.id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > "$RUNNER_TEMP/notes.md"
+          node scripts/latest-json.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/notes.md" entries > latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
       - run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name' | grep -qx latest.json
@@ -140,7 +211,7 @@ jobs:
           set -euo pipefail
           mkdir "$RUNNER_TEMP/assets"
           gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/assets"
-          # latest.json is merged by each build and replaced on a re-run; the sums are what this job makes.
+          # The manifest can be replaced on a re-run; the sums are what this job makes.
           rm -f "$RUNNER_TEMP/assets/latest.json" "$RUNNER_TEMP/assets/SHA256SUMS.txt"
           (cd "$RUNNER_TEMP/assets" && sha256sum -- * > "$GITHUB_WORKSPACE/SHA256SUMS.txt")
           cat SHA256SUMS.txt
