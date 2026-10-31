@@ -1,6 +1,6 @@
 # Workflow
 
-How work lands: lane claims, merge on green, the task queue, the direction check, the red base and the numbers given at landing.
+How work lands: lane claims, merge on green, the task queue, the process freeze, the direction check, the red base and the numbers given at landing.
 
 ## Lane claims
 
@@ -78,8 +78,8 @@ where macOS runs its Rust suite now (Erick, 2026-10-17): the PC proves macOS thr
 A session that finished a task takes the next one by itself, without asking, the way it does when the owner says "I am
 going to sleep, keep going" (R185). The list is `docs/tasks/`: one file per task, `<order>-<name>.md`, lowest order
 first, with a `# Title` line and the brief a fresh session needs. One file each means adding, reordering or finishing a
-task never touches another's lines. The owner decides what goes there; a session may add a follow-up it found after
-the owner's tasks.
+task never touches another's lines. The owner decides what goes there, directly or through the session he names; the list holds
+at most 15 tasks (R489), and a session that finds a follow-up tells that session instead of writing a task file.
 
 `node scripts/tasks.mjs next` reads the list on `origin/phase-1-base` and claims the first free task by creating the
 branch `claim/<name>` on GitHub. A push without force fails when that branch is already there, so two sessions never
@@ -89,8 +89,10 @@ works on a branch named after the task, and its pull request deletes the task's 
 the next `next` deletes the claims of tasks that left the list. A task whose `Depends:` line names a task still on
 the list waits: `next` skips it. `list` shows who holds what and what waits, `release <name>` gives a task back. CI never runs on `claim/` branches. `node scripts/pace.mjs` prints, for the last day and week, the pull requests landed with their size and time to land, the queue rounds green, red and cancelled with the three checks that failed most by chance (`flaky: <check> ×<n>`, a check that failed and later passed on the same pull request head), and the free tasks.
 
-A task is the size of one pull request: one idea, about 100 to 400 changed lines. A task that needs more than about
-1000 is split into tasks that land one after another, each one a working step on its own. Its file names the area, the
+A task is the size of one pull request: the biggest coherent slice one AI does well, one feature or fix with its tests,
+often 300 to 1,000 changed lines (R490). Each pull request costs a queue run, so a string of 100-line steps of one idea
+costs more than one change. A task that needs much more than 1,000 lines is split into tasks that land one after another,
+each one a working step on its own. Its file names the area, the
 files, what done looks like and the tasks it depends on. Many small pull requests a day keep their quality the same way
 one does: the local proofs, the queue and a review by the other vendor.
 
@@ -100,6 +102,14 @@ again from the start (task 000 changes that for moves of words only).
 
 A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
 next task while the question waits. It stops when `next` says no task is free.
+
+## Process freeze
+
+Until 2026-11-14 (R489) the process machinery changes only to fix a red base or a landing that is blocked:
+`scripts/land.mjs`, `scripts/tasks.mjs`, `scripts/pace.mjs`, `testkit/` and `.github/`. The W9 audit
+(`reports/reforma/workflow-audit.md` outside the repository) found 38% of the commits since 10-24 spent on that machinery,
+task files and CI, and 124 task files written in one day while 122 waited. A change it does need names the red run or the
+blocked pull request in its body.
 
 ## Board
 
