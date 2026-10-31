@@ -798,6 +798,17 @@ fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
     }
+    // Asking the program what it is never starts the app: no window, no updater, no second Faber.
+    if let Some(arg) = std::env::args_os().nth(1) {
+        if arg == "--version" || arg == "-V" {
+            println!("Faber {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        if arg == "--help" || arg == "-h" {
+            println!("Faber {}\nOpens the app. The command line is `faber` in the bin folder: run `faber help`.", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+    }
     // A copy of Faber in a temporary folder that finishes an update install (`update/handoff.rs`): no window, no app.
     #[cfg(windows)]
     {
@@ -1029,6 +1040,15 @@ mod crash_record_wiring_tests {
             "the hook is gated"
         );
         assert!(main.contains("ifcrash_record_dir(is_test).is_some(){faber_engine::crash::start_run("), "the marker is gated");
+    }
+
+    #[test]
+    fn asking_the_program_for_its_version_or_help_exits_before_anything_starts() {
+        let main = body_of("fn main() {");
+        let ask = main.find("\"--version\"").expect("main answers --version");
+        for later in ["install_hook(", "tauri::Builder::default()"] {
+            assert!(ask < main.find(later).expect(later), "--version must be answered before `{later}`");
+        }
     }
 
     #[test]
