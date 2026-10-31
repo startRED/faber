@@ -937,7 +937,7 @@
       ]
     ],
     "kind": "write",
-    "reach": "free"
+    "reach": "ask"
   },
   {
     "name": "clear_asides",
@@ -971,7 +971,8 @@
       ]
     ],
     "kind": "write",
-    "reach": "free",
+    "reach": "own",
+    "conversation": "/id",
     "about": "The person stops following the pull request a project conversation follows (R200)."
   },
   {

@@ -34,6 +34,8 @@ struct Seen {
 pub struct Ticket {
     /// The `running` events seen when it was admitted.
     seen: u64,
+    /// When it was admitted: the entry it put in the hour's list.
+    at: Instant,
 }
 
 #[derive(Default)]
@@ -97,7 +99,16 @@ impl Guard {
         }
         seen.starts.push_back(now);
         seen.admitted += 1;
-        Ok(Ticket { seen: seen.snapshots })
+        Ok(Ticket { seen: seen.snapshots, at: now })
+    }
+
+    /// A request refused before it could start anything (`error.reach.*`, bad arguments) gives back its place in the hour,
+    /// so an AI asking for what it may not do cannot use up the turns every AI shares.
+    pub fn refund(&self, ticket: &Ticket) {
+        let mut seen = self.lock();
+        if let Some(place) = seen.starts.iter().position(|at| *at == ticket.at) {
+            seen.starts.remove(place);
+        }
     }
 
     /// An admitted turn was answered. When it started (`answer` is its reply), notes the conversation it went to, from its
@@ -160,6 +171,18 @@ mod tests {
         assert_eq!(guard.admit(now).err(), Some("error.channel.agentTurns"), "two still waiting for their answer");
         guard.answered(ticket, &json!({}), None);
         assert!(guard.admit(now).is_ok(), "the refused one no longer counts");
+    }
+
+    #[test]
+    fn a_refused_request_gives_back_its_place_in_the_hour() {
+        let guard = Guard::default();
+        let start = Instant::now();
+        for _ in 0..MAX_PER_HOUR * 2 {
+            let ticket = guard.admit(start).unwrap();
+            guard.refund(&ticket);
+            guard.answered(ticket, &json!({}), None);
+        }
+        assert!(guard.admit(start).is_ok(), "refused requests used up nothing");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# The command line
+| `screen` | Only the screen itself (`error.reach.screen` over the channel) | `open`, `state`, `set_clock`, `quota_attention`, `parked_seen`, `warm`, `route_draft`, `seen`, `preview_look`, `set_shell_texts`, `input_seen`, `draft_dirty`, `game_in_front`, `notes_seen`, `save_notes_seen`, `site_place`, `site_round`, `site_size`, `site_park`, `site_open`, `site_step`, `site_go`, `site_tab`, `site_history`, `site_clear`, `screen_ready`, `visual_open`, `visual_page`, `visual_close`, `visual_policy`, `report_checks`, `checks_progress`, `test_site_probe`, `test_host_size`, `test_site_refuse_once` || `person` | Only the person on the screen (`error.reach.person` for everyone else): signing in, answering cards, granting folders, security settings, deleting for good, native pickers | `answer_plan`, `approve_credits`, `answer`, `approve_plan`, `answer_question`, `remove`, `save_theme`, `export_conversation`, `open_theme`, `add_project`, `open_folders`, `chat_folder`, `save_file`, `open_terminal`, `project_proof_confirm`, `setup_sign_in`, `set_mcp_server`, `tools_clear_removed`, `cookie_profiles`, `cookie_sites`, `cookie_import`, `cookie_held`, `cookie_forget`, and the security fields of `save_settings` (`permissions`, `userHooks`, `faberTrust`, `grantsEpoch`, `permissionsRevision`, `beforePlan`, `previews`, `autostart`) || `ask` | Person at a terminal or on screen; an AI gets `error.reach.ask` and asks the person | `save_chat_group`, `add_chat_group_files`, `remove_chat_group_file`, `remove_chat_group`, `forget_auto_learned`, `pick_up`, `move_to_project`, `stop_background`, `rewind_recover`, `rewind_restore`, `rewind_redo`, `stop_aside`, `remove_project`, `save_settings`, `save_environment`, `forget_environment`, `start_environment`, `show_file`, `show_project`, `open_link`, `project_copies`, `project_goals_auto`, `project_goal_add`, `project_goal_add_crashes`, `project_goal_remove`, `project_goal_resume`, `edit_project_memory`, `update_restart`, `setup_install`, `tools_install`, `tools_prepare_replacement`, `tools_replace`, `tools_remove`, `tools_set_enabled`, `tools_restore` (`save_settings` for the security fields below is the person's alone) || `own` | Person anywhere; an AI only in its own family (or to start a new conversation) | `move_turn`, `wait_turn`, `continue_closed`, `interrupt`, `send`, `branch`, `branch_here`, `save_piece_value`, `keep_going`, `remove_queued`, `edit_queued`, `send_queued`, `tell_helper`, `compact_now`, `ask_aside`, `clear_asides`, `unfollow_pr` || `free` | Anyone | `conversations`, `conversation`, `projects`, `quota`, `settings`, `create_chat_group`, `move_chat_to_group`, `new_group_chat`, `search_messages`, `prompt_history`, `cli_sessions`, `versions`, `visual_answers`, `visual_pieces`, `rename`, `archive`, `pin`, `child_words`, `child_transcript`, `mentions`, `commands`, `context_parts`, `background_commands`, `changes`, `change_patch`, `rewind_points`, `rewind_redos`, `rewind_redo_preview`, `rewind_preview`, `asides`, `recents`, `forget_recent`, `read_file_at`, `read_image`, `site_tabs`, `site_picture`, `project_goals`, `project_proof`, `project_memory`, `update_status`, `setup_check`, `tools_list`, `tools_inventory`, `mcp_servers`, `tools_in_use` |# The command line
 
 `faber` (`cli/`, shipped as `bin\faber.exe` beside the app) lets an AI inside a conversation, an AI in an outside
 terminal, or a person at a terminal do what a person does on the screen. Every CLI session Faber starts gets `bin` first
@@ -19,12 +19,13 @@ to the table is immediately callable through `faber call <command>` and listed i
 - **Per-run secret:** before listening, Faber writes 32 random bytes from the OS CSPRNG as 64 hex characters to
   `<data>/channel/secret` (readable only by the signed-in user). A client's first line (`hello`, within 5 s) must carry
   that secret; a missing or wrong one fails with `error.channel.secret` and closes.
-- **Conversation tokens:** when Faber starts a CLI for conversation `<id>`, it sets `FABER_CONVERSATION=<id>` and
-  `FABER_AGENT_TOKEN=fa1.<id>.<64 hex>` (HMAC-SHA256 with this run's secret over `fa1.<id>`, checked in constant time).
-  `hello` passes the token and `FABER_AGENT_DEPTH`; a tampered token or one from a previous run fails with
-  `error.channel.token`.
-- **Starting Faber when closed:** if nothing answers on the channel, `faber` finds `Faber.exe` (from `FABER_APP`, beside
-  itself, or `%LOCALAPPDATA%\Programs\Faber\Faber.exe`), starts it hidden in the tray (`--autostart`, no console) and
+- **Conversation tokens:** a token `fa1.<id>.<64 hex>` (HMAC-SHA256 with this run's secret over `fa1.<id>`, checked in
+  constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`) with `FABER_AGENT_DEPTH`; a
+  tampered token or one from a previous run fails with `error.channel.token`. Faber does not put a token in the
+  environment of the CLIs it starts yet (slice 3, with the AI's own tools): until then every AI Faber starts is an AI with
+  no conversation, and asks the person for anything beyond reading and organizing.
+- **Starting Faber when closed:** if nothing answers on the channel, `faber` finds Faber's program (`FABER_APP`, or the app
+  folder above its own `bin` folder), starts it hidden in the tray (`--autostart`, no console) and
   waits up to 10 s for the channel. `--no-start` and any process with `FABER_AGENT_DEPTH >= 1` never start Faber and exit
   with code `3`.
 
@@ -50,6 +51,11 @@ Every command in `host/src/table.rs` names one of five reaches, checked in `Host
 An AI's **family** is the root conversation found by following `startedBy` up from the AI's own conversation (up to 16
 steps), plus every conversation whose `startedBy` chain leads to that same root. When an AI calls `send` without a
 conversation id, `send` stamps `startedBy` with the AI's conversation id so the new conversation joins its family.
+
+What the rules do not stop: they keep a well-meant AI on its own work. An AI runs as the same user as the person, so a
+program that sets out to break them can read `<data>/channel/secret`, make a token for another conversation, or act as
+the person at a terminal (on Unix, with no job to tell it apart, an AI that drops `FABER_AGENT_DEPTH` is taken for the
+person). The channel is a wall against other accounts and other machines, not against the person's own programs.
 
 ## Conversation states
 

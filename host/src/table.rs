@@ -421,7 +421,7 @@ table! {
     StartsTurn Own("/id") fn ask_aside(h, id: String, question: String, model: Option<String>) -> String {
         h.engine.ask_aside(&id, &question, model)
     }
-    Write Free fn stop_aside(h, aside_id: String) -> () {
+    Write Ask fn stop_aside(h, aside_id: String) -> () {
         h.engine.stop_aside(&aside_id);
         Ok(())
     }
@@ -433,7 +433,7 @@ table! {
         Ok(h.engine.asides(&id))
     }
     /// The person stops following the pull request a project conversation follows (R200).
-    Write Free fn unfollow_pr(h, id: String) -> () {
+    Write Own("/id") fn unfollow_pr(h, id: String) -> () {
         h.engine.unfollow_pr(&id);
         Ok(())
     }

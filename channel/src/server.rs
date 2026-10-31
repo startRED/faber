@@ -286,6 +286,9 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                 tokio::spawn(async move {
                     let result = run.await;
                     if let Some((ticket, asked)) = ticket {
+                        if matches!(&result, Err(key) if key.starts_with("error.reach.") || key == "error.host.badArgs") {
+                            guard.refund(&ticket);
+                        }
                         guard.answered(ticket, &asked, result.as_ref().ok());
                     }
                     let _ = tx.send(wire::reply(id, &result)).await;
