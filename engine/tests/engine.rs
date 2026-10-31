@@ -2450,6 +2450,7 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
+    assert!(serde_json::to_value(&reply).unwrap().get("acts").is_none());
     assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".to_string()));
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["sessions"]["claude"], "c5b9834c-dfc7-4086-beed-2212be93b722");
@@ -6625,4 +6626,42 @@ async fn project_adopted_tasks_location_approval_survives_reopen_without_approvi
     assert!(!root.path().join(".faber").exists());
     assert!(!data.path().join("decisions-kept.json").exists());
     reopened.shutdown();
+}
+
+#[test]
+fn faber_acts_old_messages_load_without_acts() {
+    let message = Message::new("old".into(), Role::User, "hello".into(), 0);
+    let json = serde_json::to_value(message).unwrap();
+    let loaded: Message = serde_json::from_value(json).unwrap();
+    assert!(serde_json::to_value(loaded).unwrap().get("acts").is_none());
+}
+
+#[test]
+fn faber_acts_wire_shape_and_unicode_limit() {
+    use faber_engine::act::{Actor, ActorRole, FaberAct};
+    use faber_engine::model::Wake;
+    use faber_engine::router::Pick;
+    use faber_engine::tools::kits::Report;
+    let sent = "é".repeat(4001);
+    let wake = serde_json::to_value(FaberAct::wake(&Wake::of("wake.keepGoing"), &sent)).unwrap();
+    assert_eq!(wake["kind"], "wake");
+    assert_eq!(wake["actor"], json!({"who": "faber"}));
+    assert_eq!(wake["change"], "keepGoing");
+    assert_eq!(wake["sent"].as_str().unwrap().chars().count(), 4000);
+    let pick =
+        Pick { vendor: Vendor::Codex, model: Some("model".into()), effort: "medium".into(), reason: "reason.autoOnly".into(), pace: None };
+    let route = serde_json::to_value(FaberAct::route(
+        &pick,
+        Actor::Ai { vendor: Vendor::Claude, model: Some("router".into()), role: ActorRole::Router },
+    ))
+    .unwrap();
+    assert_eq!(route["actor"], json!({"who":"ai", "vendor":"claude", "model":"router", "role":"router"}));
+    assert_eq!(route["params"], json!({"vendor":"codex", "model":"model", "effort":"medium"}));
+    let kit = serde_json::to_value(FaberAct::kit(&Report { ids: vec!["one".into(), "two".into()], ..Default::default() })).unwrap();
+    assert_eq!(kit["kind"], "kit");
+    assert_eq!(kit["params"]["ids"], "one, two");
+    assert_eq!(kit["change"], "toolKit");
+    let recovery = serde_json::to_value(FaberAct::recovery("act.recovery.moved", "reason.moved.full")).unwrap();
+    assert_eq!(recovery["kind"], "recovery");
+    assert_eq!(recovery["why"], "reason.moved.full");
 }

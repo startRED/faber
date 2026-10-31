@@ -3432,6 +3432,9 @@ impl Core {
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &item.text));
+        }
         let mut reply =
             Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), now);
         question.rewind = point;
@@ -3693,12 +3696,18 @@ impl Core {
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &item.text));
+        }
         let mut reply = Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), at);
         if !routing {
             reply.vendor = Some(pick.vendor);
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+            reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
+        }
         reply.note = resent.then(|| "note.historyResent".to_string());
         question.rewind = point;
         reply.tools = Some(vec![]);
@@ -3755,8 +3764,9 @@ impl Core {
                 let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                    let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
                 }
             });
             return Ok(());
@@ -4005,6 +4015,11 @@ impl Core {
         let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
+            if let Some(kit) = &tool_kit
+                && !kit.ids.is_empty()
+            {
+                m.acts.push(crate::act::FaberAct::kit(kit));
+            }
             m.tool_kit = tool_kit;
             if rewind_notice.is_some() {
                 m.note = rewind_notice;
@@ -4627,6 +4642,9 @@ impl Core {
         };
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
         question.wake = wake;
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &req.text));
+        }
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
@@ -4635,6 +4653,9 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+            reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
+        }
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
@@ -4697,8 +4718,9 @@ impl Core {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
-                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                    let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
                 }
             });
             return Ok(id);
