@@ -2,7 +2,7 @@
 //! folder. Each test runs the built program as a person or an agent would, and reads what it prints and how it exits.
 
 use faber_channel::server::Answer;
-use faber_channel::{Backend, serve};
+use faber_channel::{Backend, Who, serve};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
@@ -30,7 +30,7 @@ impl Backend for Fake {
     fn starts_turn(&self, cmd: &str) -> bool {
         cmd == "send"
     }
-    fn dispatch(&self, cmd: String, args: Value) -> Answer {
+    fn dispatch(&self, _who: &Who, cmd: String, args: Value) -> Answer {
         self.calls.lock().unwrap().push((cmd.clone(), args.clone()));
         let working = self.working.load(Ordering::SeqCst);
         let finish = self.working.clone();

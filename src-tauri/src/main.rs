@@ -805,7 +805,10 @@ fn main() {
             std::process::exit(0);
         }
         if arg == "--help" || arg == "-h" {
-            println!("Faber {}\nOpens the app. The command line is `faber` in the bin folder: run `faber help`.", env!("CARGO_PKG_VERSION"));
+            println!(
+                "Faber {}\nOpens the app. The command line is `faber` in the bin folder: run `faber help`.",
+                env!("CARGO_PKG_VERSION")
+            );
             std::process::exit(0);
         }
     }
