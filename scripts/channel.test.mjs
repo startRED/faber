@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   PLATFORMS,
+  SHIPS,
   compare,
   completeManifest,
   newest,
@@ -153,6 +155,10 @@ test('every bundle target accepts a pre-release version: no MSI, whose WiX wants
   assert.ok(Array.isArray(targets) && targets.length > 0, 'bundle.targets is an explicit list');
   for (const target of targets) assert.ok(!['msi', 'wix', 'all'].includes(target), `${target} would reject vX.Y.Z-preview.N`);
   assert.deepEqual([...targets].sort(), ['app', 'appimage', 'deb', 'dmg', 'nsis']);
+  const builder = createRequire(import.meta.url)('../installer/electron-builder.config.cjs');
+  assert.deepEqual(builder.win.target.map((item) => item.target), ['nsis']);
+  assert.deepEqual(builder.mac.target.map((item) => item.target).sort(), ['dmg', 'zip']);
+  assert.deepEqual([...builder.linux.target].sort(), ['AppImage', 'deb']);
 });
 
 // ---- the whole decision, against a real repository ----
@@ -290,4 +296,8 @@ test('user-facing and notes-base read the real history', () => {
   } finally {
     r.stop();
   }
+});
+
+test('all Electron and legacy app directories count as shipped', () => {
+  for (const dir of ['electron', 'installer', 'sidecar', 'update', 'src-tauri']) assert.ok(SHIPS.includes(dir), dir);
 });
