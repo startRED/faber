@@ -5,6 +5,7 @@ export const ptBR: Messages = {
   "act.route.chose": "escolheu {model}, esforço {effort}",
   "act.kit.chose": "escolheu ferramentas para esta tarefa: {ids}",
   "act.recovery.moved": "passou para {vendor} porque a primeira IA ficou sem cota",
+  "act.recovery.waited": "está esperando a cota incluída voltar",
   "act.helper.started": "deu esta tarefa a uma IA ajudante",
   "act.why.keepGoing": "Continuar está ligado nesta conversa e a IA parou",
   "act.why.compacted": "a IA pediu para continuar depois",

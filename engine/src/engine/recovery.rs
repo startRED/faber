@@ -374,7 +374,7 @@ impl Core {
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
             m.moved_from = m.vendor;
             m.reason = Some(if summary { "reason.moved.summary" } else { "reason.moved.full" }.into());
-            m.acts.push(crate::act::FaberAct::recovery("act.recovery.moved", m.reason.as_deref().unwrap_or_default()));
+            m.acts.push(crate::act::FaberAct::recovery("act.recovery.moved", Some(pick.vendor)));
         }
         if self.start(id, reply, &pick, text, vec![], false).is_err() {
             self.move_failed(id, reply);
@@ -433,7 +433,7 @@ impl Core {
             m.wait_until = until;
             m.status = Some(if queued { Status::Streaming } else { Status::Error });
             m.reason = Some("reason.waiting".into());
-            m.acts.push(crate::act::FaberAct::recovery("act.recovery.waited", "reason.waiting"));
+            m.acts.push(crate::act::FaberAct::recovery("act.recovery.waited", None));
             m.error = (!queued).then(|| "error.quotaWait".into());
             m.permissions = None;
         }

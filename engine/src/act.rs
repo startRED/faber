@@ -101,9 +101,12 @@ impl FaberAct {
         act.change = Some(ActChange::ToolKit);
         act
     }
-    pub fn recovery(what: &str, why: &str) -> Self {
+    /// Faber moved a reply to another subscription (`vendor` is the one it moved to) or waited for quota.
+    pub fn recovery(what: &str, vendor: Option<Vendor>) -> Self {
         let mut act = Self::new(ActKind::Recovery, what);
-        act.why = Some(why.into());
+        if let Some(vendor) = vendor {
+            act.params.insert("vendor".into(), vendor.name().into());
+        }
         act
     }
 }

@@ -6672,7 +6672,8 @@ fn faber_acts_wire_shape_and_unicode_limit() {
     assert_eq!(kit["kind"], "kit");
     assert_eq!(kit["params"]["ids"], "one, two");
     assert_eq!(kit["change"], "toolKit");
-    let recovery = serde_json::to_value(FaberAct::recovery("act.recovery.moved", "reason.moved.full")).unwrap();
+    let recovery = serde_json::to_value(FaberAct::recovery("act.recovery.moved", Some(Vendor::Codex))).unwrap();
     assert_eq!(recovery["kind"], "recovery");
-    assert_eq!(recovery["why"], "reason.moved.full");
+    assert_eq!(recovery["params"], json!({"vendor":"codex"}));
+    assert!(recovery.get("why").is_none(), "the sentence already says why");
 }

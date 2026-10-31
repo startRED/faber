@@ -5,6 +5,7 @@ export const de: Messages = {
   "act.route.chose": "hat {model} mit Aufwand {effort} gewählt",
   "act.kit.chose": "hat Werkzeuge für diese Aufgabe gewählt: {ids}",
   "act.recovery.moved": "hat an {vendor} übergeben, weil das Kontingent der ersten KI aufgebraucht war",
+  "act.recovery.waited": "wartet, bis das enthaltene Kontingent zurück ist",
   "act.helper.started": "hat einer weiteren KI diese Aufgabe gegeben",
   "act.why.keepGoing": "Weitermachen ist für diese Unterhaltung eingeschaltet und die KI hat angehalten",
   "act.why.compacted": "die KI danach weitermachen wollte",

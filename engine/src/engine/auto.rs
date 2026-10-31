@@ -515,13 +515,15 @@ impl Core {
         if let (Some(r), Some(t)) = (&routed, self.transfers.get_mut(id)) {
             t.check = r.check;
         }
+        // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
+        let from_router = routed.is_some();
         let pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
-            m.acts.push(crate::act::FaberAct::route(&pick, fallback.1));
+            m.acts.push(crate::act::FaberAct::route(&pick, if from_router { fallback.1 } else { crate::act::Actor::Faber }));
         }
         self.save(id);
         if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {

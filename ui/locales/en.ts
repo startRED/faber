@@ -5,6 +5,7 @@ export const en = {
   "act.route.chose": "chose {model}, {effort} effort",
   "act.kit.chose": "picked tools for this task: {ids}",
   "act.recovery.moved": "moved this to {vendor} because the first AI was out of quota",
+  "act.recovery.waited": "is waiting for the included quota to come back",
   "act.helper.started": "gave a helper this job",
   "act.why.keepGoing": "Keep going is on for this conversation and the AI stopped",
   "act.why.compacted": "the AI asked to continue afterward",

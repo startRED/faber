@@ -5,6 +5,7 @@ export const fr: Messages = {
   "act.route.chose": "a choisi {model}, effort {effort}",
   "act.kit.chose": "a choisi les outils pour cette tâche : {ids}",
   "act.recovery.moved": "a confié la suite à {vendor} car la première IA avait épuisé son quota",
+  "act.recovery.waited": "attend le retour du quota inclus",
   "act.helper.started": "a confié cette tâche à une IA de renfort",
   "act.why.keepGoing": "Continuer est activé pour cette conversation et l’IA s’est arrêtée",
   "act.why.compacted": "l’IA a demandé à continuer ensuite",
