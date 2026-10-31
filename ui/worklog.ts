@@ -1,7 +1,9 @@
-import type { Message, ToolUse } from './api.ts';
+import type { Change, ChangedLine, Message, ToolUse } from './api.ts';
 import { lang, t } from './i18n.ts';
 import { readsIn } from './language.ts';
 import type { Key } from './locales/en.ts';
+
+export type { Change, ChangedLine };
 
 // How a turn's work log reads on screen: reasoning summaries as separate short paragraphs and tool rows as a label plus
 // the command itself. The engine keeps what the CLI sent; the tidying lives here so older conversations get it too.
@@ -368,11 +370,6 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
   });
 }
 
-/** A line an edit step added or removed. */
-export interface ChangedLine {
-  added: boolean;
-  text: string;
-}
 /** The sites a reply opened, the one it opened last at the end, and the one it reads now (R161 step 9). Only a page read
  * names a site: a search names a query, and Codex reports its searches only. */
 export interface Sources {
@@ -405,14 +402,6 @@ export function sourcesOf(tools: ToolUse[]): Sources {
   // Still loading while later ones ended, it moves to the end too, so it never falls out of the four in view.
   if (now) hosts.push(...hosts.splice(hosts.indexOf(now), 1));
   return { hosts, now };
-}
-
-/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
- * removed, and the changed lines themselves. */
-export interface Change {
-  added: number;
-  removed: number;
-  lines: ChangedLine[];
 }
 
 const lines = (text: string) => (text ? text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') : []);
@@ -476,8 +465,9 @@ function codexChange(change: unknown): ChangedLine[] {
 }
 
 /** The lines an edit step changed: Claude Code's Edit, MultiEdit and Write, and Codex's file changes. Anything else, or an
- * edit that changed nothing, has none. */
+ * edit that changed nothing, has none. The engine's own reading comes first; reading the input is for older conversations. */
 export function changeOf(tool: ToolUse): Change | undefined {
+  if (tool.change) return tool.change;
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const input = tool.input as Record<string, unknown> | unknown[] | undefined;
   let changed: ChangedLine[] = [];

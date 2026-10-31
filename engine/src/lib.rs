@@ -7,6 +7,7 @@ pub mod background;
 pub mod browser;
 pub mod budget;
 pub mod cadence;
+pub mod change;
 pub mod changes;
 pub mod claude;
 pub mod claude_sessions;
