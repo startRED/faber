@@ -2275,6 +2275,7 @@ export const en = {
   'notes.336.better': 'Interrupted work resumes once when Faber opens again.',
   'notes.337.fixed': 'Work no longer shows as done when the AI never concluded it; it says it ended without a conclusion, and Faber asks the AI once to close it.',
   'notes.338.better': 'Opening a step to read it keeps the page still while the reply goes on below, and steps show short file names instead of long folder paths.',
+  'notes.339.better': "A big request is split again: the AI runs up to three conversations side by side and checks each one's work. Small requests stay in one conversation.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
