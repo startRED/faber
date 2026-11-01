@@ -95,6 +95,22 @@ impl Recents {
         self.folders.retain(|f| !same_place(f, path));
     }
 
+    /// Replaces `old` with `new` when a moved project folder is repointed, keeping environments pointed at the new place.
+    pub fn replace_folder(&mut self, old: &str, new: &str) -> Option<String> {
+        let new = resolved(new)?;
+        self.folders.retain(|f| !same_place(f, old) && !same_place(f, &new));
+        self.folders.insert(0, new.clone());
+        self.folders.truncate(MAX_RECENT);
+        for env in &mut self.environments {
+            for folder in &mut env.folders {
+                if same_place(folder, old) {
+                    *folder = new.clone();
+                }
+            }
+        }
+        Some(new)
+    }
+
     /// Saves (or replaces, when the name is already used) an environment. Errors are translation keys.
     pub fn save_environment(&mut self, id: String, name: &str, folders: &[String]) -> Result<(), &'static str> {
         let name: String = name.trim().chars().take(MAX_NAME).collect();

@@ -4,6 +4,8 @@ import themes from '../../src-tauri/src/themes.json';
 import { api, type Project } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
+import { Sidebar } from '../../ui/Sidebar.tsx';
+import { Welcome } from '../../ui/Welcome.tsx';
 import { keep, kept } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
 
@@ -187,4 +189,112 @@ check('settings projects: the separate copies switch is on by default and turns 
     equal(JSON.stringify(saved), JSON.stringify([demo.id, false]));
     ok(!box.checked, 'the switch stays off');
   });
+});
+
+check('projects recovery_320: a moved or missing project folder offers Find the folder and Remove from Faber, and an unclean exit shows one calm home note', async () => {
+  useLanguage('en');
+  const missing = { id: 'p-moved', name: 'Moved repo', path: 'C:/fixture/moved', state: 'missing' as const } as Project;
+  const disconnected = { id: 'p-drive', name: 'USB repo', path: 'E:/fixture/usb', state: 'disconnected' as const } as Project;
+  const [unclean, setUnclean] = createSignal<{ at: number; panic: boolean } | undefined>({ at: 1000, panic: true });
+  const [active, setActive] = createSignal<Project>(missing);
+  const actions: string[] = [];
+
+  const root = document.createElement('div');
+  root.dataset.motion = 'none';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  document.body.append(root);
+  const dispose = render(
+    () => [
+      createComponent(Sidebar, {
+        conversations: [{ id: 'c1', title: 'Existing work', area: 'project', projectId: missing.id, updatedAt: 1000 }],
+        projects: [missing, disconnected],
+        vendors: ['claude'],
+        version: '0.1.0',
+        place: { area: 'project', projectId: missing.id },
+        running: [],
+        quotas: {},
+        now: 1000,
+        onNew: () => {},
+        onArea: () => {},
+        onProject: () => {},
+        onNewIn: () => {},
+        onAddProject: () => {},
+        onOpen: () => {},
+        onRemove: () => {},
+        onSettings: () => {},
+        ...({
+          onFindProjectFolder: (id: string) => actions.push(`side-find:${id}`),
+          onRemoveProject: (id: string) => actions.push(`side-remove:${id}`),
+        } as Record<string, unknown>),
+      }),
+      createComponent(Welcome, {
+        recent: [{ id: 'c1', title: 'Existing work', area: 'project', projectId: missing.id, updatedAt: 1000 }],
+        running: [],
+        projects: [missing, disconnected],
+        get project() {
+          return active();
+        },
+        onSuggest: () => {},
+        onOpen: () => {},
+        get children() {
+          return null;
+        },
+        get uncleanExit() {
+          return unclean();
+        },
+        onDismissUncleanExit: () => {
+          actions.push('dismiss-crash');
+          setUnclean(undefined);
+        },
+        onOpenLogFolder: () => actions.push('open-logs'),
+        onFindProjectFolder: (id: string) => actions.push(`home-find:${id}`),
+        onRemoveProject: (id: string) => actions.push(`home-remove:${id}`),
+      }),
+    ],
+    root,
+  );
+  try {
+    await settle();
+    const sideRow = root.querySelector('[data-project-id="p-moved"] .proj-missing');
+    ok(sideRow, 'the sidebar row of a missing project explains that the folder is missing');
+    ok(sideRow?.textContent?.includes('C:/fixture/moved'), 'the sidebar names the missing folder');
+    await click(sideRow?.querySelector('[data-action="find-folder"]'));
+    await click(sideRow?.querySelector('[data-action="remove-project"]'));
+
+    const card = root.querySelector('[data-testid="project-missing"]');
+    ok(card, 'the project home shows the missing-folder explanation');
+    ok(card?.textContent?.includes('The folder C:/fixture/moved is missing or was moved.'), 'explains the missing folder');
+    ok(card?.textContent?.includes('Find the folder'), 'offers Find the folder');
+    ok(card?.textContent?.includes('Remove from Faber'), 'offers Remove from Faber');
+    await click(card?.querySelector('[data-action="find-folder"]'));
+    await click(card?.querySelector('[data-action="remove-project"]'));
+
+    setActive(disconnected);
+    await settle();
+    ok(
+      root.querySelector('[data-testid="project-missing"]')?.textContent?.includes('The drive for E:/fixture/usb is not connected right now.'),
+      'a disconnected drive says the drive is not connected right now',
+    );
+
+    const crashNote = root.querySelector('[data-testid="crash-note"]');
+    ok(crashNote, 'an unclean exit shows one calm home note');
+    ok(crashNote?.textContent?.includes('Faber did not finish closing last time. Your conversations and projects are safe.'), 'calm crash note words');
+    ok(crashNote?.textContent?.includes(new Date(1000).toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' })), 'shows the localized time');
+    ok(crashNote?.textContent?.includes('A panic was recorded.'), 'says a panic was recorded');
+    setUnclean({ at: 1000, panic: false });
+    await settle();
+    ok(crashNote?.textContent?.includes('No panic was recorded.'), 'says when no panic was recorded');
+    ok(crashNote?.textContent?.includes('Open the log folder'), 'offers Open the log folder');
+    await click(crashNote?.querySelector('[data-action="open-logs"]'));
+    await click(crashNote?.querySelector('[data-action="dismiss-crash"]'));
+    equal(root.querySelector('[data-testid="crash-note"]'), null, 'dismissing removes the calm crash note');
+    equal(
+      actions.join('|'),
+      'side-find:p-moved|side-remove:p-moved|home-find:p-moved|home-remove:p-moved|open-logs|dismiss-crash',
+      'every recovery action triggers its handler',
+    );
+  } finally {
+    dispose();
+    root.remove();
+  }
 });

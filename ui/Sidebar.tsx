@@ -109,6 +109,8 @@ interface Props {
   /** A new conversation in this project. */
   onNewIn: (id: string) => void;
   onAddProject: () => void;
+  onFindProjectFolder?: (id: string) => void;
+  onRemoveProject?: (id: string) => void;
   onOpen: (conversation: Summary) => void;
   onMoved?: (conversation: Conversation) => void;
   onMessage?: (hit: MessageHit) => void;
@@ -448,16 +450,28 @@ export function Sidebar(props: Props) {
                 const tail = () => tailOf(props.running, p.id);
                 const here = () => props.place.area === 'project' && props.place.projectId === p.id;
                 const shown = keepForExit(() => expanded(p));
+                const gone = () => p.state === 'missing' || p.state === 'disconnected';
+                const findFolder = () => (props.onFindProjectFolder ? props.onFindProjectFolder(p.id) : void api.repointProject(p.id).catch((err) => props.onError?.(err)));
+                const removeFromFaber = () => (props.onRemoveProject ? props.onRemoveProject(p.id) : void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)));
                 return (
-                  <div class="proj">
+                  <div class="proj" data-project-id={p.id} data-folder-state={p.state ?? 'present'}>
                     <div
                       class="prow"
+                      classList={{ gone: gone() }}
                       onContextMenu={(e) =>
-                        openMenu(e, [
-                          { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
-                          { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
-                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
-                        ])
+                        openMenu(
+                          e,
+                          gone()
+                            ? [
+                                { id: 'find', label: t('projects.findFolder'), run: findFolder },
+                                { id: 'remove', label: t('projects.removeFromFaber'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: removeFromFaber },
+                              ]
+                            : [
+                                { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
+                                { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
+                                { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
+                              ],
+                        )
                       }
                     >
                       <button
@@ -487,6 +501,19 @@ export function Sidebar(props: Props) {
                         <Icon name="plus" small />
                       </button>
                     </div>
+                    <Show when={gone()}>
+                      <div class="proj-missing" role="status">
+                        <p>{t(p.state === 'disconnected' ? 'projects.disconnectedNote' : 'projects.missingNote', { path: p.path })}</p>
+                        <div class="proj-missing-actions">
+                          <button type="button" class="btn" data-action="find-folder" onClick={findFolder}>
+                            {t('projects.findFolder')}
+                          </button>
+                          <button type="button" class="btn ghost" data-action="remove-project" disabled={tail().running} onClick={removeFromFaber}>
+                            {t('projects.removeFromFaber')}
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
                     <div class="fold" classList={{ open: expanded(p) }} inert={!expanded(p)}>
                       <div class="fold-inner">
                         <Show when={shown()}>

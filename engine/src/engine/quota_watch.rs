@@ -103,6 +103,9 @@ impl Engine {
     /// The window was shown, hidden or focused (the screen says). Gaining focus reads at once; while hidden, readings slow down.
     pub fn set_attention(&self, visible: bool, focused: bool) {
         self.with(|c| {
+            if focused {
+                c.refresh_project_folders();
+            }
             if !c.watching {
                 return;
             }

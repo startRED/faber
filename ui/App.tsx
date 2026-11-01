@@ -1,5 +1,5 @@
 import { ChatGroup } from './ChatGroup.tsx';
-import { createComputed, createEffect, createMemo, createResource, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createComputed, createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
@@ -49,6 +49,7 @@ import { animateDetails, animateList, keepForExit, leaveColumn, watchMotion } fr
 import { Palette } from './Palette.tsx';
 import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
 import { Projects } from './Projects.tsx';
+import { forgetProject } from './projects.ts';
 import { createOpening, upsert, whole } from './opening.ts';
 import { Running } from './Running.tsx';
 import { openedDetails, showDetails } from './Details.tsx';
@@ -71,6 +72,7 @@ import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
+import { CrashNote, MissingFolder } from './RecoveryNotes.tsx';
 import { ProjectGoals } from './ProjectGoals.tsx';
 import { ProjectMemory } from './ProjectMemory.tsx';
 import { UpdateStage } from './UpdateStage.tsx';
@@ -1062,6 +1064,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const watchFocus = (e: FocusEvent) => {
       if (!tourOpen() && e.target instanceof HTMLElement) lastFocus = new WeakRef(e.target);
     };
+    const onWindowFocus = () => void refresh().catch(() => {});
     document.addEventListener('focusin', watchFocus);
     const typingEvents = ['keydown', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
     for (const type of typingEvents) window.addEventListener(type, typing, true);
@@ -1071,6 +1074,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // Returning without a held button clears a release that happened outside the window.
     window.addEventListener('pointerover', releasePointer, true);
     window.addEventListener('blur', releasePointers);
+    window.addEventListener('focus', onWindowFocus);
     window.addEventListener('keydown', onKey);
     onCleanup(() => {
       stopFollowing();
@@ -1083,6 +1087,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       window.removeEventListener('pointercancel', releasePointer, true);
       window.removeEventListener('pointerover', releasePointer, true);
       window.removeEventListener('blur', releasePointers);
+      window.removeEventListener('focus', onWindowFocus);
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('focusin', watchFocus);
     });
@@ -1283,6 +1288,31 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!projects.length) return;
     closeSide(false);
     void fresh({ area: 'project', projectId: projects[0].id });
+  };
+  const findProjectFolder = async (id: string) => {
+    try {
+      await api.repointProject(id);
+      await refresh();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const removeProjectFromFaber = async (id: string) => {
+    try {
+      await api.removeProject(id);
+      forgetProject(id);
+      if (projectId() === id) void fresh({ area: 'project', projectId: undefined });
+      await refresh();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const dismissUncleanExit = () => {
+    setState((s) => ({ ...s, uncleanExit: undefined }));
+    void api.dismissUncleanExit().catch(() => {});
+  };
+  const openLogFolder = () => {
+    void api.openLogFolder().catch(fail);
   };
   const retryRemovedDrafts = async () => {
     if (retryingDraftRemoval()) return;
@@ -1745,6 +1775,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onProject={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
+                onFindProjectFolder={(id) => void findProjectFolder(id)}
+                onRemoveProject={(id) => void removeProjectFromFaber(id)}
                 onOpen={openSummary}
                 onMoved={(c) => {
                   void refresh();
@@ -1910,9 +1942,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                 onCleanup(() => tailWatch().unobserve(el));
                               });
                             }}>
+                              <MissingFolder project={area() === 'project' ? project() : undefined} onFind={(id) => void findProjectFolder(id)} onRemove={(id) => void removeProjectFromFaber(id)} />
                               <Show
                                 when={current()?.messages.length || current()?.rewindNotice ? current() : undefined}
-                                fallback={<><NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} /><Show when={area() === 'project' ? project() : undefined}>{(project) => <><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show></>}
+                                fallback={<><NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} /><Show when={area() === 'project' && project() && project()!.state !== 'missing' && project()!.state !== 'disconnected' ? project() : undefined}>{(project) => <><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show></>}
                               >
                                 {(c) => (
                                   <Thread
@@ -1964,6 +1997,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             onSuggest={(text) => fill?.(text)}
                             onOpen={openSummary}
                             terminal={terminalHere() ? fromTerminal : undefined}
+                            uncleanExit={state().uncleanExit}
+                            onDismissUncleanExit={dismissUncleanExit}
+                            onOpenLogFolder={openLogFolder}
+                            onFindProjectFolder={(id) => void findProjectFolder(id)}
+                            onRemoveProject={(id) => void removeProjectFromFaber(id)}
                           >
                             {composer()}
                           </Welcome>
@@ -2007,6 +2045,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     </>
                   }
                 >
+                  <CrashNote exit={state().uncleanExit} onDismiss={dismissUncleanExit} onOpenLogs={openLogFolder} />
+                  <For each={state().projects.filter((p) => p.state === 'missing' || p.state === 'disconnected')}>
+                    {(p) => <MissingFolder project={p} onFind={(id) => void findProjectFolder(id)} onRemove={(id) => void removeProjectFromFaber(id)} />}
+                  </For>
                   <Projects
                     vendors={state().vendors}
                     projects={state().projects}

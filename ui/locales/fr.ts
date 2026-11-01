@@ -2272,5 +2272,17 @@ export const fr: Messages = {
   'piece.discard': "Abandonner la modification",
   'piece.retry': "Réessayer",
   'piece.show': "Afficher {title}",
+  'error.project.missing': 'Le dossier de ce projet est introuvable ou a été déplacé. Indiquez son nouvel emplacement à Faber ou retirez-le.',
+  'error.project.disconnected': 'Le disque du dossier de ce projet n’est pas branché pour le moment.',
+  'projects.missingNote': 'Le dossier {path} est introuvable ou a été déplacé. Vos conversations sont toujours là.',
+  'projects.disconnectedNote': 'Le disque de {path} n’est pas branché pour le moment. Vos conversations sont toujours là.',
+  'projects.findFolder': 'Trouver le dossier',
+  'projects.removeFromFaber': 'Retirer de Faber',
+  'crash.note': 'Faber ne s’est pas fermé normalement la dernière fois. Vos conversations et vos projets sont intacts.',
+  'crash.noteWhen': "La session précédente a été trouvée non fermée le {when}.",
+  'crash.notePanic': "Une erreur grave a été enregistrée.",
+  'crash.noteNoPanic': "Aucune erreur grave n’a été enregistrée.",
+  'crash.openLogs': 'Ouvrir le dossier des journaux',
+  'crash.dismiss': 'Fermer',
 
 };

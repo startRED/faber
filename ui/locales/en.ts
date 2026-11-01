@@ -2152,6 +2152,18 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.project.missing': 'This project folder is missing or was moved. Point Faber to its new place or remove it.',
+  'error.project.disconnected': 'The drive for this project folder is not connected right now.',
+  'projects.missingNote': 'The folder {path} is missing or was moved. Your conversations are still here.',
+  'projects.disconnectedNote': 'The drive for {path} is not connected right now. Your conversations are still here.',
+  'projects.findFolder': 'Find the folder',
+  'projects.removeFromFaber': 'Remove from Faber',
+  'crash.note': 'Faber did not finish closing last time. Your conversations and projects are safe.',
+  'crash.noteWhen': "The previous run was found unclosed at {when}.",
+  'crash.notePanic': "A panic was recorded.",
+  'crash.noteNoPanic': "No panic was recorded.",
+  'crash.openLogs': 'Open the log folder',
+  'crash.dismiss': 'Dismiss',
 
 } as const;
 

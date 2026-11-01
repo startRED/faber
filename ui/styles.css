@@ -1855,3 +1855,9 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
 .goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
 .goal-add .goal-words { flex-basis: 100%; margin: 0; }
+.prow.gone > .item { color: var(--ink-3); }
+.proj-missing, .project-missing-card, .crash-note { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s1); color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.proj-missing { margin: 4px 0 8px; padding: 10px 12px; }
+.project-missing-card, .crash-note { margin: 0 0 14px; }
+.proj-missing p, .project-missing-card p, .crash-note p { margin: 0; line-height: 1.5; }
+.proj-missing-actions, .project-missing-actions, .crash-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

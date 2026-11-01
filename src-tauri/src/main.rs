@@ -861,6 +861,36 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
     faber.engine.open_folder(&path.to_string_lossy()).map(Some)
 }
 
+/// Points a moved or missing project at its new folder (`Find the folder`), keeping its id and conversations intact.
+#[tauri::command]
+async fn repoint_project(app: AppHandle, faber: State<'_, Faber>, id: String, path: Option<String>) -> Res<Option<Project>> {
+    project_commands::id(&id)?;
+    if let Some(path) = path {
+        return faber.engine.repoint_project(&id, &path).map(Some);
+    }
+    if faber.hidden {
+        return Err("error.project.missing".into());
+    }
+    let mut dialog = app.dialog().file();
+    if let Some(w) = main_window(&app) {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
+    let path = picked.into_path().map_err(|_| "error.folder.notLocal")?;
+    faber.engine.repoint_project(&id, &path.to_string_lossy()).map(Some)
+}
+
+/// Opens the local data folder where `crashes.jsonl` lives from the calm recovery note.
+#[tauri::command]
+async fn open_log_folder(app: AppHandle, faber: State<'_, Faber>) -> Res<String> {
+    let crash_file = faber.data_dir.join(faber_engine::crash::CRASHES);
+    let target = if crash_file.exists() { crash_file } else { faber.data_dir.clone() };
+    if !faber.hidden && !cfg!(feature = "test-hooks") {
+        app.opener().reveal_item_in_dir(&target).map_err(|_| "error.file.show".to_string())?;
+    }
+    Ok(faber.data_dir.to_string_lossy().into_owned())
+}
+
 /// The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key.
 #[tauri::command]
 async fn recents(faber: State<'_, Faber>) -> Res<faber_engine::recents::RecentsView> {
@@ -1815,6 +1845,8 @@ fn main() {
                 export_conversation,
                 open_theme,
                 add_project,
+                repoint_project,
+                open_log_folder,
                 recents,
                 open_folders,
                 forget_recent,

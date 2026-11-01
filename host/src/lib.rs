@@ -264,6 +264,10 @@ table! {
     Write fn answer(h, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> () {
         h.engine.answer(&id, &turn_id, &request_id, allow, always).await
     }
+    Write fn dismiss_unclean_exit(h) -> () {
+        h.engine.dismiss_unclean_exit();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

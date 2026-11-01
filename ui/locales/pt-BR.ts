@@ -2259,5 +2259,17 @@ export const ptBR: Messages = {
   'piece.discard': "Descartar alteração",
   'piece.retry': "Tentar de novo",
   'piece.show': "Mostrar {title}",
+  'error.project.missing': 'A pasta deste projeto não foi encontrada ou mudou de lugar. Aponte o novo lugar no Faber ou remova o projeto.',
+  'error.project.disconnected': 'A unidade da pasta deste projeto não está conectada agora.',
+  'projects.missingNote': 'A pasta {path} não foi encontrada ou mudou de lugar. Suas conversas continuam aqui.',
+  'projects.disconnectedNote': 'A unidade de {path} não está conectada agora. Suas conversas continuam aqui.',
+  'projects.findFolder': 'Encontrar a pasta',
+  'projects.removeFromFaber': 'Remover do Faber',
+  'crash.note': 'O Faber não terminou de fechar da última vez. Suas conversas e projetos estão salvos.',
+  'crash.noteWhen': "O fechamento anterior foi encontrado incompleto em {when}.",
+  'crash.notePanic': "Um erro grave foi registrado.",
+  'crash.noteNoPanic': "Nenhum erro grave foi registrado.",
+  'crash.openLogs': 'Abrir a pasta de registros',
+  'crash.dismiss': 'Fechar',
 
 };

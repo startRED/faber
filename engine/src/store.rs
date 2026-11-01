@@ -492,7 +492,15 @@ impl Store {
     }
 
     pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
-        self.write(&self.projects, &projects)?;
+        let mut raw = serde_json::to_value(projects).map_err(|_| Fault::Corrupt)?;
+        if let Some(items) = raw.as_array_mut() {
+            for item in items {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.remove("state");
+                }
+            }
+        }
+        self.write(&self.projects, &raw)?;
         // A project that left the list takes its local method count with it (`method_log`).
         if let Some(dir) = self.projects.parent() {
             crate::method_log::forget(dir, &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>());
