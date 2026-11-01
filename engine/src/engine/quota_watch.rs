@@ -116,6 +116,8 @@ impl Core {
                         }
                         c.emit_usage();
                     }
+                    // Not yet: no CLI is discovered for it, so the loop above skipped it.
+                    Vendor::Gemini => {}
                 }
             });
         }

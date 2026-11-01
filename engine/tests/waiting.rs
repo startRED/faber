@@ -44,7 +44,7 @@ async fn moved_attachment_handover(long: bool) {
             data_dir: dir.path().into(),
             #[cfg(windows)]
             chat_dir: dir.chat_path().into(),
-            clis: Vendor::ALL.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
+            clis: Vendor::RUNNABLE.into_iter().map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
             spawn,
             windows: false,
             claude_env_billed: false,
@@ -58,7 +58,7 @@ async fn moved_attachment_handover(long: bool) {
     .unwrap();
     engine.set_time_source(Arc::new(|| WHEN as f64));
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
-    for v in Vendor::ALL {
+    for v in Vendor::RUNNABLE {
         engine.note_account_events(
             v,
             vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Default::default() })],
@@ -112,7 +112,7 @@ async fn moved_attachment_handover(long: bool) {
 
 #[tokio::test]
 async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_for_each_cli() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for reopened in [false, true] {
             let dir = support::DataFolder::new();
             dir.initialize_chat();
@@ -414,7 +414,7 @@ async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendo
                 .unwrap();
             entries.insert(at, Entry { input: false, msg: json!({"method":"item/started","params":{"item":{"type":"commandExecution","id":"resume-tool","command":"check"}}}) });
         }
-        let r = sources(&dir, &Vendor::ALL, claude, fake(entries));
+        let r = sources(&dir, &Vendor::RUNNABLE, claude, fake(entries));
         let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
         let m = reply(&r.engine, &id, Status::Done).await;
         assert_eq!(m.vendor, Some(Vendor::Codex));
@@ -446,7 +446,7 @@ async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendo
 async fn a_family_limit_resumes_on_another_family_of_the_same_vendor() {
     let dir = support::DataFolder::new();
     let before = seed(dir.path(), false);
-    let r = rig(&dir, &Vendor::ALL, fake(vec![]));
+    let r = rig(&dir, &Vendor::RUNNABLE, fake(vec![]));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 172800, 1.0)]);
     let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
     let m = reply(&r.engine, &id, Status::Done).await;
@@ -634,7 +634,7 @@ async fn a_failed_hand_over_ends_with_move_failed_and_keeps_the_conversation() {
     entries[at].msg["params"]["input"][0]["text"] = json!(prompt);
     entries.truncate(at + 1);
     entries.push(support::Entry { input: false, msg: json!({"id":3,"error":{"code":-1,"message":"summary unavailable"}}) });
-    let r = rig(&dir, &Vendor::ALL, fake(entries));
+    let r = rig(&dir, &Vendor::RUNNABLE, fake(entries));
     r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
     let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
     let m = reply(&r.engine, &id, Status::Error).await;
@@ -703,7 +703,7 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
     codex.push(done);
     let r = asking(
         &dir,
-        &Vendor::ALL,
+        &Vendor::RUNNABLE,
         fake(fixture("claude", "chat")),
         fake(codex),
         r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,
@@ -738,7 +738,7 @@ async fn a_lifted_pick_that_runs_out_of_quota_is_re_picked_and_the_answer_no_lon
     codex.push(done);
     let r = asking(
         &dir,
-        &Vendor::ALL,
+        &Vendor::RUNNABLE,
         fake(fixture("claude", "chat")),
         fake(codex),
         r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,

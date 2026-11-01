@@ -87,6 +87,8 @@ pub fn project_names_with(root: &Path, vendor: Vendor, home: Option<&Path>, read
     let relative = match vendor {
         Vendor::Claude => ".mcp.json",
         Vendor::Codex => ".codex/config.toml",
+        // Not yet: its server file is read once its CLI runs.
+        Vendor::Gemini => return BTreeSet::new(),
     };
     let Some(path) = project_file(root, relative, home) else { return BTreeSet::new() };
     let Some(text) = read(&path) else { return BTreeSet::new() };
@@ -107,6 +109,7 @@ pub fn project_names_with(root: &Path, vendor: Vendor, home: Option<&Path>, read
             }
             toml::from_str::<Names>(&text).map(|n| n.mcp_servers.into_keys().take(256).collect()).unwrap_or_default()
         }
+        Vendor::Gemini => BTreeSet::new(),
     }
 }
 

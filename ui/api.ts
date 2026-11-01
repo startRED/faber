@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 // The shapes the engine sends (engine/src/model.rs).
-export type Vendor = 'claude' | 'codex';
+export type Vendor = 'claude' | 'codex' | 'gemini';
 
 /**
  * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole

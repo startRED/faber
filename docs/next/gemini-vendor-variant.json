@@ -1,0 +1,3 @@
+{
+  "decisions": ["| R-next | 2026-10-30 | Gemini through Antigravity's CLI (`agy`) becomes Faber's third AI for Projects, amending the non-goal that ruled out vendors other than Claude Code and Codex. Task 055 only makes the engine know it (`Vendor::Gemini`); discovering, signing in, limits, routing and starting it are the tasks that follow, and until then everything that discovers, lists or starts an AI walks `Vendor::RUNNABLE` (Claude and Codex). | Owner |"]
+}

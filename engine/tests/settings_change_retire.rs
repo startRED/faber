@@ -528,7 +528,7 @@ async fn retired_codex_closes_when_quota_stops_its_last_turn_in_chat_and_project
 
 #[tokio::test]
 async fn a_keep_going_halt_at_turn_end_still_checks_edits_before_retiring() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for failed in [false, true] {
             let dir = support::DataFolder::new();
             let folder = support::work_folder();
@@ -627,7 +627,7 @@ async fn settings_relaunch_routes_a_delayed_background_start_to_its_retired_owne
 
 #[tokio::test]
 async fn settings_relaunch_keeps_background_commands_running_until_they_end() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         for permissions in [false, true] {
             let dir = support::DataFolder::new();
             let (spawn, made) = pipes();

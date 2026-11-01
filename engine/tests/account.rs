@@ -173,6 +173,7 @@ fn status_spawner(stdout: &'static str, stderr: &'static str, hangs: bool) -> (S
 
 fn status_args(vendor: Vendor) -> Vec<String> {
     match vendor {
+        Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
         Vendor::Claude => vec!["auth".into(), "status".into()],
         Vendor::Codex => vec!["login".into(), "status".into()],
     }

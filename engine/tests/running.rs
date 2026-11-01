@@ -611,7 +611,7 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
             Poll::Pending
         }
     }
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let triggers = Arc::new(std::sync::Mutex::new(Vec::new()));
         let keep = triggers.clone();
         let spawn: Spawner = Arc::new(move |_, _, _| {
