@@ -7,8 +7,9 @@ import { t } from './i18n.ts';
 export const planWords = (n: PlanCount) => t('plan.count', { done: n.done, total: n.total });
 
 /** The agent's plan under the newest reply (task 017): done steps checked and dimmed, the current one in ink with what the agent
- * says it is doing now beside it, pending ones plain. It is a list of facts: nothing in it moves or takes input. */
-export function PlanList(props: { plan: Plan; now?: string }) {
+ * says it is doing now beside it, pending ones plain. A step another conversation does names it under the step's text, as a
+ * quiet link that opens it, with where it stands in a subagent row's words (task 040). Nothing else in it moves or takes input. */
+export function PlanList(props: { plan: Plan; now?: string; names?: Record<string, string>; onOpen?: (id: string) => void }) {
   const count = () => ({ done: props.plan.steps.filter((s) => s.state === 'done').length, total: props.plan.steps.length });
   return (
     <section class="plan" aria-label={t('plan.label')}>
@@ -30,6 +31,16 @@ export function PlanList(props: { plan: Plan; now?: string }) {
                 <span class="now"> · {props.now}</span>
               </Show>
               <span class="sr">{t(`plan.state.${step.state}`)}</span>
+              <Show when={step.conversation}>
+                {(id) => (
+                  <span class="member">
+                    <button type="button" class="link" onClick={() => props.onOpen?.(id())}>
+                      {props.names?.[id()] || t('agent.untitled')}
+                    </button>
+                    <Show when={step.member}>{(state) => <span class="member-state" data-state={state()}> · {t(`agent.${state()}`)}</span>}</Show>
+                  </span>
+                )}
+              </Show>
             </li>
           )}
         </For>

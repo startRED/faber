@@ -51,6 +51,19 @@ fn state_of(busy: bool, c: &Conversation) -> State {
     }
 }
 
+/// Where a plan step's conversation stands (task 040), in a subagent row's words.
+pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
+    match state_of(busy, c) {
+        State::Working => MemberState::Running,
+        State::Waiting => MemberState::Waiting,
+        State::Finished => MemberState::Done,
+        State::Failed => MemberState::Failed,
+        State::Stopped => MemberState::Stopped,
+        // Cut off when Faber closed: not running, and a resume picks it up; the plan says stopped.
+        State::Interrupted => MemberState::Stopped,
+    }
+}
+
 impl Core {
     /// Reports owed when Faber opens: those saved as owed (a close that cut a member's turn off marks it, `shutdown`), and
     /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
@@ -299,8 +312,8 @@ impl Core {
         if *step == before {
             return false;
         }
-        let plan = c.shown_plan();
         self.save(lead);
+        let plan = self.shown_plan(lead);
         (self.emit)(AppEvent::Plan { conversation_id: lead.to_string(), plan });
         true
     }

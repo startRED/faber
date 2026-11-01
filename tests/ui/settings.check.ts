@@ -30,14 +30,47 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
 check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
   ok(!Object.keys(en).some((key) => key.startsWith('project.permissions')), 'no permission sentence is kept for the top of a conversation');
   const body = en['set.permissionsDontAskBody'];
-  for (const word of ['internet', 'any folder', 'steer', 'pick Ask for', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands', 'best effort', 'Stop asks the tools to stop']) ok(body.includes(word), word);
   ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');
-  ok(body.split('. ').length <= 5, 'one short paragraph');
   ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
   const ask = en['set.permissionsAskBody'];
   ok(ask.includes('ask the tools to stop and end the programs they started') && ask.includes('before changing a file') && ask.includes('plain reading commands'), ask);
   ok(ask.includes('except the ones you already allowed in the tool\x27s own settings'), 'Ask names what the tools\x27 own settings can pre-approve');
   ok(en['error.workingFolder'].includes('system files') && en['error.workingFolder'].includes('sign-in keys'));
+});
+
+check('the Full access text is a short list: every warning is its own short sentence, none dropped', () => {
+  // Each point is found whole inside one sentence: what Full access does, the five warnings, what to do and what Stop does.
+  const points = {
+    en: [
+      [/run commands and change files without asking/, /internet/],
+      [/any folder you choose/, /except system and sign-in folders/],
+      [/connected tools and hooks stay on/],
+      [/page or file the AI reads could steer it/, /network without asking/],
+      [/Codex can read your sign-in and key folders/, /\.ssh/, /directly/],
+      [/Claude Code can read them through commands/],
+      [/Blocking those folders for commands is best effort/],
+      [/So, for anything you do not trust, pick Ask/],
+      [/Stop asks the tools to stop and ends the programs they started/],
+    ],
+    'pt-BR': [
+      [/executam comandos e alteram arquivos sem perguntar/, /internet/],
+      [/qualquer pasta que você escolher/, /exceto pastas do sistema e de login/],
+      [/ferramentas conectadas e hooks continuam ativos/],
+      [/página ou arquivo que a IA lê pode induzi-la/, /rede sem perguntar/],
+      [/Codex pode ler diretamente suas pastas de login e de chaves/, /\.ssh/],
+      [/Claude Code pode lê-las por meio de comandos/],
+      [/bloqueio dessas pastas nos comandos funciona só na medida do possível/],
+      [/Por isso, para o que não for de confiança, use Perguntar/],
+      [/Parar pede às ferramentas que parem e encerra os programas que elas iniciaram/],
+    ],
+  };
+  for (const [lang, text] of [['en', en['set.permissionsDontAskBody']], ['pt-BR', ptBR['set.permissionsDontAskBody']]] as const) {
+    const items = text.split('\n');
+    ok(items.length >= 4, `${lang}: a short list, one point per line`);
+    const sentences = items.flatMap((item) => item.split(/(?<=[.!?])\s+/));
+    for (const s of sentences) ok(s.split(/\s+/).length <= 25, `${lang}: under 25 words: ${s}`);
+    for (const point of points[lang]) ok(sentences.some((s) => point.every((p) => p.test(s))), `${lang}: ${point.join(' ')}`);
+  }
 });
 
 const look = (over: Partial<Look> = {}): Look => ({
@@ -520,7 +553,7 @@ check('R140: the permission menu lists five modes with one plain line each, and 
     deepEqual(options().map((o) => o.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
     for (const row of options()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
     deepEqual(options().map((o) => o.getAttribute('aria-selected')), ['false', 'false', 'false', 'false', 'true']);
-    const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => view.host.textContent!.includes(en[key]);
+    const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => en[key].split('\n').every((line) => view.host.textContent!.includes(line));
     equal(body('set.permissionsDontAskBody'), false, 'the long risk text is not on the page');
     const more = view.host.querySelector<HTMLButtonElement>('#set-permissions-q')!;
     equal(more.getAttribute('aria-expanded'), 'false');
