@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Quota refreshes after sleep, and conversation handoffs explain which AI took over without blaming the same AI for an exhausted quota.",
+      "pt-BR": "A cota é atualizada depois que o PC acorda, e a transferência da conversa mostra qual IA assumiu sem dizer que a mesma IA ficou sem cota.",
+      "es": "La cuota se actualiza al despertar el equipo y el traspaso de la conversación indica qué IA continúa sin afirmar que esa misma IA agotó su cuota.",
+      "fr": "Le quota est actualisé au réveil et le transfert de la conversation indique quelle IA prend la suite sans dire que cette même IA a épuisé son quota.",
+      "de": "Nach dem Aufwachen wird das Kontingent aktualisiert, und bei einer Gesprächsübergabe steht, welche KI übernimmt, ohne derselben KI ein leeres Kontingent zuzuschreiben."
+    }
+  },
+  "decisions": []
+}

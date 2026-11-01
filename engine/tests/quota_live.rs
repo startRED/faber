@@ -807,3 +807,91 @@ async fn no_reading_starts_once_the_engine_is_shutting_down() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(probe.calls.lock().unwrap().len(), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_eight_hour_sleep_refreshes_at_the_next_tick_without_foreign_use() {
+    let dir = support::DataFolder::new();
+    let probe = Probe::saying(usage_json(0));
+    let (engine, time) = start(&dir, probe.spawner(None));
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("the first reading", || engine.ledger().claude.readings.len() == 2).await;
+    let woke = WHEN + 8 * 3600;
+    probe.hold.store(true, Ordering::SeqCst);
+    *probe.text.lock().unwrap() = usage_json(0).replace("36%", "86%");
+    time.store(woke, Ordering::SeqCst);
+    tokio::time::advance(Duration::from_secs_f64(TICK)).await;
+    until("wake starts a refresh on the existing tick", || probe.calls.lock().unwrap().len() == 2).await;
+    let ledger = engine.ledger().claude;
+    assert!(ledger.readings.values().all(|r| r.read_at < woke as f64 - faber_engine::budget::STALE_SECS));
+    assert!(ledger.zero_turn_readings.is_empty(), "old no-model evidence is stale too");
+    probe.release().await;
+    until("the post-sleep baseline", || engine.ledger().claude.readings["seven_day"].used == 0.86).await;
+    assert!(!engine.state().usage[0].foreign_use, "the unobserved jump is not foreign use");
+    assert_eq!(engine.ledger().claude.outside(woke as f64).share(), None);
+    // New observations still detect outside use after the first post-wake baseline.
+    time.store(woke + 60, Ordering::SeqCst);
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![EngineEvent::Quota { window: "seven_day".into(), used: 0.96, resets_at: 1_792_137_600.0 }],
+    );
+    assert!(engine.state().usage[0].foreign_use);
+    engine.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn focusing_after_sleep_keeps_the_post_wake_baseline() {
+    let dir = support::DataFolder::new();
+    let probe = Probe::saying(usage_json(0));
+    let (engine, time) = start(&dir, probe.spawner(None));
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("first reading", || engine.ledger().claude.readings.len() == 2).await;
+    *probe.text.lock().unwrap() = usage_json(0).replace("36%", "86%");
+    time.store(WHEN + 8 * 3600, Ordering::SeqCst);
+    engine.set_attention(true, true);
+    until("focus refresh", || engine.ledger().claude.readings["seven_day"].used == 0.86).await;
+    tokio::time::advance(Duration::from_secs_f64(TICK)).await;
+    assert!(!engine.state().usage[0].foreign_use);
+    assert_eq!(probe.calls.lock().unwrap().len(), 2, "focus and tick share the read");
+    engine.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn quota_refreshes_are_serial_across_calls_and_stop_when_closing() {
+    for close in [false, true] {
+        let dir = support::DataFolder::new();
+        let probe = Probe::saying(usage_json(0));
+        probe.hold.store(true, Ordering::SeqCst);
+        let starts = Arc::new(AtomicU64::new(0));
+        let seen = starts.clone();
+        let other: Spawner = Arc::new(move |_, _, _| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::other("fake Codex read failed"))
+        });
+        let (engine, time) = start(&dir, probe.spawner(Some(other)));
+        engine.set_utc_offset(-10_800);
+        engine.watch_accounts();
+        until("Claude is held", || probe.calls.lock().unwrap().len() == 1).await;
+        engine.replace_clis(BTreeMap::from([
+            (Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] }),
+            (Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] }),
+        ]));
+        time.store(WHEN + 8 * 3600, Ordering::SeqCst);
+        engine.set_attention(true, true);
+        tokio::task::yield_now().await;
+        assert_eq!(starts.load(Ordering::SeqCst), 0, "another call cannot read Codex beside Claude");
+        if close {
+            engine.shutdown();
+        }
+        probe.release().await;
+        if close {
+            until("the active read finishes", || !engine.ledger().claude.readings.is_empty()).await;
+            tokio::task::yield_now().await;
+            assert_eq!(starts.load(Ordering::SeqCst), 0, "closing never launches the queued vendor");
+        } else {
+            until("the queued Codex read starts", || starts.load(Ordering::SeqCst) == 1).await;
+            engine.shutdown();
+        }
+    }
+}

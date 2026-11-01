@@ -410,6 +410,8 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<Recovery>,
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -951,6 +953,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            moved_from_model: None,
             mode: None,
             note: None,
             rewind: None,
