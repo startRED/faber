@@ -2641,6 +2641,7 @@ impl Core {
                         words_cut: false,
                         words_chars: None,
                         transcript: None,
+                        change: None,
                         check: false,
                         started: Some(now()),
                         ended: None,
@@ -2649,6 +2650,7 @@ impl Core {
                         tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
                     }
                     tool.check = crate::nudge::is_check(&tool);
+                    tool.change = crate::change::of(&tool.name, &tool.input);
                     step = tool.parent.is_none() && !crate::model::runs_in_background(&tool);
                     m.tools.get_or_insert_default().push(tool);
                 }

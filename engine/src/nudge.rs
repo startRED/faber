@@ -348,6 +348,7 @@ mod tests {
             words_cut: false,
             words_chars: None,
             transcript: None,
+            change: None,
             check: false,
             started: None,
             ended: None,

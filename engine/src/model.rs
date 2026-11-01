@@ -171,6 +171,10 @@ pub struct ToolUse {
     /// Visible child-session pages, kept outside the conversation and read one at a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    /// On an edit step: the lines it added and removed and the first of them (`change.rs`), so the screen counts them
+    /// without the whole input. Absent on other steps and on conversations recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::change::Change>,
 }
 
 impl ToolUse {
