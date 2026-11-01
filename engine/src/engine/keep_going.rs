@@ -163,7 +163,7 @@ pub fn stop_at(text: &str) -> Option<usize> {
 /// Takes every [`STOP`] out of a reply, since it is a signal for Faber and never words for the person (task 015): a line that
 /// holds only it (with the marks a model puts around a line) wherever it is, such as before the answer to a hook, and one at
 /// the very end of the last line. `positions` are offsets into the text in UTF-16 units (the reply's `activity_end` and
-/// `text_breaks`); each one after a cut moves back with it. True when there was one.
+/// `text_breaks`, where its steps and thinking sit); each one after a cut moves back with it. True when there was one.
 pub fn strip_stop(text: &mut String, positions: &mut [&mut usize]) -> bool {
     let mark = |c: char| matches!(c, '`' | '*' | '_' | '"' | '\'');
     let bare = |line: &str| line.trim().trim_matches(|c: char| mark(c) || c == '.').trim().eq_ignore_ascii_case(STOP);
@@ -418,7 +418,12 @@ impl Core {
             let mut end = m.activity_end.unwrap_or(0);
             let had_breaks = m.text_breaks.is_some();
             let mut breaks = m.text_breaks.take().unwrap_or_default();
-            let mut positions: Vec<&mut usize> = std::iter::once(&mut end).chain(breaks.iter_mut()).collect();
+            // Where each step and each piece of thinking sits among the words moves back with the cut too.
+            let mut positions: Vec<&mut usize> = std::iter::once(&mut end)
+                .chain(breaks.iter_mut())
+                .chain(m.tools.iter_mut().flatten().filter_map(|t| t.at.as_mut()))
+                .chain(m.thinking_marks.iter_mut().map(|mark| &mut mark.at))
+                .collect();
             let found = strip_stop(&mut m.text, &mut positions);
             if m.activity_end.is_some() {
                 m.activity_end = Some(end);

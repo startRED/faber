@@ -1,4 +1,4 @@
-//! Who may send which command (R-next). Every caller goes through the same rule, in Rust, before a command runs: the screen,
+//! Who may send which command (R499). Every caller goes through the same rule, in Rust, before a command runs: the screen,
 //! the command line and the AI's own tools alike. A command's reach is written beside it in the table; this decides it for
 //! one caller.
 //!
