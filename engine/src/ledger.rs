@@ -102,6 +102,10 @@ pub struct VendorLedger {
     pub typed_plan: Option<String>,
     /// Readings and spans before this time are ignored for outside use and weights (a plan change starts them again).
     pub since: f64,
+    /// Comparisons across a sleeping PC's unobserved interval are not evidence of outside use.
+    pub outside_since: f64,
+    #[serde(skip)]
+    pub refresh_pending: bool,
     pub relearn_until: f64,
     pub stretches_since: usize,
     // Billing and live reach are rechecked; paid-fallback evidence and own metering survive a restart.
@@ -197,7 +201,7 @@ impl VendorLedger {
         self.weights.w.values_mut().for_each(|w| *w = w.clamp(0.5, 2.0));
         self.weights.capacity = self.weights.capacity.filter(|c| c.is_finite() && *c > 0.0);
         self.fold_overflow();
-        for t in [&mut self.since, &mut self.relearn_until] {
+        for t in [&mut self.since, &mut self.outside_since, &mut self.relearn_until] {
             if !t.is_finite() {
                 *t = 0.0;
             }
@@ -302,7 +306,13 @@ impl VendorLedger {
 
     /// Use from outside Faber over the last week, from the primary window.
     pub fn outside(&self, now: f64) -> Outside {
-        self.primary(now).map(|w| outside(&self.recent(w), &self.recent_spans(), now)).unwrap_or_default()
+        self.primary(now)
+            .map(|w| {
+                let mut points = self.recent(w);
+                points.retain(|p| p.at >= self.outside_since);
+                outside(&points, &self.recent_spans(), now)
+            })
+            .unwrap_or_default()
     }
 
     /// Learns the weights again from the stretches in the history. Returns true when the vendor's capacity moved by more

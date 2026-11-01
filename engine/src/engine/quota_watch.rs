@@ -21,7 +21,9 @@ struct InFlight {
 impl Drop for InFlight {
     fn drop(&mut self) {
         if let Some(core) = self.core.upgrade() {
-            core.lock().unwrap_or_else(|e| e.into_inner()).reading.remove(&self.vendor);
+            let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+            c.reading.remove(&self.vendor);
+            c.read_quotas(vec![]);
         }
     }
 }
@@ -42,12 +44,23 @@ fn probe_is_free(v: &VendorLedger, now: f64, unfinished_at: f64) -> bool {
 }
 
 impl Core {
-    /// Starts one reading for each vendor named that is not being read already.
+    /// Queues one reading per named vendor and runs them one at a time.
     pub(super) fn read_quotas(&mut self, vendors: Vec<Vendor>) {
         if self.closing {
             return;
         }
         for vendor in vendors {
+            if !self.reading.contains(&vendor) {
+                self.ledger.of_mut(vendor).refresh_pending = true;
+            }
+        }
+        if !self.reading.is_empty() {
+            return;
+        }
+        for vendor in Vendor::ALL {
+            if !std::mem::take(&mut self.ledger.of_mut(vendor).refresh_pending) {
+                continue;
+            }
             let Some(cli) = self.opts.clis.get(&vendor).cloned() else { continue };
             // Claude's reset times are printed in the PC's own time: nothing is read until the screen has said what that is.
             if (vendor == Vendor::Claude && (!self.offset_known || self.usage_command_spent)) || !self.reading.insert(vendor) {
@@ -55,8 +68,9 @@ impl Core {
             }
             let (me, spawn, cwd, windows) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone(), self.opts.windows);
             let (now, offset) = (self.secs(), self.utc_offset);
+            let in_flight = InFlight { core: me.clone(), vendor };
             self.opts.runtime.spawn(async move {
-                let _in_flight = InFlight { core: me.clone(), vendor };
+                let _in_flight = in_flight;
                 match vendor {
                     Vendor::Claude => {
                         let mut read = claude_usage(&cli, &spawn, &cwd, CLAUDE_TIMEOUT, now, offset).await;
@@ -118,6 +132,7 @@ impl Core {
                     }
                 }
             });
+            break;
         }
     }
 
@@ -126,6 +141,8 @@ impl Core {
         if !self.watching {
             return;
         }
+        // Observe a wake before this event can consume the shared reading debounce.
+        self.quota_tick();
         let (now, vendors) = (self.secs(), self.vendors());
         let due = self.cadence.event(now, &vendors);
         self.read_quotas(due);
@@ -134,7 +151,21 @@ impl Core {
     /// The watcher's look at the clock.
     pub(super) fn quota_tick(&mut self) {
         let (now, vendors) = (self.secs(), self.vendors());
-        let due = self.cadence.tick(now, &vendors).into_iter().map(|(v, _)| v).collect();
+        let due = self.cadence.tick(now, &vendors);
+        for (vendor, reason) in &due {
+            if *reason == crate::cadence::Reason::Wake {
+                let ledger = self.ledger.of_mut(*vendor);
+                ledger.outside_since = now.round();
+                for reading in ledger.readings.values_mut() {
+                    reading.read_at = reading.read_at.min(now - crate::budget::STALE_SECS - 1.0);
+                }
+                ledger.zero_turn_readings.clear();
+            }
+        }
+        if due.iter().any(|(_, reason)| *reason == crate::cadence::Reason::Wake) {
+            self.emit_usage();
+        }
+        let due = due.into_iter().map(|(v, _)| v).collect();
         self.read_quotas(due);
     }
 }
@@ -146,6 +177,7 @@ impl Engine {
             if !c.watching {
                 return;
             }
+            c.quota_tick();
             let (now, vendors) = (c.secs(), c.vendors());
             let due = c.cadence.attention(now, &vendors, visible, focused);
             c.read_quotas(due);

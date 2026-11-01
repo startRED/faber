@@ -205,3 +205,35 @@ check('quota: Auto never alarms about quota that is far from the limit (C002)', 
     ok(!/acabando|running out|running low|agotando|épuis|ausgeht/i.test(said('fast')), `${language}: "${said('fast')}" must not alarm`);
   }
 });
+
+check('quota: handoff names both AIs and the exhausted model, while same-AI and old moves stay honest', async () => {
+  const previousWidth = document.documentElement.style.width;
+  document.documentElement.style.width = '720px';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      for (const detail of ['full', 'summary'] as const) {
+        for (const source of ['claude', 'codex', undefined] as const) {
+          for (const model of ['claude-sonnet-4-6', undefined]) {
+            const message: Message = { id: 'move', role: 'assistant', text: 'Answer', at: 1, status: 'done',
+              vendor: 'codex', model: 'gpt-6.1-sol', movedFrom: source, movedFromModel: model,
+              reason: 'reason.moved.' + detail, acts: [{ kind: 'recovery', actor: { who: 'faber' }, what: 'act.recovery.moved', params: { vendor: 'Codex' } }] };
+            const host = document.createElement('div');
+            document.body.append(host);
+            const dispose = render(() => createComponent(Thread, { conversationId: 'chat', messages: [message], from: 0, options: [], onBranch: () => {} }), host);
+            try {
+              await tick();
+              const title = host.querySelector<HTMLElement>('.ai .model')!.title;
+              const expected = source === 'claude'
+                ? t(detail === 'full' ? 'reason.moved.full' : 'reason.moved.summary', { from: model ? 'Claude (Sonnet 4.6)' : 'Claude', to: 'Codex' })
+                : t(detail === 'full' ? 'reason.moved.same.full' : 'reason.moved.same.summary', { to: 'Codex' });
+              ok(title.includes(expected), language + ': ' + title + ' expected ' + expected);
+              ok(!host.textContent!.includes('out of quota'), host.textContent!);
+              ok(host.scrollWidth <= host.clientWidth + 1, 'handoff fits a 720px window');
+            } finally { dispose(); host.remove(); }
+          }
+        }
+      }
+    }
+  } finally { document.documentElement.style.width = previousWidth; }
+});

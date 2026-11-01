@@ -538,8 +538,19 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // quota is said once, by the card under it.
   const standIn = () => !m().model || m().model === 'codex';
   const shown = () => (m().vendor ? (standIn() ? vendorName(m().vendor!) : prettyModel(m().model)) : t('model.auto'));
-  const reason = () =>
-    m().reason ? fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' }) : '';
+  const reason = () => {
+    const message = m();
+    if (!message.reason) return '';
+    const moved = message.reason === 'reason.moved.full' || message.reason === 'reason.moved.summary';
+    const key = moved && (!message.movedFrom || message.movedFrom === message.vendor)
+      ? (message.reason === 'reason.moved.full' ? 'reason.moved.same.full' : 'reason.moved.same.summary') : message.reason;
+    const from = message.movedFrom ? vendorName(message.movedFrom) : '';
+    return fromEngine(key, {
+      when: message.waitUntil ? untilReset(message.waitUntil) : t('quota.unknown'),
+      from: message.movedFromModel ? `${from} (${prettyModel(message.movedFromModel)})` : from,
+      to: message.vendor ? vendorName(message.vendor) : '',
+    });
+  };
   const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
   const wokeWhy = () => {
     const wake = woke();
