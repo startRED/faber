@@ -36,7 +36,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(windows))'.dependencies]
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.0", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
