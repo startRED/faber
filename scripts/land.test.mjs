@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -210,4 +210,31 @@ test('a green batch lands on a base moved by words only, and anything else sends
   assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
   assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
   assert.equal(wordsOnly([], [], isWords), false);
+});
+
+test('a green batch lands as checked when the base moved in independent files', () => {
+  const check = (moved, changed, differs) => landsAsChecked(moved, changed, differs, isWords);
+  const a = 'engine/src/a.rs';
+  const b = 'ui/App.tsx';
+  const flow = '.github/workflows/ci.yml';
+  assert.equal(check(['docs/tasks/a.md'], [b], ['docs/tasks/a.md']), 'words');
+  assert.equal(check([a], [b], [a]), 'disjoint');
+  assert.equal(check([a], [a], [a]), null);
+  assert.equal(check([a], [b], [a, 'other.ts']), null);
+  assert.equal(check([flow], [b], [flow]), null);
+  assert.equal(check([a], [flow], [a]), null);
+  for (const numbered of ['docs/decisions.md', 'docs/next/a.json', 'ui/locales/en.ts']) {
+    assert.equal(check([numbered], ['ui/locales/fr.ts'], [numbered]), null);
+    assert.equal(check([numbered], [b], [numbered]), 'disjoint');
+  }
+  assert.equal(check([], [b], []), null);
+});
+
+test('main accepts a full phase-1-base dispatch after its gate passes', () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const main = ci.split('\n  main:\n')[1].split('\n  land:\n')[0];
+  assert.match(main, /github\.event_name == 'workflow_dispatch' && !inputs\.warm/);
+  assert.match(main, /github\.ref == 'refs\/heads\/phase-1-base'/);
+  assert.match(main, /needs\.gate\.result == 'success'/);
+  assert.match(main, /gh workflow run auto-release\.yml --ref phase-1-base -f sha="\$GITHUB_SHA"/);
 });

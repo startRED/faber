@@ -9,9 +9,9 @@
 // --amend`: docs/next/*.json fold into the locales and the decisions, and every placeholder takes the next free number),
 // and pushes it to queue/pr-<number>. CI checks that very commit; the land job of ci.yml puts it on phase-1-base, moves the
 // pull request's branch to it so GitHub shows it merged, and lets main follow. When the base moves while the checks run,
-// the land job runs this again with --head, the head it squashed before, so the numbers are given again on the new base
-// instead of a rebase that would collide. A conflict with today's base stops here, with its files. --dry-run shows the
-// commit it would queue and pushes nothing.
+// the batch lands as checked if the base moved only by words or independent files; otherwise it is squashed and numbered
+// again on the new base. Independent files get a full base check before main follows. A conflict stops with its files.
+// --dry-run shows the commit it would queue and pushes nothing.
 //
 // Batches (R190 V3): a pull request that touches other parts of the repository than one queued and not landed yet is
 // squashed on top of that one instead of the base (at most `BATCH` deep), so one run checks them together and the land
@@ -172,6 +172,17 @@ export function areas(files) {
 export function wordsOnly(moved, differs, isWords) {
   const numbered = (f) => f === 'docs/decisions.md' || f.startsWith('docs/next/');
   return moved.length > 0 && moved.every((f) => isWords(f) && !numbered(f)) && differs.every(isWords);
+}
+
+/** Whether the checked batch can land on a base that moved, and why. */
+export function landsAsChecked(moved, changed, differs, isWords) {
+  if (workflow(moved) || workflow(changed)) return null;
+  if (wordsOnly(moved, differs, isWords)) return 'words';
+  const numbered = (f) => f === 'docs/decisions.md' || f.startsWith('docs/next/') || f.startsWith('ui/locales/');
+  const files = new Set(moved);
+  if (moved.length && !changed.some((f) => files.has(f)) && differs.every((f) => files.has(f)) &&
+      !(moved.some(numbered) && changed.some(numbered))) return 'disjoint';
+  return null;
 }
 
 /** A change to a workflow lands only from a PC (`--finish`), so it is never batched. */
@@ -559,31 +570,34 @@ async function alone(number, oid, why) {
 }
 
 /**
- * The batch `sha` (its commits `batch`, checked green) put again on `base`, which moved since by words only (`wordsOnly`),
- * so it lands without a new run: `{ landing, commits }`, the new top and each member's new commit in order. Null when the
- * base moved by anything else, a member does not apply cleanly, or the docs check fails on the new tree.
+ * The green batch `sha` put on the moved `base`: its new top, each member's commit and why it lands as checked.
+ * Null when the trees do not qualify, a member does not apply cleanly, or a check fails on the new tree.
  */
-export async function onWords(base, sha, batch) {
+export async function onMoved(base, sha, batch) {
   // The checked-out queued commit's own rules, as CI's: the base's land.mjs runs from a temporary folder.
   const { isWords } = await import(pathToFileURL(resolve('scripts/ci-scope.mjs')).href);
   // Both sides of a rename count: a code file renamed into a folder of words is not words.
   const plain = (from, to) => git('diff', '--name-only', '--no-renames', from, to).split('\n').filter(Boolean);
-  const moved = plain(git('merge-base', base, sha).trim(), base);
-  if (!wordsOnly(moved, [], isWords)) return null;
+  const mergeBase = git('merge-base', base, sha).trim();
+  const moved = plain(mergeBase, base);
+  const changed = plain(mergeBase, sha);
+  if (!landsAsChecked(moved, changed, [], isWords)) return null;
   const dir = mkdtempSync(join(tmpdir(), 'faber-land-'));
   try {
     git('worktree', 'add', '--quiet', '--detach', dir, base);
     git('-C', dir, 'cherry-pick', '--allow-empty', ...batch.map((m) => m.commit));
     const landing = git('-C', dir, 'rev-parse', 'HEAD').trim();
-    if (!wordsOnly(moved, plain(sha, landing), isWords)) return null;
+    const kind = landsAsChecked(moved, changed, plain(sha, landing), isWords);
+    if (!kind) return null;
     run(process.execPath, ['scripts/docs.mjs'], { cwd: dir });
+    run(process.execPath, ['scripts/numbers.mjs', 'check'], { cwd: dir });
     const commits = git('-C', dir, 'rev-list', '--reverse', `${base}..${landing}`).split('\n').filter(Boolean);
     if (commits.length !== batch.length) return null;
-    console.log(`${BASE} moved by words only (${moved.join(', ')}): the green batch lands on it without a new run.`);
-    return { landing, commits };
+    console.log(`${BASE} moved by ${kind} (${moved.join(', ')}): the green batch lands on it as checked.`);
+    return { landing, commits, kind };
   } catch (error) {
     const lines = String(error.stderr || error.message).trim().split('\n');
-    console.log(`${BASE} moved by words only, but the batch does not land on it as checked: ${lines.find((l) => /error|conflict/i.test(l)) ?? lines.at(-1)}`);
+    console.log(`${BASE} moved, but the batch does not land on it as checked: ${lines.find((l) => /error|conflict/i.test(l)) ?? lines.at(-1)}`);
     return null;
   } finally {
     try {
@@ -609,15 +623,15 @@ async function landQueued(number, sha) {
     console.error(`${sha.slice(0, 9)} is not #${number}'s squash on top of ${BASE}.`);
     return 1;
   }
-  // A base that moved by words only takes the green batch as it is (`onWords`); any other move checks it again.
-  const words = ancestor(base, sha) ? null : await onWords(base, sha, batch);
-  if (!ancestor(base, sha) && !words) return alone(number, mine.oid, `${BASE} moved`);
-  const top = words?.landing ?? sha;
+  // A base that moved by words or independent files can take the green batch as checked.
+  const movedBase = ancestor(base, sha) ? null : await onMoved(base, sha, batch);
+  if (!ancestor(base, sha) && !movedBase) return alone(number, mine.oid, `${BASE} moved`);
+  const top = movedBase?.landing ?? sha;
   const under = batch.slice(0, -1);
   for (const m of under) {
     if (queuedAt(m.pr) !== m.commit || gate(m.commit) === 'failure') return alone(number, mine.oid, `#${m.pr} under it no longer stands as queued`);
   }
-  const views = batch.map((m, i) => ({ ...m, landed: words?.commits[i] ?? m.commit, view: JSON.parse(run('gh', ['pr', 'view', m.pr, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid'])) }));
+  const views = batch.map((m, i) => ({ ...m, landed: movedBase?.commits[i] ?? m.commit, view: JSON.parse(run('gh', ['pr', 'view', m.pr, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid'])) }));
   for (const m of views) {
     if (!refusal({ ...m.view, isDraft: false }) && m.view.headRefOid === m.oid) continue;
     if (m !== views.at(-1)) return alone(number, mine.oid, `#${m.pr} under it was closed, retargeted or pushed again`);
@@ -655,14 +669,21 @@ async function landQueued(number, sha) {
     }
     return alone(number, mine.oid, `${BASE} moved`);
   }
-  // Green on top of the whole phase-1-base, so main follows at once (R127). Pushes made with this token start no
-  // workflow, so main's warm run (R165) and the preview release (R130, R156) are started by hand.
-  if (ancestor('origin/main', top)) {
-    git('push', '--quiet', 'origin', `${top}:refs/heads/main`);
-    run('gh', ['workflow', 'run', 'ci.yml', '--ref', 'main', '-f', 'warm=true']);
+  // Independent changes need a full base check first, and so does every landing while main waits behind the base for
+  // one: a later batch's own check may not cover the whole tree. Otherwise main follows at once and starts its warm run
+  // (R165).
+  const checkBase = movedBase?.kind === 'disjoint' || !ancestor(base, 'origin/main');
+  if (checkBase) {
+    run('gh', ['workflow', 'run', 'ci.yml', '--ref', BASE]);
+    console.log('main follows once the phase-1-base check is green.');
+  } else {
+    if (ancestor('origin/main', top)) {
+      git('push', '--quiet', 'origin', `${top}:refs/heads/main`);
+      run('gh', ['workflow', 'run', 'ci.yml', '--ref', 'main', '-f', 'warm=true']);
+    }
+    run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${top}`]);
   }
   for (const m of views) drop(m.pr, m.commit);
-  run('gh', ['workflow', 'run', 'auto-release.yml', '--ref', BASE, '-f', `sha=${top}`]);
   // The board follows the landing (docs/dev/workflow.md#board); one that fails to publish never fails the landing.
   try {
     run('node', ['scripts/tasks.mjs', 'board', '--push']);

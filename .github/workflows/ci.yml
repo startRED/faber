@@ -5,7 +5,7 @@ on:
     branches: [main, 'phase-*', 'queue/**']
   pull_request:
   # The land job starts a queue branch again by hand after rebasing it: a push made with this run's token starts nothing.
-  # The land and main jobs start a warm run on main the same way, and promote-stable.yml a full run on a preview tag.
+  # The land job also starts a full base check; main starts a warm run, and promote-stable.yml a full preview check.
   workflow_dispatch:
     inputs:
       warm:
@@ -113,6 +113,9 @@ jobs:
             warm=true
             echo "A warm run: it builds what the checks build and saves the Rust caches, and tests nothing"
             scope=$(printf 'lints=false\nrust=false\nui=false\nscreen=false')
+          elif [ "$EVENT" = workflow_dispatch ] && [ "$GITHUB_REF" = refs/heads/phase-1-base ]; then
+            # The base can combine independently checked changes, so check the whole tree.
+            echo "Everything runs: the base was checked by hand"
           else
             decide
           fi
@@ -405,7 +408,8 @@ jobs:
   main:
     needs: gate
     if: >-
-      always() && github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base' &&
+      always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.warm)) &&
+      github.ref == 'refs/heads/phase-1-base' &&
       needs.gate.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -423,6 +427,10 @@ jobs:
           git push origin "$GITHUB_SHA:refs/heads/main"
           # A push made with this token starts no workflow, so main's warm run is started by hand (R165).
           gh workflow run ci.yml --ref main -f warm=true
+          # A full base check starts the preview after the checked commit reaches main.
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
+          fi
 
   # The queue (R162): a commit pushed to queue/<name> lands on phase-1-base only after every check passed on top of the
   # newest phase-1-base, so a commit that is red on one system never reaches the shared branch and never stalls the
