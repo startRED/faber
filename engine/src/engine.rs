@@ -1026,7 +1026,8 @@ impl Engine {
         self.with(|core| {
             let opened = core.opened(id)?;
             core.shown(id);
-            Some(opened.for_screen())
+            let plan = core.shown_plan(id);
+            Some(Conversation { plan, ..opened.for_screen() })
         })
     }
     /// What a conversation delivered and what it cost, from its stored messages (`crate::results`).
@@ -1976,6 +1977,7 @@ impl Core {
             self.restore_recovery(&mut c);
             self.restore_evicted(&mut c);
             self.convs.insert(id.to_string(), c);
+            self.reopen_busy_plan_steps(id, false);
         }
         let c = self.convs.get_mut(id)?;
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
@@ -3857,9 +3859,39 @@ impl Core {
         if items == self.running.items {
             return;
         }
+        // Load an evicted leader only when its resumed child reopens a completed step.
+        let parents: Vec<_> = items
+            .iter()
+            .filter(|item| !self.running.items.iter().any(|old| old.conversation_id == item.conversation_id))
+            .filter_map(|item| {
+                let parent = self.convs.get(&item.conversation_id)?.started_by.as_ref()?;
+                if self.convs.contains_key(parent) {
+                    return None;
+                }
+                let has_step = self.store.get(parent).and_then(|c| c.plan).is_some_and(|plan| {
+                    plan.steps.iter().any(|step| {
+                        step.state == StepState::Done
+                            && (step.conversation.as_deref() == Some(item.conversation_id.as_str())
+                                || step.worker.as_ref().is_some_and(|worker| worker.conversation == item.conversation_id))
+                    })
+                });
+                has_step.then(|| parent.clone())
+            })
+            .collect();
+        for parent in parents {
+            self.load(&parent);
+        }
+        let leads: Vec<_> = self.convs.iter().filter(|(_, c)| c.plan.is_some()).map(|(id, _)| id.clone()).collect();
+        for lead in leads {
+            self.reopen_busy_plan_steps(&lead, true);
+        }
+        let items = self.running_items();
         self.mark_ended(&items);
+        // A conversation that started, ended or now waits for the person moves a step of the plan that names it.
+        let moved: HashSet<String> = self.running.items.iter().chain(&items).map(|i| i.conversation_id.clone()).collect();
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });
+        self.plans_naming(&moved);
     }
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.

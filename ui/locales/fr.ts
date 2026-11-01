@@ -2258,6 +2258,7 @@ export const fr: Messages = {
   'notes.323.fixed': 'Dans une petite fenêtre, les boutons Installer et Se connecter du premier lancement ne se cachent plus sous le pied de page.',
   'notes.324.better': 'Après une heure sans rien livrer, Faber demande une fois à l’IA de changer d’approche. Toujours rien : Continuer seul s’arrête et vous dit pourquoi.',
   'notes.325.fixed': 'Une décision gardée puis supprimée dans Mémoire ne revient plus comme gardée quand un agent la réécrit : elle apparaît non relue.',
+  'notes.326.better': "Le plan montre quelle conversation s'occupe de chaque étape et si elle vous attend, et l'ouvre d'un clic.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

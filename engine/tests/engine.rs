@@ -1,7 +1,7 @@
 use crate::support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Experience, Message, Permissions, Role, Settings, Setup, Status, Vendor};
+use faber_engine::model::{Area, Experience, MemberState, Message, Permissions, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -4905,7 +4905,12 @@ async fn r140_settings_that_cannot_be_read_ask_before_every_change_and_a_missing
 
 /// An engine with both CLIs connected on a known subscription, as a helper needs (R161).
 fn two_vendors(dir: &support::DataFolder, spawn: Spawner) -> Engine {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    two_vendors_heard(dir, spawn).0
+}
+
+/// `two_vendors`, with the events it sends the screen.
+fn two_vendors_heard(dir: &support::DataFolder, spawn: Spawner) -> (Engine, tokio::sync::mpsc::UnboundedReceiver<AppEvent>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = BTreeMap::from(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })));
     let opts = EngineOptions {
         data_dir: dir.path().into(),
@@ -4927,7 +4932,7 @@ fn two_vendors(dir: &support::DataFolder, spawn: Spawner) -> Engine {
         engine.note_account_events(vendor, vec![faber_engine::events::EngineEvent::Signals(plan)]);
     }
     engine.set_codex_models(vec!["gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
-    engine
+    (engine, rx)
 }
 
 /// R161: a project's agent on Claude Code hands a piece of work to Codex. Codex runs it in a session of its own, its steps
@@ -5351,6 +5356,190 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
         })
         .unwrap();
     assert!(!archived(&engine), "writing to it brings it back");
+    engine.shutdown();
+}
+
+/// Task 040: a step of the leader's plan names the conversation it started for it, the screen's plan says where that
+/// conversation stands and follows it, and a step cannot name a conversation the leader did not start.
+#[tokio::test]
+async fn a_plan_step_names_the_conversation_doing_it_and_follows_its_state() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, mut rx) = two_vendors_heard(&dir, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    let other =
+        engine.send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "mine", choice("claude", None)) }).unwrap();
+    let _other = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let call = |rpc: u64, name: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":name,"arguments":args,"_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}})
+    };
+    agent.say(call(1, "conversation", &json!({"title":"Docs","brief":"Write the docs page."}))).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed").id;
+    let mut member = next_pipe(&made).await;
+    member.say(json!({"type":"system","subtype":"init","session_id":"m1","model":"claude-haiku-5-5"})).await;
+
+    let plan = |id: &str| json!({"steps":[{"text":"Write the docs","state":"in_progress","conversation":id},{"text":"Review them","state":"pending"}]});
+    agent.say(call(2, "plan", &plan(&other))).await;
+    let refused = mcp_answer(&agent, "r2").await["result"].clone();
+    assert_eq!(refused["isError"], true, "a conversation it did not start is refused: {refused}");
+    assert!(refused["content"][0]["text"].as_str().unwrap().contains("not a conversation you started"), "{refused}");
+    assert!(engine.open(&parent).unwrap().plan.is_none(), "a refused plan changes nothing");
+
+    agent.say(call(3, "plan", &plan(&child))).await;
+    assert_eq!(mcp_answer(&agent, "r3").await["result"]["isError"], false);
+    let stored = engine.open(&parent).unwrap().plan.expect("the plan is kept");
+    assert_eq!(stored.steps[0].conversation.as_deref(), Some(child.as_str()), "the step keeps the id");
+    assert_eq!((stored.steps[0].member, stored.steps[1].conversation.as_deref()), (None, None), "the state is never stored");
+    let shown = |engine: &Engine| engine.open_for_screen(&parent).unwrap().plan.unwrap().steps.iter().map(|s| s.member).collect::<Vec<_>>();
+    assert_eq!(shown(&engine), [Some(MemberState::Running), None], "the member works on its brief");
+
+    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending"}]});
+    agent.say(call(4, "plan", &done)).await;
+    assert_eq!(mcp_answer(&agent, "r4").await["result"]["isError"], true, "running work cannot be marked done");
+    assert_ne!(engine.open_for_screen(&parent).unwrap().plan.unwrap().steps[0].state, faber_engine::model::StepState::Done);
+
+    // The member asks the person: the plan already on the screen is sent again saying the step waits for them, without the
+    // leader doing anything.
+    while rx.try_recv().is_ok() {}
+    member.say(json!({"type":"control_request","request_id":"q","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"x.txt","content":"x"}}})).await;
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("the plan is sent again").unwrap();
+        if let AppEvent::Plan { conversation_id, plan: Some(plan) } = event
+            && conversation_id == parent
+            && plan.steps[0].member == Some(MemberState::Waiting)
+        {
+            break;
+        }
+    }
+    assert_eq!(shown(&engine)[0], Some(MemberState::Waiting), "and opening it again says the same");
+    agent.say(call(5, "plan", &done)).await;
+    assert_eq!(mcp_answer(&agent, "r5").await["result"]["isError"], true, "waiting work cannot be marked done");
+    engine.shutdown();
+    drop(engine);
+    let (spawn, _) = pipes();
+    let reopened = two_vendors(&dir, spawn);
+    assert_eq!(shown(&reopened)[0], Some(MemberState::Stopped), "a saved interrupted conversation is reported as stopped");
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn plan_missing_conversation_is_stopped() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(&dir, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    let other =
+        engine.send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "mine", choice("claude", None)) }).unwrap();
+    let _other = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let call = |rpc: u64, name: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":name,"arguments":args,"_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}})
+    };
+    agent.say(call(1, "conversation", &json!({"title":"Docs","brief":"Write the docs page."}))).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed").id;
+    let mut member = next_pipe(&made).await;
+    member.say(json!({"type":"system","subtype":"init","session_id":"m1","model":"claude-haiku-5-5"})).await;
+
+    let plan = |id: &str| json!({"steps":[{"text":"Write the docs","state":"in_progress","conversation":id},{"text":"Review them","state":"pending"}]});
+    agent.say(call(2, "plan", &plan(&other))).await;
+    let refused = mcp_answer(&agent, "r2").await["result"].clone();
+    assert_eq!(refused["isError"], true, "a conversation it did not start is refused: {refused}");
+    assert!(refused["content"][0]["text"].as_str().unwrap().contains("not a conversation you started"), "{refused}");
+    assert!(engine.open(&parent).unwrap().plan.is_none(), "a refused plan changes nothing");
+
+    agent.say(call(3, "plan", &plan(&child))).await;
+    assert_eq!(mcp_answer(&agent, "r3").await["result"]["isError"], false);
+    let stored = engine.open(&parent).unwrap().plan.expect("the plan is kept");
+    assert_eq!(stored.steps[0].conversation.as_deref(), Some(child.as_str()), "the step keeps the id");
+    assert_eq!((stored.steps[0].member, stored.steps[1].conversation.as_deref()), (None, None), "the state is never stored");
+    let shown = |engine: &Engine| engine.open_for_screen(&parent).unwrap().plan.unwrap().steps.iter().map(|s| s.member).collect::<Vec<_>>();
+    assert_eq!(shown(&engine), [Some(MemberState::Running), None], "the member works on its brief");
+
+    engine.shutdown();
+    drop(engine);
+    std::fs::remove_file(dir.path().join("conversations").join(format!("{child}.json"))).unwrap();
+    let (spawn, _) = pipes();
+    let reopened = two_vendors(&dir, spawn);
+    assert_eq!(shown(&reopened)[0], Some(MemberState::Stopped), "a missing conversation is not finished");
+    reopened.shutdown();
+    drop(reopened);
+    std::fs::write(dir.path().join("conversations").join(format!("{child}.json")), "invalid json").unwrap();
+    let (spawn, _) = pipes();
+    let reopened = two_vendors(&dir, spawn);
+    assert_eq!(shown(&reopened)[0], Some(MemberState::Stopped), "an unreadable conversation is not finished");
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn plan_reopens_a_done_step_when_its_conversation_resumes() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(&dir, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    let other =
+        engine.send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "mine", choice("claude", None)) }).unwrap();
+    let _other = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let call = |rpc: u64, name: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":name,"arguments":args,"_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}})
+    };
+    agent.say(call(1, "conversation", &json!({"title":"Docs","brief":"Write the docs page."}))).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed").id;
+    let mut member = next_pipe(&made).await;
+    member.say(json!({"type":"system","subtype":"init","session_id":"m1","model":"claude-haiku-5-5"})).await;
+
+    let plan = |id: &str| json!({"steps":[{"text":"Write the docs","state":"in_progress","conversation":id},{"text":"Review them","state":"pending"}]});
+    agent.say(call(2, "plan", &plan(&other))).await;
+    let refused = mcp_answer(&agent, "r2").await["result"].clone();
+    assert_eq!(refused["isError"], true, "a conversation it did not start is refused: {refused}");
+    assert!(refused["content"][0]["text"].as_str().unwrap().contains("not a conversation you started"), "{refused}");
+    assert!(engine.open(&parent).unwrap().plan.is_none(), "a refused plan changes nothing");
+
+    agent.say(call(3, "plan", &plan(&child))).await;
+    assert_eq!(mcp_answer(&agent, "r3").await["result"]["isError"], false);
+    let stored = engine.open(&parent).unwrap().plan.expect("the plan is kept");
+    assert_eq!(stored.steps[0].conversation.as_deref(), Some(child.as_str()), "the step keeps the id");
+    assert_eq!((stored.steps[0].member, stored.steps[1].conversation.as_deref()), (None, None), "the state is never stored");
+    let shown = |engine: &Engine| engine.open_for_screen(&parent).unwrap().plan.unwrap().steps.iter().map(|s| s.member).collect::<Vec<_>>();
+    assert_eq!(shown(&engine), [Some(MemberState::Running), None], "the member works on its brief");
+
+    member.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+    until(&engine, &child, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending","waits":["s1"]}]});
+    agent.say(call(6, "plan", &done)).await;
+    assert_eq!(mcp_answer(&agent, "r6").await["result"]["isError"], false);
+    engine
+        .send(SendRequest {
+            conversation_id: Some(child.clone()),
+            project_id: Some(project.id.clone()),
+            ..ask(Area::Project, "Continue", choice("claude", Some("haiku")))
+        })
+        .unwrap();
+    let plan = engine.open(&parent).unwrap().plan.unwrap();
+    assert_eq!(plan.steps[0].state, faber_engine::model::StepState::Active, "resumed work reopens the stored step");
+    assert!(faber_engine::progress::ready(&plan).is_empty(), "dependent work stays blocked");
     engine.shutdown();
 }
 
