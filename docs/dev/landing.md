@@ -25,17 +25,17 @@ So a pull request is never merged with the button or `gh pr merge`: its green sa
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
-Batches (R190 V3, R220). A pull request that touches other parts of the repository than one queued and not landed
-yet (its first folders, leaving out the words, the locales and `docs/`, which every landing writes) is squashed and
-numbered on top of that queue commit instead of the base, up to three deep and never with a workflow change. One run
-then checks them together, and when it is green the land job (`land.mjs --land`) moves every branch of the batch to
-its own commit and phase-1-base to the top one, so all of them show merged; the runs under it find themselves landed.
-Before selecting a queued batch, `land.mjs` skips it if any pull request under it is already closed, retargeted, pushed
-again, requeued, or red; the landing job checks again after the suites to catch changes made during the run.
-One under it that was queued again, closed, pushed again or turned red, or a base that moved, sends the top one back to
-be squashed alone. A red batch blames nobody yet: the report job (`land.mjs --split`) queues the top one again alone,
-and each side then answers for itself, so the one whose own run is red is the culprit and gets the red `queue` status.
-`--alone` queues without batching.
+Trains (R497, replacing the batches of R220). The queue checks one train at a time. A queued pull request's own run
+tests nothing (`changes` says `waits`); its `train` job sends a train when none runs. `land.mjs --train` takes the
+oldest queued pull requests still at the head that was squashed, at most four, squashes and numbers each on the one
+before it, moves each `queue/pr-<n>` there, points the branch `train` at the top one and starts one run on it. Green,
+the land job (`--land`) moves every rider's branch to its own commit and phase-1-base to the top, so all show merged,
+and sends the next train. Pull requests queued meanwhile wait instead of cancelling anything: with one run each, every
+landing sent all the others back to the start (2026-11-01: of 38 queue runs, 1 green, 6 red, 31 cancelled). A red
+train blames nobody yet: `--split` sends its first half again, and a red rider alone is the culprit, whose red `queue`
+status keeps it off trains until it is queued again. A rider pushed again or closed, or a base that moved, sends the
+next train with whoever stands. A cancelled run reports nothing. `queue.yml` sends a train every twenty minutes when
+none runs. A workflow change never rides: it is checked alone and landed with `--finish`.
 
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that

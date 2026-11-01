@@ -45,6 +45,7 @@ jobs:
       parts: ${{ steps.decide.outputs.parts }}
       tested: ${{ steps.decide.outputs.tested }}
       warm: ${{ steps.decide.outputs.warm }}
+      waits: ${{ steps.decide.outputs.waits }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,7 +110,21 @@ jobs:
             scope=$found
           }
           warm=false
-          if [ "$WARM" = true ]; then
+          waits=false
+          # A pull request queued by a person waits for the next train (R497): this run tests nothing, its train job
+          # sends a train if none runs, and the train's own run checks it with the riders before it. One that changes a
+          # workflow lands only from a PC, so it is still checked alone; anything this cannot read is checked alone too.
+          if [ "$EVENT" = push ] && [[ "$GITHUB_REF" == refs/heads/queue/pr-* ]]; then
+            flows=$(gh api "repos/$GITHUB_REPOSITORY/compare/phase-1-base...$HEAD" \
+              --jq '"\(.files | length) \([.files[] | select([.filename, .previous_filename // ""] | any(startswith(".github/workflows/")))] | length)"') || flows=""
+            count=""; workflows=""
+            read -r count workflows <<<"$flows" || true
+            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -lt 300 ] && [ "$workflows" = 0 ]; then waits=true; fi
+          fi
+          if [ "$waits" = true ]; then
+            echo "Queued: it rides the next train, whose run checks it"
+            scope=$(printf 'lints=false\nrust=false\nui=false\nscreen=false')
+          elif [ "$WARM" = true ]; then
             warm=true
             echo "A warm run: it builds what the checks build and saves the Rust caches, and tests nothing"
             scope=$(printf 'lints=false\nrust=false\nui=false\nscreen=false')
@@ -155,7 +170,7 @@ jobs:
           {
             echo "lints=$lints"; echo "rust=$rust"; echo "ui=$ui"; echo "screen=$screen"
             echo "app=$app"; echo "check=$check"; echo "matrix=$matrix"
-            echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"
+            echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"; echo "waits=$waits"
           } >> "$GITHUB_OUTPUT"
 
   # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163); macOS's suites only at night (R468).
@@ -379,9 +394,10 @@ jobs:
   # One check that is green only when CI is (R174): phase-1-base requires it, so a pull request set to merge by itself
   # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means
   # for main below: every job passed, or the plan left it out on purpose.
+  # A waiting queue run tested nothing, so it has no gate at all: a green one would let `land.mjs --finish` land it.
   gate:
     needs: [changes, docs, check, app, screen]
-    if: always()
+    if: always() && needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -442,17 +458,17 @@ jobs:
   # Pull-request-head line), so a later push stops the landing instead of being lost. When phase-1-base moved, it is
   # squashed and numbered again on the new base rather than rebased, since its numbers would collide.
   land:
-    needs: gate
+    needs: [changes, gate]
     if: >-
       always() && startsWith(github.ref, 'refs/heads/queue/') && github.event_name != 'pull_request' &&
-      needs.gate.result == 'success'
+      needs.gate.result == 'success' && needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: land
     permissions:
       contents: write
       actions: write
-      pull-requests: read
+      pull-requests: write  # the next train may blame a rider that no longer squashes (R497)
       statuses: write
     steps:
       - uses: actions/checkout@v7
@@ -496,7 +512,7 @@ jobs:
             git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
             # An older land.mjs would read --land as a plain queueing: it never lands then.
             grep -q "'--land'" "$RUNNER_TEMP/land.mjs" || { echo "::error::phase-1-base's land.mjs cannot land a queued commit (--land)."; exit 1; }
-            node "$RUNNER_TEMP/land.mjs" "$pr" --land "$GITHUB_SHA"
+            node "$RUNNER_TEMP/land.mjs" "$pr" --land "$GITHUB_SHA" --self "$GITHUB_RUN_ID"
             exit
           fi
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
@@ -530,11 +546,13 @@ jobs:
   # status on the head that was queued and a comment, which wake the session that opened it, so nobody watches the queue
   # (R182). The fix is pushed to the pull request and queued again with scripts/land.mjs. A red batch blames nobody yet:
   # the top one is queued again alone (land.mjs --split), and each side answers for itself (R190 V3).
+  # A cancelled run is no red: a newer queueing replaced it, and blaming it woke its lane to queue again, which cancelled
+  # the run after it (R497).
   report:
     needs: [gate, land]
     if: >-
-      always() && startsWith(github.ref, 'refs/heads/queue/pr-') && github.event_name != 'pull_request' &&
-      (needs.gate.result == 'failure' || needs.land.result == 'failure')
+      ${{ !cancelled() && startsWith(github.ref, 'refs/heads/queue/pr-') && github.event_name != 'pull_request' &&
+      (needs.gate.result == 'failure' || needs.land.result == 'failure') }}
     runs-on: ubuntu-latest
     # Its own group per branch: in the land group a waiting report would replace a waiting landing, or be replaced.
     concurrency:
@@ -565,11 +583,48 @@ jobs:
           git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
           code=0
           # An older land.mjs would read --split as a plain queueing: then the red is reported as before.
-          if grep -q "'--split'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" "$pr" --split "$GITHUB_SHA" || code=$?; fi
-          if [ "$code" = 3 ]; then echo "Checked again alone, or landed already: nobody is blamed yet."; exit 0; fi
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
-            -f description="Queued, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
-          gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
+          if grep -q "'--split'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" "$pr" --split "$GITHUB_SHA" --self "$GITHUB_RUN_ID" || code=$?; fi
+          if [ "$code" = 3 ]; then
+            echo "Checked again alone, landed already, or its train's first half rides again: nobody is blamed yet."
+          else
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
+              -f description="Queued as ${GITHUB_SHA:0:9}, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
+            gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
+          fi
+          # The train this run checked has ended: the next one leaves, without a rider just blamed (R497).
+          if grep -q "'--train'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" --train --after "$GITHUB_SHA" --self "$GITHUB_RUN_ID"; fi
+
+  # A queued pull request that waits (R497) sends a train when none runs; the base's land.mjs builds it. Its own group:
+  # in the land group a waiting train job would replace a waiting landing. queue.yml uses the same group.
+  train:
+    needs: changes
+    if: needs.changes.outputs.waits == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: train
+    permissions:
+      contents: write
+      actions: write
+      statuses: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --quiet origin phase-1-base
+          git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
+          # A base from before trains cannot send one: this commit is checked alone, as it was then.
+          if ! grep -q "'--train'" "$RUNNER_TEMP/land.mjs"; then gh workflow run ci.yml --ref "${GITHUB_REF#refs/heads/}"; exit 0; fi
+          node "$RUNNER_TEMP/land.mjs" --train --self "$GITHUB_RUN_ID"
 
   # The nightly run is the only one that runs macOS's suites (R468), and nobody waits on it, so a red one keeps one
   # issue open, labelled `nightly`, with a comment per failed night; the fix closes it. It never blocks the queue.
