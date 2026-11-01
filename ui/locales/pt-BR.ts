@@ -2381,6 +2381,7 @@ export const ptBR: Messages = {
   'notes.336.better': 'O trabalho interrompido continua uma vez quando o Faber abre de novo.',
   'notes.337.fixed': 'O trabalho não aparece mais como concluído quando a IA não o concluiu; ele diz que terminou sem conclusão, e o Faber pede uma vez à IA que o encerre.',
   'notes.338.better': 'Abrir um passo para ler deixa a página parada enquanto a resposta continua embaixo, e os passos mostram nomes curtos de arquivo em vez de caminhos longos de pasta.',
+  'notes.339.better': 'Um pedido grande volta a ser dividido: a IA abre até três conversas lado a lado e confere o trabalho de cada uma. Pedido pequeno continua em uma conversa só.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

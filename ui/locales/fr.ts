@@ -2394,6 +2394,7 @@ export const fr: Messages = {
   'notes.336.better': 'Le travail interrompu reprend une fois à la réouverture de Faber.',
   'notes.337.fixed': 'Un travail n’apparaît plus comme terminé quand l’IA ne l’a pas conclu : il indique qu’il s’est arrêté sans conclusion, et Faber demande une fois à l’IA de le clore.',
   'notes.338.better': 'Ouvrir une étape pour la lire garde la page immobile pendant que la réponse continue en dessous, et les étapes affichent des noms de fichier courts au lieu de longs chemins.',
+  'notes.339.better': "Un gros projet est de nouveau découpé : l'IA ouvre jusqu'à trois conversations en parallèle et vérifie le travail de chacune. Une petite demande reste dans une seule conversation.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
