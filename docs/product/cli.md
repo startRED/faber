@@ -51,6 +51,13 @@ Every command in `host/src/table.rs` names one of five reaches, checked in `Host
 An AI's **family** is the root conversation found by following `startedBy` up from the AI's own conversation (up to 64
 steps), plus every conversation whose `startedBy` chain leads to that same root.
 
+When an identified agent needs the person's permission, Faber records a request and returns `error.reach.ask` with a
+request ID. `faber asks` lists that conversation's requests and their state. An approval permits one identical retry,
+for the same conversation, command and arguments, within ten minutes. A refusal or expiry does not grant access.
+Requests are kept in memory, at most 20, and do not survive a restart. An agent without a conversation still receives
+`error.reach.ask`, but has no request ID or grant because Faber cannot distinguish it from another unidentified agent;
+the person must perform the action on the screen. Person-only and screen-only commands are never askable.
+
 What the rules do not stop: they keep a well-meant AI on its own work. An AI runs as the same user as the person, so a
 program that sets out to break them can read `<data>/channel/secret`, make a token for another conversation, or act as
 the person at a terminal (on Unix, with no job to tell it apart, an AI that drops `FABER_AGENT_DEPTH` is taken for the
@@ -91,6 +98,7 @@ Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--ti
 | `pin` / `unpin` | `<id>` | `pin` (`pinned: true` / `false`) |
 | `rename` | `<id> <title>` | `rename` |
 | `projects` / `quota` / `settings` | | `projects`, `quota`, `settings` |
+| `asks` | | `asks` (the calling conversation's permission requests) |
 | `watch` | `[--id <id>] [--family <id>] [--project <id>]` | Subscribes to channel events and emits state-transition JSON lines |
 | `wait` | `<id> [--timeout <s>]` | Waits until `<id>` is no longer `working`, prints `conversation {id, last: 1}` (default timeout 300 s; `0` = none) |
 | `call` | `<command> [<arguments as JSON> \| -]` | Any non-`screen` command in `host/src/table.rs` |
@@ -101,6 +109,8 @@ When `--json` is passed or stdout is not a terminal (every AI tool call), `faber
 on stdout, and failures write `{"error":"<key>","message":"<English words>"}` on stdout as well. When stdout is a
 terminal (or `--human` is passed), `faber` prints short lines in the user's language (`cli.*` in `ui/locales/*.ts`) and
 errors on stderr.
+
+An ask refusal with a request ID instead prints `{"error":"error.reach.ask","request":"<id>"}` in JSON mode.
 
 | Exit code | Meaning |
 | :--- | :--- |

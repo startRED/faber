@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next-5 | 2026-10-31 | An identified agent refused with `error.reach.ask` receives a request ID and may read its requests with `asks`; the person may allow one identical retry for that conversation, command and arguments within ten minutes. The in-memory book holds at most 20 requests. An agent without a conversation receives no request or grant, and person-only and screen-only actions remain with the person. | Erick |"
+  ]
+}
