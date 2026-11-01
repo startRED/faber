@@ -7,9 +7,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
+import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
+
+// The test runner sets its own debugging switch later, in testmode.prepare().
+if (['remote-debugging-port', 'remote-debugging-pipe', 'remote-debugging-address'].some((name) => app.commandLine.hasSwitch(name))) app.exit(1);
 
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
@@ -30,11 +35,16 @@ const autostart = process.argv.includes('--autostart');
 // Every renderer runs in the system sandbox, not only the ones that ask for it.
 app.enableSandbox();
 // The screen loads only from Faber's own scheme: never file:// and never a remote page.
-protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  visualScheme,
+]);
 
 // Features Faber does not use stay off; each one costs memory in every renderer.
 app.commandLine.appendSwitch('disable-features', ['SpareRendererForSitePerProcess', 'MediaRouter', 'Translate', ...testmode.disabledFeatures].join(','));
 app.commandLine.appendSwitch('disable-spell-checking');
+app.commandLine.appendSwitch('dns-prefetch-disable');
+app.commandLine.appendSwitch('disable-preconnect');
 // The screen fetches nothing from the network (its policy allows only its own scheme), so the network service runs
 // inside the main process instead of one of its own: about 10 MB private and 50 MB working set less, measured.
 app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
@@ -57,6 +67,8 @@ if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.fabe
 
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
+/** Faber's browser pane: the views the host orders (`electron/pane.ts`). */
+const pane = new Pane({ window: () => win, note: (note) => host?.note(note) });
 
 /**
  * The hashes of the inline scripts dist/index.html ships: only the fixed loader that starts the screen's modules
@@ -77,7 +89,7 @@ const CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   'media-src data: blob:',
-  "frame-src 'none'",
+  `frame-src ${VISUAL_ORIGIN}`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -116,6 +128,8 @@ function serveScreen(): void {
 
 /** Only the screen itself speaks to the shell: its window, its top frame, its own origin. */
 function fromScreen(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  // A page of the browser pane is never the screen, whatever address it shows (its views have no preload, so none can ask).
+  if (pane.owns(event.sender)) return false;
   const frame = event.senderFrame;
   if (!win || !frame || event.sender !== win.webContents) return false;
   // Two handles on one frame are different objects: the frame is told by its process and routing ids.
@@ -153,6 +167,7 @@ function createWindow(): BrowserWindow {
     },
   });
   // The screen opens links through `open_link`; a page never opens a window or leaves its origin by itself.
+  window.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const stay = (event: Electron.Event, url: string) => {
     if (!url.startsWith(`${ORIGIN}/`)) event.preventDefault();
@@ -160,6 +175,8 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-navigate', stay);
   window.webContents.on('will-redirect', stay);
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  guardVisualFrames(window.webContents);
+  pane.watch(window);
   const failsafe = setTimeout(() => reveal(window), REVEAL_FAILSAFE_MS);
   window.once('show', () => clearTimeout(failsafe));
   const resized = () => window.webContents.send('faber:window-resized');
@@ -169,10 +186,17 @@ function createWindow(): BrowserWindow {
   // The host decides notices, and a question that comes while the person looks at Faber is never one.
   window.on('focus', () => host?.note({ kind: 'focus', focused: true }));
   window.on('blur', () => host?.note({ kind: 'focus', focused: false }));
+  // The updater installs only while the window is not on screen (never under the person's hands).
+  const seen = (visible: boolean) => () => host?.note({ kind: 'window', visible });
+  window.on('show', seen(true));
+  window.on('restore', seen(true));
+  window.on('hide', seen(false));
+  window.on('minimize', seen(false));
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   window.on('closed', () => {
     if (win === window) win = null;
     host?.note({ kind: 'focus', focused: false });
+    host?.note({ kind: 'window', visible: false });
     releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
   });
@@ -286,6 +310,7 @@ app.on('before-quit', (event) => {
   stopping = true;
   event.preventDefault();
   release();
+  pane.closeAll();
   void host.stop(HOST_STOP_MS).finally(() => app.quit());
 });
 
@@ -299,6 +324,7 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => clipboard(permission) && wc === win?.webContents && origin === ORIGIN);
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
+  installVisual(() => host, () => win);
   relay();
   const window = {
     focused: () => win?.isFocused() ?? false,
@@ -311,10 +337,25 @@ void app.whenReady().then(() => {
     event: (event) => {
       // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
       // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
-      if ((event as { type?: unknown } | null)?.type === 'lagged') win?.webContents.reload();
-      else win?.webContents.send('faber:event', event);
+      const type = (event as { type?: unknown } | null)?.type;
+      if (type === 'lagged') win?.webContents.reload();
+      else if (type === 'pane') {
+        // What the browser pane tells the screen, on the channel the host names (only the pane's own channels reach it).
+        const { channel, payload } = event as { channel?: unknown; payload?: unknown };
+        if (typeof channel === 'string' && SCREEN_CHANNELS.has(channel)) win?.webContents.send(channel, payload);
+      }
+      else if (type === 'update') {
+        // The updater's status has its own channel on the screen (`onUpdate`), without the tag that routes it.
+        const { type: _tag, ...status } = event as Record<string, unknown>;
+        win?.webContents.send('faber:update', status);
+      } else win?.webContents.send('faber:event', event);
     },
-    order: (order) => apply(order, window),
+    order: (order) => {
+      if ((order as { kind?: unknown } | null)?.kind === 'pane') pane.order(order);
+      else apply(order, window);
+    },
   });
-  if (!autostart) show();
+  // A start with the system keeps the window away, and the updater must know that before it decides anything.
+  if (autostart) host.note({ kind: 'window', visible: false });
+  else show();
 });

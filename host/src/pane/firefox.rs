@@ -632,6 +632,21 @@ mod store {
 }
 
 #[cfg(test)]
+impl Profile {
+    /// A profile that reads nothing, for tests of what uses the list (the pane's own).
+    pub(crate) fn stand_in(id: &str, name: &str) -> Profile {
+        Profile {
+            id: id.into(),
+            name: name.into(),
+            last_used: true,
+            db: PathBuf::new(),
+            candidate: false,
+            modified: SystemTime::UNIX_EPOCH,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;

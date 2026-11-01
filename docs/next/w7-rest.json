@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-11-01 | The Electron shell uses the host pane rules, isolated visual pages and the signed updater while the shipped app remains Tauri. | AI |"
+  ]
+}

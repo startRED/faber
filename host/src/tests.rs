@@ -152,11 +152,40 @@ async fn a_chat_group_made_through_the_table_is_in_the_state_the_screen_reads() 
 async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first() {
     let (host, _dir) = host().await;
     assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_open", Value::Null).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_page", json!({ "id": "x", "revision": 1, "document": "<p>x</p>" })).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_close", json!({ "id": "x" })).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_document", json!({ "path": "faber-visual://app/0.html" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "https://example.com" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "file:///C:/Windows" })).await), "error.link.web");
     assert_eq!(key(host.dispatch("add_project", Value::Null).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("set_shell_texts", json!({ "texts": {} })).await), NO_WINDOW);
     assert_eq!(host.dispatch("update_status", Value::Null).await.unwrap(), json!({ "phase": "none" }));
+}
+
+#[tokio::test]
+async fn the_panes_window_commands_reach_the_pane_a_front_end_gives_the_host_and_none_without() {
+    let (host, _dir) = host().await;
+    let asks = [
+        ("cookie_held", json!({ "id": "c" })),
+        ("site_history", json!({ "id": "c" })),
+        ("site_place", json!({ "load": 1, "boxId": 1, "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 })),
+    ];
+    for (name, args) in &asks {
+        assert_eq!(
+            key(host.dispatch(name, args.clone()).await),
+            NO_WINDOW,
+            "{name}: the Tauri shell and the command line have no pane here"
+        );
+    }
+    let views = pane::Relay::new(Arc::new(|_| {}));
+    host.set_pane(pane::Pane::new(views, pane::EngineHome::new(|_| {}), Handle::current()));
+    let answers = [json!([]), json!([false, false]), json!(false)];
+    for ((name, args), answer) in asks.iter().zip(answers) {
+        assert_eq!(host.dispatch(name, args.clone()).await.unwrap(), answer, "{name}: the pane answers, with no page open");
+    }
+    // The commands that are still a window's own stay so.
+    assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
 }
 
 #[tokio::test]
