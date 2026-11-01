@@ -3,6 +3,14 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+The access chip keeps its place in the composer and uses Settings' `PickMenu`: each existing mode shows its name and
+plain description while choosing. The bounded, scrollable list opens above the chip and wraps long translations.
+The current mode is selected; arrows move, Enter or Space chooses, Escape dismisses without changing the mode and
+returns focus to the chip. A choice does not send a message. Captions, restricted mode lists and disabled controls
+remain supported. The list leaves the page after its existing exit; no background process or polling is added.
+`tests/ui/composer.check.ts` covers the descriptions in all five languages, wrapping, unchanged composer position,
+selection and Escape focus; the full Settings keyboard walk belongs to task 350's second slice.
+
 The attachment picker copies its selected files and immediately clears the native input. Removing a file and choosing
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
 (`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
