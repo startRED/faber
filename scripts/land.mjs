@@ -720,8 +720,10 @@ async function split(number, sha, self) {
   // A red train rides again with its first half only; the rest wait for the train after it, and a red rider alone is
   // the culprit (bisection).
   if (trainAt() === sha) {
-    console.log(`The train ${sha.slice(0, 9)} was red: its first half rides again alone.`);
-    return (await train({ after: sha, self, only: half(batch.map((m) => m.pr)) })) === 0;
+    console.log(`The train ${sha.slice(0, 9)} was red: its first half rides again alone, and its second half next.`);
+    const prs = batch.map((m) => m.pr);
+    const first = half(prs);
+    return (await train({ after: sha, self, only: first, later: prs.slice(first.length) })) === 0;
   }
   return (await alone(number, batch.at(-1).oid, `The batch under #${number} was red`)) === 0;
 }
@@ -734,8 +736,10 @@ async function split(number, sha, self) {
  * The branch `train` holds the top of the train that runs; the land and report jobs send the next one when theirs ends,
  * as does every queueing while none runs, and queue.yml every twenty minutes, for a run that stopped without either.
  */
-// Four: about one run in four fails, often for no code reason, so a longer train would rarely pass whole.
-export const TRAIN = 4;
+// Three: on 2026-11-01 about four queued pull requests in ten arrived broken, and trains of six were red for six
+// hours, since a train lands only when every rider is green. Three keeps a whole train likely to pass; raise it once
+// fewer arrive broken.
+export const TRAIN = 3;
 const LOCK = 'refs/heads/train';
 
 /** The commit the train that runs is checked on (the `train` branch), or ''. */
@@ -756,6 +760,59 @@ export function riders(entries, only) {
 
 /** The pull requests of a red train that ride again: the first half, at least one. */
 export const half = (prs) => prs.slice(0, Math.max(1, Math.ceil(prs.length / 2)));
+
+/**
+ * The halves of red trains still to ride, first group next: a commit on the base whose message has one `Then:` line per
+ * group. Without it the second half of a red train went back among the newcomers, and a red rider there turned each
+ * train after it red until it happened to ride first (2026-11-01: #569 rode red trains for two hours). Only a train
+ * builder, holding the lock, writes it.
+ */
+const THEN = 'refs/heads/train-then';
+
+/** The groups a `train-then` message names, in order. */
+export const parseThen = (message) =>
+  message
+    .split('\n')
+    .filter((l) => l.startsWith('Then: '))
+    .map((l) => l.slice('Then: '.length).trim().split(/\s+/).filter(Boolean))
+    .filter((g) => g.length);
+
+/** The message that names `groups`. */
+export const thenMessage = (groups) =>
+  ['Halves of red trains that wait to ride, the first next (R497).', '', ...groups.map((g) => `Then: ${g.join(' ')}`)].join('\n');
+
+/**
+ * Who rides next and which groups still wait: `only` (a red train's first half) with `later` (its second half) put in
+ * front of the waiting `groups`, else the first waiting group that still has a rider among `entries`. Null rides
+ * everyone, once no group is left.
+ */
+export function pickRiders(entries, groups, only, later) {
+  const queue = only ? [only, ...(later?.length ? [later] : []), ...groups] : [...groups];
+  while (queue.length) {
+    const group = queue.shift();
+    if (riders(entries, group).length) return { only: group, groups: queue };
+  }
+  return { only: null, groups: [] };
+}
+
+function readThen() {
+  const held = git('ls-remote', 'origin', THEN).split(/\s/)[0] ?? '';
+  if (!held) return { held, groups: [] };
+  git('fetch', '--quiet', 'origin', THEN);
+  return { held, groups: parseThen(git('log', '-1', '--format=%B', held)) };
+}
+
+/**
+ * The push arguments that leave `train-then` naming `groups` (its lease, then its refspec), none when it already names
+ * nothing. They go in the same atomic push as the lock, so a builder that stops halfway loses no group.
+ */
+function thenPush(base, held, groups) {
+  if (!groups.length && !held) return [[], []];
+  const target = groups.length
+    ? run('git', ['commit-tree', `${base}^{tree}`, '-p', base, '-m', thenMessage(groups)], { stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    : '';
+  return [[`--force-with-lease=${THEN}:${held}`], [`${target}:${THEN}`]];
+}
 
 /**
  * Whether the train at `sha` still runs: a run of ci.yml on that commit that has not ended, other than `self` (the job
@@ -834,7 +891,7 @@ async function next(sha, self, why) {
  * the run asking, `only` the riders a red train sends again. Each rider is squashed and numbered again on the one before
  * it from the head that was queued, its queue branch moved there, and one run of ci.yml checks the top one.
  */
-async function train({ after = '', self = '', only = null } = {}) {
+async function train({ after = '', self = '', only = null, later = [] } = {}) {
   git('fetch', '--quiet', 'origin', `+refs/heads/${BASE}:refs/remotes/origin/${BASE}`);
   const base = git('rev-parse', `origin/${BASE}`).trim();
   const held = trainAt();
@@ -857,9 +914,13 @@ async function train({ after = '', self = '', only = null } = {}) {
     console.log('Another train is being built: whoever is queued waits for it.');
     return 0;
   }
-  const chosen = riders(waiting(base), only);
+  const entries = waiting(base);
+  const then = readThen();
+  const pick = pickRiders(entries, then.groups, only, later);
+  const chosen = riders(entries, pick.only);
   let parent = base;
   const members = [];
+  const behind = [];
   for (const e of chosen) {
     const opts = { onto: parent };
     if ((await land(e.pr, false, e.oid, ['--alone'], opts)) === 0 && opts.commit) {
@@ -870,23 +931,28 @@ async function train({ after = '', self = '', only = null } = {}) {
       blame(e.pr, e.oid, e.commit, `it does not squash on ${BASE}`);
     } else {
       console.log(`#${e.pr} does not go on top of the riders before it: it waits for the next train.`);
+      behind.push(e.pr);
     }
   }
+  // A group's riders that did not fit ride next, still before any newcomer.
+  const groups = pick.only && behind.length ? [behind, ...pick.groups] : pick.groups;
+  const [lease, refspec] = thenPush(base, then.held, groups);
   if (!members.length) {
     try {
-      git('push', '--quiet', `--force-with-lease=${LOCK}:${lock}`, 'origin', `:${LOCK}`);
+      git('push', '--quiet', '--atomic', `--force-with-lease=${LOCK}:${lock}`, ...lease, 'origin', `:${LOCK}`, ...refspec);
     } catch {
-      // Taken over after ten minutes: that train stands.
+      // Taken over after ten minutes: that train stands, and so does the list it found.
     }
     console.log('Nobody waits for a train.');
     return 0;
   }
   try {
-    git('push', '--quiet', `--force-with-lease=${LOCK}:${lock}`, 'origin', `${parent}:${LOCK}`);
+    git('push', '--quiet', '--atomic', `--force-with-lease=${LOCK}:${lock}`, ...lease, 'origin', `${parent}:${LOCK}`, ...refspec);
   } catch {
     console.log('Another train left meanwhile: these wait for the one after it.');
     return 0;
   }
+  if (groups.length) console.log(`Waiting to ride after this train: ${groups.map((g) => g.map((n) => `#${n}`).join(' ')).join(', then ')}.`);
   // Pushes made with this token start no workflow, so the train's run is started by hand.
   run('gh', ['workflow', 'run', 'ci.yml', '--ref', `queue/pr-${members.at(-1)}`]);
   console.log(`The train ${parent.slice(0, 9)} leaves with ${members.map((n) => `#${n}`).join(', ')}: one run checks them together.`);

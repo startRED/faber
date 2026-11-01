@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, half, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, half, parseThen, pickRiders, thenMessage, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -263,6 +263,24 @@ test('a red train rides again with its first half, down to one rider who answers
   assert.deepEqual(half(['1', '2', '3', '4', '5']), ['1', '2', '3']);
   assert.deepEqual(half(['1', '2']), ['1']);
   assert.deepEqual(half(['1']), ['1']);
+});
+
+test('the second half of a red train rides right after its first, before newcomers and older halves', () => {
+  const view = (oid) => ({ state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false, headRefOid: oid });
+  const rider = (pr, time) => ({ pr, oid: `h${pr}`, files: ['ui/App.tsx'], time, red: false, view: view(`h${pr}`) });
+  const entries = ['1', '2', '3', '4', '5', '6', '7'].map((pr, i) => rider(pr, i));
+  // A red train of six: the first half rides, the second waits in front of what already waited.
+  assert.deepEqual(pickRiders(entries, [['7']], ['1', '2', '3'], ['4', '5', '6']), { only: ['1', '2', '3'], groups: [['4', '5', '6'], ['7']] });
+  // The first half landed and left the queue: the second half rides, not the newcomer 7.
+  assert.deepEqual(pickRiders(entries.slice(3), [['4', '5', '6'], ['7']], null), { only: ['4', '5', '6'], groups: [['7']] });
+  // A group whose riders all left (landed or blamed) is skipped.
+  assert.deepEqual(pickRiders(entries.slice(6), [['4', '5'], ['7']], null), { only: ['7'], groups: [] });
+  // No group waits: everyone rides.
+  assert.deepEqual(pickRiders(entries, [], null), { only: null, groups: [] });
+  assert.deepEqual(pickRiders([], [['4']], null), { only: null, groups: [] });
+  // The groups survive their message.
+  assert.deepEqual(parseThen(thenMessage([['4', '5'], ['7']])), [['4', '5'], ['7']]);
+  assert.deepEqual(parseThen('A train is being built (x)'), []);
 });
 
 test('a train runs while a run of its commit has not ended, other than the job asking, or was just sent', () => {
