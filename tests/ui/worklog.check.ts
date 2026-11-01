@@ -93,6 +93,24 @@ check('worklog: an edit step counts the lines it added and removed', () => {
   equal(changeOf({ id: 'r', name: 'Read', input: { file_path: 'a.rs' } }), undefined);
 });
 
+check('worklog: an edit step reads what the engine kept, with no input left', () => {
+  useLanguage('en');
+  // The engine keeps the counts and only the first 40 lines (engine/src/change.rs), so a step may carry no input at all.
+  const kept = { added: 50, removed: 3, lines: Array.from({ length: 40 }, (_, i) => ({ added: i >= 3, text: `line ${i}` })) };
+  equal(changeOf({ id: 'k', name: 'Edit', input: {}, change: kept }), kept, 'the engine reading wins');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const message: Message = { id: 'edit-kept', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [{ id: 'e', name: 'Write', input: {}, change: kept }] };
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'edit-kept', options: [], onBranch: () => {} }), root);
+  try {
+    deepEqual([...root.querySelectorAll('.changed div')].map((d) => d.textContent), ['−line 0', '−line 1', '−line 2', '+line 3']);
+    equal(root.querySelector('.changed p')!.textContent, '49 more lines', 'the rest counts from the totals, not the kept lines');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('worklog: an edit in flight shows its lines under the status line, and its step counts them', () => {
   useLanguage('en');
   const root = document.createElement('div');

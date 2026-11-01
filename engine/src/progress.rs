@@ -46,7 +46,8 @@ const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
 while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
 own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
-next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. For big \
+next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
+conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
 work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
 spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
@@ -78,7 +79,8 @@ fn plan_schema() -> Value {
                         "id": { "type": "string", "description": "Short id for waits; default s1, s2 by position." },
                         "files": { "type": "array", "maxItems": MAX_FILES, "items": { "type": "string" }, "description": "Paths or folders it will change, relative to the project." },
                         "waits": { "type": "array", "items": { "type": "string" }, "description": "Ids of steps to finish first." },
-                        "read": { "type": "boolean", "description": "True when the step only reads (search, collect, review): a helper does it, with no copy." }
+                        "read": { "type": "boolean", "description": "True when the step only reads (search, collect, review): a helper does it, with no copy." },
+                        "conversation": { "type": "string", "description": "The id of the conversation you started that does this step, so the person can open it." }
                     },
                     "required": ["text", "state"],
                     "additionalProperties": false
@@ -170,6 +172,9 @@ fn text_of(v: &Value, most: usize) -> Option<String> {
     v.as_str().map(|t| line(t, most)).filter(|t| !t.is_empty())
 }
 
+/// The longest conversation id a step may name; Faber's ids are far shorter.
+const CONVERSATION_ID_CHARS: usize = 64;
+
 /// The most an estimate may say, in US dollars: above it the number is a mistake, not a job.
 const MAX_ESTIMATE_USD: f64 = 10_000.0;
 
@@ -210,9 +215,9 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             let mut steps: Vec<PlanStep> = Vec::new();
             for s in list {
                 let Some(text) = text_of(&s["text"], STEP_CHARS) else {
-                    // A blank step is skipped, but one that carries an id, files or waits would drop them unseen.
-                    if ["id", "files", "waits"].iter().any(|k| !s[*k].is_null()) {
-                        return Err(format!("{NO_TEXT}: a step with an id, files or waits needs its text"));
+                    // A blank step is skipped, but one carrying other fields would drop them unseen.
+                    if ["id", "files", "waits", "conversation"].iter().any(|k| !s[*k].is_null()) {
+                        return Err(format!("{NO_TEXT}: a step with an id, files, waits or conversation needs its text"));
                     }
                     continue;
                 };
@@ -249,7 +254,17 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                         waits.push(w.to_string());
                     }
                 }
-                steps.push(PlanStep { id, text, state, files, waits, read: s["read"].as_bool().unwrap_or(false), worker: None });
+                steps.push(PlanStep {
+                    id,
+                    text,
+                    state,
+                    files,
+                    waits,
+                    read: s["read"].as_bool().unwrap_or(false),
+                    worker: None,
+                    conversation: text_of(&s["conversation"], CONVERSATION_ID_CHARS),
+                    member: None,
+                });
             }
             if steps.is_empty() {
                 return Ok(None);
@@ -340,7 +355,9 @@ fn waits_done(plan: &Plan, step: &PlanStep) -> bool {
 /// The steps a conversation may be started for: ready ones, and the one `advance` made current (in progress, nobody at work on
 /// it), since the plan tool tells the agent to use `advance`.
 fn startable(plan: &Plan) -> impl Iterator<Item = &PlanStep> {
-    plan.steps.iter().filter(|s| s.worker.is_none() && s.state != StepState::Done && !s.read && waits_done(plan, s))
+    plan.steps
+        .iter()
+        .filter(|s| s.worker.is_none() && s.conversation.is_none() && s.state != StepState::Done && !s.read && waits_done(plan, s))
 }
 
 /// Whether two lists of paths and folders share a file: the same path, or one inside a folder the other names. Each name is
@@ -356,12 +373,24 @@ fn overlap(a: &[String], b: &[String]) -> bool {
 
 /// The steps with a conversation at work or waiting to be joined.
 fn running(plan: &Plan) -> Vec<&PlanStep> {
-    plan.steps.iter().filter(|s| s.worker.is_some() && s.state != StepState::Done).collect()
+    plan.steps.iter().filter(|s| (s.worker.is_some() || s.conversation.is_some()) && s.state != StepState::Done).collect()
 }
 
 /// A step may start beside the running ones when it names files and none of them shares one; a step that names none runs alone.
 fn clear(step: &PlanStep, running: &[&PlanStep]) -> bool {
     running.is_empty() || (!step.files.is_empty() && running.iter().all(|r| !r.files.is_empty() && !overlap(&step.files, &r.files)))
+}
+
+/// Linked steps reserve their files too, including when a plan first names an existing conversation.
+pub fn check_linked(plan: &Plan) -> Result<(), String> {
+    let busy = running(plan);
+    for step in busy.iter().filter(|s| s.conversation.is_some()) {
+        let others: Vec<_> = busy.iter().copied().filter(|s| s.id != step.id).collect();
+        if !clear(step, &others) {
+            return Err(format!("{RUNNING}: {} overlaps a step with a conversation at work", step.id));
+        }
+    }
+    Ok(())
 }
 
 /// A wave: the ready steps that can start together now, beside the running ones, in plan order. Steps that only read go to a
@@ -384,7 +413,7 @@ pub fn can_start(plan: &Plan, id: &str) -> Result<(), &'static str> {
     if step.read {
         return Err("that step only reads: give it to a helper");
     }
-    if step.worker.is_some() {
+    if step.worker.is_some() || step.conversation.is_some() {
         return Err("a conversation already works on that step");
     }
     if step.state == StepState::Done {
@@ -408,17 +437,24 @@ pub fn can_start(plan: &Plan, id: &str) -> Result<(), &'static str> {
 pub fn keep_workers(before: &Plan, after: &mut Option<Plan>) -> Result<(), String> {
     let mut none = vec![];
     let steps = after.as_mut().map_or(&mut none, |p| &mut p.steps);
-    for old in before.steps.iter().filter(|s| s.worker.is_some()) {
+    for old in before.steps.iter().filter(|s| s.worker.is_some() || s.conversation.is_some()) {
         let same = steps.iter_mut().find(|s| s.id == old.id && !s.id.is_empty());
         if old.state == StepState::Done {
             if let Some(new) = same.filter(|n| n.state == StepState::Done && n.text == old.text) {
-                new.worker = old.worker.clone();
+                (new.worker, new.conversation) = (old.worker.clone(), old.conversation.clone());
             }
             continue;
         }
         match same {
-            Some(new) if new.state == StepState::Done => new.worker = old.worker.clone(),
-            Some(new) if new.files == old.files => (new.worker, new.state) = (old.worker.clone(), StepState::Active),
+            Some(new) if new.state == StepState::Done => (new.worker, new.conversation) = (old.worker.clone(), old.conversation.clone()),
+            Some(new)
+                if new.files == old.files
+                    && (new.conversation.is_none()
+                        || new.conversation == old.conversation
+                        || old.worker.as_ref().is_some_and(|w| new.conversation.as_deref() == Some(w.conversation.as_str()))) =>
+            {
+                (new.worker, new.conversation, new.state) = (old.worker.clone(), old.conversation.clone(), StepState::Active);
+            }
             _ => {
                 return Err(format!(
                     "{RUNNING}: {} has a conversation at work or to join; keep it in the list with the same files, or mark it done",
@@ -804,6 +840,30 @@ mod tests {
         for bad in ["/src", "//server/share", "C:/x", "./../x", "src/../../x", ".", "./", "//"] {
             assert!(path_of(bad).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn linked_conversations_reserve_files_and_cannot_be_dropped() {
+        let before = plan(
+            None,
+            &json!({"steps": [
+                {"text": "Model", "state": "in_progress", "files": ["src"], "conversation": "child"},
+                {"text": "Test", "state": "pending", "files": ["src/test"]}
+            ]}),
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(can_start(&before, "s1").is_err());
+        assert!(can_start(&before, "s2").is_err());
+        assert!(wave(&before).is_empty());
+        assert!(keep_workers(&before, &mut None).is_err());
+        let mut changed = before.clone();
+        changed.steps[0].files = vec!["other".into()];
+        assert!(keep_workers(&before, &mut Some(changed)).is_err());
+        let mut overlap = before.clone();
+        overlap.steps[1].conversation = Some("other".into());
+        assert!(check_linked(&overlap).is_err());
     }
 
     #[test]

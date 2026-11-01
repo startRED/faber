@@ -7,6 +7,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
+#[path = "dry_run.rs"]
+mod dry_run;
 mod loopback;
 #[path = "mcp_servers.rs"]
 mod mcp_servers;
@@ -120,6 +122,8 @@ mod quota;
 mod quota_live;
 #[path = "recents.rs"]
 mod recents;
+#[path = "results.rs"]
+mod results;
 #[path = "rewind.rs"]
 mod rewind;
 #[path = "route.rs"]

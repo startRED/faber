@@ -171,6 +171,10 @@ pub struct ToolUse {
     /// Visible child-session pages, kept outside the conversation and read one at a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    /// On an edit step: the lines it added and removed and the first of them (`change.rs`), so the screen counts them
+    /// without the whole input. Absent on other steps and on conversations recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::change::Change>,
 }
 
 impl ToolUse {
@@ -693,6 +697,12 @@ pub struct PlanStep {
     pub id: String,
     pub text: String,
     pub state: StepState,
+    /// The conversation this one started that does the step (task 040), checked when the plan is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    /// For the screen only, like `Plan::estimate`: where that conversation stands now (`Core::shown_plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<MemberState>,
     /// Paths or folders the step expects to change, relative to the project, written with `/`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
@@ -705,6 +715,17 @@ pub struct PlanStep {
     /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<StepWorker>,
+}
+
+/// Where a plan step's conversation stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberState {
+    Running,
+    Waiting,
+    Done,
+    Failed,
+    Stopped,
 }
 
 /// The conversation that works on a plan step, and where its copy started.
@@ -1052,6 +1073,9 @@ pub struct Conversation {
     /// The agent's plan for the request (`crate::progress::plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
+    /// The watchdog found this conversation delivering nothing for a long run of turns (`crate::results::Stuck`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<crate::results::Stuck>,
     pub messages: Vec<Message>,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1173,6 +1197,12 @@ pub struct Summary {
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
+    /// What the conversation delivered and cost, derived from its messages (`crate::results`); none before its first reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<crate::results::Results>,
+    /// The watchdog found it delivering nothing for a long run of turns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
