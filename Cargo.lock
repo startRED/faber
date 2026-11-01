@@ -1082,6 +1082,7 @@ dependencies = [
  "base64 0.23.1",
  "block2",
  "dirs",
+ "faber-channel",
  "faber-engine",
  "faber-host",
  "junction",
@@ -1108,6 +1109,34 @@ dependencies = [
  "webview2-com",
  "windows-core 0.62.2",
  "winsafe",
+]
+
+[[package]]
+name = "faber-channel"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "faber-engine",
+ "faber-host",
+ "faber-winproc",
+ "getrandom 0.3.4",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "faber-cli"
+version = "0.1.0"
+dependencies = [
+ "faber-channel",
+ "faber-winproc",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1145,9 +1174,27 @@ dependencies = [
 name = "faber-host"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "dirs",
  "faber-engine",
+ "faber-winproc",
+ "png",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "winsafe",
+]
+
+[[package]]
+name = "faber-sidecar"
+version = "0.1.0"
+dependencies = [
+ "faber-channel",
+ "faber-engine",
+ "faber-host",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -1181,6 +1228,7 @@ dependencies = [
  "libc",
  "rustix",
  "tempfile",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 

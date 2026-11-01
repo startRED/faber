@@ -151,24 +151,12 @@ fn text_of(content: &Value) -> String {
 }
 
 async fn until_turns(pipe: &Pipe, n: usize) {
-    for _ in 0..300 {
-        if turns(pipe).len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the CLI got {} turns, not {n}: {:?}", turns(pipe).len(), turns(pipe));
+    support::until(&format!("the CLI never got {n} turns"), || turns(pipe).len() >= n).await;
 }
 
 async fn until(engine: &Engine, id: &str, done: impl Fn(&Conversation) -> bool) -> Conversation {
-    for _ in 0..300 {
-        let c = engine.open(id).unwrap();
-        if done(&c) {
-            return c;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the conversation never got there: {:?}", engine.open(id).unwrap());
+    support::until("the conversation never got there", || done(&engine.open(id).unwrap())).await;
+    engine.open(id).unwrap()
 }
 
 fn idle(c: &Conversation) -> bool {
@@ -595,12 +583,7 @@ async fn with_no_reset_known_it_tries_the_cli_again_after_the_wait_and_never_sto
     until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.wait_until.is_some())).await;
     let started = bins.lock().unwrap().len();
     // Ten minutes (here a thousandth of that) later the limit is not taken for granted: a turn goes to the CLI to find out.
-    for _ in 0..300 {
-        if bins.lock().unwrap().len() > started {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the CLI was never tried again", || bins.lock().unwrap().len() > started).await;
     assert!(bins.lock().unwrap().len() > started, "the CLI was tried again: {:?}", bins.lock().unwrap());
     assert!(engine.open(&id).unwrap().keep_going.is_some());
     assert!(halts(&mut rx).is_empty(), "the tray is not woken: nothing needs the person");
@@ -642,12 +625,7 @@ async fn with_the_picked_ai_out_the_next_turn_goes_to_another_ai_that_has_room()
     // Claude is out for an hour and Codex is not: the work goes on there, with no wait.
     let c = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.vendor == Some(Vendor::Codex))).await;
     assert_eq!(c.keep_going.as_ref().map(|k| k.switches), Some(1));
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("Codex was never started", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "Codex was started: {:?}", bins.lock().unwrap());
     assert!(c.keep_going.as_ref().is_some_and(|k| k.waiting.is_none()));
     assert!(halts(&mut rx).is_empty());
@@ -685,12 +663,7 @@ async fn a_first_turn_picked_by_hand_moves_to_the_other_ai_when_keep_going_is_on
     pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true,
         "errors": ["You've hit your usage limit"], "total_cost_usd": 0.0, "usage": {} }))
         .await;
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the work never moved to Codex", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "the work moved to Codex: {:?}", bins.lock().unwrap());
     assert_eq!(engine.open(&id).unwrap().keep_going.map(|k| k.switches), Some(1));
     engine.shutdown();
@@ -775,12 +748,7 @@ async fn a_question_nobody_answers_gets_its_first_choice_and_the_reply_says_so()
         .await;
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
     // Ten minutes pass (here 600 ms) and nobody answers: the first choice goes to the agent.
-    for _ in 0..300 {
-        if !pipe.answers().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the unanswered question never got its first choice", || !pipe.answers().is_empty()).await;
     assert_eq!(pipe.answers(), vec![("asked".to_string(), "allow".to_string())]);
     let sent = pipe.lines.lock().unwrap().iter().find(|m| m["type"] == "control_response").cloned().unwrap();
     assert_eq!(sent["response"]["response"]["updatedInput"]["answers"], json!({ "Which stack?": "Rust" }));
@@ -905,15 +873,13 @@ async fn calls(pipe: &mut Pipe, request: &str, tool: &str, input: Value) -> (Str
     pipe.say(json!({ "type": "control_request", "request_id": request,
         "request": { "subtype": "mcp_message", "server_name": "faber", "message": call } }))
         .await;
-    for _ in 0..300 {
-        let answer = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned();
-        if let Some(a) = answer {
-            let result = &a["response"]["response"]["mcp_response"]["result"];
-            return (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("Faber never answered the {tool} call");
+    support::until(&format!("Faber never answered the {tool} call"), || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request)
+    })
+    .await;
+    let a = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request).cloned().unwrap();
+    let result = &a["response"]["response"]["mcp_response"]["result"];
+    (result["content"][0]["text"].as_str().unwrap_or_default().to_string(), result["isError"] == true)
 }
 
 /// Task 017: a project agent keeps its plan, says what it is doing now and closes with a box, through Faber's own tools.
@@ -936,11 +902,12 @@ async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
     assert!(said.contains("1 of 2"), "{said}");
     // A wrong call is answered as an error the agent can read, and changes nothing.
     let (said, error) = calls(&mut pipe, "w0", "wrap_up", json!({ "ask": "Ship it?" })).await;
-    assert!(error && said.contains("recap"), "{said}");
-    let box_ =
-        json!({ "recap": "The login page works. The rest is not checked yet.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
+    assert!(error && said.contains("outcome"), "{said}");
+    let box_ = json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The rest is not checked yet.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
     let (said, error) = calls(&mut pipe, "w1", "wrap_up", box_).await;
-    assert!(!error && said.contains("End your turn"), "{said}");
+    assert!(!error && said.to_lowercase().contains("end your turn"), "{said}");
+    assert!(said.contains("Results: 0 files, 0/0 checks passed, 0 commits, 0 pull requests, 0 artifacts, 0 answers; cost:"), "{said}");
+    assert!(said.contains("input and 0 output tokens") && said.contains("current turn may be incomplete"), "{said}");
     answers(&mut pipe, "Done for now.", true).await;
     let c = until(&engine, &id, idle).await;
     let plan = c.plan.clone().expect("the plan stays with the conversation");
@@ -992,6 +959,11 @@ async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_m
         plans
     };
     assert_eq!(events(&mut rx), 2, "the plan, then the one warning");
+    // The turn ended with a step left and no conclusion, so Faber asks once for it; the agent's answer costs nothing more.
+    until_turns(&pipe, 2).await;
+    echo(&mut pipe, 1).await;
+    ends_costing(&mut pipe, 1.6).await;
+    until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
     let (said, error) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
     assert!(!error && said.contains("1 of 2") && said.contains("half as much again"), "{said}");
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
@@ -1009,10 +981,10 @@ async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_m
         choice,
     };
     engine.send(more).unwrap();
-    until_turns(&pipe, 2).await;
-    echo(&mut pipe, 1).await;
+    until_turns(&pipe, 3).await;
+    echo(&mut pipe, 2).await;
     ends_costing(&mut pipe, 3.2).await;
-    until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
+    until(&engine, &id, |c| c.messages.len() >= 6 && c.messages[..6].iter().all(|m| m.status != Some(Status::Streaming))).await;
     assert_eq!(events(&mut rx), 0, "the warning fires once");
     engine.shutdown();
 }
@@ -1084,7 +1056,8 @@ async fn the_estimate_and_economy_mode_end_with_the_job() {
         assert!(economy_on(&engine.open(&id).unwrap()), "{call} left the job's estimate alone");
     }
     while rx.try_recv().is_ok() {}
-    let done = json!({ "recap": "The login page and the rest are fixed. Both were checked.", "done": true });
+    let done =
+        json!({ "outcome": "done", "did": "Fixed the login page and the rest.", "result": "Both work.", "verified": "Checked both." });
     let (said, error) = calls(&mut pipe, "w1", "wrap_up", done).await;
     assert!(!error, "{said}");
     let c = until(&engine, &id, |c| c.estimate.is_none()).await;
@@ -1135,6 +1108,7 @@ async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Optio
         .await;
     let mut codex = next_pipe(made).await;
     let (mut answered, mut seen) = (0, (None, None));
+    // The loop answers the app-server with .await inside, which a closure cannot hold.
     for _ in 0..600 {
         let lines = codex.lines.lock().unwrap().clone();
         for m in lines.iter().skip(answered) {
@@ -1253,12 +1227,7 @@ async fn a_quick_question_on_the_side_tips_the_spend_of_the_job() {
     let mut side = next_pipe(&made).await;
     side.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"It holds the parser."}}})).await;
     side.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":1.6,"usage":{}})).await;
-    for _ in 0..300 {
-        if engine.asides(&id).iter().any(|a| a.id == aside && a.state == "done") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the side question never finished", || engine.asides(&id).iter().any(|a| a.id == aside && a.state == "done")).await;
     let c = engine.open(&id).unwrap();
     assert!((c.spent_usd - 1.6).abs() < 1e-9, "the question's cost is in the total: {}", c.spent_usd);
     assert!(!economy_on(&c), "nothing is checked before the agent's own turn ends");
@@ -1304,7 +1273,8 @@ async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
-    let done = json!({ "recap": "The login page and the rest are fixed. Both were checked.", "done": true });
+    let done =
+        json!({ "outcome": "done", "did": "Fixed the login page and the rest.", "result": "Both work.", "verified": "Checked both." });
     calls(&mut pipe, "d1", "wrap_up", done.clone()).await;
     answers_at(&mut pipe, "All fixed.", true, 0.1).await;
     until_turns(&pipe, 2).await;
@@ -1326,7 +1296,7 @@ async fn keep_going_answers_a_closing_question_nobody_answered_with_its_first_re
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
     engine.keep_going(&id, true).unwrap();
-    let ask = json!({ "recap": "The login page works. The docs are not written.", "ask": "Write the docs now?", "actions": ["Yes, write them", "Skip"] });
+    let ask = json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The docs are not written.", "ask": "Write the docs now?", "actions": ["Yes, write them", "Skip"] });
     calls(&mut pipe, "q1", "wrap_up", ask).await;
     answers_at(&mut pipe, "Login fixed.", true, 0.1).await;
     let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())).await;
@@ -1347,7 +1317,7 @@ async fn keep_going_answers_a_closing_question_nobody_answered_with_its_first_re
 async fn keep_going_turned_on_after_a_closing_question_still_waits_before_answering_it() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
-    let ask = json!({ "recap": "The login page works.", "ask": "Write the docs now?", "actions": ["Yes", "Skip"] });
+    let ask = json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "ask": "Write the docs now?", "actions": ["Yes", "Skip"] });
     calls(&mut pipe, "q1", "wrap_up", ask).await;
     answers_at(&mut pipe, "Login fixed.", true, 0.1).await;
     until(&engine, &id, idle).await;
@@ -1549,8 +1519,8 @@ async fn two_silent_keep_going_turns_in_a_row_halt_on_the_last_reply_with_conten
     until(&engine, &id, |c| c.messages.len() == 6).await;
     answers(&mut pipe, "", true).await;
     let c = until(&engine, &id, |c| c.keep_going.is_none()).await;
-    assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.done"));
-    assert_eq!(c.messages.last().unwrap().halt, None);
+    assert_eq!(c.messages[1].halt.as_deref(), Some("reason.keepGoing.silent"));
+    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.silent"));
     engine.shutdown();
 }
 
@@ -1560,13 +1530,13 @@ async fn start_team_member(pipe: &mut Pipe, rpc: u64, args: Value) -> Value {
         "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,
         "_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}}))
         .await;
-    for _ in 0..300 {
-        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == format!("r{rpc}")) {
-            return m["response"]["response"]["mcp_response"]["result"].clone();
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("r{rpc} was never answered");
+    support::until(&format!("r{rpc} was never answered"), || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == format!("r{rpc}"))
+    })
+    .await;
+    let lines = pipe.lines.lock().unwrap();
+    let m = lines.iter().find(|m| m["response"]["request_id"] == format!("r{rpc}")).unwrap();
+    m["response"]["response"]["mcp_response"]["result"].clone()
 }
 
 fn said(result: &Value) -> String {
@@ -1588,12 +1558,7 @@ async fn the_agent_picks_the_ai_of_a_team_conversation_and_one_that_cannot_run_i
     let choice = |id: &str| engine.open(id).unwrap().choice.map(|c| c.vendor);
     assert_eq!(choice(&titled(&engine, "Review")).as_deref(), Some("codex"));
     assert_eq!(choice(&parent).as_deref(), Some("claude"), "never the conversation that asked");
-    for _ in 0..300 {
-        if bins.lock().unwrap().iter().any(|b| b == "codex") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    support::until("the first turn never started on Codex", || bins.lock().unwrap().iter().any(|b| b == "codex")).await;
     assert!(bins.lock().unwrap().iter().any(|b| b == "codex"), "its first turn runs on Codex: {:?}", bins.lock().unwrap());
     let docs = start_team_member(&mut pipe, 2, json!({"title":"Docs","brief":"Write the docs.","ai":"auto"})).await;
     assert_eq!(docs["isError"], false, "{}", said(&docs));
@@ -1656,7 +1621,7 @@ async fn a_message_after_a_done_closing_box_is_counted_as_a_correction_and_a_fir
         panic!("the count is {:?}, not {want:?}", count());
     };
     // A box that is not done is no close, and the message after it is no correction.
-    calls(&mut pipe, "w0", "wrap_up", json!({ "recap": "The login page works. The rest is not done." })).await;
+    calls(&mut pipe, "w0", "wrap_up", json!({ "outcome": "blocked", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The rest is not done." })).await;
     answers(&mut pipe, "Login fixed.", true).await;
     until(&engine, &id, idle).await;
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
@@ -1673,7 +1638,13 @@ async fn a_message_after_a_done_closing_box_is_counted_as_a_correction_and_a_fir
     until_turns(&pipe, 2).await;
     echo(&mut pipe, 1).await;
     // A done box is a close, and no correction before the person writes again.
-    calls(&mut pipe, "w1", "wrap_up", json!({ "recap": "Everything is fixed and checked.", "done": true })).await;
+    calls(
+        &mut pipe,
+        "w1",
+        "wrap_up",
+        json!({ "outcome": "done", "did": "Fixed everything.", "result": "Everything works.", "verified": "Checked it all." }),
+    )
+    .await;
     answers(&mut pipe, "All fixed.", true).await;
     until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
     for _ in 0..300 {
@@ -1699,4 +1670,188 @@ async fn a_message_after_a_done_closing_box_is_counted_as_a_correction_and_a_fir
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(count().corrected, 1, "one message, one correction");
     engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_tool_turn_gets_exactly_one_closing_wake_and_never_claims_done_without_a_box() {
+    // Rule: tool work without a conclusion gets one wake and remains unconcluded.
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+    calls(&mut pipe, "plan-close", "plan", json!({"steps":[{"text":"Check the result", "state":"pending"}]})).await;
+    answers(&mut pipe, "I stopped here.", true).await;
+    let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion"))).await;
+    assert_eq!(c.messages.iter().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion")).count(), 1);
+    assert_ne!(c.ended.as_ref().map(|e| e.kind), Some(faber_engine::model::EndKind::Done));
+    answers(&mut pipe, "Still no conclusion.", true).await;
+    let c = until(&engine, &id, |c| c.messages.len() >= 4 && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    assert_eq!(c.messages.iter().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion")).count(), 1);
+    assert_ne!(c.ended.as_ref().map(|e| e.kind), Some(faber_engine::model::EndKind::Done));
+    assert_eq!(engine.state().conversations.iter().find(|c| c.id == id).unwrap().state, Some(faber_engine::sibling::State::Unconcluded));
+    engine.shutdown();
+}
+
+// Rule: conversations saved by an older version retain their conclusion and recover an interrupted reply.
+#[tokio::test]
+async fn old_conclusions_and_crashed_replies_load_and_are_listed() {
+    use faber_engine::{
+        model::{EndKind, Outcome},
+        sibling::State,
+    };
+    let dir = support::DataFolder::new();
+    let folder = dir.path().join("conversations");
+    std::fs::create_dir_all(&folder).unwrap();
+    for (name, contents) in [
+        ("old-done", include_str!("../../tests/fixtures/stored/old-done.json")),
+        ("old-streaming", include_str!("../../tests/fixtures/stored/old-streaming.json")),
+    ] {
+        std::fs::write(folder.join(format!("{name}.json")), contents).unwrap();
+    }
+    let (spawn, _) = pipes();
+    let (engine, _rx) = engine(&dir, spawn);
+    let state = |id: &str| engine.state().conversations.into_iter().find(|c| c.id == id).unwrap().state;
+    assert_eq!(state("old-streaming"), Some(State::Interrupted));
+    let old = engine.open("old-done").unwrap();
+    assert_eq!(old.ended.unwrap().kind, EndKind::Done);
+    assert_eq!(old.messages[0].wrap_up.as_ref().unwrap().outcome(), Some(Outcome::Done));
+    let crashed = engine.open("old-streaming").unwrap();
+    assert_eq!(crashed.messages[0].status, Some(Status::Stopped));
+    assert!(crashed.messages[0].closed);
+    assert_eq!(state("old-streaming"), Some(State::Interrupted));
+    engine.shutdown();
+}
+
+// Rule: a verified done conclusion persists both the new fields and the old readable box.
+#[tokio::test]
+async fn verified_conclusion_is_saved_and_tells_the_agent_to_close() {
+    use faber_engine::{
+        model::{EndKind, Outcome},
+        sibling::State,
+    };
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+    let (said, error) = calls(
+        &mut pipe,
+        "done-new",
+        "wrap_up",
+        json!({
+            "outcome":"done", "did":"Fixed login.", "result":"Login works.", "verified":"Ran the login test."
+        }),
+    )
+    .await;
+    assert!(!error && said.contains("write your closing message"), "{said}");
+    answers(&mut pipe, "Fixed login.", true).await;
+    let c = until(&engine, &id, |c| idle(c) && c.ended.is_some()).await;
+    assert_eq!(c.ended.unwrap().kind, EndKind::Done);
+    let wrap = c.messages.last().unwrap().wrap_up.as_ref().unwrap();
+    assert_eq!(wrap.outcome(), Some(Outcome::Done));
+    assert_eq!(wrap.summary.as_ref().unwrap().verified, "Ran the login test.");
+    assert_eq!(engine.state().conversations.iter().find(|c| c.id == id).unwrap().state, Some(State::Concluded));
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("conversations").join(format!("{id}.json"))).unwrap()).unwrap();
+    let wrap = &stored["messages"].as_array().unwrap().last().unwrap()["wrapUp"];
+    assert_eq!(wrap["outcome"], "done");
+    assert_eq!(wrap["summary"]["result"], "Login works.");
+    #[derive(serde::Deserialize)]
+    struct OldBox {
+        recap: String,
+        done: bool,
+    }
+    let old: OldBox = serde_json::from_value(wrap.clone()).unwrap();
+    assert!(!old.recap.is_empty() && old.done);
+    engine.shutdown();
+}
+
+// Rule: an unverified done claim is refused and cannot conclude the tool work.
+#[tokio::test]
+async fn done_without_verification_is_refused() {
+    use faber_engine::{model::EndKind, sibling::State};
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+    calls(&mut pipe, "plan-unverified", "plan", json!({"steps":[{"text":"Check login", "state":"pending"}]})).await;
+    let (said, error) =
+        calls(&mut pipe, "unverified", "wrap_up", json!({"outcome":"done","did":"Fixed login.","result":"Login works."})).await;
+    assert!(error && said.contains("verified"), "{said}");
+    answers(&mut pipe, "Not checked.", true).await;
+    until_turns(&pipe, 2).await;
+    answers(&mut pipe, "Still not checked.", true).await;
+    let c = until(&engine, &id, |c| c.messages.len() >= 4 && idle(c)).await;
+    assert_ne!(c.ended.map(|e| e.kind), Some(EndKind::Done));
+    assert_eq!(engine.state().conversations.iter().find(|c| c.id == id).unwrap().state, Some(State::Unconcluded));
+    engine.shutdown();
+}
+
+// Rule: blocked and needs_you both wait for the person.
+#[tokio::test]
+async fn conclusions_that_need_the_person_wait() {
+    use faber_engine::{model::EndKind, sibling::State};
+    for outcome in ["blocked", "needs_you"] {
+        let (dir, project) = (support::DataFolder::new(), support::work_folder());
+        let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+        let (said, error) =
+            calls(&mut pipe, "waiting", "wrap_up", json!({"outcome":outcome,"did":"Investigated.","result":"Waiting for access."})).await;
+        assert!(!error, "{said}");
+        answers(&mut pipe, "Waiting for access.", true).await;
+        let c = until(&engine, &id, |c| idle(c) && c.ended.is_some()).await;
+        assert_eq!(c.ended.unwrap().kind, EndKind::NeedsYou, "{outcome}");
+        assert_eq!(engine.state().conversations.iter().find(|c| c.id == id).unwrap().state, Some(State::Waiting), "{outcome}");
+        engine.shutdown();
+    }
+}
+
+// Rule: a pending plan prevents a done conclusion from claiming the task is finished.
+#[tokio::test]
+async fn pending_plan_overrides_done_conclusion() {
+    use faber_engine::{model::EndKind, sibling::State};
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+    let (_, error) = calls(&mut pipe, "pending", "plan", json!({"steps":[{"text":"Check login", "state":"pending"}]})).await;
+    assert!(!error);
+    let (said, error) = calls(
+        &mut pipe,
+        "pending-done",
+        "wrap_up",
+        json!({"outcome":"done","did":"Fixed login.","result":"Login works.","verified":"Ran a test."}),
+    )
+    .await;
+    assert!(!error, "{said}");
+    answers(&mut pipe, "Done.", true).await;
+    // The step is still pending, so Faber asks once for a real conclusion; the agent answers without one.
+    until_turns(&pipe, 2).await;
+    answers(&mut pipe, "Still checking.", true).await;
+    let c = until(&engine, &id, |c| idle(c) && c.messages.len() >= 4 && c.ended.is_some()).await;
+    assert_eq!(c.ended.unwrap().kind, EndKind::Unconcluded);
+    assert_eq!(engine.state().conversations.iter().find(|c| c.id == id).unwrap().state, Some(State::Unconcluded));
+    engine.shutdown();
+}
+
+/// The measurement of the honest ending: automatic messages Faber adds to one message the person typed, on the fake CLI.
+/// Before this change Faber added none; now an answer with no work adds none, work that was concluded adds none, and work
+/// that was not adds one request for the conclusion, never a second.
+#[tokio::test]
+async fn faber_adds_at_most_one_automatic_message_to_a_typed_one() {
+    let wakes = |c: &Conversation| c.messages.iter().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion")).count();
+    // (edits a file, concludes with wrap_up, expected requests for a conclusion, expected turns the CLI got)
+    for (edits, concludes, asked, turns_run) in [(false, false, 0, 1), (true, true, 0, 1), (true, false, 1, 2)] {
+        let (dir, project) = (support::DataFolder::new(), support::work_folder());
+        let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
+        if edits {
+            pipe.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"a.txt","old_string":"a","new_string":"b"}}]}})).await;
+            pipe.say(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok","is_error":false}]}})).await;
+        }
+        if concludes {
+            let done =
+                json!({ "outcome": "done", "did": "Edited the file.", "result": "The file is changed.", "verified": "Read it back." });
+            let (said, error) = calls(&mut pipe, "w1", "wrap_up", done).await;
+            assert!(!error, "{said}");
+        }
+        answers(&mut pipe, "Finished.", true).await;
+        if asked > 0 {
+            until_turns(&pipe, 2).await;
+            answers(&mut pipe, "Still no conclusion.", true).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let c = engine.open(&id).unwrap();
+        assert_eq!((wakes(&c), turns(&pipe).len()), (asked, turns_run), "edits {edits}, concludes {concludes}: {:?}", turns(&pipe));
+        engine.shutdown();
+    }
 }

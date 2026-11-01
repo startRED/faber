@@ -2238,7 +2238,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     assert!(!thread_params(Area::Chat, &lead).1["developerInstructions"].as_str().unwrap().contains(faber_engine::persona::LEADS));
     assert!(!start["developerInstructions"].as_str().unwrap().contains("offer_bigger"));
     let (_, none) = thread_params(Area::Chat, &thread(None, None, None));
-    assert!(none["developerInstructions"].as_str().unwrap().contains("You are Faber"));
+    assert!(none["developerInstructions"].as_str().unwrap().contains("State the underlying model truthfully"));
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
     assert!(side.get("developerInstructions").is_none());
 }

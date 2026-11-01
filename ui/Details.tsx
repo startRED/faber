@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, Show, type ComponentProps } from 'solid-js';
 import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
+import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { CommandStop } from './Commands.tsx';
 import { ChangesFiles } from './Changes.tsx';
 import { Icon } from './Glyphs.tsx';
@@ -121,7 +122,7 @@ function Facts(props: { tools: DetailTool[]; follows?: Follow[]; conversationId?
     const [outputOpen, setOutputOpen] = createSignal(false);
     return <li data-state={tool().detailState}>
       <div class="tools"><ToolChip tool={tool()} /></div>
-      <span class="det-state">{t(tool().detailState === 'unknown' ? 'details.state.unknown' : `agent.${tool().detailState as AgentState}`)}</span>
+      <span class="det-state"><StateGlyph state={stateKind(tool().detailState)} small />{t(tool().detailState === 'unknown' ? 'details.state.unknown' : `agent.${tool().detailState as AgentState}`)}</span>
       <Show when={tool().agentAt && props.conversationId}><button type="button" class="btn" aria-controls="running" onClick={() => showAgent({ conversationId: props.conversationId!, ...tool().agentAt! })}>{t('agent.look')}</button></Show>
       <Show when={tool().output}><details class="disclosure" onToggle={(e) => setOutputOpen(e.currentTarget.open)}><summary>{t('details.output')}</summary><Show when={outputOpen()}><pre class="command-output"><LiveText text={tool().output!} follows={props.follows ?? []} /></pre></Show></details></Show>
     </li>;
@@ -138,9 +139,9 @@ function BackgroundList(props: { rows: BackgroundWork[]; conversationId: string;
     return <li data-work={id} data-state={status().state} data-need={status().need}>
       <Show when={row().follow} fallback={<Show when={row().checks} fallback={<>
         <div class="work-head">
-        <Show when={row().agent} fallback={<span class="work-chip"><span>{row().title || t('background.checks')}</span><span class="work-state">{t(status().key, status().vars)}</span></span>}>
+        <Show when={row().agent} fallback={<span class="work-chip"><span>{row().title || t('background.checks')}</span><span class="work-state"><StateGlyph state={stateKind(status().state)} small />{t(status().key, status().vars)}</span></span>}>
           <button type="button" class="work-chip" aria-controls="running" onClick={() => showAgent({ conversationId: props.conversationId, messageId: row().messageId!, callId: row().agent!.call.id })}>
-            <span>{row().title}</span><span class="work-state">{t(status().key, status().vars)}</span>
+            <span>{row().title}</span><span class="work-state"><StateGlyph state={stateKind(status().state)} small />{t(status().key, status().vars)}</span>
           </button>
         </Show>
         <Show when={row().command}>{(command) => <CommandStop command={command()} />}</Show>

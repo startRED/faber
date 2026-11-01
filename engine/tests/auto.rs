@@ -168,8 +168,8 @@ async fn a_failed_router_keeps_the_previous_choice() {
     let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn, ask);
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
-    engine.send(SendRequest { conversation_id: Some(id), ..auto("A harder follow-up") }).unwrap();
-    let second = finished(&mut rx).await;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("A harder follow-up") }).unwrap();
+    let second = routed(&engine, &id, 1).await;
     assert_eq!(second.model, first.model);
     assert_eq!(second.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
     engine.shutdown();

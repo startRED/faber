@@ -2,7 +2,6 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Message } from '../../ui/api.ts';
 import { t } from '../../ui/i18n.ts';
-import { toolLine } from '../../ui/worklog.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -78,11 +77,12 @@ check('plumbing: a failed check that brought back no lines says so instead of an
 
 check('plumbing: once its words stop, a reply still at work shows its step under them instead of a blinking caret', async () => {
   const start = Date.now();
-  const command = { id: 't1', name: 'Bash', input: { command: 'sleep 540' }, started: start };
+  const command = { id: 't1', name: 'Bash', input: { command: 'sleep 540' }, at: 'I put it in the plan.'.length, started: start };
   const [m, setM] = createSignal<Message>(reply('a1', { status: 'streaming', text: 'I put it in the plan.', at: start }));
   const view = mount(() => [mine, m()]);
   const caret = () => view.root.querySelector('.ai .md .cursor');
-  const after = () => view.root.querySelector<HTMLElement>('.ai .activity-latest.after .step')?.textContent;
+  const after = () => view.root.querySelector<HTMLElement>('.ai .activity-latest')?.textContent;
+  const step = () => view.root.querySelector<HTMLElement>('.ai .steps-head, .ai .step-line')?.textContent;
   try {
     await settle();
     ok(caret(), 'words just arrived: the caret blinks');
@@ -91,11 +91,11 @@ check('plumbing: once its words stop, a reply still at work shows its step under
     await settle();
     equal(caret(), null, 'a step runs: no caret');
     await settle(1_600);
-    equal(after(), toolLine(command), 'the step sits under the words');
-    const read = { id: 't2', name: 'Read', input: { file_path: 'src/login.ts' }, started: start, ok: true };
+    ok(step()?.includes('sleep 540'), 'the running step stays visible');
+    const read = { id: 't2', name: 'Read', input: { file_path: 'src/login.ts' }, at: 'I put it in the plan.'.length, started: start, ok: true };
     setM({ ...m(), tools: [command, read] });
     await settle();
-    equal(after(), toolLine(command), 'a later step that ended does not hide the one still running');
+    ok(step()?.includes('sleep 540'), 'a later step that ended does not hide the one still running');
     equal(caret(), null);
     setM({ ...m(), tools: [{ ...command, ok: true }, read] });
     await settle();

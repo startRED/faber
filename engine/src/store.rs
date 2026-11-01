@@ -172,6 +172,7 @@ fn summary(c: &Conversation) -> Summary {
         pinned_at: c.pinned_at,
         started_by: c.started_by.clone(),
         ended: c.ended.clone(),
+        state: (!c.messages.is_empty()).then(|| crate::engine::run_state(c)),
         plan: c.plan.as_ref().map(crate::model::Plan::count),
         results: Some(crate::results::tally(c)).filter(|r| r.cost.turns > 0),
         stuck: c.stuck.is_some(),

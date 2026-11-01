@@ -3,11 +3,11 @@
 /// The longest text a command may carry, in bytes.
 const MAX_TEXT: usize = 8 * 1024;
 
-pub(super) fn id(value: &str) -> Result<(), String> {
+pub(crate) fn id(value: &str) -> Result<(), String> {
     if faber_engine::project::valid_id(value) { Ok(()) } else { Err("error.journal.badId".into()) }
 }
 
-pub(super) fn text(value: &str) -> Result<(), String> {
+pub(crate) fn text(value: &str) -> Result<(), String> {
     if value.len() > MAX_TEXT {
         return Err("error.wire.tooBig".into());
     }

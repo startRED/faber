@@ -23,15 +23,15 @@ check('kits: Chat and Projects show session choices and their reason inside the 
           get messages() { return [message()]; }, from: 0, conversationId: area, options: [], onBranch: () => {},
         }), root);
         try {
-          const fold = root.querySelector<HTMLDetailsElement>('details.activity')!;
-          ok(fold && !fold.open, 'the technical line starts folded even without tool calls');
+          const fold = root.querySelector<HTMLDetailsElement>('details.kit')!;
+          ok(fold && !fold.open, 'the kit line starts folded even without tool calls');
           equal(fold.querySelector('summary')?.textContent, t('kit.details'));
-          const line = () => root.querySelector('.kit');
-          equal(line()?.closest('details'), fold, 'the line stays in the existing work-log disclosure');
+          const line = () => root.querySelector('p.kit');
+          equal(line()?.closest('details'), fold, 'the line stays in the kit disclosure');
           equal(line()?.textContent, t('kit.line', { tools: t('catalog.name.design-taste-frontend'), reason: t('kit.code') }));
           fold.open = true;
           setMessage({ ...message(), text: 'Working. More words.', tools: [{ id: 'read', name: 'Read', input: { file_path: 'a.ts' }, ok: true }] });
-          equal(root.querySelectorAll('details.activity').length, 1, 'the tool steps share the same disclosure');
+          equal(root.querySelectorAll('.steps.one .step').length, 1, 'the tool step remains visible beside the kit');
           equal(line()?.textContent, t('kit.line', { tools: t('catalog.name.design-taste-frontend'), reason: t('kit.code') }), 'streaming does not change the session choice');
           for (const method of ['catalog', 'code'] as const) {
             setMessage({ ...message(), toolKit: { ids: ['design-taste-frontend'], jobs: ['web'], method, suggested: 'systematic-debugging' } });
@@ -42,18 +42,18 @@ check('kits: Chat and Projects show session choices and their reason inside the 
           }
           setMessage({ ...message(), status: 'done', toolKit: { ids: [], jobs: [], method: 'code' } });
           equal(line(), null, 'an empty saved report adds no catalog line to tool steps');
-          equal(root.querySelectorAll('details.activity').length, 1, 'an empty report does not hide real tool steps');
+          equal(root.querySelectorAll('.steps.one .step').length, 1, 'an empty report does not hide real tool steps');
           setMessage({ ...message(), tools: [] });
-          equal(root.querySelector('.activity'), null, 'an empty saved report does not create a technical fold');
+          equal(root.querySelector('details.kit'), null, 'an empty saved report does not create a kit fold');
           setMessage({ ...message(), toolKit: { ids: [], jobs: ['documents'], method: 'code', suggested: 'systematic-debugging' } });
           equal(line()?.textContent, `${t('kit.line', { tools: t('kit.none'), reason: t('kit.code') })} ${t('kit.suggest', { tool: t('catalog.name.systematic-debugging') })}`);
-          equal(root.querySelectorAll('details.activity').length, 1, 'a suggestion alone still has a quiet technical fold');
+          equal(root.querySelectorAll('details.kit').length, 1, 'a suggestion alone still has a quiet technical fold');
           setMessage({ ...message(), tools: [], toolKit: { ids: [], jobs: [], method: 'code', error: 'error.tools.snapshot' } });
           equal(line()?.textContent, t('error.tools.snapshot'), 'a failed snapshot reports the engine key quietly in every language');
           ok(line()?.classList.contains('pace'), 'snapshot failure uses the existing quiet work-log line');
-          equal(root.querySelectorAll('details.activity').length, 1, 'preparation failure alone is inspectable');
+          equal(root.querySelectorAll('details.kit').length, 1, 'preparation failure alone is inspectable');
           setMessage({ ...message(), toolKit: undefined, tools: [] });
-          equal(root.querySelector('.activity'), null, 'older replies do not gain an empty technical fold');
+          equal(root.querySelector('details.kit'), null, 'older replies do not gain an empty kit fold');
         } finally { dispose(); root.remove(); }
       }
     }
@@ -81,7 +81,7 @@ check('kits: expanded catalog cards, details and work log use the same localized
         await tick();
         const name = catalogName('pm-summarize-meeting');
         equal(root.querySelector('.catalog-name')?.textContent, name);
-        equal(root.querySelector('.kit')?.textContent, t('kit.line', { tools: name, reason: t('kit.code') }));
+        equal(root.querySelector('p.kit')?.textContent, t('kit.line', { tools: name, reason: t('kit.code') }));
         root.querySelector<HTMLButtonElement>('[data-catalog-card]')!.click();
         await tick();
         equal(root.querySelector('.catalog-detail h1')?.textContent, name);
