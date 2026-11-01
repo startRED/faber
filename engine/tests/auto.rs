@@ -98,6 +98,14 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
     }
 }
 
+#[test]
+fn agent_questions_and_child_results_explain_why_they_were_sent() {
+    for (wake, reason) in [("wake.asked", "act.why.asked"), ("wake.childDone", "act.why.childDone")] {
+        let act = faber_engine::act::FaberAct::wake(&faber_engine::model::Wake::of(wake), "sent");
+        assert_eq!(act.why.as_deref(), Some(reason));
+    }
+}
+
 #[tokio::test]
 async fn auto_routes_the_first_message_blind_and_says_why() {
     let dir = crate::support::DataFolder::new();
@@ -120,15 +128,80 @@ async fn auto_routes_the_first_message_blind_and_says_why() {
 }
 
 #[tokio::test]
+async fn a_slow_router_starts_the_turn_with_a_reason_within_the_budget() {
+    let dir = crate::support::DataFolder::new();
+    let slow: Ask = Arc::new(|_| {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            None
+        })
+    });
+    let f = fake(fixture("codex", "chat"));
+    let (engine, _rx) = engine(&dir, Vendor::Codex, f.spawn.clone(), slow);
+    let id = engine.send(auto(SKY)).unwrap();
+    tokio::time::timeout(Duration::from_millis(3500), async {
+        loop {
+            if !f.args.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("turn held by router");
+    let reply = engine.open(&id).unwrap().messages[1].clone();
+    assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_failed_router_keeps_the_previous_choice() {
+    let dir = crate::support::DataFolder::new();
+    let calls = Calls::default();
+    let seen = calls.clone();
+    let ask: Ask = Arc::new(move |prompt| {
+        let mut calls = seen.lock().unwrap();
+        calls.push(prompt);
+        let first = calls.len() == 1;
+        Box::pin(async move { first.then(|| r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#.to_string()) })
+    });
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn, ask);
+    let id = engine.send(auto(SKY)).unwrap();
+    let first = finished(&mut rx).await;
+    engine.send(SendRequest { conversation_id: Some(id), ..auto("A harder follow-up") }).unwrap();
+    let second = finished(&mut rx).await;
+    assert_eq!(second.model, first.model);
+    assert_eq!(second.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn a_router_without_an_answer_leaves_the_everyday_default() {
     let dir = crate::support::DataFolder::new();
     let silent: Ask = Arc::new(|_| Box::pin(async { None }));
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, silent);
+    let models = vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()];
+    engine.set_codex_models(models.clone(), None);
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
     assert_eq!(reply.status, Some(Status::Done));
     assert_eq!(reply.reason.as_deref(), Some("reason.autoOnly"));
+    assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
+    assert_eq!(reply.acts[0].params.get("model"), Some(&faber_engine::router::default_model(Vendor::Codex, None, &models)));
+}
+
+#[tokio::test]
+async fn no_router_candidates_keep_the_default_reason() {
+    let dir = crate::support::DataFolder::new();
+    let calls = Calls::default();
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    engine.set_codex_models(vec![], None);
+    engine.send(auto(SKY)).unwrap();
+    let reply = finished(&mut rx).await;
+    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(reply.acts[0].why.as_deref(), Some("reason.autoOnly"));
+    engine.shutdown();
 }
 
 #[tokio::test]

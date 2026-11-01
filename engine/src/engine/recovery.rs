@@ -345,7 +345,7 @@ impl Core {
                 spare.session.send(UserTurn::text(prompt));
                 let (me, id, reply) = (self.me.clone(), id.to_string(), t.reply.clone());
                 tokio::spawn(async move {
-                    let answer = tokio::time::timeout(auto::ROUTE_BUDGET, spare.answer).await.ok().and_then(|r| r.ok()).flatten();
+                    let answer = tokio::time::timeout(Duration::from_secs(30), spare.answer).await.ok().and_then(|r| r.ok()).flatten();
                     spare.session.close();
                     let Some(core) = me.upgrade() else { return };
                     let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
