@@ -7,8 +7,38 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::process::{Child, Command};
+#[cfg(not(windows))]
+use tokio::process::Child;
+use tokio::process::Command;
 use tokio::time::{Duration, Instant};
+
+#[cfg(windows)]
+pub enum Child {
+    Cli(faber_winproc::Child),
+    Command(tokio::process::Child),
+}
+
+#[cfg(windows)]
+impl Child {
+    pub fn id(&self) -> Option<u32> {
+        match self {
+            Self::Cli(child) => child.id(),
+            Self::Command(child) => child.id(),
+        }
+    }
+    pub fn start_kill(&mut self) -> io::Result<()> {
+        match self {
+            Self::Cli(child) => child.start_kill(),
+            Self::Command(child) => child.start_kill(),
+        }
+    }
+    pub async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+        match self {
+            Self::Cli(child) => child.wait().await,
+            Self::Command(child) => child.wait().await,
+        }
+    }
+}
 
 /// A running turn, and the fixed grace period an interrupt gives it before the process is stopped.
 #[derive(Default)]
@@ -207,7 +237,28 @@ pub fn set_cli(path: PathBuf) {
 
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    Arc::new(|bin, args, cwd| spawn_command(marked(bin, args, cwd)))
+    Arc::new(|bin, args, cwd| {
+        let cmd = marked(bin, args, cwd);
+        #[cfg(windows)]
+        {
+            let mut limits = win32job::ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let job = win32job::Job::create_with_limit_info(&limits).map_err(io::Error::other)?;
+            let (child, stdin, stdout, stderr) =
+                faber_winproc::spawn_in_job(cmd.as_std(), job.handle(), creation_flags(starting_in_background()))?;
+            let contained = owned_job(child.id().ok_or_else(|| io::Error::other("the process already ended"))?, job)?;
+            child.resume()?;
+            Ok(Proc {
+                stdin: Box::new(stdin),
+                stdout: Box::new(stdout),
+                stderr: Some(Box::new(stderr)),
+                child: Some(Child::Cli(child)),
+                contained: Some(contained),
+            })
+        }
+        #[cfg(not(windows))]
+        spawn_command(cmd)
+    })
 }
 
 fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
@@ -265,7 +316,7 @@ pub fn spawn_check(cmd: Command, memory: Option<u64>) -> io::Result<Proc> {
     })
 }
 
-fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
+fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&tokio::process::Child) -> io::Result<Containment>) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
@@ -295,7 +346,16 @@ fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Contai
         stdin: Box::new(child.stdin.take().expect("piped stdin")),
         stdout: Box::new(child.stdout.take().expect("piped stdout")),
         stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
-        child: Some(child),
+        child: Some({
+            #[cfg(windows)]
+            {
+                Child::Command(child)
+            }
+            #[cfg(not(windows))]
+            {
+                child
+            }
+        }),
         contained,
     })
 }
@@ -701,14 +761,19 @@ pub fn in_a_job_we_started(inside: impl Fn(isize) -> io::Result<bool>) -> bool {
 }
 
 #[cfg(windows)]
-fn join_job(child: &Child) -> io::Result<Containment> {
+fn join_job(child: &tokio::process::Child) -> io::Result<Containment> {
     let handle = child.raw_handle().ok_or_else(|| io::Error::other("the process already ended"))?;
     let mut limits = win32job::ExtendedLimitInfo::new();
     limits.limit_kill_on_job_close();
     let job = win32job::Job::create_with_limit_info(&limits).map_err(io::Error::other)?;
     job.assign_process(handle as isize).map_err(io::Error::other)?;
+    owned_job(child.id().ok_or_else(|| io::Error::other("the process already ended"))?, job)
+}
+
+#[cfg(windows)]
+fn owned_job(pid: u32, job: win32job::Job) -> io::Result<Containment> {
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
-    let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
+    let identity = crate::project::ProcessId { pid, started_at };
     let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
     let tree = Arc::new(TreeState {
         job: Mutex::new(Some(job)),
@@ -874,6 +939,151 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cli_lifetime_creator_death_before_resume_leaves_no_process() {
+        const MARK: &str = "FABER_CLI_JOB_CREATOR_TEST";
+        if let Some(marker) = std::env::var_os(MARK) {
+            let mut limits = win32job::ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let job = win32job::Job::create_with_limit_info(&limits).unwrap();
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.arg("--list");
+            let (child, _stdin, _stdout, _stderr) = faber_winproc::spawn_in_job(&command, job.handle(), creation_flags(false)).unwrap();
+            assert_eq!(
+                faber_winproc::job_active_processes(job.handle()).unwrap(),
+                1,
+                "membership exists before any resume or later assignment"
+            );
+            std::fs::write(marker, child.id().unwrap().to_string()).unwrap();
+            std::future::pending::<()>().await;
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("pid");
+        let mut creator = Command::new(std::env::current_exe().unwrap());
+        creator
+            .args(["--exact", "proc::tests::cli_lifetime_creator_death_before_resume_leaves_no_process", "--nocapture"])
+            .env(MARK, &marker)
+            .creation_flags(0x0800_0000)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut creator = creator.spawn().unwrap();
+        let pid = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&marker)
+                    && let Ok(pid) = pid.parse::<u32>()
+                {
+                    break pid;
+                }
+                assert!(creator.try_wait().unwrap().is_none(), "creator exited before the creation hook");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the creator reaches the creation/resume hook");
+        creator.kill().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !faber_winproc::process_ended(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("killing the creator must kill even a never-resumed CLI");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cli_lifetime_native_pipes_preserve_input_output_environment_and_directory() {
+        const MARK: &str = "FABER_CLI_JOB_PIPE_TEST";
+        if let Some(folder) = std::env::var_os(MARK) {
+            use std::io::Read;
+            assert_eq!(std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap(), std::fs::canonicalize(folder).unwrap());
+            assert_eq!(std::env::var(AGENT_MARK).unwrap(), "1");
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input).unwrap();
+            println!("CLI_OUTPUT:{input}");
+            eprintln!("CLI_ERROR");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let bin = std::env::current_exe().unwrap();
+        let args = ["--exact", "proc::tests::cli_lifetime_native_pipes_preserve_input_output_environment_and_directory", "--nocapture"]
+            .map(String::from);
+        let mut command = marked(bin.to_str().unwrap(), &args, dir.path());
+        command.env(MARK, dir.path());
+        for _ in 0..12 {
+            let mut limits = win32job::ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let job = win32job::Job::create_with_limit_info(&limits).unwrap();
+            let (mut child, mut stdin, mut stdout, mut stderr) =
+                faber_winproc::spawn_in_job(command.as_std(), job.handle(), creation_flags(false)).unwrap();
+            child.resume().unwrap();
+            let exchange = async {
+                stdin.write_all("Spaces, quotes: \" and Unicode: café.\n".as_bytes()).await.unwrap();
+                stdin.shutdown().await.unwrap();
+                drop(stdin);
+                let (mut out, mut err) = (String::new(), String::new());
+                let (out_read, err_read) = tokio::join!(stdout.read_to_string(&mut out), stderr.read_to_string(&mut err));
+                out_read.unwrap();
+                err_read.unwrap();
+                assert!(child.wait().await.unwrap().success(), "{out}\n{err}");
+                assert!(out.contains("CLI_OUTPUT:Spaces, quotes: \" and Unicode: café."), "{out}");
+                assert!(err.contains("CLI_ERROR"), "{err}");
+            };
+            tokio::time::timeout(Duration::from_secs(10), exchange).await.expect("native stdio must not hang");
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cli_lifetime_root_exit_ends_output_even_while_a_descendant_holds_the_pipe() {
+        const MARK: &str = "FABER_CLI_JOB_HELD_PIPE_TEST";
+        let name = "proc::tests::cli_lifetime_root_exit_ends_output_even_while_a_descendant_holds_the_pipe";
+        if let Ok(mode) = std::env::var(MARK) {
+            if mode == "descendant" {
+                std::future::pending::<()>().await;
+            }
+            use std::io::Write;
+            use std::os::windows::process::CommandExt;
+            let _descendant = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env(MARK, "descendant")
+                .creation_flags(0x0800_0000)
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap();
+            println!("Keep these partial words.");
+            std::io::stdout().flush().unwrap();
+            return;
+        }
+        let mut limits = win32job::ExtendedLimitInfo::new();
+        limits.limit_kill_on_job_close();
+        let job = win32job::Job::create_with_limit_info(&limits).unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", name, "--nocapture"]).env(MARK, "root");
+        let (mut child, _stdin, mut stdout, _stderr) = faber_winproc::spawn_in_job(&command, job.handle(), creation_flags(false)).unwrap();
+        child.resume().unwrap();
+        let mut words = String::new();
+        tokio::time::timeout(Duration::from_secs(2), stdout.read_to_string(&mut words))
+            .await
+            .expect("root exit, not pipe inheritance, must end the driver's read")
+            .unwrap();
+        assert!(words.contains("Keep these partial words."), "{words}");
+        assert!(child.wait().await.unwrap().success());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while faber_winproc::job_active_processes(job.handle()).unwrap() != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("root death retires the descendants that inherited its output");
+    }
 
     #[test]
     fn every_cli_faber_starts_is_marked_as_an_ai() {
