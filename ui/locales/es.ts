@@ -538,6 +538,7 @@ export const es: Messages = {
   's1.try': 'Para empezar',
   's1.pickUp': 'Seguir donde lo dejaste',
   's1.terminal': 'Sesiones de la terminal',
+  's1.terminal.summary': "Sesiones iniciadas en esta carpeta.",
   's1.terminal.hint': 'Sesiones que abriste en una terminal en esta carpeta: abre una aquí y sigue donde se quedó.',
   's1.terminal.none': 'No se abrió ninguna sesión en una terminal en esta carpeta.',
   'suggest.1': 'Explicar un tema',
@@ -1837,6 +1838,7 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "memory.title": "Memoria",
+  'memory.summary': "Instrucciones y decisiones del proyecto.",
   "memory.scope": "Solo esta carpeta del proyecto. Las copias separadas y las carpetas privadas de acceso de tus IA quedan fuera.",
   "memory.nextLaunch": "Los cambios se aplican cuando la IA vuelva a iniciarse en esta carpeta. Las instrucciones de una subcarpeta se aplican allí.",
   "memory.refresh": "Actualizar",
@@ -2036,6 +2038,7 @@ export const es: Messages = {
   "set.projects.copiesDesc": "Cada conversación nueva trabaja en una rama propia, faber/…, en una copia del repositorio, así que dos conversaciones y tu propia carpeta nunca cambian los mismos archivos. El agente trae su trabajo de vuelta con un commit, un push o un pull request; Faber nunca hace merge por su cuenta.",
   "set.projects.copiesTech": "Un git worktree en la carpeta de datos de Faber, hecho desde la rama que tienes abierta cuando sale el primer mensaje, solo en un repositorio con al menos un commit. Se va con su conversación, o al abrir Faber cuando su trabajo ya entró y no queda nada sin commit; el trabajo que no está en ningún otro sitio nunca se borra sin preguntar. Apagar esto conserva las copias que las conversaciones ya tienen.",
   "goals.title": "Metas permanentes",
+  'goals.summary': "Lo que debe seguir cumpliéndose.",
   "goals.scope": "Cosas que este proyecto debe mantener siempre ciertas. Cada una es una comprobación confirmada o, en el proyecto del propio Faber, ningún cierre inesperado nuevo.",
   "goals.refresh": "Actualizar",
   "goals.off": "Faber solo vigila estas metas cuando el arreglo automático está activado en Ajustes, Proyectos.",
@@ -2414,6 +2417,7 @@ export const es: Messages = {
   'notes.340.better': 'Puedes ver en la conversación cuándo el trabajo terminó sin conclusión o se interrumpió.',
   'notes.341.new': 'En un proyecto, cada conversación termina ahora con lo que entregó y lo que costó. La página del proyecto las lista una al lado de otra.',
   'notes.342.better': 'La línea en directo muestra el estado del agente o el título de su último pensamiento, y los pasos quedan alineados con el texto.',
+  'notes.343.better': 'Las secciones del proyecto tienen una explicación, el Catálogo da prioridad a la búsqueda y las etiquetas de Chat y de cuota en francés son más claras.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

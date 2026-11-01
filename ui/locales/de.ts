@@ -377,6 +377,7 @@ export const de: Messages = {
   's1.try': 'Zum Einstieg',
   's1.pickUp': 'Dort weitermachen, wo du aufgehört hast',
   's1.terminal': 'Sitzungen aus dem Terminal',
+  's1.terminal.summary': "Sitzungen aus diesem Ordner.",
   's1.terminal.hint': 'Sitzungen, die du in einem Terminal in diesem Ordner gestartet hast: hier geöffnet, geht eine dort weiter, wo sie war.',
   's1.terminal.none': 'In diesem Ordner wurde keine Sitzung in einem Terminal gestartet.',
   'suggest.1': 'Thema erklären',
@@ -1837,6 +1838,7 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "memory.title": "Gedächtnis",
+  'memory.summary': "Anweisungen und Entscheidungen.",
   "memory.scope": "Nur dieser Projektordner. Separate Kopien und die privaten Anmeldeordner deiner KI bleiben außen vor.",
   "memory.nextLaunch": "Änderungen gelten, wenn die KI das nächste Mal in diesem Ordner startet. Anweisungen aus Unterordnern gelten dort.",
   "memory.refresh": "Aktualisieren",
@@ -2036,6 +2038,7 @@ export const de: Messages = {
   "set.projects.copiesDesc": "Jedes neue Gespräch arbeitet auf einem eigenen Branch, faber/…, in einer Kopie des Repositorys, damit zwei Gespräche und dein eigener Ordner nie dieselben Dateien ändern. Der Agent bringt seine Arbeit mit einem Commit, einem Push oder einem Pull Request zurück; Faber merged nie von selbst.",
   "set.projects.copiesTech": "Ein Git-Worktree im Datenordner von Faber, erstellt aus dem Branch, den du beim Senden der ersten Nachricht ausgecheckt hast, nur in einem Repository mit mindestens einem Commit. Er verschwindet mit seinem Gespräch, oder beim Start, sobald seine Arbeit gemerged ist und nichts ohne Commit übrig bleibt; Arbeit, die es nirgends sonst gibt, wird nie ohne Nachfrage gelöscht. Ausschalten behält die Kopien, die Gespräche schon haben.",
   "goals.title": "Dauerhafte Ziele",
+  'goals.summary': "Was immer gelten soll.",
   "goals.scope": "Dinge, die in diesem Projekt immer gelten sollen. Jedes ist eine bestätigte Prüfung oder, im Projekt von Faber selbst, kein neuer Absturz.",
   "goals.refresh": "Aktualisieren",
   "goals.off": "Faber beobachtet diese Ziele nur, wenn die automatische Reparatur in Einstellungen, Projekte eingeschaltet ist.",
@@ -2414,6 +2417,7 @@ export const de: Messages = {
   'notes.340.better': 'In der Unterhaltung siehst du, wenn die Arbeit ohne Abschluss endet oder unterbrochen wurde.',
   'notes.341.new': 'In einem Projekt zeigt jedes Gespräch jetzt am Ende, was es geliefert und was es gekostet hat. Die Projektseite listet alle nebeneinander auf.',
   'notes.342.better': 'Die Live-Zeile zeigt den Status des Agenten oder die Überschrift seines letzten Gedankens; die Schritte sind am Text ausgerichtet.',
+  'notes.343.better': 'Die Projektbereiche haben jetzt Erklärungen, die Suche steht im Katalog im Vordergrund und die Beschriftungen im Chat und bei französischen Kontingenten sind klarer.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

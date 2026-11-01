@@ -201,7 +201,7 @@ fn catalog_controls(ctx: &mut Ctx) -> Result {
         page.wait_visible(&card)?;
         let away = css("[data-catalog-tab]");
         page.hover(&away)?;
-        page.eval_on(&css("[data-catalog-pick-shown]"), "el.focus(); return {};")?;
+        page.eval_on(&css(".catalog-filters button:last-child"), "el.focus(); return {};")?;
         for step in ["hover-in", "hover-out", "focus-in", "focus-out"] {
             let shown = step.ends_with("in");
             let w = watch(ctx, &format!("catalog {mode} {step}"), page, &["catalog-pick", "catalog-site"], |p| {
