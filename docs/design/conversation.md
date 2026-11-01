@@ -42,9 +42,8 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before times were kept, a stop and an error
   say nothing here. Nothing animates.
-- A reply Faber was closed under (still running when Faber closed or crashed) says so in the quiet note style in place
-  of "Stopped.", with "Files it already changed stay changed." in a project; the newest such reply has one plain Continue
-  button under it, which sends Faber's own turn (`wake.closed`) and, when refused, says why in the red note.
+- An unconcluded latest reply says so in a quiet decision-style row. A closing request appears as its own row in the thread. A reply Faber was closed under (still running when Faber closed or crashed) says so in the same row in place
+  of "Stopped.", with the existing project files note; the newest such reply has a Continue action beside it, which sends Faber's own turn (`wake.closed`) and, when refused, says why in the red note.
 - A reply that stopped on its own says why in one line under its words, and never beside "Stopped." (that word is only the
   person's own Stop, which says nothing more). A limit (`reason.turnLimit`, `reason.budget`) is told in the quiet note
   style; a failure (`reason.failed`, and `reason.other` for an unknown ending) keeps the red note (C001).

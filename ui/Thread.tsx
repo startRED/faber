@@ -17,6 +17,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { StallNote } from './StallNote.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
@@ -355,6 +356,7 @@ type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
   workingFolder?: string;
+  endState?: import('./api.ts').RunStateName;
   pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
@@ -384,7 +386,7 @@ interface Shared {
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // Older automatic messages without acts keep their loop mark in the reply header.
-  const woke = () => props.prompt?.acts?.length ? undefined : props.prompt?.wake;
+  const woke = () => props.prompt?.acts?.length || props.prompt?.wake?.why === 'wake.conclusion' ? undefined : props.prompt?.wake;
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
@@ -705,19 +707,14 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>
-      {/* Faber was closed while this ran: said in place of "Stopped.", and the newest such reply offers to go on (R477). */}
+      <Show when={props.last && m().id === props.messages?.at(-1)?.id && props.endState === 'unconcluded'}>
+        <div class="faber-act"><div class="faber-act-line"><StateGlyph state="ended" small /><span>{t('run.unconcluded')}</span></div></div>
+      </Show>
+      {/* A reply cut by closing keeps its recovery action (R477). */}
       <Show when={m().status === 'stopped' && m().closed}>
-        <div class="note">{t('answer.closed')}</div>
-        <Show when={props.area === 'project'}>
-          <div class="note">{t('answer.closedFiles')}</div>
-        </Show>
-        <Show when={props.last && !closedRefused()}>
-          <div>
-            <button type="button" class="btn" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>
-              {t('answer.closedContinue')}
-            </button>
-          </div>
-        </Show>
+        <div class="faber-act"><div class="faber-act-line"><StateGlyph state="interrupted" small /><span>{t('answer.closed')}<Show when={props.area === 'project'}> {t('answer.closedFiles')}</Show></span>
+          <Show when={props.last && !closedRefused()}><button type="button" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>{t('answer.closedContinue')}</button></Show>
+        </div></div>
         <Show when={closedRefused()}>{(text) => <div class="note err" role="alert">{text()}</div>}</Show>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
@@ -1064,7 +1061,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
-  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m) && !(at === props.messages.length - 1 && (props.endState === 'unconcluded' || m.closed)));
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header,
   // and if the newest turns had nothing for the person, the last turn of the run with content stays open below the header.
   const runs = createMemo(() => runsOf(props.messages, drawn));
@@ -1118,6 +1115,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             }
           >
             <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
+            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><Icon name="loop" small /><span>{t('wake.conclusion')}</span></div></div></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (
