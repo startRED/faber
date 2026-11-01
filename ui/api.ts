@@ -158,6 +158,7 @@ export interface Message {
   vendor?: Vendor;
   model?: string;
   reason?: string;
+  overloadRetry?: number;
   effort?: Effort;
   thinking?: string;
   tools?: ToolUse[];

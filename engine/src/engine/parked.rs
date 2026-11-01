@@ -282,6 +282,8 @@ mod tests {
                     running: None,
                     capabilities: Default::default(),
                     ended: None,
+                    overload_retries: 0,
+                    overload_wait: None,
                     effort: "medium".into(),
                     sid: 1,
                     session,
