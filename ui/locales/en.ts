@@ -2159,6 +2159,8 @@ export const en = {
   'notes.329.better': 'You can see why Faber continued a conversation and what it asked a helper to do.',
   'notes.330.fixed': "An address you are typing in Faber's browser is no longer lost when the window is resized.",
   'notes.331.better': 'The agent sees what the conversation delivered and cost when it wraps up.',
+  'notes.332.better': 'In Chat, the AI now answers in its own voice and at its own length. "Short" in Settings still shortens its answers.',
+  'notes.333.better': 'The AI starts a team of conversations only when you ask for one.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

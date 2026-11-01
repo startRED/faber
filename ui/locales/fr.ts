@@ -2279,6 +2279,8 @@ export const fr: Messages = {
   'notes.329.better': 'Vous voyez pourquoi Faber a poursuivi une conversation et ce qu’il a demandé à un assistant.',
   'notes.330.fixed': "Une adresse que vous tapez dans le navigateur de Faber n'est plus perdue quand la fenêtre change de taille.",
   'notes.331.better': 'En terminant, l’agent voit les résultats de la conversation et leur coût.',
+  'notes.332.better': "Dans le Chat, l'IA répond désormais avec sa propre voix et à la longueur qu'elle choisit. « Court » dans les réglages raccourcit toujours ses réponses.",
+  'notes.333.better': 'L’IA ne forme une équipe de conversations que si vous le demandez.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

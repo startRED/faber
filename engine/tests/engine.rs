@@ -1844,7 +1844,7 @@ async fn research_plan_edit_approve_report(vendor: Vendor, area: Area) -> (suppo
             let args = f.args.lock().unwrap();
             let persona = args[0].windows(2).find(|pair| pair[0] == "--append-system-prompt").unwrap();
             assert!(persona[1].contains(phase));
-            assert!(persona[1].contains("You are Faber"));
+            assert!(persona[1].contains("State the underlying model truthfully"));
         }
         assert!(planning.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(report.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "default"]));
@@ -1854,7 +1854,7 @@ async fn research_plan_edit_approve_report(vendor: Vendor, area: Area) -> (suppo
             let thread = wire.iter().find(|m| m["method"] == "thread/start" || m["method"] == "thread/resume").unwrap();
             let persona = thread["params"]["developerInstructions"].as_str().unwrap();
             assert!(persona.contains(phase));
-            assert!(persona.contains("You are Faber"));
+            assert!(persona.contains("State the underlying model truthfully"));
         }
         let plans: Vec<_> = planning.wire.messages().into_iter().filter(|m| m["method"] == "turn/start").collect();
         assert_eq!(plans.len(), 2);
@@ -3229,7 +3229,7 @@ async fn without_a_name_nothing_is_added_and_clearing_it_stops_it_for_new_conver
     assert_eq!(args.len(), 3);
     for a in [&args[0], &args[2]] {
         let prompt = appended(a).unwrap();
-        assert!(prompt.contains("You are Faber"));
+        assert!(prompt.contains("State the underlying model truthfully"));
         assert!(!prompt.contains("called Erick."));
     }
     assert!(appended(&args[1]).is_some());
@@ -6447,7 +6447,7 @@ async fn research_codex_follow_up_reopens_backend_without_interrupting_active_pe
         let resumed = reply_style_codex_thread(&mut ordinary, "thread/resume", 0, "main").await;
         assert_eq!(resumed["params"]["threadId"], "main", "the conversation keeps its history");
         let instructions = resumed["params"]["developerInstructions"].as_str().unwrap();
-        assert!(instructions.contains("You are Faber"));
+        assert!(instructions.contains("State the underlying model truthfully"));
         assert!(!instructions.contains("Search the web over many steps") && !instructions.contains("Do not search yet."));
         assert_eq!(reply_style_rpc(&ordinary, "turn/start", 0).await["params"]["input"][0]["text"], SKY);
         assert!(!report.closed.load(std::sync::atomic::Ordering::SeqCst));

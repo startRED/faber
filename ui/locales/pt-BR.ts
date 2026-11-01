@@ -2266,6 +2266,8 @@ export const ptBR: Messages = {
   'notes.329.better': 'Você pode ver por que o Faber continuou uma conversa e o que pediu a um ajudante.',
   'notes.330.fixed': 'Um endereço que você está digitando no navegador do Faber não se perde mais quando a janela muda de tamanho.',
   'notes.331.better': 'Ao encerrar, o agente vê o que a conversa entregou e quanto custou.',
+  'notes.332.better': 'No Chat, a IA agora responde com a própria voz e no tamanho que ela escolhe. "Curto" nos Ajustes continua encurtando as respostas.',
+  'notes.333.better': 'A IA só forma uma equipe de conversas quando você pede.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

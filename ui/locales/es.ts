@@ -2279,6 +2279,8 @@ export const es: Messages = {
   'notes.329.better': 'Puedes ver por qué Faber continuó una conversación y qué le pidió a un ayudante.',
   'notes.330.fixed': 'Una dirección que estás escribiendo en el navegador de Faber ya no se pierde cuando cambia el tamaño de la ventana.',
   'notes.331.better': 'Al terminar, el agente ve lo que entregó la conversación y cuánto costó.',
+  'notes.332.better': 'En el Chat, la IA ahora responde con su propia voz y a la medida que ella elige. "Corto" en Ajustes sigue acortando las respuestas.',
+  'notes.333.better': 'La IA solo forma un equipo de conversaciones cuando se lo pides.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
