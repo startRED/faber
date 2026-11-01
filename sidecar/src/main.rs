@@ -3,6 +3,8 @@
 //! concurrently, so replies may come out of order; every engine event is a `{"event":...}` line. When stdin closes the
 //! engine is shut down cleanly and the process ends. It has no window: whatever needs one answers `error.host.noWindow`.
 //!
+//! The command line (`faber`) reaches the same table over the local channel (`faber-channel`) while this runs.
+//!
 //! What the shell must show or do, it decides here and says with an `{"order":{...}}` line (`faber_host::wire::Order`, all
 //! written by the same single writer): the tray (tooltip, number, picture, menu words), a notification, keeping the PC
 //! awake, starting with the system. The shell draws them with its own calls and decides nothing.
@@ -87,6 +89,7 @@ async fn run() -> ExitCode {
         shell_process: std::env::var("FABER_SHELL_PID").ok().and_then(|pid| pid.parse().ok()),
         chime: faber_host::tray::chime::play,
     }));
+    let channel_data = data_dir.clone();
     let options = StartOptions {
         data_dir,
         hidden,
@@ -95,6 +98,10 @@ async fn run() -> ExitCode {
         game_guard: None,
         browser: None,
     };
+    if let Err(error) = faber_channel::host::prepare() {
+        eprintln!("Faber failed to prepare its channel: {error}");
+        return ExitCode::FAILURE;
+    }
     let host: Arc<Host> = match faber_host::start(options, shell.clone()) {
         Ok(host) => host,
         Err(error) => {
@@ -102,6 +109,13 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The command line reaches the same table over the local channel, for as long as the sidecar runs.
+    let channel_host = host.clone();
+    tokio::spawn(async move {
+        if let Err(error) = faber_channel::host::serve(&channel_data, channel_host).await {
+            eprintln!("faber: the command line's channel could not open: {error}");
+        }
+    });
     // The engine exists: the tray is told for the first time, and its settings decide the notifications from now on.
     let engine = host.engine.clone();
     shell.attach(move || engine.settings());

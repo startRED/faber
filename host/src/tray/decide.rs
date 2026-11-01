@@ -50,6 +50,7 @@ fn default_notify_many() -> String {
 fn default_stopped() -> BTreeMap<String, String> {
     [
         ("done", "{title}: kept going until nothing was left"),
+        ("silent", "{title}: stopped keeping going after two turns with nothing new and no conclusion"),
         ("asked", "{title}: stopped keeping going to ask you something"),
         ("failed", "{title}: stopped keeping going after two turns failed"),
         ("cap", "{title}: stopped keeping going after a long run on its own"),

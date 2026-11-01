@@ -1,8 +1,19 @@
 import { createSignal } from 'solid-js';
-import { type Area, errorText, type RunningItem, type RunningList, type Summary } from './api.ts';
+import { type Area, errorText, type RunningItem, type RunningList, type RunStateName, type Summary } from './api.ts';
+import { t } from './i18n.ts';
 
 // The running list on the screen (docs/design/layout.md, "Running column"). The engine builds and orders the list; the screen
 // keeps the newest one it has seen, groups it into blocks and decides when the column opens by itself.
+
+/** The words of a state that needs a second look: the AI never concluded, Faber closed mid-turn, the run is stuck, it failed.
+ * Working, waiting, concluded and stopped have their own places (the running list, the done card, the person's own Stop). */
+export function stateWords(state: RunStateName | undefined): string | undefined {
+  if (state === 'unconcluded') return t('run.unconcluded');
+  if (state === 'interrupted') return t('run.interrupted');
+  if (state === 'stuck') return t('run.stuckNoResult');
+  if (state === 'failed') return t('run.doneFailed');
+  return undefined;
+}
 
 /** The newer of two lists. The same revision keeps the one already held. */
 export function newest(held: RunningList, offered: RunningList): RunningList {

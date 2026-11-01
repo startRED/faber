@@ -664,7 +664,9 @@ fn endpoint_json(port: u16, deadline: Instant, path: &str) -> Result<Value, Stri
 }
 
 fn app_url(url: &Value) -> bool {
-    url.as_str().is_some_and(|url| url.starts_with("http://tauri.localhost/") || url.starts_with("tauri://localhost/"))
+    // Tauri's origin on Windows, then on the other systems, then the Electron shell's own scheme.
+    url.as_str()
+        .is_some_and(|url| ["http://tauri.localhost/", "tauri://localhost/", "faber://app/"].iter().any(|origin| url.starts_with(origin)))
 }
 
 fn open(url: &str, deadline: Instant) -> Result<Cdp, String> {

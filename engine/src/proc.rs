@@ -2,10 +2,10 @@
 
 pub use faber_winproc::process_tree::ProcessIdentity;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
@@ -194,13 +194,78 @@ pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot
     }
 }
 
+/// Set to `1` on every CLI Faber starts, and so on everything that CLI runs: Faber's own command line (`faber`, in `cli/`)
+/// then knows an AI is driving it and holds it to the channel's limits on starting turns (`channel/src/guard.rs`).
+pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
+
+static CLI: OnceLock<PathBuf> = OnceLock::new();
+/// Mints the token a conversation's AI carries (set once by the channel).
+pub type TokenMinter = Arc<dyn Fn(&str) -> String + Send + Sync>;
+
+static TOKEN_MINTER: OnceLock<TokenMinter> = OnceLock::new();
+
+thread_local! {
+    static CONVERSATION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs the current channel's token minter once for this process.
+pub fn set_token_minter(f: Arc<dyn Fn(&str) -> String + Send + Sync>) {
+    let _ = TOKEN_MINTER.set(f);
+}
+
+/// Mints a token using the running channel's secret, if its minter is installed.
+pub fn conversation_token(id: &str) -> Option<String> {
+    TOKEN_MINTER.get().map(|mint| mint(id))
+}
+
+/// Runs a synchronous session start with its conversation identity, restoring it even on panic.
+pub fn as_conversation<T>(id: &str, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CONVERSATION.with(|current| *current.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = CONVERSATION.with(|current| current.replace(Some(id.to_owned())));
+    let _restore = Restore(previous);
+    f()
+}
+
+/// Sets the command line shipped with this Faber, once at startup.
+pub fn set_cli(path: PathBuf) {
+    let _ = CLI.set(path);
+}
+
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    Arc::new(|bin, args, cwd| {
-        let mut cmd = Command::new(bin);
-        cmd.args(args).current_dir(cwd);
-        spawn_command(cmd)
-    })
+    Arc::new(|bin, args, cwd| spawn_command(marked(bin, args, cwd)))
+}
+
+pub(crate) fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
+    marked_with_minter(bin, args, cwd, TOKEN_MINTER.get().map(Arc::as_ref))
+}
+
+fn marked_with_minter(bin: &str, args: &[String], cwd: &Path, mint: Option<&(dyn Fn(&str) -> String + Send + Sync)>) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1").env_remove("FABER_AGENT_TOKEN").env_remove("FABER_CONVERSATION");
+    CONVERSATION.with(|current| {
+        if let Some(id) = current.borrow().as_deref()
+            && let Some(mint) = mint
+        {
+            cmd.env("FABER_AGENT_TOKEN", mint(id)).env("FABER_CONVERSATION", id);
+        }
+    });
+    if let Some(cli) = CLI.get()
+        && let Some(folder) = cli.parent()
+        && let Ok(mut path) = std::env::join_paths([folder])
+    {
+        if let Some(original) = std::env::var_os("PATH") {
+            path.push(if cfg!(windows) { ";" } else { ":" });
+            path.push(original);
+        }
+        cmd.env("FABER_CLI", cli).env("PATH", path);
+    }
+    cmd
 }
 
 /// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
@@ -654,6 +719,29 @@ impl OwnedTree {
     }
 }
 
+/// The jobs the CLIs and checks Faber started run in, so the command line's channel can tell a program one of them started,
+/// however it was launched: nothing in such a job can leave it.
+#[cfg(windows)]
+static JOBS: Mutex<Vec<std::sync::Weak<TreeState>>> = Mutex::new(Vec::new());
+
+#[cfg(windows)]
+fn known(tree: &Arc<TreeState>) {
+    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    jobs.retain(|tree| tree.strong_count() > 0);
+    jobs.push(Arc::downgrade(tree));
+}
+
+/// Whether `inside` finds a process in one of the jobs Faber's CLIs and checks run in now. A job it cannot ask counts as a
+/// yes: in doubt, the process is held to an AI's limits.
+#[cfg(windows)]
+pub fn in_a_job_we_started(inside: impl Fn(isize) -> io::Result<bool>) -> bool {
+    let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    jobs.retain(|tree| tree.strong_count() > 0);
+    jobs.iter()
+        .filter_map(std::sync::Weak::upgrade)
+        .any(|tree| tree.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|job| inside(job.handle()).unwrap_or(true)))
+}
+
 #[cfg(windows)]
 fn join_job(child: &Child) -> io::Result<Containment> {
     let handle = child.raw_handle().ok_or_else(|| io::Error::other("the process already ended"))?;
@@ -664,16 +752,16 @@ fn join_job(child: &Child) -> io::Result<Containment> {
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
     let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
     let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
-    Ok(Containment {
-        tree: Arc::new(TreeState {
-            job: Mutex::new(Some(job)),
-            identity,
-            root: Some(root),
-            confirmed: AtomicBool::new(false),
-            #[cfg(test)]
-            probe: None,
-        }),
-    })
+    let tree = Arc::new(TreeState {
+        job: Mutex::new(Some(job)),
+        identity,
+        root: Some(root),
+        confirmed: AtomicBool::new(false),
+        #[cfg(test)]
+        probe: None,
+    });
+    known(&tree);
+    Ok(Containment { tree })
 }
 
 #[cfg(unix)]
@@ -773,6 +861,25 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
 mod lifecycle_tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn the_channel_knows_the_jobs_of_the_clis_running_now_and_only_those() {
+        let job = win32job::Job::create().unwrap();
+        let handle = job.handle();
+        let tree = Arc::new(TreeState {
+            job: Mutex::new(Some(job)),
+            identity: crate::project::ProcessId { pid: 1, started_at: 1 },
+            root: None,
+            confirmed: AtomicBool::new(false),
+            probe: None,
+        });
+        known(&tree);
+        assert!(in_a_job_we_started(|job| Ok(job == handle)));
+        assert!(in_a_job_we_started(|_| Err(io::Error::other("cannot ask"))), "in doubt, an AI");
+        drop(tree);
+        assert!(!in_a_job_we_started(|job| Ok(job == handle)), "a job that ended no longer counts");
+    }
+
     #[tokio::test]
     async fn rewind_cancelled_command_waits_for_its_pipes_to_close() {
         let (output, writer) = tokio::io::duplex(64);
@@ -809,6 +916,60 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_without_a_minter_gets_no_identity() {
+        as_conversation("one", || {
+            let cmd = marked_with_minter("cli", &[], Path::new("."), None);
+            for name in ["FABER_AGENT_TOKEN", "FABER_CONVERSATION"] {
+                assert_eq!(cmd.as_std().get_envs().find(|(key, _)| *key == name).unwrap().1, None);
+            }
+        });
+    }
+
+    #[test]
+    fn conversation_identity_is_scoped_to_the_starting_thread() {
+        set_token_minter(Arc::new(|id| format!("test-{id}")));
+        let env = || {
+            let cmd = marked("cli", &[], Path::new("."));
+            cmd.as_std()
+                .get_envs()
+                .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned())))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        assert!(!env().contains_key(std::ffi::OsStr::new("FABER_AGENT_TOKEN")));
+        as_conversation("one", || {
+            let values = env();
+            assert_eq!(values.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).unwrap(), "test-one");
+            assert_eq!(values.get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "one");
+            assert!(!std::thread::spawn(env).join().unwrap().contains_key(std::ffi::OsStr::new("FABER_AGENT_TOKEN")));
+            as_conversation("two", || assert_eq!(env().get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "two"));
+            assert_eq!(env().get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "one");
+        });
+        assert!(!env().contains_key(std::ffi::OsStr::new("FABER_CONVERSATION")));
+    }
+
+    #[test]
+    fn every_cli_faber_starts_is_marked_as_an_ai() {
+        let cmd = marked("cli", &["--x".into()], Path::new("."));
+        let marks: Vec<_> = cmd.as_std().get_envs().filter(|(name, _)| *name == AGENT_MARK).collect();
+        assert_eq!(marks, [(std::ffi::OsStr::new(AGENT_MARK), Some(std::ffi::OsStr::new("1")))]);
+    }
+
+    #[test]
+    fn marked_commands_find_the_shipped_cli_only_after_it_is_set() {
+        let before = marked("cli", &[], Path::new("."));
+        assert!(!before.as_std().get_envs().any(|(key, _)| key == "FABER_CLI" || key.eq_ignore_ascii_case("PATH")));
+        let cli = std::env::current_dir().unwrap().join("bin").join("faber.exe");
+        set_cli(cli.clone());
+        let after = marked("cli", &[], Path::new("."));
+        let env: Vec<_> = after.as_std().get_envs().collect();
+        assert!(env.iter().any(|(key, value)| *key == "FABER_CLI" && *value == Some(cli.as_os_str())));
+        let path = env.iter().find(|(key, _)| key.eq_ignore_ascii_case("PATH")).unwrap().1.unwrap();
+        let paths: Vec<_> = std::env::split_paths(path).collect();
+        assert_eq!(paths[0], cli.parent().unwrap());
+        assert_eq!(&paths[1..], std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+    }
 
     #[test]
     fn rewind_member_observation_excludes_only_the_actual_cli_generation() {

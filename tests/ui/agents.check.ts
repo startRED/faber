@@ -296,8 +296,7 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     ok(status.getBoundingClientRect().right <= caption.getBoundingClientRect().right, 'a long detail cannot hide the completed state beyond the ellipsis');
     root.style.width = '';
     setMessage({ ...message(), tools: [OWN, AGENT, GREP] });
-    equal(root.querySelector('.activity summary')!.textContent, 'Working · 1 step · 1 command', 'the helper and its tools are not counted twice');
-    equal(root.querySelectorAll('.activity .tools > span').length, 1, 'only the agent’s own tool is in its activity');
+    equal(root.querySelectorAll('.steps .step').length, 1, 'only the agent’s own tool is in its steps');
     setMessage({ ...message(), tools: [OWN, AGENT, GREP, { id: 'nested', name: 'Agent', input: { description: 'Inspect parser' }, parent: 'a1' }, { id: 'read', name: 'Read', input: { file_path: 'parser.rs' }, parent: 'nested' }] });
     equal(root.querySelectorAll('.agents .agent').length, 2, 'a nested task has its own clickable row');
     const childRow = root.querySelectorAll<HTMLButtonElement>('.agents .agent')[1]!;

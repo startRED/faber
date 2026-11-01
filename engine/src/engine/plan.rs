@@ -229,6 +229,7 @@ impl Core {
                 let box_ = progress::wrap_up(input)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
+                let concluded = box_.outcome.is_some();
                 m.wrap_up = Some(box_);
                 let id = m.id.clone();
                 if done {
@@ -243,7 +244,29 @@ impl Core {
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 }
                 self.push(conv, Some(&id), true);
-                Ok("The person sees the box. End your turn now, without repeating the recap.".into())
+                let lead = if concluded {
+                    "Concluded. Now write your closing message to the person in your own words: what you did, the result, what is not                      done and what you checked. Then end your turn."
+                } else {
+                    "The person sees the box. End your turn now, without repeating the recap."
+                };
+                let r = crate::results::tally(self.convs.get(conv).ok_or("The conversation is gone.")?);
+                let (d, c) = (r.delivered, r.cost);
+                Ok(format!(
+                    "{lead}\nResults: {} files, {}/{} checks passed, {} commits, {} pull requests, {} artifacts, {} answers; cost: {}${} API value, {} input and {} output tokens, {} ms work (current turn may be incomplete).",
+                    d.files,
+                    d.checks_passed,
+                    d.checks_run,
+                    d.commits,
+                    d.prs,
+                    d.artifacts,
+                    d.answers,
+                    if c.unpriced > 0 { "at least " } else { "" },
+                    c.usd,
+                    c.input_tokens,
+                    c.output_tokens,
+                    c.work_ms,
+                    lead = lead
+                ))
             }
             _ => Err("Faber has no such tool.".into()),
         }

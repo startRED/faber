@@ -22,6 +22,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/building.md](product/building.md) | How Projects builds software: team, workers, self-development, coherence |
 | [product/frontend.md](product/frontend.md) | Original frontend design/proof skills, how both AIs receive them, what delivery checks do and do not prove |
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |
+| [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |
@@ -29,6 +30,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
+| [design/icons.md](design/icons.md) | The drawing of each kind of step and each state, and who is speaking: when a screen needs a picture for one |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
@@ -58,9 +60,11 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
-| [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
+| [dev/workflow.md](dev/workflow.md) | Lane claims, the task queue, a red base and the numbers given at landing |
+| [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
 | [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
+| [dev/dev-edition.md](dev/dev-edition.md) | Faber Dev: the owner's separate copy that follows the green base and opens as a new person every time |
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
 | [tasks/README.md](tasks/README.md) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
@@ -109,6 +113,7 @@ one is never touched again, and its boxes say nothing.
 | [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Accepted eight-surface motion critique and incorporated sidebar correction; bounded scores and observation limits preserved |
 | [research/2026-10-27-native-ui-spike/report.md](research/2026-10-27-native-ui-spike/report.md) | Chat screen rebuilt in GPUI and measured against the current screen on the same PC: about 4× less memory with GPU memory counted, but no screen-reader text and no way for the screen runner to drive it; no-go for now, R459 stands |
 | [research/2026-10-24-frontend-interaction.md](research/2026-10-24-frontend-interaction.md) | UX/UI/IxD references, clean behavioral comparison, partial implementation receipts and remaining gaps; no human user study |
+| [research/2026-11-01-landing-in-user-repos.md](research/2026-11-01-landing-in-user-repos.md) | Proposal, nothing built: how Faber lands its agents' work in a person's own GitHub repository (profiles per repository, file claims, trains, GitHub's merge queue), with three questions for the owner |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 | superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
 

@@ -96,11 +96,27 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
+/// Only a confirmed closing box makes these conversations safe to put away.
+async fn conclude(engine: &Engine, id: &str, pipe: &mut support::Pipe) {
+    pipe.say(json!({"type":"control_request","request_id":"closing",
+    "request":{"subtype":"mcp_message","server_name":"faber","message":{
+        "jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"wrap_up",
+            "arguments":{"outcome":"done","did":"Did the requested work.","result":"The requested work is finished.","verified":"Checked the result."}}
+    }}}))
+    .await;
+    until(engine, id, "closing box arrives", |c| c.messages.last().is_some_and(|m| m.wrap_up.is_some())).await;
+}
+
 /// A turn that answers and ends.
 async fn answered(engine: &Engine, made: &Arc<Mutex<Vec<support::Pipe>>>, req: SendRequest) -> (String, support::Pipe) {
+    let req_area = req.area;
     let id = engine.send(req).unwrap();
     let mut pipe = next_pipe(made).await;
     pipe.say(init()).await;
+    // A chat answer is its own conclusion; only a project's agent has the closing call.
+    if req_area == Area::Project {
+        conclude(engine, &id, &mut pipe).await;
+    }
     pipe.say(done()).await;
     until(engine, &id, "the turn ends", ended).await;
     (id, pipe)
@@ -113,6 +129,7 @@ async fn opened(engine: &Engine, made: &Arc<Mutex<Vec<support::Pipe>>>, project:
     pipe.say(init()).await;
     pipe.say(step("b1", "git push -u origin fix && gh pr create --fill")).await;
     pipe.say(result("b1", &format!("Creating pull request for fix into main in acme/app\n\n{URL}\n"))).await;
+    conclude(engine, &id, &mut pipe).await;
     pipe.say(done()).await;
     until(engine, &id, "the turn ends", ended).await;
     let plan = Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
@@ -269,6 +286,7 @@ async fn r_next_a_pull_request_still_watched_and_a_conversation_written_to_since
     engine.look_at_prs().await;
     assert!(archived(&engine, &moved));
     engine.send(ask(Area::Project, &project.id, Some(&moved), "now something else")).unwrap();
+    conclude(&engine, &moved, &mut pipe).await;
     pipe.say(done()).await;
     until(&engine, &moved, "the new turn ends", |c| ended(c) && c.messages.len() == 4).await;
     engine.archive_at(now(), None);
@@ -345,5 +363,21 @@ async fn r_next_a_quiet_conversation_whose_copy_holds_unsaved_work_is_not_archiv
     repo.lock().unwrap().held = true;
     engine.archive_at(week, None);
     assert!(archived(&engine, &id), "saved elsewhere: put away");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_quiet_project_without_a_confirmed_conclusion_is_not_archived() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, _) = boot(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine.send(ask(Area::Project, &project.id, None, "Check what remains")).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(init()).await;
+    pipe.say(done()).await;
+    until(&engine, &id, "turn ended", ended).await;
+    engine.archive_at(now() + 8 * DAY, None);
+    assert!(!archived(&engine, &id));
     engine.shutdown();
 }

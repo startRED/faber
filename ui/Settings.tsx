@@ -276,6 +276,7 @@ export function Settings(props: Props) {
             <Group title={t('set.group.system')}>
               <Toggle id="set-notify" label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications === true} onChange={(on) => save({ notifications: on })} />
               <Toggle id="set-sound" label={t('set.playSound')} hint={t('set.soundLine')} more={t('set.soundHint')} checked={props.saved.notificationSound === true} onChange={(on) => save({ notificationSound: on })} />
+              <Toggle id="set-resume-interrupted" label={t('set.resumeInterrupted')} hint={t('set.resumeInterruptedHint')} more={t('set.resumeInterruptedMore')} checked={props.saved.resumeInterrupted === true} onChange={(on) => save({ resumeInterrupted: on })} />
               <Show when={isWindows()}>
                 <Toggle id="set-awake" label={t('set.keepAwake')} hint={t('set.keepAwakeHint')} checked={props.saved.keepAwake === true} onChange={(on) => save({ keepAwake: on })} />
                 <Toggle id="set-autostart" label={t('set.autostart')} hint={t('set.autostartHint')} checked={props.saved.autostart === true} onChange={(on) => save({ autostart: on })} />

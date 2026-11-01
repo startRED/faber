@@ -19,7 +19,8 @@ export function ProjectGoals(props: { projectId: string }) {
   const [open, setOpen] = createSignal(false);
   return (
     <section class="project-memory project-goals">
-      <button type="button" class="btn ghost" aria-expanded={open()} onClick={() => setOpen(!open())}>{t('goals.title')}</button>
+      <button type="button" class="btn ghost" aria-describedby="goals-summary" aria-expanded={open()} onClick={() => setOpen(!open())}>{t('goals.title')}</button>
+      <p id="goals-summary" class="project-summary">{t('goals.summary')}</p>
       <Collapse open={open()}>
         <Show when={open() && props.projectId} keyed>{(id) => <GoalList projectId={id} />}</Show>
       </Collapse>

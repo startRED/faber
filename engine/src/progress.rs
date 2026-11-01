@@ -3,7 +3,7 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
-use crate::model::{Estimate, Plan, PlanStep, StepState, WrapUp};
+use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanStep, StepState, WrapUp};
 use serde_json::{Value, json};
 
 /// The names both drivers give the calls, whatever the CLI calls them.
@@ -24,7 +24,8 @@ pub const MAX_STEPS: usize = 12;
 /// The longest a step, a status, a recap, a question and a button are, in characters; longer ones are cut, never refused.
 const STEP_CHARS: usize = 80;
 pub const STATUS_CHARS: usize = 50;
-const RECAP_CHARS: usize = 400;
+/// The longest each part of a conclusion is, in characters.
+const PART_CHARS: usize = 300;
 const ASK_CHARS: usize = 120;
 const ACTION_CHARS: usize = 40;
 /// What a step's `id`, `files` and `waits` may hold. The agent reads these keys in the error of a refused `plan` call (they never
@@ -55,13 +56,7 @@ const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words, what you ar
 language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". Call it when substantial \
 work starts and again only when the phase of the work changes, together with another tool call, never on a timer.";
 
-const WRAP_UP_DESCRIPTION: &str = "Closes a task with a quiet box at the end of your reply. Call it once, as your last tool \
-call, when the task the person asked for ends or stops. recap: 2 to 3 short sentences in the person's language and in everyday \
-words, saying what is now true, then what is not done or not verified; no next-steps list. ask: at most one short question, \
-only when the next move is the person's to make, with actions: one or two replies of 1 to 3 words, your recommendation first. \
-done: true when the person's whole request is finished and verified. When the task fixed a mistake, first look where the same \
-kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in the \
-recap and make fixing them your ask, and never fix them unasked. Then end your turn without repeating the recap in text.";
+const WRAP_UP_DESCRIPTION: &str = "Concludes your task: the only way a task counts as finished. Call it once, as your last tool call, when the task the person asked for ends or stops, then write your closing message to the person in your own words (what you did, the result, what is not done, what you checked) and end your turn. outcome: done when the person's whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: what you did, one or two sentences. result: what is now true. not_done: what is left or not verified (leave it out when nothing is). verified: what you ran or looked at that shows the result (required for done, and it must be something you saw, never something you expect). Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. A task that ends without this call shows as ended without a conclusion and you are asked once to conclude it. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
 
 fn plan_schema() -> Value {
     json!({
@@ -106,17 +101,20 @@ fn wrap_up_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "recap": { "type": "string", "description": "2 to 3 sentences: what is now true, then what is not done or not verified." },
+            "outcome": { "type": "string", "enum": ["done", "blocked", "needs_you"], "description": "done: the whole request is finished and verified. blocked: you cannot go on. needs_you: a decision or action is the person's." },
+            "did": { "type": "string", "description": "What you did, one or two sentences." },
+            "result": { "type": "string", "description": "What is now true." },
+            "not_done": { "type": "string", "description": "What is left or not verified; leave out when nothing is." },
+            "verified": { "type": "string", "description": "What you ran or looked at that shows the result. Required for done." },
             "ask": { "type": "string", "description": "One short question for the person, only when the next move is theirs." },
             "actions": {
                 "type": "array",
                 "maxItems": 2,
                 "items": { "type": "string" },
                 "description": "With ask: one or two replies of 1 to 3 words, the recommendation first."
-            },
-            "done": { "type": "boolean", "description": "The person's whole request is finished and verified." }
+            }
         },
-        "required": ["recap"],
+        "required": ["outcome", "did", "result"],
         "additionalProperties": false
     })
 }
@@ -471,20 +469,52 @@ pub fn status(input: &Value) -> Result<String, String> {
     text_of(&input["text"], STATUS_CHARS).ok_or_else(|| "Send the status as text: 3 to 6 words.".into())
 }
 
-/// The closing box a `wrap_up` call draws. A question needs at least one action, and actions need a question.
+/// The outcome named in a closing call, in the words the schema gives and the camel-case one the screen stores.
+fn outcome_of(v: &Value) -> Result<Option<Outcome>, String> {
+    match v.as_str() {
+        None if v.is_null() => Ok(None),
+        Some("done") => Ok(Some(Outcome::Done)),
+        Some("blocked") => Ok(Some(Outcome::Blocked)),
+        Some("needs_you" | "needsYou") => Ok(Some(Outcome::NeedsYou)),
+        _ => Err("Send outcome as done, blocked or needs_you.".into()),
+    }
+}
+
+fn part(v: &Value) -> String {
+    v.as_str().map(|t| line(t, PART_CHARS)).unwrap_or_default()
+}
+
+/// The closing box a `wrap_up` call draws. A question needs at least one action, and actions need a question. A call with an
+/// `outcome` is a conclusion: `did` and `result` are required, and `done` also needs `verified`, what the agent saw. The older
+/// shape (`recap` and `done`) still loads from stored conversations but is refused here, so no live call can claim done unchecked.
 pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
-    let recap = input["recap"].as_str().map(|r| r.trim()).filter(|r| !r.is_empty()).ok_or("Send a recap of 2 to 3 sentences.")?;
-    let recap = match recap.char_indices().nth(RECAP_CHARS) {
-        Some((at, _)) => format!("{}…", recap[..at].trim_end()),
-        None => recap.to_string(),
-    };
+    let outcome = outcome_of(&input["outcome"])?;
     let ask = text_of(&input["ask"], ASK_CHARS);
     let actions: Vec<String> = match &ask {
         Some(_) => input["actions"].as_array().into_iter().flatten().filter_map(|a| text_of(a, ACTION_CHARS)).take(2).collect(),
         None => vec![],
     };
     let ask = ask.filter(|_| !actions.is_empty());
-    Ok(WrapUp { recap, ask, actions, done: input["done"].as_bool() == Some(true), answered: None })
+    let outcome = outcome.ok_or("Send outcome (done, blocked or needs_you), did and result.")?;
+    let summary = ConclusionSummary {
+        did: part(&input["did"]),
+        result: part(&input["result"]),
+        not_done: part(&input["not_done"]),
+        verified: part(&input["verified"]),
+    };
+    if summary.did.is_empty() || summary.result.is_empty() {
+        return Err("A conclusion needs did (what you did) and result (what is now true).".into());
+    }
+    if outcome == Outcome::Done && summary.verified.is_empty() {
+        return Err("A done conclusion needs verified: what you ran or looked at that shows the result. If you did not check it, conclude with needs_you or blocked and say what is not verified in not_done."
+            .into());
+    }
+    // The line the sidebar, the cards and the notices show: what is now true, then what is left.
+    let recap = match summary.not_done.is_empty() {
+        true => summary.result.clone(),
+        false => format!("{}. Not done: {}", summary.result.trim_end_matches('.'), summary.not_done),
+    };
+    Ok(WrapUp { recap, ask, actions, done: outcome == Outcome::Done, outcome: Some(outcome), summary: Some(summary), answered: None })
 }
 
 /// The first sentence of a recap, for a running row, a done card and the tray: up to its first full stop, question or
@@ -577,11 +607,16 @@ mod tests {
                 <= STATUS_CHARS + 1
         );
         assert!(status(&json!({})).is_err());
-        let w = wrap_up(&json!({ "recap": "The page works. Not seen on a phone yet.", "ask": "Ship it?", "actions": ["Yes", "Not yet", "Later"], "done": true })).unwrap();
+        let w = wrap_up(&json!({ "outcome": "done", "did": "Built the page.", "result": "The page works.", "verified": "Opened it.",
+            "ask": "Ship it?", "actions": ["Yes", "Not yet", "Later"] }))
+        .unwrap();
         assert_eq!((w.ask.as_deref(), w.actions.len(), w.done), (Some("Ship it?"), 2, true));
-        let w = wrap_up(&json!({ "recap": "Done.", "ask": "Ship it?" })).unwrap();
+        let w = wrap_up(&json!({ "outcome": "needs_you", "did": "Built the page.", "result": "Done.", "ask": "Ship it?" })).unwrap();
         assert_eq!((w.ask, w.actions.len(), w.done), (None, 0, false), "a question with no button is no question");
-        assert!(wrap_up(&json!({ "recap": " " })).is_err());
+        assert!(wrap_up(&json!({ "outcome": "done", "did": " ", "result": "x", "verified": "y" })).is_err());
+        for old in [json!({ "recap": "Finished", "done": true }), json!({ "recap": "Finished" })] {
+            assert!(wrap_up(&old).is_err(), "the older shape cannot claim done on a live call: {old}");
+        }
     }
 
     #[test]

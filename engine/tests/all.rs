@@ -124,6 +124,8 @@ mod quota_live;
 mod recents;
 #[path = "results.rs"]
 mod results;
+#[path = "resume_cut.rs"]
+mod resume_cut;
 #[path = "rewind.rs"]
 mod rewind;
 #[path = "route.rs"]
