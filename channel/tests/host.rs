@@ -94,6 +94,7 @@ async fn engine_token_is_accepted_by_the_running_host_channel() {
     let engine = Engine::new(
         EngineOptions {
             data_dir: data_dir.clone(),
+            #[cfg(windows)]
             chat_dir: data.path().join("work"),
             clis: BTreeMap::new(),
             spawn,
