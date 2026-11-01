@@ -14,6 +14,8 @@ export const fr: Messages = {
   "cli.help.unpin": "Désépingler une conversation",
   "cli.help.rename": "Renommer une conversation",
   "cli.help.projects": "Lister les projets",
+  "cli.help.asks": "Lister vos demandes d’autorisation",
+  "cli.ask.request": "Demande d’autorisation",
   "cli.help.quota": "Afficher le quota",
   "cli.help.settings": "Afficher les paramètres",
   "cli.help.watch": "Suivre les changements d’état",

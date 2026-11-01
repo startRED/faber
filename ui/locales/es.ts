@@ -14,6 +14,8 @@ export const es: Messages = {
   "cli.help.unpin": "Desfijar una conversación",
   "cli.help.rename": "Renombrar una conversación",
   "cli.help.projects": "Listar proyectos",
+  "cli.help.asks": "Listar tus solicitudes de permiso",
+  "cli.ask.request": "Solicitud de permiso",
   "cli.help.quota": "Mostrar límite de uso",
   "cli.help.settings": "Mostrar ajustes",
   "cli.help.watch": "Seguir cambios de estado",

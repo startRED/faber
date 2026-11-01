@@ -24,6 +24,8 @@ export const en = {
   "cli.help.unpin": "Unpin a conversation",
   "cli.help.rename": "Rename a conversation",
   "cli.help.projects": "List projects",
+  "cli.help.asks": "List your permission requests",
+  "cli.ask.request": "Permission request",
   "cli.help.quota": "Show quota",
   "cli.help.settings": "Show settings",
   "cli.help.watch": "Watch state changes",
