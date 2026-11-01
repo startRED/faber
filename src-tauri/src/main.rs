@@ -52,6 +52,7 @@ pub(crate) struct Faber {
     /// The window was shown after its first paint (or by the failsafe); false from its creation until then. A window not
     /// shown yet counts as seen, so nothing closes it under the person (`update.rs`).
     pub(crate) revealed: std::sync::atomic::AtomicBool,
+    pending_conversation: Mutex<Option<String>>,
     /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen, so the
     /// install at open waits for an idle moment (`update.rs`).
     pub(crate) touched: std::sync::atomic::AtomicBool,
@@ -112,6 +113,24 @@ impl Shell for TauriShell {
             let (app, title, why, vendor) = (self.handle.clone(), title.clone(), why.clone(), *vendor);
             tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
         }
+    }
+
+    fn show_conversation(&self, id: &str) -> faber_host::Res<()> {
+        if self.hidden {
+            return Err(faber_host::NO_WINDOW.into());
+        }
+        let faber = self.handle.state::<Faber>();
+        if main_window(&self.handle).is_some() && faber.revealed.load(std::sync::atomic::Ordering::SeqCst) {
+            self.handle.emit("faber:show-conversation", id).map_err(|_| faber_host::NO_WINDOW.to_string())?;
+        } else {
+            *lock(&faber.pending_conversation) = Some(id.to_string());
+        }
+        show(&self.handle);
+        if main_window(&self.handle).is_none() {
+            lock(&faber.pending_conversation).take();
+            return Err(faber_host::NO_WINDOW.into());
+        }
+        Ok(())
     }
 
     fn shown_settings(&self, settings: Settings) -> Settings {
@@ -677,8 +696,9 @@ fn reveal(app: &AppHandle, by: &str) {
 
 /// The screen painted its first frame: the window may show now.
 #[tauri::command]
-fn screen_ready(app: AppHandle) {
+fn screen_ready(app: AppHandle) -> Option<String> {
     reveal(&app, "paint");
+    lock(&app.state::<Faber>().pending_conversation).take()
 }
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
@@ -978,6 +998,7 @@ fn main() {
                 update: Mutex::default(),
                 stage: Mutex::default(),
                 revealed: std::sync::atomic::AtomicBool::new(false),
+                pending_conversation: Mutex::new(None),
                 touched: std::sync::atomic::AtomicBool::new(false),
                 draft_dirty: std::sync::atomic::AtomicBool::new(false),
                 data_dir: data_dir.clone(),

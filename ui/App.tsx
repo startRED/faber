@@ -891,6 +891,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
 
   onMount(() => {
+    const openRequested = (id: string) => {
+      const conversation = state().conversations.find((c) => c.id === id);
+      if (conversation) openSummary(conversation);
+      else void api.open(id).then((found) => {
+        if (found) { closeSettings(); closeSide(false); void go(openPlace(place(), found)); }
+      }).catch(fail);
+    };
+    const requested = (event: Event) => openRequested((event as CustomEvent<string>).detail);
+    window.addEventListener('faber:show-conversation', requested);
+    const unlistenOpen = api.onShowConversation(openRequested).catch(() => () => {});
+    onCleanup(() => { window.removeEventListener('faber:show-conversation', requested); void unlistenOpen.then((stop) => stop()); });
     const firstInstall = isFirstInstall(props.initial.settings, props.initial.conversations);
     void api.notesSeen().then(
       (seen) => {

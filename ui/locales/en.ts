@@ -16,6 +16,7 @@ export const en = {
   "cli.help.list": "List conversations",
   "cli.help.read": "Read a conversation",
   "cli.help.export": "Export a conversation",
+  "cli.help.open": "Open a conversation in the window",
   "cli.help.search": "Search messages",
   "cli.help.send": "Send a message",
   "cli.help.stop": "Stop a conversation",

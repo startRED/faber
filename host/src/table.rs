@@ -766,6 +766,12 @@ table! {
 
     // What only a window answers: the front end that has one handles these itself, and any other answers `error.host.noWindow`.
 
+    /// Bring the window to a conversation.
+    Window Ask fn show_conversation(h, id: String) -> () {
+        h.shell.show_conversation(&id)?;
+        Ok(())
+    }
+
     /// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
     Window Screen fn site_place(h, load: u32, box_id: u64, x: f64, y: f64, width: f64, height: f64) -> bool {
         Err(NO_WINDOW.into())

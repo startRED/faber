@@ -54,6 +54,8 @@ impl Backend for Fake {
                     }
                     Ok(json!("c1"))
                 }
+                "show_conversation" if args["id"] == "missing-window" => Err("error.host.noWindow".into()),
+                "show_conversation" => Ok(Value::Null),
                 "refuse" => Err("error.test.refused".into()),
                 "ask" => Err("error.reach.ask".into()),
                 _ => Ok(json!({"cmd":cmd,"args":args})),
@@ -244,6 +246,16 @@ async fn human_overrides_json_and_the_end_of_flags_is_respected() {
     assert_eq!(lines(&r.stdout)[0], "c1");
     let calls = fake.calls.lock().unwrap();
     assert_eq!(calls.iter().find(|(cmd, _)| cmd == "send").unwrap().1["req"]["text"], "--human");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn open_reaches_the_window_and_reports_when_it_is_missing() {
+    let (result, fake) = faber(false, &["open", "c1"], "", &[]).await;
+    assert_eq!(result.code, 0);
+    assert_eq!(fake.calls.lock().unwrap()[0], ("show_conversation".into(), json!({"id":"c1"})));
+    let (result, _) = faber(false, &["open", "missing-window"], "", &[]).await;
+    assert_eq!(result.code, 1);
+    assert_eq!(lines(&result.stdout)[0]["error"], "error.host.noWindow");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -6,6 +6,7 @@ export const ptBR: Messages = {
   "cli.help.list": "Listar conversas",
   "cli.help.read": "Ler uma conversa",
   "cli.help.export": "Exportar uma conversa",
+  "cli.help.open": "Abrir uma conversa na janela",
   "cli.help.search": "Buscar mensagens",
   "cli.help.send": "Enviar uma mensagem",
   "cli.help.stop": "Parar uma conversa",

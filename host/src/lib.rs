@@ -152,6 +152,10 @@ pub trait Shell: Send + Sync + 'static {
     fn pick_save(&self, _filter: Option<Filter>, _name: String) -> BoxFuture<'_, Picked> {
         Box::pin(async { Err(PickError::NoWindow) })
     }
+    /// Opens a conversation in the window.
+    fn show_conversation(&self, _id: &str) -> Res<()> {
+        Err(NO_WINDOW.into())
+    }
     /// Shows a file or folder in the file manager, selected and never opened.
     fn reveal(&self, _path: PathBuf) -> Res<()> {
         Err(NO_WINDOW.into())

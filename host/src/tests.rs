@@ -89,7 +89,7 @@ fn only_the_browser_pane_the_page_server_and_the_first_paint_are_the_windows() {
                 || name.starts_with("cookie_")
                 || name.starts_with("visual_")
                 || name.starts_with("test_")
-                || ["screen_ready", "report_checks"].contains(name),
+                || ["screen_ready", "report_checks", "show_conversation"].contains(name),
             "{name} needs the window, yet it is not one of the pane's, the page server's or the first paint's"
         );
     }
@@ -151,6 +151,7 @@ async fn a_chat_group_made_through_the_table_is_in_the_state_the_screen_reads() 
 #[tokio::test]
 async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first() {
     let (host, _dir) = host().await;
+    assert_eq!(key(host.dispatch("show_conversation", json!({"id":"c1"})).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "https://example.com" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "file:///C:/Windows" })).await), "error.link.web");

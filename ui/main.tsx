@@ -74,7 +74,7 @@ let told = false;
 const painted = () => {
   if (told) return;
   told = true;
-  void api.screenReady().catch(() => {});
+  void api.screenReady().then((id) => { if (id) window.dispatchEvent(new CustomEvent('faber:show-conversation', { detail: id })); }).catch(() => {});
 };
 requestAnimationFrame(() => requestAnimationFrame(painted));
 setTimeout(painted, 150);

@@ -19,6 +19,7 @@ pub const VERBS: &[(&str, &[&str])] = &[
     ("read", &["conversation"]),
     ("export", &["conversation_markdown"]),
     ("search", &["search_messages"]),
+    ("open", &["show_conversation"]),
     ("send", &["send", "conversation"]),
     ("stop", &["interrupt"]),
     ("continue", &["conversation", "continue_closed"]),
@@ -67,7 +68,7 @@ fn valid(args: &Args, verb: &str) -> bool {
     let count = args.words.len();
     let (min, max) = match verb {
         "help" => (0, 2),
-        "read" | "export" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
+        "read" | "export" | "open" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
         "search" => (2, usize::MAX),
         "rename" => (3, 3),
         "call" => (2, 3),
@@ -207,6 +208,7 @@ pub async fn run(args: Args, out: Out) -> i32 {
                 None => Ok(results),
             }
         }
+        "open" => ask(&client, &out, "show_conversation", json!({"id":id})).await,
         "send" => {
             let Some(text) = input(id) else { return usage(&out) };
             let mut choice = json!({"vendor":args.value("vendor").unwrap_or("auto")});

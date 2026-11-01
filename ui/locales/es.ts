@@ -6,6 +6,7 @@ export const es: Messages = {
   "cli.help.list": "Listar conversaciones",
   "cli.help.read": "Leer una conversación",
   "cli.help.export": "Exportar una conversación",
+  "cli.help.open": "Abrir una conversación en la ventana",
   "cli.help.search": "Buscar mensajes",
   "cli.help.send": "Enviar un mensaje",
   "cli.help.stop": "Detener una conversación",

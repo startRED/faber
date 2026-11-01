@@ -1622,6 +1622,18 @@
     "about": "The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the engine's memory when the panel opens; nothing is prepared, polled or started."
   },
   {
+    "name": "show_conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "window",
+    "reach": "ask",
+    "about": "Bring the window to a conversation."
+  },
+  {
     "name": "cookie_profiles",
     "args": [],
     "kind": "window",
