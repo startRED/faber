@@ -8,6 +8,15 @@ use tokio::time::Instant;
 const LIMIT: usize = 20;
 const LIFE: Duration = Duration::from_secs(600);
 
+pub(crate) fn label(command: &str) -> &'static str {
+    if command.starts_with("tools_") || command.starts_with("setup_") { "tools" }
+    else if command.starts_with("project_") || command.contains("project") { "projects" }
+    else if command.contains("environment") { "environments" }
+    else if command.starts_with("rewind_") { "rewind" }
+    else if command.contains("settings") || command == "update_restart" { "settings" }
+    else { "organize" }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum State {

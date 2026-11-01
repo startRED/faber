@@ -12,7 +12,6 @@
 mod macros;
 pub mod autostart;
 pub mod awake;
-#[cfg(test)]
 mod ask;
 mod failure;
 mod feed;
@@ -285,6 +284,7 @@ impl Wiring {
             runtime,
             models: Arc::default(),
             loading_models: Arc::default(),
+            asks: Mutex::default(),
         }
     }
 }
@@ -306,6 +306,7 @@ pub struct Host {
     /// enough.
     loading_models: Arc<AtomicBool>,
     voice: Voice,
+    asks: Mutex<ask::Book>,
 }
 
 impl Host {
@@ -356,7 +357,25 @@ impl Host {
     pub async fn dispatch_as(&self, caller: &Caller, command: &str, args: Value) -> Result<Value, Failure> {
         if *caller != Caller::Screen {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
-            reach::check(caller, command, reach, &args, |id| self.family_of(id)).map_err(Failure::key)?;
+            if let Err(key) = reach::check(caller, command, reach, &args, |id| self.family_of(id)) {
+                let mut allowed = false;
+                if key == reach::ASK_PERSON {
+                    if let Caller::Agent { conversation: Some(id) } = caller {
+                        let pending = {
+                            let mut book = lock(&self.asks);
+                            allowed = book.spend(id, command, &args);
+                            if !allowed {
+                                book.record(id, command, args.clone(), ask::label(command));
+                            }
+                            book.pending()
+                        };
+                        self.announce(&json!({"type": "asks", "asks": pending}));
+                    }
+                }
+                if !allowed {
+                    return Err(Failure::key(key));
+                }
+            }
         }
         self.dispatch(command, args).await
     }
