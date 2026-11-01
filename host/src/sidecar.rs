@@ -77,6 +77,8 @@ struct Inner {
     state: Mutex<State>,
     /// Saves of the settings go one at a time, so the stored switch and the order for it never disagree.
     saving: Mutex<()>,
+    /// Single-use pages for the Electron shell's `faber-visual` scheme.
+    visual: crate::visual::Pages,
 }
 
 struct State {
@@ -118,6 +120,7 @@ impl SidecarShell {
             settings: OnceLock::new(),
             state: Mutex::new(state),
             saving: Mutex::new(()),
+            visual: crate::visual::Pages::electron(),
         }))
     }
 
@@ -385,6 +388,28 @@ impl Shell for SidecarShell {
     fn reveal(&self, path: PathBuf) -> Res<()> {
         (self.0.send)(Order::Reveal { path: path.to_string_lossy().into_owned() });
         Ok(())
+    }
+
+    fn visual_open(&self) -> Res<String> {
+        Ok(self.0.visual.open())
+    }
+
+    fn visual_page(&self, id: &str, revision: u64, document: String, live: bool) -> Res<crate::visual::Prepared> {
+        self.0.visual.prepare(id, revision, document, live && crate::visual::NETWORK_READY).map_err(Into::into)
+    }
+
+    fn visual_close(&self, id: &str) -> Res<()> {
+        self.0.visual.close(id);
+        Ok(())
+    }
+
+    fn visual_document(&self, path: &str) -> Res<crate::visual::Document> {
+        self.0.visual.document(path).map_err(Into::into)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn visual_policy(&self, live: bool) -> Res<bool> {
+        Ok(live && crate::visual::NETWORK_READY)
     }
 
     fn shut_down(&self) {
@@ -782,5 +807,21 @@ mod tests {
             chime: quiet,
         });
         assert_eq!(shell.version(), "9.8.7");
+    }
+
+    #[tokio::test]
+    async fn visual_pages_are_served_once_from_the_sidecar_and_cleared_when_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), true, false, normal);
+        let id = shell.visual_open().unwrap();
+        let page = shell.visual_page(&id, 1, "<p>chart</p>".into(), true).unwrap();
+        assert!(page.url.starts_with("faber-visual://app/"));
+        assert_eq!(page.live, crate::visual::NETWORK_READY);
+        let doc = shell.visual_document(&page.url).unwrap();
+        assert!(doc.csp.contains("sandbox allow-scripts"));
+        assert_eq!(shell.visual_document(&page.url), Err("error.messageGone".into()));
+        let second = shell.visual_page(&id, 2, "<p>next</p>".into(), false).unwrap();
+        shell.visual_close(&id).unwrap();
+        assert_eq!(shell.visual_document(&second.url), Err("error.messageGone".into()));
     }
 }

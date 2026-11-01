@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { Sidecar } from './sidecar.ts';
 import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
+import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
@@ -34,7 +35,10 @@ if (!testmode.testing && process.argv.some((arg) => /^--remote-debugging-(port|p
 // Every renderer runs in the system sandbox, not only the ones that ask for it.
 app.enableSandbox();
 // The screen loads only from Faber's own scheme: never file:// and never a remote page.
-protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  visualScheme,
+]);
 
 // Features Faber does not use stay off; each one costs memory in every renderer.
 app.commandLine.appendSwitch('disable-features', ['SpareRendererForSitePerProcess', 'MediaRouter', 'Translate', ...testmode.disabledFeatures].join(','));
@@ -81,7 +85,7 @@ const CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   'media-src data: blob:',
-  "frame-src 'none'",
+  `frame-src ${VISUAL_ORIGIN}`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -164,6 +168,7 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-navigate', stay);
   window.webContents.on('will-redirect', stay);
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  guardVisualFrames(window.webContents);
   const failsafe = setTimeout(() => reveal(window), REVEAL_FAILSAFE_MS);
   window.once('show', () => clearTimeout(failsafe));
   const resized = () => window.webContents.send('faber:window-resized');
@@ -310,6 +315,7 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => clipboard(permission) && wc === win?.webContents && origin === ORIGIN);
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
+  installVisual(() => host, () => win);
   relay();
   const window = {
     focused: () => win?.isFocused() ?? false,

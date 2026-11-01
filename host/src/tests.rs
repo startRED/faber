@@ -135,6 +135,10 @@ async fn a_chat_group_made_through_the_table_is_in_the_state_the_screen_reads() 
 async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first() {
     let (host, _dir) = host().await;
     assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_open", Value::Null).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_page", json!({ "id": "x", "revision": 1, "document": "<p>x</p>" })).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_close", json!({ "id": "x" })).await), NO_WINDOW);
+    assert_eq!(key(host.dispatch("visual_document", json!({ "path": "faber-visual://app/0.html" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "https://example.com" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "file:///C:/Windows" })).await), "error.link.web");
     assert_eq!(key(host.dispatch("add_project", Value::Null).await), NO_WINDOW);

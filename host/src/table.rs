@@ -810,15 +810,19 @@ table! {
     Window Screen fn screen_ready(h) -> () {
         Err(NO_WINDOW.into())
     }
-    /// A page a reply drew gets its own address in the window's page server; the window answers all three.
+    /// A page a reply drew gets its own address in the window's page server; the window answers all four.
     Window Screen fn visual_open(h) -> String {
-        Err(NO_WINDOW.into())
+        h.shell.visual_open()
     }
-    Window Screen fn visual_page(h, id: String, revision: u64, document: String) -> Value {
-        Err(NO_WINDOW.into())
+    Window Screen fn visual_page(h, id: String, revision: u64, document: String) -> visual::Prepared {
+        h.shell.visual_page(&id, revision, document, h.engine.visual_network())
     }
     Window Screen fn visual_close(h, id: String) -> () {
-        Err(NO_WINDOW.into())
+        h.shell.visual_close(&id)
+    }
+    /// The single-use bytes and CSP header of a prepared visual page, for the Electron shell's `faber-visual` scheme.
+    Window Screen fn visual_document(h, path: String) -> visual::Document {
+        h.shell.visual_document(&path)
     }
 
     // Test builds only.
@@ -826,7 +830,7 @@ table! {
     /// No authored page can call this command; the screen snapshots the saved choice for each opened version.
     #[cfg(feature = "test-hooks")]
     Window Screen fn visual_policy(h) -> bool {
-        Err(NO_WINDOW.into())
+        h.shell.visual_policy(h.engine.visual_network())
     }
     /// The screen's checks send their result to `FABER_CHECKS_OUT`, written whole before the app ends.
     #[cfg(feature = "test-hooks")]
