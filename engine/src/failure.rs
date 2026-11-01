@@ -36,6 +36,23 @@ impl Failure {
     }
 }
 
+/// Delay before a Codex overload continuation, indexed by the number of retries already attempted.
+pub fn overload_retry_delay(kind: Failure, retries: usize) -> Option<std::time::Duration> {
+    (kind == Failure::Overloaded).then(|| [2, 4, 8, 16, 30].get(retries).copied()).flatten().map(std::time::Duration::from_secs)
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn overload_retry_delays_are_bounded_and_other_failures_do_not_retry() {
+        let delays: Vec<_> = (0..6).map(|n| overload_retry_delay(Failure::Overloaded, n).map(|d| d.as_secs())).collect();
+        assert_eq!(delays, [Some(2), Some(4), Some(8), Some(16), Some(30), None]);
+        assert_eq!(overload_retry_delay(Failure::RateLimit, 0), None);
+    }
+}
+
 /// The kind Codex names in `error.codexErrorInfo` (codex-cli 0.166.0, `v2/TurnError`): a camelCase word, or an object whose
 /// one key is the word and may carry the upstream `httpStatusCode`. None for what it calls `other`, a sandbox error or a word
 /// this version does not know.

@@ -1344,6 +1344,8 @@ mod tests {
                     running: None,
                     capabilities: Default::default(),
                     ended: None,
+                    overload_retries: 0,
+                    overload_wait: None,
                     effort: String::new(),
                     sid: 1,
                     session: Session::from_fn(move |cmd| {

@@ -1902,6 +1902,7 @@ export const fr: Messages = {
   'reason.failed': 'L’IA s’est arrêtée, car quelque chose a mal tourné. Envoyez un message pour réessayer.',
   'reason.fail.limit': 'L’IA s’est arrêtée, car la limite d’utilisation de ce compte est atteinte. Envoyez un message une fois la limite renouvelée, ou choisissez une autre IA.',
   'reason.fail.rateLimit': 'L’IA s’est arrêtée, car trop de demandes sont parties en peu de temps. Attendez une minute, puis envoyez un message pour réessayer.',
+  'answer.overloadRetry': 'Le service est occupé. Nouvelle tentative {n} sur {total}…',
   'reason.fail.overloaded': 'L’IA s’est arrêtée, car son service est occupé ou en difficulté. Envoyez un message dans un instant pour réessayer.',
   'reason.fail.connection': 'L’IA s’est arrêtée, car la connexion à son service a été coupée. Vérifiez internet, puis envoyez un message pour réessayer.',
   'reason.fail.signIn': 'L’IA s’est arrêtée, car sa connexion au compte n’est plus valide. Reconnectez-vous dans Réglages, Comptes et limites, puis envoyez un message.',

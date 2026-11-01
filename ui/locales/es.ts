@@ -1902,6 +1902,7 @@ export const es: Messages = {
   'reason.failed': 'La IA se detuvo porque algo salió mal. Envía un mensaje para intentarlo de nuevo.',
   'reason.fail.limit': 'La IA se detuvo porque se agotó el límite de uso de esta cuenta. Envía un mensaje cuando se renueve, o elige otra IA.',
   'reason.fail.rateLimit': 'La IA se detuvo porque salieron demasiadas solicitudes en poco tiempo. Espera un minuto y envía un mensaje para intentarlo de nuevo.',
+  'answer.overloadRetry': 'El servicio está ocupado. Reintentando {n} de {total}…',
   'reason.fail.overloaded': 'La IA se detuvo porque su servicio está ocupado o tiene problemas. Envía un mensaje en un momento para intentarlo de nuevo.',
   'reason.fail.connection': 'La IA se detuvo porque se cortó la conexión con su servicio. Revisa internet y envía un mensaje para intentarlo de nuevo.',
   'reason.fail.signIn': 'La IA se detuvo porque su inicio de sesión ya no es válido. Vuelve a iniciar sesión en Ajustes, Cuentas y límites, y envía un mensaje.',

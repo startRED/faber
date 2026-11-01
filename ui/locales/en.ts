@@ -1827,6 +1827,7 @@ export const en = {
   'reason.failed': 'The AI stopped because something went wrong. Send a message to try again.',
   'reason.fail.limit': "The AI stopped because this account's usage limit is used up. Send a message once it resets, or pick another AI.",
   'reason.fail.rateLimit': 'The AI stopped because too many requests went out in a short time. Wait a minute, then send a message to try again.',
+  'answer.overloadRetry': 'The service is busy. Retrying {n} of {total}…',
   'reason.fail.overloaded': 'The AI stopped because its service is busy or having trouble. Send a message in a moment to try again.',
   'reason.fail.connection': 'The AI stopped because the connection to its service dropped. Check the internet, then send a message to try again.',
   'reason.fail.signIn': 'The AI stopped because its sign-in is no longer valid. Sign in again in Settings, Accounts and limits, then send a message.',

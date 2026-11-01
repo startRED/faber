@@ -6810,6 +6810,72 @@ async fn rule_6_a_chatgpt_plan_limit_named_only_by_its_kind_still_goes_to_recove
 }
 
 #[tokio::test]
+async fn codex_overloaded_retries_on_the_same_thread_without_replaying_the_person() {
+    let dir = support::DataFolder::new();
+    let mut entries = fixture("codex", "chat");
+    let done = entries.iter_mut().find(|e| e.msg["method"] == "turn/completed").unwrap();
+    done.msg["params"]["turn"]["status"] = "failed".into();
+    done.msg["params"]["turn"]["error"] = json!({"message":"Service busy", "codexErrorInfo":"serverOverloaded"});
+    let retry = entries.iter_mut().filter(|e| e.input && e.msg["method"] == "turn/start").nth(1).unwrap();
+    retry.msg["params"]["input"] = json!([{"type":"text", "text":"Continue from where you stopped after the service error. Do not repeat completed work.", "text_elements":[]}]);
+    let f = fake(entries.clone());
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let started = std::time::Instant::now();
+    let mut retries = vec![];
+    let reply = finished(&mut rx, |m| {
+        if let Some(n) = m.overload_retry {
+            assert_eq!(m.status, Some(Status::Streaming));
+            assert!(m.error.is_none());
+            retries.push(n);
+        }
+    })
+    .await;
+    assert!(started.elapsed() >= Duration::from_secs(2));
+    assert!(retries.contains(&1));
+    assert_eq!(reply.status, Some(Status::Done));
+    assert!(reply.overload_retry.is_none());
+    assert!(reply.error.is_none());
+    let starts: Vec<_> = f.wire.messages().into_iter().filter(|m| m["method"] == "turn/start").collect();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[0]["params"]["threadId"], starts[1]["params"]["threadId"]);
+    assert_eq!(f.wire.lines_with(SKY), 1);
+    assert_eq!(engine.open(&id).unwrap().messages.iter().filter(|m| m.role == Role::User).count(), 1);
+    assert_eq!(f.args.lock().unwrap().len(), 1);
+    let mismatches = f.mismatches.lock().unwrap().clone();
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    engine.shutdown();
+
+    for stop in [true, false] {
+        let dir = support::DataFolder::new();
+        let mut entries = entries.clone();
+        if !stop {
+            let done = entries.iter().position(|e| e.msg["method"] == "turn/completed").unwrap();
+            entries.insert(done + 1, Entry { input: false, msg: json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"windowDurationMins":300,"usedPercent":100,"resetsAt":4102444800_i64}}}}) });
+        }
+        let f = fake(entries);
+        let (engine, mut rx) = self::engine(&dir, Vendor::Codex, f.spawn.clone());
+        let id = engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+        let reply = finished(&mut rx, |m| {
+            if stop && m.overload_retry.is_some() {
+                engine.interrupt(&id);
+            }
+        })
+        .await;
+        assert!(reply.overload_retry.is_none());
+        if stop {
+            assert_eq!(reply.status, Some(Status::Stopped));
+            assert!(reply.error.is_none());
+            tokio::time::sleep(Duration::from_millis(2100)).await;
+        } else {
+            assert_eq!(reply.error.as_deref(), Some("error.quotaOut"));
+        }
+        assert_eq!(f.wire.messages().iter().filter(|m| m["method"] == "turn/start").count(), 1);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn rule_2_two_messages_on_a_choice_that_names_no_model_start_one_process() {
     let dir = support::DataFolder::new();
     let (spawn, made) = pipes();
