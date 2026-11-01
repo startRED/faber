@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-31 | A plan step is done only when the AI marks it with evidence; a helper or subagent ending never marks a step. | AI |"
+  ]
+}

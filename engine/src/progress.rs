@@ -23,6 +23,7 @@ pub const CLAUDE_WRAP_UP: &str = "mcp__faber__wrap_up";
 pub const MAX_STEPS: usize = 12;
 /// The longest a step, a status, a recap, a question and a button are, in characters; longer ones are cut, never refused.
 const STEP_CHARS: usize = 80;
+const EVIDENCE_CHARS: usize = 200;
 pub const STATUS_CHARS: usize = 50;
 /// The longest each part of a conclusion is, in characters.
 const PART_CHARS: usize = 300;
@@ -42,13 +43,20 @@ pub const SELF_WAIT: &str = "error.plan.selfWait";
 pub const CYCLE: &str = "error.plan.cycle";
 pub const NO_TEXT: &str = "error.plan.noText";
 pub const RUNNING: &str = "error.plan.running";
+pub const NO_EVIDENCE: &str = "error.plan.noEvidence";
 
 const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a short checklist, kept with the conversation \
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
 while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
+<<<<<<< HEAD
 own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
 next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
 conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
+=======
+own. Then send {\"advance\": true, \"evidence\": \"...\"} together with the call that starts the next step: it finishes the current \
+step and starts the next pending one. Every step marked done (in steps or with advance) needs evidence: what you ran or looked at \
+that shows it is done. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. For big \
+>>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
 work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
 spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
@@ -71,6 +79,7 @@ fn plan_schema() -> Value {
                     "properties": {
                         "text": { "type": "string", "description": "A short imperative step." },
                         "state": { "type": "string", "enum": ["pending", "in_progress", "done"] },
+                        "evidence": { "type": "string", "description": "Required when marking the step done: what you ran or looked at that shows it is done." },
                         "id": { "type": "string", "description": "Short id for waits; default s1, s2 by position." },
                         "files": { "type": "array", "maxItems": MAX_FILES, "items": { "type": "string" }, "description": "Paths or folders it will change, relative to the project." },
                         "waits": { "type": "array", "items": { "type": "string" }, "description": "Ids of steps to finish first." },
@@ -82,6 +91,7 @@ fn plan_schema() -> Value {
                 }
             },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
+            "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at that shows the finished step is done." },
             "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
         },
         "additionalProperties": false
@@ -203,9 +213,14 @@ pub fn estimate(had: Option<Estimate>, input: &Value, spent: u64) -> Result<Opti
     }
 }
 
+fn no_evidence(id: &str, text: &str) -> String {
+    let who = if id.is_empty() { text.to_string() } else { format!("{id} ({text})") };
+    format!("{NO_EVIDENCE}: {who}. Marking a step done needs evidence: what you ran or looked at that shows it is done.")
+}
+
 /// The plan after a `plan` call, from the one before: a new list replaces it, `advance` moves it one step on. At most one
 /// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix: a
-/// list whose ids, files or waits are wrong is refused whole with an `error.plan.*` key, never trimmed to something else.
+/// list whose ids, files, waits or evidence are wrong is refused whole with an `error.plan.*` key, never trimmed to something else.
 pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan>, String> {
     let mut steps = match input.get("steps").and_then(Value::as_array) {
         Some(list) => {
@@ -238,6 +253,18 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                     }
                     other => return Err(format!("{BAD_ID}: {}", line(&other.to_string(), ID_CHARS))),
                 };
+                let evidence = match state {
+                    StepState::Done => {
+                        let given = text_of(&s["evidence"], EVIDENCE_CHARS);
+                        let was_done = before.and_then(|p| p.steps.iter().find(|old| old.id == id && old.state == StepState::Done));
+                        match (was_done, given) {
+                            (Some(old), given) => old.evidence.clone().or(given),
+                            (None, Some(ev)) => Some(ev),
+                            (None, None) => return Err(no_evidence(&id, &text)),
+                        }
+                    }
+                    _ => None,
+                };
                 let files = names(&s["files"], BAD_FILE)?;
                 if files.len() > MAX_FILES {
                     return Err(format!("{TOO_MANY_FILES}: {id} has {}, at most {MAX_FILES}", files.len()));
@@ -252,6 +279,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                         waits.push(w.to_string());
                     }
                 }
+<<<<<<< HEAD
                 steps.push(PlanStep {
                     id,
                     text,
@@ -263,6 +291,9 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                     conversation: text_of(&s["conversation"], CONVERSATION_ID_CHARS),
                     member: None,
                 });
+=======
+                steps.push(PlanStep { id, text, state, evidence, files, waits, read: s["read"].as_bool().unwrap_or(false), worker: None });
+>>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
             }
             if steps.is_empty() {
                 return Ok(None);
@@ -273,8 +304,14 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
         None => before.map(|p| p.steps.clone()).ok_or("There is no plan yet: send the whole list in steps first.")?,
     };
     if input.get("advance").and_then(Value::as_bool) == Some(true) {
-        if let Some(current) = steps.iter_mut().find(|s| s.state == StepState::Active) {
+        let current = steps.iter_mut().find(|s| s.state == StepState::Active);
+        let Some(evidence) = text_of(&input["evidence"], EVIDENCE_CHARS) else {
+            let (id, text) = current.map_or(("", "advance"), |s| (s.id.as_str(), s.text.as_str()));
+            return Err(no_evidence(id, text));
+        };
+        if let Some(current) = current {
             current.state = StepState::Done;
+            current.evidence = Some(evidence);
         }
         if let Some(next) = steps.iter_mut().find(|s| s.state == StepState::Pending) {
             next.state = StepState::Active;
@@ -550,12 +587,15 @@ mod tests {
             [("Read the login page", StepState::Active), ("Fix the redirect", StepState::Pending), ("Check it works", StepState::Pending)],
             "one step in progress, the first; words on one line"
         );
-        let p = plan(Some(&p), &json!({ "advance": true }), 2).unwrap().unwrap();
+        let p = plan(Some(&p), &json!({ "advance": true, "evidence": "Read auth.rs" }), 2).unwrap().unwrap();
         assert_eq!(states(&p)[..2], [("Read the login page", StepState::Done), ("Fix the redirect", StepState::Active)]);
-        let p =
-            plan(Some(&p), &json!({ "advance": true }), 3).and_then(|p| plan(p.as_ref(), &json!({ "advance": true }), 4)).unwrap().unwrap();
+        assert_eq!(p.steps[0].evidence.as_deref(), Some("Read auth.rs"));
+        let p = plan(Some(&p), &json!({ "advance": true, "evidence": "Redirect updated" }), 3)
+            .and_then(|p| plan(p.as_ref(), &json!({ "advance": true, "evidence": "Login test passed" }), 4))
+            .unwrap()
+            .unwrap();
         assert!(p.steps.iter().all(|s| s.state == StepState::Done), "advancing past the end finishes it: {p:?}");
-        assert!(plan(None, &json!({ "advance": true }), 5).is_err(), "nothing to advance yet");
+        assert!(plan(None, &json!({ "advance": true, "evidence": "Nothing" }), 5).is_err(), "nothing to advance yet");
         assert_eq!(plan(Some(&p), &json!({ "steps": [] }), 6).unwrap(), None, "an empty list clears it");
         let long = json!({ "steps": (0..20).map(|i| json!({ "text": format!("Step {i}"), "state": "pending" })).collect::<Vec<_>>() });
         assert_eq!(plan(None, &long, 7).unwrap().unwrap().steps.len(), MAX_STEPS);
@@ -584,8 +624,10 @@ mod tests {
 
     #[test]
     fn a_plan_never_carries_the_estimate_it_belongs_to_the_job_not_the_list() {
-        let list =
-            json!({ "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "done" }], "estimate": 1.0 });
+        let list = json!({
+            "steps": [{ "text": "Build it", "state": "in_progress" }, { "text": "Check it", "state": "done", "evidence": "Checked" }],
+            "estimate": 1.0
+        });
         assert_eq!(plan(None, &list, 1).unwrap().unwrap().estimate, None);
         assert_eq!(plan(None, &json!({ "steps": [], "estimate": 1.0 }), 2).unwrap(), None, "an empty list clears the plan alone");
     }
@@ -653,7 +695,7 @@ mod tests {
         assert_eq!(again, p, "stored and loaded back");
         // A rewrite of the same list keeps every id, and an advance only moves the states.
         assert_eq!(plan(Some(&p), &list, 2).unwrap().unwrap().steps, p.steps);
-        let moved = plan(Some(&p), &json!({ "advance": true }), 3).unwrap().unwrap();
+        let moved = plan(Some(&p), &json!({ "advance": true, "evidence": "Model built" }), 3).unwrap().unwrap();
         assert_eq!((moved.steps[1].id.as_str(), moved.steps[1].waits.len()), ("s2", 1));
     }
 
@@ -662,11 +704,14 @@ mod tests {
         let old =
             r#"{"steps":[{"text":"Read","state":"done"},{"text":"Fix","state":"pending"},{"text":"Check","state":"pending"}],"at":5}"#;
         let p: Plan = serde_json::from_str(old).unwrap();
-        assert!(p.steps.iter().all(|s| s.id.is_empty() && s.files.is_empty() && s.waits.is_empty()));
+        assert!(p.steps.iter().all(|s| s.id.is_empty() && s.files.is_empty() && s.waits.is_empty() && s.evidence.is_none()));
         assert_eq!(ready(&p).len(), 2);
         let stored = serde_json::to_string(&p).unwrap();
-        assert!(!stored.contains("\"id\"") && !stored.contains("files") && !stored.contains("waits"), "nothing new is written for them");
-        let advanced = plan(Some(&p), &json!({ "advance": true }), 6).unwrap().unwrap();
+        assert!(
+            !stored.contains("\"id\"") && !stored.contains("files") && !stored.contains("waits") && !stored.contains("evidence"),
+            "nothing new is written for them"
+        );
+        let advanced = plan(Some(&p), &json!({ "advance": true, "evidence": "Read the file" }), 6).unwrap().unwrap();
         assert_eq!(advanced.steps[1].state, StepState::Active);
     }
 
@@ -819,7 +864,7 @@ mod tests {
         assert_eq!(wave(&after).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["b"], "only b, beside a that still holds src/model");
         // Done frees the files.
         let done = json!({ "steps": [
-            { "text": "Model", "state": "done", "id": "a" },
+            { "text": "Model", "state": "done", "id": "a", "evidence": "Model unit tests pass" },
             { "text": "Screen", "state": "pending", "id": "b", "files": ["src/model"] }
         ]});
         assert_eq!(wave(&send(done).unwrap()).len(), 1);
@@ -828,8 +873,8 @@ mod tests {
     #[test]
     fn a_new_plan_never_inherits_the_conversation_of_a_finished_step_that_had_its_id() {
         let before = delegated(json!({ "steps": [
-            { "text": "Model", "state": "done", "id": "s1", "files": ["src"] },
-            { "text": "Screen", "state": "done", "id": "s2", "files": ["ui"] }
+            { "text": "Model", "state": "done", "id": "s1", "files": ["src"], "evidence": "Model built" },
+            { "text": "Screen", "state": "done", "id": "s2", "files": ["ui"], "evidence": "Screen built" }
         ]}));
         let list = json!({ "steps": [{ "text": "Something else", "state": "pending" }, { "text": "Screen", "state": "done" }] });
         let mut after = plan(Some(&before), &list, 2).unwrap();
@@ -838,6 +883,7 @@ mod tests {
         assert_eq!((after.steps[0].state, after.steps[0].worker.as_ref()), (StepState::Pending, None));
         assert_eq!(can_start(&after, "s1"), Ok(()));
         assert_eq!(after.steps[1].worker, before.steps[1].worker, "the same finished step keeps its record");
+        assert_eq!(after.steps[1].evidence.as_deref(), Some("Screen built"), "and keeps its stored evidence");
     }
 
     #[test]
@@ -847,11 +893,78 @@ mod tests {
             { "text": "B", "state": "pending", "files": ["b"] }
         ]});
         let p = plan(None, &list, 1).unwrap().unwrap();
-        let p = plan(Some(&p), &json!({ "advance": true }), 2).unwrap().unwrap();
+        let p = plan(Some(&p), &json!({ "advance": true, "evidence": "Built a" }), 2).unwrap().unwrap();
         assert_eq!((p.steps[1].state, p.steps[1].worker.as_ref()), (StepState::Active, None));
         assert_eq!(can_start(&p, "s2"), Ok(()));
         assert_eq!(wave(&p).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["s2"]);
         assert_eq!(can_start(&p, "s1"), Err("that step is already done"));
+    }
+
+    #[test]
+    fn marking_a_step_done_requires_evidence_and_already_done_steps_keep_theirs() {
+        let first_no_ev = refused(json!({ "steps": [{ "text": "Read the login page", "state": "done" }] }));
+        assert!(
+            first_no_ev.starts_with(NO_EVIDENCE)
+                && first_no_ev.contains("s1")
+                && first_no_ev.contains("Read the login page")
+                && first_no_ev.contains("Marking a step done needs evidence: what you ran or looked at that shows it is done."),
+            "{first_no_ev}"
+        );
+        let p = plan(
+            None,
+            &json!({ "steps": [
+                { "text": "Read the login page", "state": "in_progress", "id": "read" },
+                { "text": "Fix the redirect", "state": "pending", "id": "fix" }
+            ]}),
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        for bad in [json!({ "advance": true }), json!({ "advance": true, "evidence": "   " })] {
+            let err = plan(Some(&p), &bad, 2).unwrap_err();
+            assert!(err.starts_with(NO_EVIDENCE) && err.contains("read"), "{err}");
+        }
+        let err = plan(
+            Some(&p),
+            &json!({ "steps": [
+                { "text": "Read the login page", "state": "done", "id": "read" },
+                { "text": "Fix the redirect", "state": "in_progress", "id": "fix" }
+            ]}),
+            2,
+        )
+        .unwrap_err();
+        assert!(err.starts_with(NO_EVIDENCE) && err.contains("read"), "{err}");
+
+        let long_ev = format!("  {}\nsecond line  ", "x".repeat(210));
+        let p = plan(Some(&p), &json!({ "advance": true, "evidence": long_ev }), 2).unwrap().unwrap();
+        let ev = p.steps[0].evidence.as_deref().unwrap();
+        assert!(ev.ends_with('…') && !ev.contains('\n') && ev.chars().count() == EVIDENCE_CHARS + 1, "{ev}");
+        assert_eq!(p.steps[1].evidence, None);
+
+        // Sending the list again may omit evidence on a step that was already done, and a newly done step still needs its own.
+        let err = plan(
+            Some(&p),
+            &json!({ "steps": [
+                { "text": "Read the login page", "state": "done", "id": "read" },
+                { "text": "Fix the redirect", "state": "done", "id": "fix" }
+            ]}),
+            3,
+        )
+        .unwrap_err();
+        assert!(err.starts_with(NO_EVIDENCE) && err.contains("fix"), "{err}");
+
+        let both = plan(
+            Some(&p),
+            &json!({ "steps": [
+                { "text": "Read the login page", "state": "done", "id": "read" },
+                { "text": "Fix the redirect", "state": "done", "id": "fix", "evidence": "Ran redirect check." }
+            ]}),
+            4,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(both.steps[0].evidence, p.steps[0].evidence, "stored evidence is kept when omitted");
+        assert_eq!(both.steps[1].evidence.as_deref(), Some("Ran redirect check."));
     }
 
     #[test]
@@ -903,8 +1016,11 @@ mod tests {
 
     #[test]
     fn the_plan_tool_offers_the_new_fields_and_the_lead_is_asked_for_them() {
-        let props = &plan_schema()["properties"]["steps"]["items"]["properties"];
+        let schema = plan_schema();
+        let props = &schema["properties"]["steps"]["items"]["properties"];
         assert!(props["id"].is_object() && props["files"]["maxItems"] == MAX_FILES && props["waits"]["type"] == "array");
+        assert!(props["evidence"]["type"] == "string" && schema["properties"]["evidence"]["type"] == "string");
+        assert!(PLAN_DESCRIPTION.contains("evidence"));
         assert!(crate::persona::LEADS.contains("(files)") && crate::persona::LEADS.contains("(waits)"));
     }
 

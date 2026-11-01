@@ -20,7 +20,11 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
       <ol>
         <For each={props.plan.steps}>
           {(step) => (
-            <li class={step.state} aria-current={step.state === 'active' ? 'step' : undefined}>
+            <li
+              class={step.state}
+              aria-current={step.state === 'active' ? 'step' : undefined}
+              title={step.state === 'done' ? step.evidence : undefined}
+            >
               <span class="mark" aria-hidden="true">
                 <Show when={step.state === 'done'}>
                   <Icon name="check" small />
