@@ -2395,6 +2395,7 @@ export const de: Messages = {
   'notes.336.better': 'Unterbrochene Arbeit wird beim erneuten Öffnen von Faber einmal fortgesetzt.',
   'notes.337.fixed': 'Arbeit gilt nicht mehr als erledigt, wenn die KI sie nicht abgeschlossen hat; sie zeigt „ohne Abschluss beendet“, und Faber bittet die KI einmal, sie abzuschließen.',
   'notes.338.better': 'Wer einen Schritt zum Lesen öffnet, behält die Seite ruhig, während die Antwort darunter weiterläuft, und Schritte zeigen kurze Dateinamen statt langer Ordnerpfade.',
+  'notes.339.better': 'Große Aufträge werden wieder aufgeteilt: Die KI startet bis zu drei Unterhaltungen parallel und prüft die Arbeit jeder einzelnen. Kleine Aufträge bleiben in einer Unterhaltung.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
