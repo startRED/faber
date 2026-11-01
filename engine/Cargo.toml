@@ -12,7 +12,7 @@ autotests = false
 faber-winproc = { path = "../winproc" }
 # The existing workspace dependency supplies a safe native disk-space reading at build admission.
 # The free memory a Cargo build of the verifier is admitted against.
-sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
+sysinfo = { version = "0.40.0", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"
 # Local export timestamps, including the offset at each message's date; already in the workspace's dependency graph.
 chrono = "0.4"
@@ -48,7 +48,7 @@ rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.0", default-features = false, features = ["system"] }
 # The paused clock of the tests that wait out the router (30 s) and an answer's acknowledgement (5 s).
 tokio = { version = "1", features = ["test-util"] }
 
