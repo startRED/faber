@@ -20,6 +20,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { StateGlyph } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { StallNote } from './StallNote.tsx';
+import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
@@ -681,6 +682,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       {/* The agent's own work seems stuck (a step with no news, a long compaction, the same step again): said where the eye is, with Stop. */}
       <StallNote conversationId={props.conversationId} m={m()} />
+      <Show when={props.last && props.area === 'project'}><ResultsNote conversationId={props.conversationId} message={m()} /></Show>
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
       <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
         {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}

@@ -367,7 +367,18 @@ export interface ContextPart {
   key: string;
   tokens: number;
 }
+export interface Results {
+  delivered: { files: number; edits: number; checksRun: number; checksPassed: number; checksFailed: number; commits: number; prs: number; artifacts: number; answers: number; concluded: boolean };
+  cost: { turns: number; workMs: number; spanMs: number; usd: number; inputTokens: number; outputTokens: number; unpriced: number; byVendor: Partial<Record<Vendor, { turns: number; workMs: number; usd: number; outputTokens: number }>> };
+  lastDelivery?: number | null;
+  dry: { turns: number; byItself: number; since?: number | null; workMs: number; usd: number };
+}
+export interface Stuck { noticedAt: number; since: number; turns: number; usd: number; askedAt?: number | null; askTurns: number }
+export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
+
 export interface Summary {
+  results?: Results;
+  stuck?: boolean;
   id: string;
   title: string;
   area: Area;
@@ -953,6 +964,8 @@ export type CookieSite = { name: string; cookies: number; kind: 'money' | 'email
 
 export const api = {
   state: () => invoke<AppState>('state'),
+  results: (id: string) => invoke<Results | null>('results', { id }),
+  projectResults: (projectId: string) => invoke<ProjectResultsView>('project_results', { projectId }),
   createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
   saveChatGroup: (id: string, name?: string, instructions?: string) => invoke<ChatGroup>('save_chat_group', { id, name, instructions }),
   addChatGroupFiles: (id: string, files: Attachment[]) => invoke<ChatGroup>('add_chat_group_files', { id, files }),

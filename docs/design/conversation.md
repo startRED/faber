@@ -10,6 +10,8 @@ A quiet labeled row records each decision or message Faber made on its own. It i
 
 ## Answers
 
+The newest reply has a quiet, wrapping line of what the conversation delivered and its work time and API-price cost; a second, quieter line names a run of at least three turns with nothing delivered. The project home lists the same facts by conversation, most spent first, with the total above them. Neither needs motion or a card.
+
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
