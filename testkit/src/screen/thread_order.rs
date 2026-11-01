@@ -16,8 +16,7 @@ fn order(ctx: &mut Ctx) -> Result {
         ..Launch::default()
     })?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "Show the work in order.")?;
     page.wait_for(
         "the final words while streaming",

@@ -954,7 +954,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .g-hint.on { opacity: 1; }
 .g-caret { position: absolute; left: 0; top: calc(var(--fs-read) * 0.2); width: 2px; height: calc(var(--fs-read) * 1.1); border-radius: 1px; background: var(--accent); animation: blink var(--dur-blink) steps(1) infinite; }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
-.cbar:has(.effort), .cbar:has(.keep) { flex-wrap: wrap; }
+.cbar { flex-wrap: wrap; }
 /* The model chip: its icon and chevron are drawings, the select on top of them is the control. */
 .chip.choose { position: relative; height: var(--h-sm); gap: 6px; padding: 0 8px 0 10px; cursor: default; white-space: nowrap; }
 .chip.choose:hover { background: var(--s3); color: var(--ink); }
@@ -962,6 +962,23 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .chip.choose select { appearance: none; border: 0; outline: none; background: none; padding: 0; margin: 0; cursor: default; field-sizing: content; }
 .chip.choose select option { background: var(--s2); color: var(--ink); }
 .chip.choose .i { color: var(--ink-3); pointer-events: none; }
+/* One model/effort chip; the top-layer menu shares the context menu's surface and quiet selection. */
+.model-chip { max-width: 100%; min-width: 0; }
+.model-chip:disabled { opacity: 0.4; }
+.model-label { overflow: hidden; text-overflow: ellipsis; }
+.model-effort { color: var(--ink-3); }
+.model-menu { position: fixed; inset: auto; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); margin: 0; padding: 6px; overflow-y: auto; border: 0; border-radius: var(--r-md); background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); font-size: var(--fs-sm); }
+.model-menu::backdrop { background: transparent; }
+.model-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: var(--h-md); padding: 6px 10px; border-radius: var(--r-xs); text-align: left; overflow-wrap: anywhere; }
+.model-option:hover, .model-menu summary:hover, .model-efforts button:hover { background: var(--s3); }
+.model-option[aria-pressed='true'], .model-efforts button[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-text); }
+.model-group { padding: 12px 10px 4px; font-size: var(--fs-xs); }
+.model-menu summary { min-height: var(--h-sm); padding: 6px 10px; color: var(--ink-3); cursor: default; border-radius: var(--r-xs); }
+.model-search { box-sizing: border-box; width: 100%; min-height: var(--h-md); margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: var(--r-xs); background: var(--s1); color: var(--ink); }
+.model-empty { padding: 6px 10px; color: var(--ink-3); }
+.model-efforts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; padding: 10px 4px 4px; border-top: 1px solid var(--line-2); }
+.model-efforts > span { margin-right: auto; padding: 0 6px; color: var(--ink-3); }
+.model-efforts button { min-height: var(--h-sm); padding: 4px 8px; border-radius: var(--r-xs); }
 /* "Keep going" (R199): a chip that is a switch of this conversation; pressed, it takes the accent's ink, never the amber. */
 .chip.keep { padding: 0 10px 0 8px; transition: color var(--dur-fast), background var(--dur-fast); }
 .chip.keep:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
