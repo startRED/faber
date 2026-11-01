@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "new": {
+      "en": "An agent can start, message and resume its conversations from a terminal, then wait for their reports.",
+      "pt-BR": "Um agente pode abrir, conversar e retomar suas conversas pelo terminal e aguardar os resultados.",
+      "es": "Un agente puede abrir, escribir y retomar sus conversaciones desde el terminal y esperar sus resultados.",
+      "fr": "Un agent peut ouvrir, contacter et reprendre ses conversations depuis le terminal, puis attendre leurs résultats.",
+      "de": "Ein Agent kann Gespräche im Terminal starten, anschreiben und fortsetzen und auf ihre Ergebnisse warten."
+    }
+  }
+}

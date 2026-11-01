@@ -18,6 +18,10 @@ const VERBS: &[&str] = &[
     "list",
     "read",
     "send",
+    "start",
+    "message",
+    "resume",
+    "mark-waiting",
     "stop",
     "continue",
     "archive",
@@ -67,6 +71,9 @@ fn valid(args: &Args, verb: &str) -> bool {
         "help" => (0, 2),
         "read" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
         "rename" => (3, 3),
+        "start" | "message" => (3, 3),
+        "resume" => (2, 3),
+        "mark-waiting" => (1, 1),
         "call" => (2, 3),
         "status" | "list" | "projects" | "quota" | "settings" | "watch" => (1, 1),
         _ => return false,
@@ -78,6 +85,8 @@ fn valid(args: &Args, verb: &str) -> bool {
         "list" => &["state", "archived", "all", "project", "family", "query", "limit"][..],
         "read" => &["last"],
         "send" => &["to", "project", "vendor", "model", "effort", "wait", "timeout"],
+        "start" => &["ai", "model", "effort", "step", "keep-going"],
+        "mark-waiting" => &["on", "note"],
         "watch" => &["id", "family", "project"],
         "wait" => &["timeout"],
         _ => &[],
@@ -89,7 +98,7 @@ fn valid(args: &Args, verb: &str) -> bool {
         return false;
     }
     if args.value("vendor").is_some_and(|v| !["auto", "claude", "codex"].contains(&v))
-        || args.value("effort").is_some_and(|v| !["low", "medium", "high"].contains(&v))
+        || verb == "send" && args.value("effort").is_some_and(|v| !["low", "medium", "high"].contains(&v))
     {
         return false;
     }
@@ -196,6 +205,33 @@ pub async fn run(args: Args, out: Out) -> i32 {
                 }
                 other => other,
             }
+        }
+        "start" => {
+            let Some(brief) = input(args.word(2).unwrap()) else { return usage(&out) };
+            ask(&client, &out, "start_conversation", json!({"title":id,"brief":brief,"ai":args.value("ai"),"model":args.value("model"),"effort":args.value("effort"),"step":args.value("step"),"keepGoing":args.on("keep-going")})).await
+        }
+        "message" => {
+            let Some(message) = input(args.word(2).unwrap()) else { return usage(&out) };
+            ask(&client, &out, "message_conversation", json!({"id":id,"message":message})).await
+        }
+        "resume" => {
+            let message = match args.word(2) {
+                Some(s) => match input(s) {
+                    Some(s) => Some(s),
+                    None => return usage(&out),
+                },
+                None => None,
+            };
+            ask(&client, &out, "resume_conversation", json!({"id":id,"message":message})).await
+        }
+        "mark-waiting" => {
+            ask(
+                &client,
+                &out,
+                "mark_waiting",
+                json!({"on":args.value("on").map(|s| s.split(',').collect::<Vec<_>>()),"note":args.value("note")}),
+            )
+            .await
         }
         "stop" => ask(&client, &out, "interrupt", json!({"id":id})).await,
         "continue" => match ask(&client, &out, "conversation", json!({"id":id,"last":1})).await {
