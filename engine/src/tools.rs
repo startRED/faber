@@ -1675,7 +1675,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::with_catalog(&tmp.path().join("data"), vec![]);
         let stream = archive(tmp.path(), &[("skills/tidy/SKILL.md", b"x"), ("skills/tidy/SKILL.md:payload", b"hidden")]);
-        assert!(store.install_from(&item(&expected()), &stream).unwrap_err().contains("no system"));
+        assert!(store.install_from(&item(&expected()), &stream).unwrap_err().contains(if cfg!(windows) {
+            "Unsafe path"
+        } else {
+            "no system"
+        }));
 
         assert_eq!(widening_key("---\nname: a\nallowed-tools: Bash\n---\nbody"), Some("allowed-tools"));
         assert_eq!(widening_key("---\nname: a\nHooks:\n  x: y\n---\n"), Some("hooks"));
