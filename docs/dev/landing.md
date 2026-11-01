@@ -32,7 +32,8 @@ before it, moves each `queue/pr-<n>` there, points the branch `train` at the top
 the land job (`--land`) moves every rider's branch to its own commit and phase-1-base to the top, so all show merged,
 and sends the next train. Pull requests queued meanwhile wait instead of cancelling anything: with one run each, every
 landing sent all the others back to the start (2026-11-01: of 38 queue runs, 1 green, 6 red, 31 cancelled). A red
-train blames nobody yet: `--split` sends its first half again, and a red rider alone is the culprit, whose red `queue`
+train blames nobody yet: `--split` sends its first half again and keeps its second half next on the branch
+`train-then`, before any newcomer, and a red rider alone is the culprit, whose red `queue`
 status keeps it off trains until it is queued again. A rider pushed again or closed, or a base that moved, sends the
 next train with whoever stands. A cancelled run reports nothing. `queue.yml` sends a train every twenty minutes when
 none runs. A workflow change never rides: it is checked alone and landed with `--finish`.
