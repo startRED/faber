@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Helpers that stop unexpectedly release the waiting AI, and closing Faber leaves no newly started AI process behind.",
+      "pt-BR": "Quando um ajudante para de repente, a IA que esperava por ele pode seguir, e fechar o Faber não deixa uma IA recém-aberta rodando.",
+      "es": "Si un ayudante se cierra de repente, la IA que lo esperaba puede continuar, y cerrar Faber no deja una IA recién iniciada en marcha.",
+      "fr": "Si une aide s’arrête soudainement, l’IA qui l’attendait peut continuer, et fermer Faber ne laisse aucune IA tout juste lancée en cours.",
+      "de": "Wird ein Helfer unerwartet beendet, kann die wartende KI fortfahren; beim Schließen von Faber bleibt keine gerade gestartete KI zurück."
+    }
+  }
+}

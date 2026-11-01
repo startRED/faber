@@ -1,5 +1,5 @@
 //! A process created with `CREATE_SUSPENDED` runs nothing until its main thread is resumed. Faber creates every CLI that way,
-//! puts it in its job object, and only then resumes it, so nothing the CLI starts can ever be outside the job. Neither std nor
+//! creates it inside its job object, and only then resumes it, so nothing the CLI starts can ever be outside the job. Neither std nor
 //! tokio gives the thread handle, so the thread is found through a toolhelp snapshot. Asking whether a process has ended is the
 //! other call. With the Windows API files of the shell (awake, autostart, the chime, pane), this is the only unsafe code in Faber.
 //!
@@ -58,6 +58,367 @@ pub use memory::MemoryDirectory;
 pub mod front;
 pub mod process_tree;
 pub mod sound;
+
+#[cfg(windows)]
+pub use launch::{Child, Output, spawn_in_job};
+
+#[cfg(windows)]
+mod launch {
+    use std::ffi::{OsStr, OsString};
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::os::windows::process::ExitStatusExt;
+    use std::sync::Mutex;
+    use std::task::{Poll, Waker};
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Threading::*;
+
+    struct Exit {
+        process: OwnedHandle,
+        wait: isize,
+        wake: Box<Mutex<[Option<Waker>; 2]>>,
+    }
+
+    impl Exit {
+        fn new(process: OwnedHandle) -> io::Result<std::sync::Arc<Self>> {
+            let mut exit = Self { process, wait: 0, wake: Box::new(Mutex::new([None, None])) };
+            let mut wait = std::ptr::null_mut();
+            // SAFETY: the boxed context and process outlive the registration; Drop joins the callback.
+            if unsafe {
+                RegisterWaitForSingleObject(
+                    &mut wait,
+                    exit.process.as_raw_handle(),
+                    Some(ended),
+                    (&*exit.wake as *const Mutex<[Option<Waker>; 2]>).cast_mut().cast(),
+                    INFINITE,
+                    WT_EXECUTEONLYONCE,
+                )
+            } == 0
+            {
+                let error = io::Error::last_os_error();
+                // SAFETY: startup failed before resume; do not leave a suspended child in the caller's still-open job.
+                unsafe {
+                    TerminateProcess(exit.process.as_raw_handle(), 1);
+                }
+                return Err(error);
+            }
+            exit.wait = wait as isize;
+            Ok(std::sync::Arc::new(exit))
+        }
+
+        fn poll(&self, cx: &std::task::Context<'_>, slot: usize) -> Poll<io::Result<()>> {
+            self.wake.lock().unwrap_or_else(|e| e.into_inner())[slot] = Some(cx.waker().clone());
+            // SAFETY: a zero-time wait queries the owned process without blocking the executor.
+            match unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) } {
+                0 => {
+                    self.wake.lock().unwrap_or_else(|e| e.into_inner())[slot] = None;
+                    Poll::Ready(Ok(()))
+                }
+                258 => Poll::Pending,
+                _ => Poll::Ready(Err(io::Error::last_os_error())),
+            }
+        }
+    }
+
+    /// A suspended CLI born in its kill-on-close job, with a cancellation-safe wait and kill on drop.
+    pub struct Child {
+        exit: std::sync::Arc<Exit>,
+        thread: OwnedHandle,
+        pid: u32,
+        status: Option<std::process::ExitStatus>,
+    }
+
+    impl Child {
+        pub fn id(&self) -> Option<u32> {
+            Some(self.pid)
+        }
+        pub fn resume(&self) -> io::Result<()> {
+            // SAFETY: this is the owned primary thread, still suspended until this call.
+            if unsafe { ResumeThread(self.thread.as_raw_handle()) } == u32::MAX { Err(io::Error::last_os_error()) } else { Ok(()) }
+        }
+        pub fn start_kill(&mut self) -> io::Result<()> {
+            // SAFETY: the owned process handle remains open throughout the call.
+            if unsafe { TerminateProcess(self.exit.process.as_raw_handle(), 1) } == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+        }
+        pub async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+            if let Some(status) = self.status {
+                return Ok(status);
+            }
+            std::future::poll_fn(|cx| self.exit.poll(cx, 1)).await?;
+            let mut code = 0;
+            // SAFETY: the process has signaled; code is writable and the handle is owned.
+            if unsafe { GetExitCodeProcess(self.exit.process.as_raw_handle(), &mut code) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let status = std::process::ExitStatus::from_raw(code);
+            self.status = Some(status);
+            Ok(status)
+        }
+    }
+
+    unsafe extern "system" fn ended(context: *mut std::ffi::c_void, _: bool) {
+        // SAFETY: Exit owns this box and joins the callback before releasing it.
+        let wake = unsafe { &*context.cast::<Mutex<[Option<Waker>; 2]>>() };
+        let wakers = std::mem::take(&mut *wake.lock().unwrap_or_else(|e| e.into_inner()));
+        for waker in wakers.into_iter().flatten() {
+            waker.wake();
+        }
+    }
+
+    impl Drop for Child {
+        fn drop(&mut self) {
+            if self.status.is_none() {
+                let _ = self.start_kill();
+            }
+        }
+    }
+
+    impl Drop for Exit {
+        fn drop(&mut self) {
+            if self.wait != 0 {
+                // SAFETY: this wait registration is ours; the sentinel joins callbacks before the context is dropped.
+                if unsafe { UnregisterWaitEx(self.wait as HANDLE, INVALID_HANDLE_VALUE) } == 0 {
+                    // Preserve callback memory if Windows cannot confirm that it stopped using it.
+                    std::mem::forget(std::mem::take(&mut self.wake));
+                }
+            }
+        }
+    }
+
+    /// Root exit ends inherited writers, then drains real EOF, including reads whose completion is still queued.
+    pub struct Output {
+        pipe: tokio::net::windows::named_pipe::NamedPipeServer,
+        exit: std::sync::Arc<Exit>,
+        job: OwnedHandle,
+        stopped: bool,
+    }
+
+    impl tokio::io::AsyncRead for Output {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            if !self.stopped
+                && let Poll::Ready(result) = self.exit.poll(cx, 0)
+            {
+                result?;
+                super::job_terminate(self.job.as_raw_handle() as isize)?;
+                self.stopped = true;
+            }
+            std::pin::Pin::new(&mut self.pipe).poll_read(cx, buf)
+        }
+    }
+
+    fn wide(value: &OsStr) -> io::Result<Vec<u16>> {
+        let mut value: Vec<_> = value.encode_wide().collect();
+        if value.contains(&0) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "embedded NUL in process input"));
+        }
+        value.push(0);
+        Ok(value)
+    }
+
+    fn quote(arg: &OsStr, line: &mut Vec<u16>) -> io::Result<()> {
+        line.push(b'"' as u16);
+        let mut slashes = 0;
+        for c in wide(arg)?.into_iter().take_while(|c| *c != 0) {
+            if c == b'\\' as u16 {
+                slashes += 1;
+                continue;
+            }
+            line.extend(std::iter::repeat_n(b'\\' as u16, slashes * if c == b'"' as u16 { 2 } else { 1 }));
+            if c == b'"' as u16 {
+                line.push(b'\\' as u16);
+            }
+            line.push(c);
+            slashes = 0;
+        }
+        line.extend(std::iter::repeat_n(b'\\' as u16, slashes * 2));
+        line.push(b'"' as u16);
+        Ok(())
+    }
+
+    struct Attributes(Vec<usize>);
+    impl Attributes {
+        fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+            self.0.as_mut_ptr().cast()
+        }
+    }
+    impl Drop for Attributes {
+        fn drop(&mut self) {
+            // SAFETY: only a successfully initialized list is wrapped in Attributes.
+            unsafe {
+                DeleteProcThreadAttributeList(self.ptr());
+            }
+        }
+    }
+
+    /// Creates a CLI with the command's plain arguments, environment overrides and directory, using connected async pipes.
+    /// The engine's commands inherit the environment; raw shell arguments and env_clear are not part of this interface.
+    pub fn spawn_in_job(
+        command: &std::process::Command,
+        job: isize,
+        flags: u32,
+    ) -> io::Result<(Child, tokio::net::windows::named_pipe::NamedPipeServer, Output, tokio::net::windows::named_pipe::NamedPipeServer)>
+    {
+        use std::fs::OpenOptions;
+        use std::os::windows::io::BorrowedHandle;
+        use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+        if !std::path::Path::new(command.get_program()).is_absolute() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "the CLI executable path must be resolved before launch"));
+        }
+        let application = wide(command.get_program())?;
+        // SAFETY: the caller keeps this job open through creation; the duplicate belongs only to this process.
+        let job_handle = unsafe { BorrowedHandle::borrow_raw(job as HANDLE) }.try_clone_to_owned()?;
+        // A private, first-instance pipe keeps another local process from replacing the CLI's standard streams.
+        let pipe = |input: bool| -> io::Result<_> {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let name = format!(r"\\.\pipe\faber-cli-{}-{n}", std::process::id());
+            let server = super::pipe::with_user_security(|attributes| {
+                // SAFETY: the user-only descriptor stays valid throughout pipe creation.
+                unsafe {
+                    tokio::net::windows::named_pipe::ServerOptions::new()
+                        .first_pipe_instance(true)
+                        .reject_remote_clients(true)
+                        .access_inbound(!input)
+                        .access_outbound(input)
+                        .in_buffer_size(4096)
+                        .out_buffer_size(4096)
+                        .create_with_security_attributes_raw(
+                            &name,
+                            (attributes as *mut windows_sys::Win32::Security::SECURITY_ATTRIBUTES).cast(),
+                        )
+                }
+            })?;
+            let client = OpenOptions::new().read(input).write(!input).open(name)?;
+            {
+                use std::future::Future;
+                let mut connect = std::pin::pin!(server.connect());
+                match connect.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())) {
+                    Poll::Ready(result) => result?,
+                    Poll::Pending => return Err(io::Error::other("the child pipe did not connect")),
+                }
+            }
+            // SAFETY: only the three child ends are inheritable, and HANDLE_LIST restricts inheritance to them.
+            if unsafe { SetHandleInformation(client.as_raw_handle(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok((server, client))
+        };
+        let ((stdin, input), (stdout, output), (stderr, error)) = (pipe(true)?, pipe(false)?, pipe(false)?);
+        let handles = [input.as_raw_handle(), output.as_raw_handle(), error.as_raw_handle()];
+        let jobs = [job as HANDLE];
+        let mut bytes = 0;
+        // SAFETY: the first call obtains the required size; the aligned allocation lives through process creation.
+        unsafe {
+            InitializeProcThreadAttributeList(std::ptr::null_mut(), 2, 0, &mut bytes);
+        }
+        let mut storage = vec![0usize; bytes.div_ceil(std::mem::size_of::<usize>())];
+        // SAFETY: storage is aligned and writable for the requested byte size.
+        if unsafe { InitializeProcThreadAttributeList(storage.as_mut_ptr().cast(), 2, 0, &mut bytes) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut attributes = Attributes(storage);
+        for (key, values) in
+            [(PROC_THREAD_ATTRIBUTE_JOB_LIST as usize, jobs.as_slice()), (PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize, handles.as_slice())]
+        {
+            // SAFETY: the borrowed handle arrays remain alive until CreateProcessW returns; no handle ownership is transferred.
+            if unsafe {
+                UpdateProcThreadAttribute(
+                    attributes.ptr(),
+                    0,
+                    key,
+                    values.as_ptr().cast(),
+                    std::mem::size_of_val(values),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        let mut line = Vec::new();
+        quote(command.get_program(), &mut line)?;
+        for arg in command.get_args() {
+            line.push(b' ' as u16);
+            quote(arg, &mut line)?;
+        }
+        line.push(0);
+        let mut env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        for (key, value) in command.get_envs() {
+            env.retain(|(existing, _)| !existing.as_encoded_bytes().eq_ignore_ascii_case(key.as_encoded_bytes()));
+            if let Some(value) = value {
+                env.push((key.into(), value.into()));
+            }
+        }
+        env.sort_by_key(|(key, _)| key.to_ascii_uppercase());
+        let mut environment = Vec::new();
+        for (key, value) in env {
+            let mut entry = key;
+            entry.push("=");
+            entry.push(value);
+            environment.extend(wide(&entry)?);
+        }
+        environment.push(0);
+        if environment.len() == 1 {
+            environment.push(0);
+        }
+        let cwd = command.get_current_dir().map(|p| wide(p.as_os_str())).transpose()?;
+        // SAFETY: all input buffers, handles and the attribute list outlive the call; successful output handles are owned below.
+        unsafe {
+            let mut startup: STARTUPINFOEXW = std::mem::zeroed();
+            startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdInput = handles[0];
+            startup.StartupInfo.hStdOutput = handles[1];
+            startup.StartupInfo.hStdError = handles[2];
+            startup.lpAttributeList = attributes.ptr();
+            let mut info: PROCESS_INFORMATION = std::mem::zeroed();
+            if CreateProcessW(
+                application.as_ptr(),
+                line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
+                environment.as_ptr().cast(),
+                cwd.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
+                &startup.StartupInfo,
+                &mut info,
+            ) == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            let process = OwnedHandle::from_raw_handle(info.hProcess);
+            let thread = OwnedHandle::from_raw_handle(info.hThread);
+            let exit = Exit::new(process)?;
+            Ok((
+                Child { exit: exit.clone(), thread, pid: info.dwProcessId, status: None },
+                stdin,
+                Output { pipe: stdout, exit, job: job_handle, stopped: false },
+                stderr,
+            ))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn cli_lifetime_arguments_quote_spaces_quotes_and_trailing_slashes() {
+            for (arg, expected) in [("", "\"\""), ("a b", "\"a b\""), ("a\"b", "\"a\\\"b\""), ("a\\", "\"a\\\\\"")] {
+                let mut line = Vec::new();
+                quote(OsStr::new(arg), &mut line).unwrap();
+                assert_eq!(String::from_utf16(&line).unwrap(), expected);
+            }
+            assert!(quote(OsStr::new("a\0b"), &mut Vec::new()).is_err());
+        }
+    }
+}
 
 #[cfg(unix)]
 fn owned_group(pgid: u32) -> std::io::Result<rustix::process::Pid> {
