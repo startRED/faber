@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::SystemTime;
 
 /// Keep typed deserialization, including duplicate-field rejection, while reading the removed setting.
@@ -125,7 +125,11 @@ fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
     read_checked(path).ok().flatten()
 }
 
+// Drivers have no Store handle; weak roots protect every live Store without retaining one after it closes.
+static DATA_ROOTS: Mutex<Vec<Weak<PathBuf>>> = Mutex::new(Vec::new());
+
 pub struct Store {
+    _data_root: Arc<PathBuf>,
     pub(crate) transcripts: crate::transcript::TranscriptStore,
     conversations: PathBuf,
     /// The side chat of each conversation (R250), a file of its own beside it, so the conversation and its search never read it.
@@ -210,6 +214,12 @@ impl Drop for Store {
 }
 
 impl Store {
+    pub(crate) fn data_roots() -> Vec<PathBuf> {
+        let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+        roots.retain(|root| root.strong_count() > 0);
+        roots.iter().filter_map(Weak::upgrade).map(|root| (*root).clone()).collect()
+    }
+
     pub fn new(data_dir: &Path) -> Self {
         Store::with_disk(data_dir, Arc::new(RealDisk))
     }
@@ -218,7 +228,16 @@ impl Store {
     pub fn with_disk(data_dir: &Path, disk: Arc<dyn Disk>) -> Self {
         let conversations = data_dir.join("conversations");
         let _ = fs::create_dir_all(&conversations);
+        let data_root = Arc::new(data_dir.canonicalize().unwrap_or_else(|_| {
+            std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.to_path_buf())
+        }));
+        {
+            let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+            roots.retain(|root| root.strong_count() > 0);
+            roots.push(Arc::downgrade(&data_root));
+        }
         Store {
+            _data_root: data_root,
             transcripts: crate::transcript::TranscriptStore::with_disk(data_dir.join("child-transcripts"), disk.clone()),
             search: crate::search::Search::new(conversations.clone()),
             conversations,

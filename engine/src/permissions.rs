@@ -20,6 +20,7 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     for name in [".credentials.json", "credentials.json", "auth.json"] {
         profile["filesystem"][":workspace_roots"][format!("**/{name}")] = "deny".into();
     }
+    protect_data(&mut profile, root);
     if root.is_absolute() {
         let mut dirs = vec![root.to_path_buf()];
         let mut left = 10_000usize;
@@ -66,6 +67,95 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
         config.insert("windows.sandbox".into(), "mxc".into());
     }
     config
+}
+
+fn protect_data(profile: &mut Value, root: &Path) {
+    let root = normal(&root.canonicalize().unwrap_or_else(|_| root.to_path_buf()).to_string_lossy());
+    for data in crate::store::Store::data_roots() {
+        let data = unified(&data.to_string_lossy());
+        profile["filesystem"][&data] = "read".into();
+        // A more specific workspace grant must not reopen a project nested in the data folder.
+        if inside(&root, &normal(&data)) {
+            profile["filesystem"][":workspace_roots"]["."] = "read".into();
+        }
+        for (alias, path) in [(":tmpdir", std::env::temp_dir()), (":slash_tmp", PathBuf::from("/tmp"))] {
+            let path = path.canonicalize().unwrap_or(path);
+            if profile["filesystem"][alias] != "deny" && inside(&normal(&path.to_string_lossy()), &normal(&data)) {
+                profile["filesystem"][alias] = "read".into();
+            }
+        }
+    }
+}
+
+/// Keep guarded modes' disk reads and native approvals, adding only the Store's write exclusion.
+pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
+    let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
+    let mut profile = json!({ "extends": ":workspace", "filesystem": {
+        ":root": "read", ":workspace_roots": { ".": if writable { "write" } else { "read" } }
+    } });
+    if !writable {
+        profile["filesystem"][":tmpdir"] = "read".into();
+        profile["filesystem"][":slash_tmp"] = "read".into();
+    }
+    protect_data(&mut profile, root);
+    json!({ "default_permissions": id, format!("permissions.{id}"): profile }).as_object().unwrap().clone()
+}
+
+/// File reads remain available. Command text is best effort: hidden paths need the native sandbox too.
+pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Value, cwd: Option<&str>) -> bool {
+    if mode == crate::model::Permissions::FullAccess || ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+        return false;
+    }
+    let roots: Vec<String> = crate::store::Store::data_roots().iter().map(|p| normal(&p.to_string_lossy())).collect();
+    let cwd = cwd.map(|c| normal(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
+    let shell = ["Bash", "PowerShell", "item/commandExecution/requestApproval"].contains(&tool);
+    if shell {
+        let command = input.as_str().or_else(|| input["command"].as_str()).unwrap_or_default();
+        if words(command).is_some_and(|args| {
+            let program = args[0].to_ascii_lowercase();
+            (program == "pwd" && args.len() == 1)
+                || (["cat", "type", "get-content", "ls"].contains(&program.as_str()) && args.iter().skip(1).all(|arg| !arg.starts_with('-')))
+        }) {
+            return false;
+        }
+    }
+    if shell && cwd.as_deref().is_some_and(|cwd| inside_any(cwd, &roots)) {
+        return true;
+    }
+    fn names(value: &Value, cwd: Option<&str>, roots: &[String]) -> bool {
+        match value {
+            Value::String(text) => {
+                let text = normal(text);
+                let matches = |token: &str| {
+                    let path = if absolute(token) {
+                        let (base, tail) = token.split_once('/').unwrap_or((token, ""));
+                        let path = resolve(base, tail);
+                        if token.starts_with("//") { format!("/{path}") } else { path }
+                    } else {
+                        resolve(cwd.unwrap_or(""), token)
+                    };
+                    inside_any(&path, roots)
+                };
+                matches(&text)
+                    || roots.iter().any(|root| {
+                        text.match_indices(root).any(|(at, _)| {
+                            let before = &text[..at];
+                            let after = &text[at + root.len()..];
+                            (before.is_empty() || before.ends_with(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                                && (after.is_empty()
+                                    || after.starts_with(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                        })
+                    })
+                    || text.split(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).chain(text.split(['"', '\''])).any(matches)
+            }
+            Value::Array(items) => items.iter().any(|v| names(v, cwd, roots)),
+            Value::Object(map) => map.iter().any(|(key, v)| {
+                !["content", "old_string", "new_string", "diff", "new_source"].contains(&key.as_str()) && names(v, cwd, roots)
+            }),
+            _ => false,
+        }
+    }
+    names(input, cwd.as_deref(), &roots)
 }
 
 pub fn prepare_tmp(root: &Path) -> bool {
@@ -179,7 +269,9 @@ pub fn command_argv(
     sandbox: Option<&crate::cli::Cli>,
     resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
 ) -> Option<Vec<String>> {
-    if !["Bash", "PowerShell"].contains(&tool) {
+    if !["Bash", "PowerShell"].contains(&tool)
+        || denies_data_write(crate::model::Permissions::Isolated, tool, input, root.to_str())
+    {
         return None;
     }
     let allowed = allows(root, tool, input);
@@ -649,11 +741,12 @@ fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathB
         return None;
     }
     let protected = |path: &Path| {
-        path.components().any(|p| {
-            let part = p.as_os_str().to_string_lossy();
-            let name = part.trim_end_matches(['.', ' ']);
-            name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".mcp.json")
-        })
+        crate::store::Store::data_roots().iter().any(|data| inside(&normal(&path.to_string_lossy()), &normal(&data.to_string_lossy())))
+            || path.components().any(|p| {
+                let part = p.as_os_str().to_string_lossy();
+                let name = part.trim_end_matches(['.', ' ']);
+                name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".mcp.json")
+            })
     };
     if writing && protected(&path) {
         return None;

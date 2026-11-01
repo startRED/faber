@@ -354,7 +354,17 @@ fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_f
     let chat = settings(&claude_args(&launch(Area::Chat, Permissions::Isolated)));
     let project = settings(&claude_args(&launch(Area::Project, Permissions::Isolated)));
     for key in ["permissions", "sandbox", "env"] {
-        assert_eq!(chat[key], project[key], "shared protection {key}");
+        if key == "permissions" {
+            let base = denied(&claude_args(&launch(Area::Chat, Permissions::FullAccess)));
+            for config in [&chat, &project] {
+                let rules = config["permissions"]["deny"].as_array().unwrap();
+                assert!(base.iter().all(|rule| rules.contains(&json!(rule))));
+                assert_eq!(config["permissions"]["ask"], chat["permissions"]["ask"]);
+                assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
+            }
+        } else {
+            assert_eq!(chat[key], project[key], "shared protection {key}");
+        }
     }
     for old in [json!({}), json!({ "setup": "done" })] {
         let old: Settings = serde_json::from_value(old).unwrap();
@@ -452,18 +462,16 @@ fn denied(args: &[String]) -> Vec<String> {
 fn r121_full_access_and_ask_deny_the_credential_folders_exactly_as_the_isolated_mode_does() {
     for area in [Area::Chat, Area::Project] {
         let full = denied(&claude_args(&launch(area, Permissions::FullAccess)));
-        assert_eq!(full, denied(&claude_args(&launch(area, Permissions::Isolated))), "{area:?}");
+        let isolated = denied(&claude_args(&launch(area, Permissions::Isolated)));
+        assert!(full.iter().all(|rule| isolated.contains(rule)), "{area:?}");
         for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)"] {
             assert!(full.contains(&rule.to_string()), "{area:?} {rule}");
         }
     }
     // Ask asks as well, and carries the same credential denies (R124b).
     for area in [Area::Chat, Area::Project] {
-        assert_eq!(
-            denied(&claude_args(&launch(area, Permissions::Ask))),
-            denied(&claude_args(&launch(area, Permissions::FullAccess))),
-            "{area:?}"
-        );
+        let ask = denied(&claude_args(&launch(area, Permissions::Ask)));
+        assert!(denied(&claude_args(&launch(area, Permissions::FullAccess))).iter().all(|rule| ask.contains(rule)), "{area:?}");
     }
 }
 
@@ -739,4 +747,272 @@ fn an_agent_can_never_change_fabers_approval_records() {
     assert!(!touches_credentials(&json!({ "file_path": "E:/work/notes.md", "content": text }), None, &none));
     assert!(!touches_credentials(&json!({ "file_path": "E:/work/notes.md", "old_string": "a", "new_string": text }), None, &none));
     assert!(!touches_credentials(&json!([{ "path": "E:/work/notes.md", "kind": { "type": "update" }, "diff": text }]), None, &none));
+}
+
+#[test]
+fn data_folder_writes_are_refused_by_both_clis_in_every_sandboxed_mode() {
+    use faber_engine::permissions::{allows, command_argv, denies_data_write};
+    let temp = tempfile::tempdir().unwrap();
+    // The host passes FABER_DATA_DIR to Store; the policy must use this actual, non-default root.
+    let data = temp.path().join("custom data");
+    let store = faber_engine::store::Store::new(&data);
+    let data = std::path::PathBuf::from(data.canonicalize().unwrap().to_string_lossy().replace("\\\\?\\", ""));
+    let outside = temp.path().join("project");
+    let nested = data.join("project");
+    for folder in [&outside, &nested] {
+        std::fs::create_dir_all(folder).unwrap();
+        std::fs::write(folder.join("notes.txt"), "keep").unwrap();
+    }
+    let data_text = data.to_string_lossy().replace("\\\\?\\", "").replace('\\', "/");
+    let rule = faber_engine::permissions::claude_rule_path(&data_text);
+    for tool in ["AskUserQuestion", "ExitPlanMode"] {
+        assert!(!denies_data_write(Permissions::Ask, tool, &json!({"question":data_text}), outside.to_str()));
+    }
+    for area in [Area::Chat, Area::Project] {
+        for mode in
+            [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::Isolated, Permissions::FullAccess]
+        {
+            let full = mode == Permissions::FullAccess;
+            let rules = denied(&claude_args(&launch(area, mode)));
+            assert_eq!(rules.contains(&format!("Edit({rule}/**)")), !full, "{mode:?}");
+            assert_eq!(rules.contains(&format!("Write({rule}/**)")), !full);
+            assert!(!rules.contains(&format!("Read({rule}/**)")), "reads stay available");
+            for cwd in [&outside, &nested] {
+                let t = CodexThread {
+                    leave_plan: false,
+                    helper: Default::default(),
+                    browse: false,
+                    conversations: false,
+                    leads: false,
+                    verify: false,
+                    progress: false,
+                    cwd: cwd.clone(),
+                    model: None,
+                    effort: None,
+                    resume: Some("existing-thread".into()),
+                    instructions: None,
+                    research: None,
+                    user_name: None,
+                    group_instructions: None,
+                    permissions: mode,
+                    tuning: Default::default(),
+                };
+                for resume in [None, Some("existing-thread".into())] {
+                    let (_, params) = thread_params(area, &CodexThread { resume, ..t.clone() });
+                    if full {
+                        assert_eq!(params["sandbox"], "danger-full-access");
+                        assert!(params["config"].get("default_permissions").is_none());
+                    } else {
+                        assert!(params.get("sandbox").is_none());
+                        let config = &params["config"];
+                        let id = config["default_permissions"].as_str().unwrap();
+                        let fs = &config[format!("permissions.{id}")]["filesystem"];
+                        assert_eq!(fs[&data_text], "read", "data writes denied without denying reads");
+                        let writable = cwd == &outside && mode != Permissions::Plan;
+                        assert_eq!(fs[":workspace_roots"]["."], if writable { "write" } else { "read" });
+                        if mode.guarded() {
+                            assert_eq!(fs[":root"], "read", "ordinary reads stay allowed");
+                        }
+                        if mode == Permissions::Plan {
+                            assert_eq!(fs[":tmpdir"], "read");
+                            assert_eq!(fs[":slash_tmp"], "read");
+                        }
+                    }
+                }
+                for (tool, input) in [
+                    ("Write", json!({"file_path":data.join("settings.json"), "content":"{}"})),
+                    ("Edit", json!({"file_path":data.join("conversations/one.json")})),
+                    ("item/fileChange/requestApproval", json!([{ "path":data.join("projects.json"), "diff":"+x" }])),
+                    ("Bash", json!({"command":format!("echo x > '{data_text}/settings.json'")})),
+                    ("PowerShell", json!({"command":format!("Set-Content '{data_text}/settings.json' x")})),
+                    ("item/commandExecution/requestApproval", json!(format!("rm '{data_text}/settings.json'"))),
+                ] {
+                    assert_eq!(denies_data_write(mode, tool, &input, cwd.to_str()), !full, "{mode:?} {tool}");
+                }
+                assert!(!denies_data_write(mode, "Read", &json!({"file_path":data.join("settings.json")}), cwd.to_str()));
+                assert_eq!(denies_data_write(mode, "Write", &json!({"file_path":"notes.txt"}), cwd.to_str()), !full && cwd == &nested);
+                assert!(!denies_data_write(
+                    mode,
+                    "Write",
+                    &json!({"file_path":outside.join("notes.txt"), "content":data_text}),
+                    cwd.to_str()
+                ));
+            }
+        }
+    }
+    assert!(allows(&outside, "Write", &json!({"file_path":"new.txt"})));
+    assert!(!allows(&nested, "Write", &json!({"file_path":"new.txt"})));
+    assert!(allows(&nested, "Read", &json!({"file_path":"notes.txt"})));
+    assert!(command_argv(&nested, "Bash", &json!({"command":"cargo test"}), None, &|_| None).is_none());
+    assert!(denies_data_write(Permissions::Ask, "Bash", &json!({"command":"echo x > ../settings.json"}), nested.to_str()));
+    assert!(denies_data_write(
+        Permissions::Ask,
+        "Bash",
+        &json!({"command":"echo x > '../custom data/settings.json'"}),
+        outside.to_str()
+    ));
+    assert!(!denies_data_write(Permissions::Ask, "Write", &json!({"file_path":format!("{data_text}-other/notes.txt")}), None));
+    assert_eq!(std::fs::read_to_string(nested.join("notes.txt")).unwrap(), "keep");
+    let started = std::time::Instant::now();
+    for _ in 0..1000 {
+        assert!(denies_data_write(Permissions::Ask, "Write", &json!({"file_path":data.join("settings.json")}), outside.to_str()));
+    }
+    println!(
+        "data-folder guard: 1000 decisions in {:?}; one path and weak registration per live Store; no worker or timer",
+        started.elapsed()
+    );
+    drop(store);
+    assert!(!denies_data_write(Permissions::Ask, "Write", &json!({"file_path":data.join("settings.json")}), None));
+}
+
+#[test]
+fn data_folder_read_commands_and_full_access_warnings_are_preserved() {
+    use faber_engine::permissions::denies_data_write;
+    let data = tempfile::tempdir().unwrap();
+    let _store = faber_engine::store::Store::new(data.path());
+    for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::Isolated] {
+        for tool in ["Bash", "PowerShell", "item/commandExecution/requestApproval"] {
+            for command in ["pwd".to_string(), "cat notes.txt".into(), format!("cat '{}'", data.path().join("settings.json").display())] {
+                assert!(!denies_data_write(mode, tool, &json!({"command":command}), data.path().to_str()));
+            }
+        }
+    }
+    for (locale, sentence) in [
+        (include_str!("../../ui/locales/en.ts"), "Full access can also change Faber's own data folder"),
+        (include_str!("../../ui/locales/pt-BR.ts"), "O Acesso total também permite alterar a pasta de dados"),
+        (include_str!("../../ui/locales/es.ts"), "Acceso total también permite cambiar la carpeta de datos"),
+        (include_str!("../../ui/locales/fr.ts"), "L’accès total permet aussi de modifier le dossier de données"),
+        (include_str!("../../ui/locales/de.ts"), "Vollzugriff erlaubt auch Änderungen im Datenordner"),
+    ] {
+        assert!(locale.contains(sentence));
+        let warning = locale.lines().find(|line| line.contains("set.permissionsDontAskBody")).unwrap();
+        for existing in [".claude", ".codex", ".ssh", "hooks", "Claude Code", "Codex"] {
+            assert!(warning.to_lowercase().contains(&existing.to_lowercase()), "missing warning: {existing}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
+    use faber_engine::events::{EngineEvent, UserTurn};
+    use faber_engine::model::Vendor;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let data = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let _store = faber_engine::store::Store::new(data.path());
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let process = Arc::new(Mutex::new(Some(faber_engine::proc::Proc {
+                stdin: Box::new(stdin),
+                stdout: Box::new(stdout),
+                stderr: None,
+                child: None,
+                contained: None,
+            })));
+            let spawn: faber_engine::proc::Spawner = Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().unwrap()));
+            let (read, mut write) = tokio::io::split(script);
+            let mut output = BufReader::new(read).lines();
+            let (sent, mut events) = tokio::sync::mpsc::unbounded_channel();
+            let sink: faber_engine::claude::EventSink = Arc::new(move |event| drop(sent.send(event)));
+            let session = if vendor == Vendor::Claude {
+                faber_engine::claude::start_claude(
+                    faber_engine::claude::ClaudeOptions {
+                        bin: "unused".into(),
+                        cwd: project.path().into(),
+                        launch: launch(Area::Project, Permissions::Ask),
+                        spawn,
+                        sandbox: None,
+                    },
+                    sink,
+                )
+            } else {
+                let server = faber_engine::codex::CodexServer::start(faber_engine::codex::CodexServerOptions {
+                    permissions: Permissions::Ask,
+                    cli: faber_engine::cli::Cli { command: "unused".into(), prefix: vec![] },
+                    cwd: project.path().into(),
+                    area: Area::Project,
+                    user_hooks: false,
+                    windows: cfg!(windows),
+                    spawn,
+                    tools: Default::default(),
+                });
+                server.open(
+                    CodexThread {
+                        leave_plan: false,
+                        helper: Default::default(),
+                        browse: false,
+                        conversations: false,
+                        leads: false,
+                        verify: false,
+                        progress: false,
+                        cwd: project.path().into(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions: None,
+                        research: None,
+                        user_name: None,
+                        group_instructions: None,
+                        permissions: Permissions::Ask,
+                        tuning: Default::default(),
+                    },
+                    sink,
+                )
+            };
+            session.send(UserTurn::text("work"));
+            if vendor == Vendor::Claude {
+                let user: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(user["type"], "user");
+            } else {
+                loop {
+                    let msg: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                    let result = match msg["method"].as_str().unwrap() {
+                        "initialized" => continue,
+                        "thread/start" => json!({"thread":{"id":"owner"}}),
+                        "turn/start" => json!({"turn":{"id":"turn"}}),
+                        _ => json!({}),
+                    };
+                    write.write_all(format!("{}\n", json!({"id":msg["id"],"result":result})).as_bytes()).await.unwrap();
+                    if msg["method"] == "turn/start" {
+                        break;
+                    }
+                }
+            }
+            for command in [false, true] {
+                let input = if command {
+                    json!({"command":format!("echo x > '{}'", data.path().join("settings.json").display())})
+                } else {
+                    json!({"file_path":data.path().join("settings.json"),"content":"{}"})
+                };
+                let request = if vendor == Vendor::Claude {
+                    json!({"type":"control_request","request_id":"data","request":{"subtype":"can_use_tool",
+                        "tool_name":if command {"Bash"} else {"Write"},"input":input}})
+                } else {
+                    let params = if command {
+                        json!({"threadId":"owner","command":input["command"],"cwd":project.path()})
+                    } else {
+                        json!({"threadId":"owner","changes":[{"path":input["file_path"],"diff":"+x"}]})
+                    };
+                    json!({"id":"data","method":if command {"item/commandExecution/requestApproval"} else {"item/fileChange/requestApproval"},"params":params})
+                };
+                write.write_all(format!("{request}\n").as_bytes()).await.unwrap();
+                let response: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                if vendor == Vendor::Claude {
+                    assert_eq!(response["response"]["response"]["behavior"], "deny");
+                } else {
+                    assert_eq!(response["result"]["decision"], "decline");
+                }
+                while let Ok(event) = events.try_recv() {
+                    assert!(!matches!(event, EngineEvent::Permission { .. }), "{vendor:?} published a data-write card");
+                }
+            }
+            session.close();
+            drop(write);
+        }
+    })
+    .await
+    .expect("data writes must be refused before waiting for a person's answer");
 }
