@@ -115,6 +115,16 @@ export function Setup(props: SetupProps) {
     });
   });
 
+  // A card's buttons appear after a pick; on a short window they would sit under the sticky footer, so the step
+  // scrolls just enough to show them.
+  const revealAboveFoot = (el: HTMLElement) => onMount(() => requestAnimationFrame(() => {
+    const box = el.closest<HTMLElement>('.firstrun');
+    const foot = box?.querySelector('.first-foot');
+    if (!box || !foot) return;
+    const over = el.getBoundingClientRect().bottom - foot.getBoundingClientRect().top + 12;
+    if (over > 0) box.scrollTop += over;
+  }));
+
   const first = () => props.mode === 'firstRun';
   // "None for now" only means something in the first run; opened later, Close already says it.
   const choices: [Subscription, string][] = [
@@ -198,7 +208,7 @@ export function Setup(props: SetupProps) {
                   </Show>
 
                   <Show when={card().actions.length > 0}>
-                    <div class="setup-card-actions" ref={animateList}>
+                    <div class="setup-card-actions" ref={(el) => { animateList(el); revealAboveFoot(el); }}>
                       <Show when={card().actions.includes('install')}>
                         <button
                           type="button"

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anchors, links, mentions, problems, MAX_LINES } from './docs.mjs';
+import { anchors, links, mentions, problems, MAX_LINES, READ_FIRST } from './docs.mjs';
 
 /** A tree of files for `problems`. */
 function tree(files) {
@@ -106,3 +106,24 @@ test('a task of the queue needs no row of its own in docs/README.md', () => {
     [],
   );
 });
+
+test('the guide every session loads and a task brief have their own, lower limit', () => {
+  const base = { 'docs/README.md': index, 'docs/a.md': '# A\n', 'docs/design/b.md': '# B\n' };
+  const big = (n) => 'x'.repeat(n);
+  assert.deepEqual(tree({ ...base, 'AGENTS.md': big(READ_FIRST['AGENTS.md']), 'docs/tasks/010-a.md': big(READ_FIRST.task) }), []);
+  const found = tree({ ...base, 'AGENTS.md': big(READ_FIRST['AGENTS.md'] + 1), 'docs/tasks/010-a.md': big(READ_FIRST.task + 1) });
+  assert.equal(found.length, 2);
+  assert.match(found[0], /^AGENTS\.md: 14001 bytes/);
+  assert.match(found[1], /^docs\/tasks\/010-a\.md: 6001 bytes/);
+});
+
+test('the README says how to install and never that there is nothing to install', () => {
+  const base = { 'docs/README.md': index, 'docs/a.md': '# A\n', 'docs/design/b.md': '# B\n' };
+  const install = '# Faber\n\n## Install\n\nDownload it from https://github.com/startRED/faber/releases/latest.\n';
+  assert.deepEqual(tree({ ...base, 'README.md': install }), []);
+  assert.deepEqual(tree({ ...base, 'README.md': '# Faber\n\n> Status: early development. Nothing to install yet.\n' }), [
+    'README.md: says "Nothing to install", but releases exist; keep its Install section',
+    'README.md: no link to /releases/latest; its Install section points newcomers there',
+  ]);
+});
+

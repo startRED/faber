@@ -49,6 +49,7 @@ fn launch(area: Area) -> ClaudeLaunch {
         helper: Default::default(),
         browse: false,
         conversations: false,
+        leads: false,
         verify: false,
         progress: false,
         area,
@@ -946,6 +947,11 @@ fn only_a_project_agent_given_the_bigger_offer_tool_is_told_to_use_it() {
     let helper = prompt(launch(Area::Project));
     assert!(helper.contains("Technical details") && !helper.contains("offer_bigger"), "{helper}");
     assert!(!prompt(launch(Area::Chat)).contains("offer_bigger"));
+    // The person's own project agent is told when to lead a small team; a team member, a helper and Chat never are.
+    let leads = faber_engine::persona::LEADS;
+    assert!(prompt(ClaudeLaunch { progress: true, leads: true, ..launch(Area::Project) }).ends_with(leads));
+    assert!(!prompt(ClaudeLaunch { progress: true, ..launch(Area::Project) }).contains(leads));
+    assert!(!helper.contains(leads) && !prompt(ClaudeLaunch { leads: true, ..launch(Area::Chat) }).contains(leads));
 }
 
 #[test]

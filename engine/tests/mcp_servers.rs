@@ -80,6 +80,7 @@ fn mcp_servers_launch_choice_filters_only_catalog_servers_without_strict_claude_
             helper: Default::default(),
             browse: false,
             conversations: false,
+            leads: false,
             verify: false,
             progress: true,
             tools: delivery.clone(),

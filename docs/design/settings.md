@@ -156,7 +156,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 - Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a
-  bar with the expected-pace mark, and the reset time written in full); an old reading, or none, shows "—". The card ends
+  bar with a mark at the share of the window's clock time gone, and the reset time in days and hours, such as "3 d 13 h"); an old reading, or none, shows "—". The card ends
   with Faber's own spend today in API value, written the language's way with two decimals. Every note about how the
   figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
   projection and age) is behind one "Details" fold per card. "Manage accounts" appears once in the section. After the cards comes one more card titled "Auto", with one row, "What Auto learned": a Forget button (it reads "Forgotten" for 2.5 s and cannot be pressed twice in that time; an error shows under the row in the existing `.note.err` line). It sits here because Auto's picks follow these limits and Auto has no section of its own.

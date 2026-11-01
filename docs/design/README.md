@@ -42,7 +42,8 @@ Native pieces and generated pages have their own [visual-answer rules](visual-an
   since in WebView2 they bring the system bar back with its arrows.
 - It is an app, not a page: the chrome's words are not selectable and keep the arrow cursor; answers, messages, code, files,
   errors and fields are selectable with the text cursor. Buttons, rows and menus show the arrow, never the hand; only a link
-  in text does. Pictures and links never drag, and no list bounces past its end (`tests/ui/shell.check.ts` checks both).
+  in text does (`scripts/arrow-cursor.test.mjs` checks it). Pictures and links never drag, and no list bounces past its
+  end (`tests/ui/shell.check.ts` checks both).
 - Faber's browser is a native view over the window, above everything the screen draws. Anything that can lie over its box
   (the picture viewer, a menu, a dialog, a toast) makes the page leave the window while it is there (`covered` in
   `ui/Site.tsx`, which watches the screen once a frame at most and counts a painted layer by its bounds unless it lies under the box, so a new layer needs a role

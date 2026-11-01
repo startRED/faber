@@ -52,6 +52,24 @@ async fn the_usage_view_separates_own_money_from_foreign_account_use() {
     e.shutdown();
 }
 #[tokio::test]
+async fn the_bar_mark_is_clock_time_even_when_the_learned_hours_are_uneven() {
+    let dir = crate::support::DataFolder::new();
+    let mut ledger = Ledger::default();
+    let v = &mut ledger.claude;
+    v.billing = Billing::Subscription;
+    v.paid_fallback = Some(false);
+    v.record("five_hour", 0.35, WHEN + 9000.0, WHEN, 0);
+    // Every point this person ever moved fell in the hour before now: weighted by habit, most of the window is gone.
+    v.learned.mass[faber_engine::budget::bin(WHEN - 3600.0, 0)] = 50.0;
+    v.learned.covered = 336.0 * 3600.0;
+    Store::new(dir.path()).save_ledger(&ledger).unwrap();
+    let e = engine(&dir);
+    let w = &e.state().usage.remove(0).windows[0];
+    assert!(w.elapsed > 0.6, "the weighted share stays for pacing: {}", w.elapsed);
+    assert!((w.expected - 0.5).abs() < 1e-9, "the mark is half the window's time: {}", w.expected);
+    e.shutdown();
+}
+#[tokio::test]
 async fn a_typed_plan_cannot_make_unknown_billing_eligible_or_hide_the_auth_hint() {
     let dir = crate::support::DataFolder::new();
     let e = engine(&dir);

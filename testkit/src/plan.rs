@@ -382,6 +382,16 @@ mod tests {
         assert_eq!(names(&suites_for(&paths(&["docs/product-map.md"]))), ["rust"], "a test reads the map");
     }
 
+    // The queue's own scripts and the scripts' tests pick no suite here; CI still runs their lints job, where
+    // `npm run test:scripts` runs them.
+    #[test]
+    fn the_queue_scripts_and_the_scripts_tests_pick_no_suite() {
+        for path in ["scripts/land.mjs", "scripts/tasks.mjs", "scripts/land.test.mjs", "scripts/bench/run.test.mjs"] {
+            assert!(suites_for(&paths(&[path])).is_empty(), "{path}");
+        }
+        assert_eq!(names(&suites_for(&paths(&["scripts/base.mjs"]))), ["rust", "ui", "screen"], "the runner reads it");
+    }
+
     #[test]
     fn several_changes_add_their_suites_together() {
         assert_eq!(names(&suites_for(&paths(&["tests/ui/a.check.ts", "engine/src/x.rs", "README.md"]))), ["rust", "ui", "screen"]);

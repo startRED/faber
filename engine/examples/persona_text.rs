@@ -28,6 +28,7 @@ fn words(language: Option<&str>) -> Value {
         helper: Default::default(),
         browse: false,
         conversations: false,
+        leads: false,
         verify: false,
         progress: false,
         tools: Default::default(),
@@ -49,6 +50,7 @@ fn words(language: Option<&str>) -> Value {
         helper: Default::default(),
         browse: false,
         conversations: false,
+        leads: false,
         verify: false,
         progress: false,
     };

@@ -1030,6 +1030,42 @@ pub fn apply(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'stat
 /// One writer at a time for the notes and `rules.md`.
 static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The review a Memory edit takes away, read before it writes: a decision deleted, or rewritten into other words, loses
+/// the review of its words, so the same words written again later are not reviewed by themselves. Every copy of them
+/// loses it, since no listing can vouch that another copy is still there (an agent writes the project meanwhile); the
+/// person keeps them again. The file is read as `apply` reads it, so a changed file is refused here as there.
+pub fn removes(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'static str> {
+    if edit.keep || !decisions(&edit.path) {
+        return Ok(None);
+    }
+    // What `apply` would refuse takes nothing back.
+    source(&edit.path).ok_or(REFUSED)?;
+    if edit.text.as_deref().is_some_and(|text| text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES) {
+        return Err(REFUSED);
+    }
+    let protected = resolved_private(&private_roots());
+    let (root, project_dir) = project_directory(project, &protected)?;
+    if private(&root.join(&edit.path), &protected) {
+        return Err(REFUSED);
+    }
+    let path = Path::new(&edit.path);
+    let dir = project_dir.under(path.parent().ok_or(REFUSED)?).map_err(|_| REFUSED)?;
+    let name = path.file_name().and_then(|s| s.to_str()).ok_or(REFUSED)?;
+    if dir.file(name).map_err(|_| REFUSED)?.metadata().map_err(|_| READ)?.permissions().readonly() {
+        return Err("error.memory.readOnly");
+    }
+    let file = read_file(&dir, name, edit.path.clone(), "faber", MAX_ENTRIES)?;
+    if format!("{}:{}", project_dir.identity().map_err(|_| READ)?, file.revision) != edit.revision {
+        return Err(CHANGED);
+    }
+    let entry = file.entries.iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
+    let old = entry.body.as_deref().unwrap_or(&entry.text);
+    // Compared with the line ends `apply` writes, so saving the same words with other line ends takes nothing back.
+    let lf = |text: &str| KeptDecision::of(&text.replace("\r\n", "\n"));
+    let same = edit.text.as_deref().is_some_and(|text| lf(mark(text).map_or(text, |m| &text[..m.open])) == lf(old));
+    Ok((!same).then(|| KeptDecision::of(old)))
+}
+
 fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<KeptDecision>, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let source = source(&edit.path).ok_or(REFUSED)?;
