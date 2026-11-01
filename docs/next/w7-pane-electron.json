@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Forgetting imported sign-ins now signs out the page the agent had open too.",
+      "pt-BR": "Ao esquecer os acessos importados, a página aberta pelo agente também sai das contas.",
+      "es": "Al olvidar los accesos importados, también se cierran las sesiones de la página del agente.",
+      "fr": "Quand vous oubliez les connexions importées, la page ouverte par l’agent est aussi déconnectée.",
+      "de": "Wenn du importierte Anmeldungen vergisst, wird auch die Seite des Agenten abgemeldet."
+    }
+  }
+}

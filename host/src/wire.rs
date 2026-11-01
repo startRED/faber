@@ -138,9 +138,9 @@ pub enum PaneOp {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ViewNote {
     /// A page started to load in the main frame, at this address.
-    Started { url: String },
+    Started { url: String, navigation: u64 },
     /// A page finished loading, at the address it ended up.
-    Finished { url: String },
+    Finished { url: String, navigation: u64 },
     /// The main frame moved within the same document.
     Moved { url: String },
     /// The page's title changed.
@@ -391,8 +391,11 @@ mod tests {
             Ok(ShellNote::PaneAnswer { id: 5, ok: None, err: Some("the page stopped".into()) })
         );
         assert_eq!(
-            note(r#"{"shell":{"kind":"paneEvent","view":"behind","event":{"kind":"started","url":"https://a.example/"}}}"#),
-            Ok(ShellNote::PaneEvent { view: PaneView::Behind, event: ViewNote::Started { url: "https://a.example/".into() } })
+            note(r#"{"shell":{"kind":"paneEvent","view":"behind","event":{"kind":"started","url":"https://a.example/","navigation":1}}}"#),
+            Ok(ShellNote::PaneEvent {
+                view: PaneView::Behind,
+                event: ViewNote::Started { url: "https://a.example/".into(), navigation: 1 }
+            })
         );
         assert_eq!(
             note(r#"{"shell":{"kind":"paneEvent","view":"main","event":{"kind":"titled"}}}"#),
@@ -400,10 +403,11 @@ mod tests {
         );
         assert_eq!(note(r#"{"shell":{"kind":"paneEvent","view":"side","event":{"kind":"gone"}}}"#), Err("error.host.badRequest".into()));
         assert_eq!(note(r#"{"shell":{"kind":"paneEvent","view":"main","event":{"kind":"crashed"}}}"#), Err("error.host.badRequest".into()));
-        let finished = ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Finished { url: "https://a.example/".into() } };
+        let finished =
+            ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Finished { url: "https://a.example/".into(), navigation: 1 } };
         assert_eq!(
             line(&Noted { shell: finished }),
-            "{\"shell\":{\"kind\":\"paneEvent\",\"view\":\"main\",\"event\":{\"kind\":\"finished\",\"url\":\"https://a.example/\"}}}\n"
+            "{\"shell\":{\"kind\":\"paneEvent\",\"view\":\"main\",\"event\":{\"kind\":\"finished\",\"url\":\"https://a.example/\",\"navigation\":1}}}\n"
         );
         assert_eq!(
             line(&Noted { shell: ShellNote::PaneAnswer { id: 9, ok: Some(json!("done")), err: None } }),

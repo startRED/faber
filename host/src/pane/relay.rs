@@ -33,8 +33,8 @@ pub fn view_named(view: PaneView) -> View {
 /// What a note says a view told, as the pane hears it.
 pub fn event_of(note: ViewNote) -> ViewEvent {
     match note {
-        ViewNote::Started { url } => ViewEvent::Started { url },
-        ViewNote::Finished { url } => ViewEvent::Finished { url },
+        ViewNote::Started { url, .. } => ViewEvent::Started { url },
+        ViewNote::Finished { url, .. } => ViewEvent::Finished { url },
         ViewNote::Moved { url } => ViewEvent::Moved { url },
         ViewNote::Titled => ViewEvent::Titled,
         ViewNote::Gone => ViewEvent::Gone,
@@ -49,6 +49,7 @@ struct Link {
     /// The views the shell opened and the host has not closed.
     open: HashSet<View>,
     generation: HashMap<View, u64>,
+    navigation: HashMap<View, u64>,
 }
 
 /// A [`Driver`] whose views are the shell's, reached by orders.
@@ -65,8 +66,34 @@ impl Relay {
         Arc::new(Relay {
             send,
             next: AtomicU64::new(1),
-            link: Mutex::new(Link { waiting: Some(HashMap::new()), open: HashSet::new(), generation: HashMap::new() }),
+            link: Mutex::new(Link {
+                waiting: Some(HashMap::new()),
+                open: HashSet::new(),
+                generation: HashMap::new(),
+                navigation: HashMap::new(),
+            }),
         })
+    }
+
+    /// Ignore a completion belonging to an older navigation, even at the same URL.
+    pub fn event(&self, view: View, note: ViewNote) -> Option<ViewEvent> {
+        let mut link = lock(&self.link);
+        match &note {
+            ViewNote::Started { navigation, .. } => {
+                link.navigation.insert(view, *navigation);
+            }
+            ViewNote::Finished { navigation, .. } => {
+                if link.navigation.get(&view) != Some(navigation) {
+                    return None;
+                }
+                link.navigation.remove(&view);
+            }
+            ViewNote::Gone => {
+                link.navigation.remove(&view);
+            }
+            _ => {}
+        }
+        Some(event_of(note))
     }
 
     /// The shell answered call `id`. An answer nobody waits for (a call the host gave up on, or an id never sent) changes
@@ -104,6 +131,7 @@ impl Relay {
                     return Err("not open".into());
                 }
                 let generation = if matches!(op, PaneOp::Open { .. }) {
+                    link.open.remove(&view);
                     let generation = link.generation.entry(view).or_default();
                     *generation += 1;
                     Some(*generation)
@@ -115,9 +143,10 @@ impl Relay {
                 (self.send)(Order::Pane { id: Some(id), view: view_of(view), op });
                 (id, generation)
             };
-            let mut forget = Forget { relay: self, id: Some(id) };
+            let mut forget = Forget { relay: self, id: Some(id), opening: generation.map(|generation| (view, generation)) };
             let result = answered.await.unwrap_or_else(|_| Err(GONE.into()));
             forget.id = None;
+            forget.opening = None;
             if result.is_ok() {
                 if let Some(generation) = generation {
                     let mut link = lock(&self.link);
@@ -136,13 +165,22 @@ impl Relay {
 struct Forget<'a> {
     relay: &'a Relay,
     id: Option<u64>,
+    opening: Option<(View, u64)>,
 }
 
 impl Drop for Forget<'_> {
     fn drop(&mut self) {
         if let Some(id) = self.id {
-            if let Some(waiting) = lock(&self.relay.link).waiting.as_mut() {
+            let mut link = lock(&self.relay.link);
+            if let Some(waiting) = link.waiting.as_mut() {
                 waiting.remove(&id);
+            }
+            if let Some((view, generation)) = self.opening {
+                if link.waiting.is_some() && link.generation.get(&view) == Some(&generation) {
+                    *link.generation.entry(view).or_default() += 1;
+                    link.open.remove(&view);
+                    (self.relay.send)(Order::Pane { id: None, view: view_of(view), op: PaneOp::Close });
+                }
             }
         }
     }
@@ -212,6 +250,46 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), orders.recv()).await.expect("an order").expect("the relay is alive")
     }
 
+    #[test]
+    fn stale_same_url_completion_does_not_end_the_new_navigation() {
+        let (relay, _) = relay();
+        let url = "https://example.org/".to_string();
+        assert!(relay.event(View::Main, ViewNote::Started { url: url.clone(), navigation: 1 }).is_some());
+        assert!(relay.event(View::Main, ViewNote::Started { url: url.clone(), navigation: 2 }).is_some());
+        assert!(relay.event(View::Main, ViewNote::Finished { url: url.clone(), navigation: 1 }).is_none());
+        assert!(relay.event(View::Main, ViewNote::Finished { url: url.clone(), navigation: 2 }).is_some());
+        assert!(relay.event(View::Main, ViewNote::Finished { url, navigation: 2 }).is_none());
+    }
+
+    #[tokio::test]
+    async fn abandoning_an_open_closes_only_that_generation() {
+        let (relay, mut orders) = relay();
+        let first = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "first".into()).await }
+        });
+        let _ = next(&mut orders).await;
+        first.abort();
+        let _ = first.await;
+        assert!(matches!(pane_order(next(&mut orders).await).2, PaneOp::Close));
+
+        let old = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "old".into()).await }
+        });
+        let _ = next(&mut orders).await;
+        let new = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "new".into()).await }
+        });
+        let (id, _, _) = pane_order(next(&mut orders).await);
+        old.abort();
+        let _ = old.await;
+        assert!(orders.try_recv().is_err());
+        relay.answer(id.unwrap(), Ok(Value::Null));
+        assert!(new.await.unwrap().is_ok());
+    }
+
     fn pane_order(order: Order) -> (Option<u64>, PaneView, PaneOp) {
         match order {
             Order::Pane { id, view, op } => (id, view, op),
@@ -278,6 +356,22 @@ mod tests {
         assert_eq!((shown, op), (view_of(view), PaneOp::Open { profile: "faber-pane-x".into() }));
         relay.answer(id.expect("a call has an id"), Ok(Value::Null));
         opening.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn replacement_is_not_open_until_the_shell_answers() {
+        let (relay, mut orders) = relay();
+        opened(&relay, &mut orders, View::Main).await;
+        let replacement = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "replacement".into()).await }
+        });
+        let (id, _, _) = pane_order(next(&mut orders).await);
+        assert!(relay.place(View::Main, Place::Parked).is_err());
+        assert!(relay.call(View::Main, "Page.reload", json!({})).await.is_err());
+        relay.answer(id.unwrap(), Ok(Value::Null));
+        assert!(replacement.await.unwrap().is_ok());
+        assert!(relay.place(View::Main, Place::Parked).is_ok());
     }
 
     #[tokio::test]
@@ -403,8 +497,8 @@ mod tests {
         }
         assert_eq!(showing.await.unwrap(), Ok(true));
         let page = "https://example.org/a".to_string();
-        pane.event(view_named(PaneView::Main), event_of(ViewNote::Started { url: page.clone() }));
-        pane.event(view_named(PaneView::Main), event_of(ViewNote::Finished { url: page.clone() }));
+        pane.event(view_named(PaneView::Main), event_of(ViewNote::Started { url: page.clone(), navigation: 1 }));
+        pane.event(view_named(PaneView::Main), event_of(ViewNote::Finished { url: page.clone(), navigation: 1 }));
         let told = || lock(&home.0).iter().filter(|event| !matches!(event, PaneEvent::Tabs(_))).cloned().collect::<Vec<_>>();
         assert_eq!(told(), [PaneEvent::Loading(true), PaneEvent::Loading(false), PaneEvent::Page(page)]);
         pane.event(View::Main, event_of(ViewNote::Moved { url: "https://example.org/a#part".into() }));
@@ -413,7 +507,7 @@ mod tests {
         pane.event(View::Main, event_of(ViewNote::Gone));
         assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
         // An event of a view that is closed changes nothing.
-        pane.event(View::Main, event_of(ViewNote::Finished { url: "https://example.org/b".into() }));
+        pane.event(View::Main, event_of(ViewNote::Finished { url: "https://example.org/b".into(), navigation: 1 }));
         assert_eq!(told().len(), 4);
     }
 }

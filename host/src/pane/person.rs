@@ -33,6 +33,7 @@ impl Pane {
             s.handed_back = true;
             s.taken += 1;
             s.placed = Some((width, height));
+            s.visible_place = Some(Place::Over { x, y, width, height });
             self.looking.send_replace(true);
             self.driver.place(self.view, Place::Over { x, y, width, height }).is_ok()
         })
@@ -414,21 +415,33 @@ impl Pane {
 
     /// Forgets the sign-ins brought over in `conversation`. Its page on view is signed out of everything, not only of the
     /// cookies that came over: sites renew their sessions with new cookies and keep more in their storage.
-    pub async fn forget(&self, conversation: &str) {
+    pub async fn forget(self: &Arc<Self>, conversation: &str) {
         let _turn = self.opening.lock().await;
-        {
+        let page = {
             let mut s = crate::lock(&self.state);
             s.held.retain(|h| h.conversation != conversation);
             if !s.open || s.owner.as_deref() != Some(conversation) {
                 return;
             }
-        }
-        let cleared = tokio::time::timeout(CLEARING, self.driver.clear(self.view)).await;
-        if matches!(cleared, Ok(Ok(()))) {
-            let _ = self.call("Page.reload", json!({})).await;
+            (s.url.clone(), s.tab.clone(), s.shown.then_some(s.visible_place).flatten())
+        };
+        self.close();
+        let _behind = if let Some(behind) = &self.behind {
+            let turn = behind.opening.lock().await;
+            crate::lock(&behind.state).held.retain(|h| h.conversation != conversation);
+            Some(turn)
         } else {
-            // Never a page still signed in after the person said to forget: it closes, and the next one starts clean.
-            self.close();
+            None
+        };
+        if let Some(url) = page.0 {
+            if self.load(&url, conversation, page.1.as_deref()).await.is_ok() {
+                if let Some(place) = page.2 {
+                    if self.driver.place(self.view, place).is_ok() {
+                        crate::lock(&self.state).shown = true;
+                        self.looking.send_replace(true);
+                    }
+                }
+            }
         }
     }
 

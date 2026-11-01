@@ -129,6 +129,8 @@ struct State {
     size: Option<Viewport>,
     /// The box the page was last placed over, in the screen's logical pixels: a screen size is fitted into it.
     placed: Option<(f64, f64)>,
+    /// Last visible rectangle, for reopening a page after its profile is discarded.
+    visible_place: Option<Place>,
     /// The page is drawn at a size of the agent's, not the pane's: the person taking the pane gets the pane's own back.
     emulated: bool,
     /// The size and scale the person's view was last drawn at (`show_size`), so placing the same box again sends nothing;

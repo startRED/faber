@@ -187,7 +187,10 @@ impl SidecarShell {
             ShellNote::PaneEvent { view, event } => {
                 // A report that comes before the pane exists (or from a shell that has none) changes nothing.
                 if let Some(pane) = self.0.pane.get() {
-                    pane.event(relay::view_named(view), relay::event_of(event));
+                    let view = relay::view_named(view);
+                    if let Some(event) = self.0.views.event(view, event) {
+                        pane.event(view, event);
+                    }
                 }
             }
         }

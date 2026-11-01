@@ -24,7 +24,7 @@ export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
 );
 
 /** What a view tells the host (`ViewNote`). */
-type ViewNote = { kind: 'started'; url: string } | { kind: 'finished'; url: string } | { kind: 'moved'; url: string } | { kind: 'titled' } | { kind: 'gone' };
+type ViewNote = { kind: 'started'; url: string; navigation: number } | { kind: 'finished'; url: string; navigation: number } | { kind: 'moved'; url: string } | { kind: 'titled' } | { kind: 'gone' };
 
 /** What the shell tells the host about the pane (`ShellNote::PaneAnswer` and `ShellNote::PaneEvent`). */
 export type PaneNote =
@@ -41,8 +41,6 @@ export type PaneHost = {
 
 /** Where a view waits while nobody looks at it (`PARKED` and `PARKED_SIZE` in host/src/pane/driver.rs). */
 const PARKED: Rectangle = { x: -20000, y: -20000, width: 1280, height: 800 };
-/** Chromium's code for a navigation that was cancelled. */
-const ABORTED = -3;
 /** The channels of the screen the pane's events may use (`PaneEvent::wire` in host/src/pane/home.rs). */
 export const SCREEN_CHANNELS: ReadonlySet<string> = new Set(['faber:site', 'faber:site-loading', 'faber:site-tabs', 'faber:site-busy']);
 
@@ -59,6 +57,7 @@ type Entry = {
   /** A page started to load and has not ended, as far as the host was told. */
   loading: boolean;
   loadingUrl: string;
+  navigation: number;
 };
 
 /** A profile in use: the session behind it and the views on it. */
@@ -101,6 +100,7 @@ function guard(profile: Session): void {
 
 export class Pane {
   private readonly host: PaneHost;
+  private navigation = 0;
   private readonly views = new Map<Name, Entry>();
   /** The profiles the host named and the views on them. */
   private readonly held = new Map<string, Held>();
@@ -239,7 +239,7 @@ export class Pane {
         },
       });
       const contents = view.webContents;
-      const entry: Entry = { name, profile, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '' };
+      const entry: Entry = { name, profile, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '', navigation: 0 };
       this.views.set(name, entry);
       this.guard(entry);
       view.setBounds(PARKED);
@@ -287,31 +287,20 @@ export class Pane {
       }
       entry.loading = true;
       entry.loadingUrl = details.url;
-      tell({ kind: 'started', url: details.url });
+      entry.navigation = ++this.navigation;
+      tell({ kind: 'started', url: details.url, navigation: entry.navigation });
     });
     contents.on('did-redirect-navigation', (details) => {
       if (details.isMainFrame && entry.loading) entry.loadingUrl = details.url;
     });
-    contents.on('did-finish-load', () => {
-      const url = contents.getURL();
+    contents.on('did-stop-loading', () => {
+      if (!entry.loading || contents.isLoading()) return;
+      const current = contents.getURL();
+      const url = allowedUrl(current) ? current : entry.loadingUrl;
       if (!allowedUrl(url)) return;
       entry.loading = false;
-      tell({ kind: 'finished', url });
+      tell({ kind: 'finished', url, navigation: entry.navigation });
     });
-    const failed = (_event: Electron.Event, code: number, _description: string, address: string, isMainFrame: boolean) => {
-      if (!isMainFrame || address !== entry.loadingUrl) return;
-      // A load that failed ends like one that finished, as the system webview did. One cancelled by a newer page ends with
-      // that page; one cancelled here ends the page it began.
-      let url = address;
-      if (code === ABORTED) {
-        url = allowedUrl(contents.getURL()) ? contents.getURL() : address;
-      }
-      if (!entry.loading || !allowedUrl(url)) return;
-      entry.loading = false;
-      tell({ kind: 'finished', url });
-    };
-    contents.on('did-fail-load', failed);
-    contents.on('did-fail-provisional-load', failed);
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (isMainFrame && allowedUrl(url)) tell({ kind: 'moved', url });
     });

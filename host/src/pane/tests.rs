@@ -382,6 +382,21 @@ async fn the_agent_s_second_tab_loads_behind_on_the_profile_of_the_first() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn forgetting_signins_closes_both_views_and_reopens_on_a_new_profile() {
+    let (pane, fake, home) = world();
+    assert!(pane.show_page("c", A).await);
+    let second = crate::lock(&home.tabs).get_mut("c").unwrap().add(String::new(), String::new());
+    open(&pane, "c", &second, B).await;
+    pane.cookie_forget("c".into()).await.unwrap();
+    let log = fake.log();
+    let profiles = profile_of(&log, "site");
+    assert_eq!(profiles.len(), 2);
+    assert_ne!(profiles[0], profiles[1]);
+    assert_eq!(fake.logged("close site-agent"), 1);
+    assert!(!pane.behind.as_ref().unwrap().is_open());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_view_that_is_gone_closes_the_pane_and_its_late_reports_change_nothing() {
     let (pane, fake, home) = world();
     open(&pane, "c", "t1", A).await;
@@ -518,9 +533,10 @@ async fn sign_ins_come_over_to_one_conversation_only_and_go_when_forgotten() {
     // Its own conversation's next pane does, before the page loads.
     assert!(pane.site_open("c".into(), A.into()).await.unwrap());
     assert_eq!(fake.calls_of("Network.setCookies").len(), 2);
-    let before = (fake.logged("clear"), fake.calls_of("Page.reload").len());
+    let before = fake.logged("close site");
     pane.cookie_forget("c".into()).await.unwrap();
-    assert_eq!((fake.logged("clear"), fake.calls_of("Page.reload").len()), (before.0 + 1, before.1 + 1));
+    assert_eq!(fake.logged("close site"), before + 1);
+    assert!(pane.is_open(), "the page reopens on a fresh profile");
     assert!(pane.cookie_held("c".into()).await.unwrap().is_empty());
 }
 
