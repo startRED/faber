@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Project sections now explain themselves, Catalog puts search first, and Chat and French quota labels are tidier.",
+      "pt-BR": "As seções do projeto agora têm explicações, a busca vem primeiro no Catálogo e os rótulos do Chat e das cotas em francês estão mais claros.",
+      "es": "Las secciones del proyecto tienen una explicación, el Catálogo da prioridad a la búsqueda y las etiquetas de Chat y de cuota en francés son más claras.",
+      "fr": "Les sections du projet sont expliquées, le Catalogue privilégie la recherche et les libellés du Chat et des quotas en français sont plus soignés.",
+      "de": "Die Projektbereiche haben jetzt Erklärungen, die Suche steht im Katalog im Vordergrund und die Beschriftungen im Chat und bei französischen Kontingenten sind klarer."
+    }
+  }
+}

@@ -521,6 +521,7 @@ export const ptBR: Messages = {
   's1.try': 'Para começar',
   's1.pickUp': 'Continuar de onde parou',
   's1.terminal': 'Sessões do terminal',
+  's1.terminal.summary': "Sessões iniciadas nesta pasta.",
   's1.terminal.hint': 'Sessões que você abriu num terminal nesta pasta: abra uma aqui e ela continua de onde parou.',
   's1.terminal.none': 'Nenhuma sessão foi aberta num terminal nesta pasta.',
   'suggest.1': 'Explicar um assunto',
@@ -1818,6 +1819,7 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "memory.title": "Memória",
+  'memory.summary': "Instruções e decisões do projeto.",
   "memory.scope": "Só esta pasta do projeto. Cópias separadas e pastas privadas de login das IAs ficam de fora.",
   "memory.nextLaunch": "As mudanças valem na próxima vez que a IA iniciar nesta pasta. Instruções de subpastas valem nas próprias subpastas.",
   "memory.refresh": "Atualizar",
@@ -2007,6 +2009,7 @@ export const ptBR: Messages = {
   "set.projects.copiesDesc": "Cada conversa nova trabalha num branch próprio, faber/…, numa cópia do repositório, então duas conversas e a sua própria pasta nunca mexem nos mesmos arquivos. O agente traz o trabalho de volta com um commit, um push ou um pull request; o Faber nunca faz merge sozinho.",
   "set.projects.copiesTech": "Um git worktree na pasta de dados do Faber, feito a partir do branch que você tem aberto quando a primeira mensagem sai, só num repositório com pelo menos um commit. Ele vai embora com a conversa, ou na abertura do Faber quando o trabalho já entrou e nada ficou sem commit; trabalho que não existe em outro lugar nunca é apagado sem perguntar. Desligar isto mantém as cópias que as conversas já têm.",
   "goals.title": "Metas permanentes",
+  'goals.summary': "O que deve continuar funcionando.",
   "goals.scope": "Coisas que este projeto deve manter sempre verdadeiras. Cada uma é uma verificação confirmada dele ou, no projeto do próprio Faber, nenhum travamento novo.",
   "goals.refresh": "Atualizar",
   "goals.off": "O Faber só vigia estas metas quando o conserto automático está ligado em Ajustes, Projetos.",

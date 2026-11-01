@@ -349,6 +349,17 @@ check('shell: empty Projects explains its purpose and exposes Add at 720 by 480'
   }
 });
 
+check('shell: empty Chat hides its Groups label and keeps its creation button visible', async () => {
+  await shell(['claude'], 'none', async (root) => {
+    const section = root.querySelector<HTMLElement>('.chat-groups')!;
+    const label = section.querySelector<HTMLElement>('#side-chat-groups')!;
+    const add = section.querySelector<HTMLButtonElement>('[data-action=new-group]')!;
+    ok(label.classList.contains('sr'));
+    equal(getComputedStyle(add).opacity, '1');
+    ok(section.getBoundingClientRect().height >= add.getBoundingClientRect().height);
+  });
+});
+
 check('shell: narrow navigation has a visible close button that returns focus to its menu', async () => {
   for (const { code } of LANGUAGES) {
     await atWidth(720, () => shell(['claude'], 'none', async (root) => {
