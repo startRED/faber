@@ -2,6 +2,11 @@
   {
     "name": "asks",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "This conversation's requests and their current state."
@@ -18,6 +23,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "allow"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person",
     "about": "Allow one identical retry, or decline the request."
@@ -50,6 +70,33 @@
         "Option<usize>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "family": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "state": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The conversations, the running ones first, then pinned, then the newest, each with its state in plain words (`working`, `waiting`, `idle`; read one conversation for how it ended). `state` keeps only these states (`running` is working or waiting); `archived` true lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom); `query` keeps titles holding its words. Reads no conversation's messages."
@@ -66,6 +113,20 @@
         "Option<usize>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "last": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it leaves its done mark for the person."
@@ -78,6 +139,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "What a conversation delivered and what it cost, after its first reply."
@@ -90,6 +162,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "A project's total and each conversation's results, most spent first."
@@ -97,6 +180,11 @@
   {
     "name": "projects",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The projects Faber knows, with their folders."
@@ -104,6 +192,11 @@
   {
     "name": "quota",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "Each vendor's quota windows (how much is used, when each resets) and what Faber has spent of them."
@@ -111,6 +204,11 @@
   {
     "name": "settings",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The settings as Settings shows them."
@@ -123,6 +221,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "free"
   },
@@ -142,6 +251,23 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -157,6 +283,25 @@
         "Vec<faber_engine::workspace::Attachment>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "files": {
+          "items": {
+            "description": "faber_engine::workspace::Attachment JSON value",
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "files"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -172,6 +317,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "fileId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "fileId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -183,6 +343,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -198,6 +369,20 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "conversationId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversationId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "free"
   },
@@ -209,6 +394,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "groupId"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "ask"
   },
@@ -224,6 +420,22 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "plan": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "vendor",
+        "plan"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -243,6 +455,26 @@
         "Vendor"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "vendor"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -258,6 +490,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -274,6 +521,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -290,6 +552,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id",
@@ -298,6 +575,11 @@
   {
     "name": "forget_auto_learned",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -309,33 +591,20 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
-  },
-  {
-    "name": "results",
-    "args": [
-      [
-        "id",
-        "String"
-      ]
-    ],
-    "kind": "read",
-    "reach": "free",
-    "about": "What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply."
-  },
-  {
-    "name": "project_results",
-    "args": [
-      [
-        "projectId",
-        "String"
-      ]
-    ],
-    "kind": "read",
-    "reach": "free",
-    "about": "The same for a project: its total and each conversation's numbers, most spent first."
   },
   {
     "name": "answer",
@@ -361,6 +630,33 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "always": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId",
+        "allow",
+        "always"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -376,6 +672,22 @@
         "Area"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "area": {
+          "description": "Area JSON value",
+          "type": "object"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query",
+        "area"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -403,6 +715,31 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "area": {
+          "description": "Area JSON value",
+          "type": "object"
+        },
+        "cancel": {
+          "type": "boolean"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "area"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -414,6 +751,18 @@
         "SendRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "req": {
+          "description": "SendRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "req"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/req/conversationId"
@@ -426,6 +775,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The sessions started in a terminal in a project's folder (parity F5)."
@@ -442,6 +802,22 @@
         "faber_engine::model::CliSession"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "session": {
+          "description": "faber_engine::model::CliSession JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "projectId",
+        "session"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "ask",
     "about": "Opens a session started in a terminal as a project conversation, or the one already opened for it."
@@ -454,6 +830,18 @@
         "BranchRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "req": {
+          "description": "BranchRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "req"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/req/conversationId"
@@ -470,6 +858,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "conversationId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversationId",
+        "messageId"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/conversationId",
@@ -483,6 +886,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The messages of a conversation that have other versions; the other conversations of its family are read from disk."
@@ -503,6 +917,23 @@
         "Option<usize>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "block": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "Pages and drawings, with the versions already held in the conversation's saved replies."
@@ -519,6 +950,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -542,6 +988,30 @@
         "Value"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "block": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "value": {
+          "description": "Value JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "block",
+        "value"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -566,6 +1036,29 @@
         "Option<faber_engine::model::Permissions>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "description": "faber_engine::model::Permissions JSON value",
+          "type": "object"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -589,6 +1082,30 @@
         "Value"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "answers": {
+          "description": "Value JSON value",
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId",
+        "answers"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person",
     "about": "The person's choices for a question the agent asked: each question's text to the label picked."
@@ -605,6 +1122,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "free"
   },
@@ -620,6 +1152,20 @@
         "Option<bool>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "discard": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -635,6 +1181,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "free",
     "about": "Archives a conversation, or brings an archived one back."
@@ -651,6 +1212,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "free"
   },
@@ -666,6 +1242,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -681,6 +1272,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/id"
@@ -697,6 +1303,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -717,6 +1338,25 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "text"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -733,6 +1373,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/id"
@@ -749,6 +1404,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "callId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "What a subagent wrote between its steps (R161 step 3), for its side chat while it is open. The screen's copy of a message carries only their length, so this is the one place they are read."
@@ -769,6 +1439,25 @@
         "u64"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "callId",
+        "page"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -788,6 +1477,25 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "callId",
+        "text"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -808,6 +1516,23 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "`@` in the composer (parity T4): the entries of the working folder that match `query`, at most 50. Git may run, off the async threads. One listing runs at a time, and a query that a newer one replaced while it waited gives up, so typing fast in a big repository never piles up git runs or their output."
@@ -824,6 +1549,19 @@
         "Option<Vendor>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The last advertised commands, read from memory without starting a CLI."
@@ -836,6 +1574,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id",
@@ -849,6 +1598,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The context meter opened: asks what fills the context; the parts come as an event. False when no CLI can say now."
@@ -856,6 +1616,11 @@
   {
     "name": "background_commands",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -867,6 +1632,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -882,6 +1658,20 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "At most one git listing runs and one waits; a newer request replaces the waiting one."
@@ -898,6 +1688,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -909,6 +1714,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -920,6 +1736,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -931,6 +1758,18 @@
         "faber_engine::rewind::RedoRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RedoRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -942,6 +1781,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -953,6 +1803,18 @@
         "faber_engine::rewind::RestoreRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RestoreRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -964,6 +1826,18 @@
         "faber_engine::rewind::RestoreRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RestoreRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -975,6 +1849,18 @@
         "faber_engine::rewind::RedoRequest"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RedoRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -994,6 +1880,24 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "question"
+      ],
+      "type": "object"
+    },
     "kind": "startsTurn",
     "reach": "own",
     "conversation": "/id",
@@ -1007,6 +1911,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "asideId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "asideId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1018,6 +1933,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id"
@@ -1030,6 +1956,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1041,6 +1978,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "own",
     "conversation": "/id",
@@ -1054,6 +2002,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1065,6 +2024,18 @@
         "Settings"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "patch": {
+          "description": "Settings JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "patch"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "A theme file comes from other people, so an appearance is checked here before anything is saved."
@@ -1081,6 +2052,22 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "appearance": {
+          "description": "Map<String, Value> JSON value",
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appearance",
+        "name"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1092,6 +2079,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The same readable record as the file export, without writing a file."
@@ -1108,24 +2106,55 @@
         "faber_engine::export::Words"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "words": {
+          "description": "faber_engine::export::Words JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "words"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
   {
     "name": "open_theme",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "person"
   },
   {
     "name": "add_project",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
   {
     "name": "recents",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key."
@@ -1138,6 +2167,20 @@
         "Vec<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1149,6 +2192,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1164,6 +2218,24 @@
         "Vec<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "folders": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "folders"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1175,6 +2247,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1186,6 +2269,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1205,6 +2299,23 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scratch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scratch"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1220,6 +2331,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person",
     "about": "Copies a file from a chat workspace to wherever the user picks."
@@ -1236,6 +2362,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "ask"
   },
@@ -1247,6 +2388,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "ask",
     "about": "Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only revealed, never opened: if something else took its place, the file manager selects it and starts nothing."
@@ -1263,6 +2415,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "own",
     "conversation": "/id",
@@ -1280,6 +2447,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "own",
     "conversation": "/id",
@@ -1293,6 +2475,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "own",
     "conversation": "/id",
@@ -1310,6 +2503,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "call": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "call"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "own",
     "conversation": "/id",
@@ -1323,6 +2531,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1334,6 +2553,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "Links in answers open in the user's browser, never inside Faber."
@@ -1350,6 +2580,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "on"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "Settings > Projects: whether each new conversation of this project works in a separate copy (R201)."
@@ -1362,6 +2607,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "Settings > Projects and the project page's Goals fold: a project's standing goals, the switch and the day's limit."
@@ -1378,6 +2634,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "on"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "The project's switch for starting fixes by itself. Off until the person turns it on."
@@ -1398,6 +2669,25 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "words": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "words",
+        "check"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "Adds a goal: the person's words and one of the project's confirmed checks."
@@ -1414,6 +2704,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "words": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "words"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "Adds a goal that breaks when the installed Faber's crash file gets a new line: Faber's own repository only."
@@ -1430,6 +2735,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "goalId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "goalId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1445,6 +2765,21 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "goalId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "goalId"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "A paused goal, or one that needs the person, is checked again."
@@ -1457,6 +2792,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1468,6 +2814,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1483,6 +2840,22 @@
         "faber_engine::project::memory::Edit"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "edit": {
+          "description": "faber_engine::project::memory::Edit JSON value",
+          "type": "object"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "edit"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1506,6 +2879,38 @@
         "Vec<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "declared": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "projectId",
+        "commands",
+        "setup",
+        "declared"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person",
     "about": "The owner confirms the commands Faber checks a project's work with (R137): the project's declared list, or the edited one."
@@ -1513,6 +2918,11 @@
   {
     "name": "update_status",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The screen's view of the update: its phase and the download's progress. Changes arrive as `faber:update`."
@@ -1520,6 +2930,11 @@
   {
     "name": "update_restart",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask",
     "about": "\"Update ready, restart\": installs the kept update now. Work that runs is cut and goes on after the restart."
@@ -1532,6 +2947,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1543,6 +2969,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1554,12 +2991,28 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
   {
     "name": "tools_list",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1571,6 +3024,15 @@
         "Option<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1582,6 +3044,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free"
   },
@@ -1601,6 +3074,25 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1612,6 +3104,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1623,6 +3126,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "ask"
   },
@@ -1634,6 +3148,18 @@
         "faber_engine::tools::ReplacementPlan"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "plan": {
+          "description": "faber_engine::tools::ReplacementPlan JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1645,6 +3171,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1660,6 +3197,21 @@
         "bool"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "enabled"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
@@ -1671,12 +3223,28 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "ask"
   },
   {
     "name": "tools_clear_removed",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "write",
     "reach": "person"
   },
@@ -1688,6 +3256,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "read",
     "reach": "free",
     "about": "The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the engine's memory when the panel opens; nothing is prepared, polled or started."
@@ -1700,6 +3279,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "ask",
     "about": "Bring the window to a conversation."
@@ -1707,6 +3297,11 @@
   {
     "name": "cookie_profiles",
     "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "person",
     "about": "The Firefox profiles on this computer whose sign-ins the browser pane can bring over."
@@ -1719,6 +3314,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "person",
     "about": "The sites with cookies in the profile `profile`, under a ticket the import names."
@@ -1739,6 +3345,28 @@
         "Vec<String>"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sites": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ticket": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "ticket",
+        "sites"
+      ],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "person",
     "about": "Brings the person's sign-ins on the sites they picked into conversation `id`'s pages; answers how many sites came over."
@@ -1751,6 +3379,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "person",
     "about": "The sites whose sign-ins conversation `id` holds."
@@ -1763,6 +3402,17 @@
         "String"
       ]
     ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "kind": "window",
     "reach": "person",
     "about": "Forgets the sign-ins conversation `id` holds and signs its page out of them."

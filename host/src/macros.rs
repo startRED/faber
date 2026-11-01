@@ -27,6 +27,7 @@ macro_rules! table {
         pub(crate) const TABLE: &[Entry] = &[$( $(#[cfg($cfg)])? Entry {
             name: stringify!($name),
             args: &[$( (stringify!($arg), stringify!($ty)) ),*],
+            schema: || argument_schema(&[$( (stringify!($arg), stringify!($ty)) ),*]),
             kind: Kind::$kind,
             reach: Reach::$reach $(($target))?,
             doc: &[$($doc),*],
