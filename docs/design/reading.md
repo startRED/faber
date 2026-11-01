@@ -7,6 +7,12 @@ How conversation text reads and keeps its place, in Chat and Projects.
   a bar with its language and a copy button for that block. Selecting words in an answer floats "Ask about this" over
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
+- A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it
+  requests the preceding 40 and prepends them with an instant viewport correction, after restoring any focused search
+  marker. One request per conversation window may be in flight; replies from a previous opening are discarded.
+  Search and version links, and a saved reading position, load as many pages as their target needs. Message indices and
+  saved positions include the unloaded `Conversation.earlier` offset. Loaded pages are retained; nothing adds a setting,
+  a second scroll view or motion. Chat and Projects share this behavior, including reduced motion and narrow windows.
 - Returning to a conversation, including after a restart, keeps the same message at the same reading offset even when
   earlier text or pictures changed height. Search still opens its result, keeping its focus and brief outline if scrolling
   loads an earlier page. Pagination restores its viewport after reconnecting focus, so any geometry change caused by
@@ -70,3 +76,14 @@ assertion. Restoring the exact original app source made both Chat and Projects p
 These are single busy-PC flows including navigation, scrolling and screenshots, not isolated overhead, a performance
 comparison or a zero-cost claim. The project is a synthetic local folder with no AI; this does not cover remote projects,
 other operating systems, smooth motion or a screen reader. This verification-only extension changes no app code.
+
+### Paged delivery fixture (Windows, 2026-11-01)
+
+The 300-message replay in `engine/tests/big_conversation.rs`, with 50 KB of text per message, compares the old full
+screen payload with the newest 40 on the same loaded engine. Fastest of three clone-and-serialize runs: 15,014,748 bytes
+in 493.0531 ms for all 300, versus 2,002,110 bytes in 65.0025 ms for 40 (86.7% fewer bytes, about 7.6 times shorter
+engine delivery). The cold newest-window engine opening took 84.4745 ms. Older pages walked back to message 5 without
+gaps. The test leaves its measurement in `target/faber-300-message-delivery.txt` because passing output is captured.
+
+These are synthetic engine delivery wall times, not a whole-app opening or isolated CPU measurement. Full-app memory,
+CPU, visible scrolling and the 300-message screen check remain CI proofs under R125; W10 runs no UI/screen suite locally.

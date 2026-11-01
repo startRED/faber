@@ -2,11 +2,109 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
+import { App } from '../../ui/App.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { api, type Message } from '../../ui/api.ts';
+import { api, type AppState, type Conversation, type Message, type RewindRequest } from '../../ui/api.ts';
 import { LANGUAGES, t, templates } from '../../ui/i18n.ts';
 import { renderMarkdown } from '../../ui/markdown.tsx';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
+import { closeMenu, menu } from '../../ui/contextmenu.ts';
+
+check('thread: 300 messages open at the newest 40, prepend without a jump and load message 5 for rewind', async () => {
+  const original = { ...api };
+  const storage = new Map(['faber.place', 'faber.reading'].map((key) => [key, localStorage.getItem(key)]));
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0;z-index:100';
+  document.body.append(root);
+  let dispose = () => {};
+  const id = 'paged-300';
+  let messages: Message[] = Array.from({ length: 300 }, (_, i) => ({
+    id: `paged-${i}`, role: i % 2 ? 'assistant' : 'user', at: i + 1,
+    text: `Message ${i + 1}. ` + 'Words that stay at the same reading position. '.repeat(10),
+    ...(i % 2 ? { status: 'done' as const } : {}),
+  }));
+  const page = (): Conversation => ({ id, title: 'Paged conversation', area: 'chat', sessions: {}, createdAt: 1, updatedAt: 1,
+    earlier: Math.max(0, messages.length - 40), messages: messages.slice(-40) });
+  const requests: string[] = [];
+  const restored: RewindRequest[] = [];
+  let release: (() => void) | undefined;
+  const waitFor = async (ready: () => boolean, why: string) => {
+    for (let i = 0; i < 100 && !ready(); i++) await new Promise((done) => setTimeout(done, 20));
+    ok(ready(), why);
+    await frames();
+  };
+  try {
+    const base = await original.state();
+    const initial: AppState = { ...base, conversations: [{ id, title: 'Paged conversation', area: 'chat', updatedAt: 1 }],
+      groups: [], projects: [], vendors: ['claude'], running: { revision: 0, items: [] }, background: { revision: 0, items: [] }, quotas: [], usage: [],
+      look: { ...base.look, motion: 'none' },
+      settings: { ...base.settings, appearance: { ...base.look.appearance, motion: 'none' }, language: 'en', setup: 'done', tutorialDone: true } };
+    Object.assign(api, {
+      state: async () => initial, open: async () => page(), versions: async () => [], visualAnswers: async () => [],
+      rewindRedos: async () => [], rewindPoints: async () => [], commands: async () => [],
+      warm: async () => {}, seen: async () => {}, notesSeen: async () => Number.MAX_SAFE_INTEGER,
+      updateStatus: async () => ({ phase: 'none' }), onUpdate: async () => () => {},
+    });
+    api.messagesBefore = async (conversationId, first) => {
+      equal(conversationId, id);
+      requests.push(first);
+      if (requests.length === 1) await new Promise<void>((done) => { release = done; });
+      const at = messages.findIndex((m) => m.id === first);
+      return messages.slice(Math.max(0, at - 40), at);
+    };
+    api.searchMessages = async () => ({ ready: true, hits: [{ conversationId: id, area: 'chat', title: 'Paged conversation',
+      messageIndex: 4, snippet: 'Fifth message needle', highlights: [] }] });
+    api.rewindPreview = async (request) => ({ files: [], replacements: 0, recreations: 0, removals: 0, conflicts: 0,
+      messages: messages.length - 4, coverage: { saved: 0, skipped: 0, unavailable: true, incomplete: false },
+      running: [], recovery: false, redoExpiresAt: null, notice: request.messageId });
+    api.rewindRestore = async (request) => {
+      restored.push(request);
+      messages = messages.slice(0, 4);
+      return { id: 'restored', restored: [], kept: [], failed: [], partial: false, recovery: false, notice: null };
+    };
+    localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id }));
+    localStorage.removeItem('faber.reading');
+    dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+    await waitFor(() => !!root.querySelector('[data-message-index="299"]'), 'the newest message opens');
+    const thread = root.querySelector<HTMLDivElement>('.thread')!;
+    equal(thread.querySelectorAll('[data-message-index]').length, 40, 'only the newest 40 are drawn');
+    equal(thread.querySelector('[data-message-index]')?.getAttribute('data-message-index'), '260', 'indices retain the unloaded offset');
+    ok(thread.scrollHeight - thread.scrollTop - thread.clientHeight < 3, 'opening starts at the actual tail');
+    equal(requests.length, 0, 'opening never requests the old history');
+    thread.scrollTop = 1;
+    thread.dispatchEvent(new Event('scroll'));
+    thread.dispatchEvent(new Event('scroll'));
+    await waitFor(() => !!release, 'scrolling to the first drawn message requests one page');
+    equal(requests.length, 1, 'overlapping scrolls share one request');
+    const before = thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top;
+    release!();
+    await waitFor(() => !!thread.querySelector('[data-message-index="220"]'), 'the previous 40 are prepended');
+    equal(thread.querySelectorAll('[data-message-index]').length, 80, 'loaded messages are retained');
+    ok(Math.abs(thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top - before) < 3, 'prepending keeps the reading position');
+    const search = root.querySelector<HTMLInputElement>('.search input')!;
+    search.value = 'needle'; search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await waitFor(() => !!root.querySelector('.message-hits button'), 'search provides a link to an unloaded message');
+    root.querySelector<HTMLButtonElement>('.message-hits button')!.click();
+    await waitFor(() => !!thread.querySelector('[data-message-index="4"].search-focus'), 'the jump loads all pages needed for message 5');
+    const fifth = thread.querySelector<HTMLElement>('[data-message-index="4"]')!;
+    ok(fifth.textContent?.includes('Message 5.'), 'the global index names the correct message');
+    fifth.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 }));
+    const rewind = menu()?.items.find((item) => item.id === 'rewind');
+    ok(rewind, 'the loaded old message offers rewind');
+    closeMenu();
+    rewind!.run();
+    await waitFor(() => !!document.querySelector('.rewind-confirm .primary:not(:disabled)'), 'the rewind preview is ready');
+    const conversation = document.querySelector<HTMLInputElement>('.rewind-confirm input[value="conversation"]')!;
+    conversation.click();
+    await frames();
+    document.querySelector<HTMLButtonElement>('.rewind-confirm .primary')!.click();
+    await waitFor(() => restored.length === 1 && !!thread.querySelector('[data-message-index="3"]') && !thread.querySelector('[data-message-index="4"]'), 'rewind refreshes the shortened conversation');
+    equal(restored[0]!.messageId, 'paged-4', 'rewind reaches message 5 rather than page position 5');
+  } finally {
+    release?.(); closeMenu(); dispose(); root.remove(); Object.assign(api, original);
+    for (const [key, value] of storage) { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); }
+  }
+});
 
 check('thread: streaming preserves the open paragraph, selection, code scroll and safe link updates', () => {
   const root = document.createElement('div'); root.className = 'md'; document.body.append(root);

@@ -95,6 +95,48 @@ async fn a_100_mb_conversation_reads_saves_and_opens_equal_to_what_was_written()
 }
 
 #[tokio::test]
+async fn a_300_message_conversation_measures_whole_and_newest_screen_delivery() {
+    let dir = support::DataFolder::new();
+    let mut c: Conversation = serde_json::from_value(json!({
+        "id": "paged-300", "title": "Paged conversation", "area": "chat", "createdAt": 1, "updatedAt": 1, "messages": []
+    }))
+    .unwrap();
+    for i in 0..300 {
+        c.messages.push(Message::new(
+            format!("m{i}"),
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            "x".repeat(TEXT),
+            i + 1,
+        ));
+    }
+    Store::new(dir.path()).save(&c);
+    drop(c);
+    let engine = engine(&dir);
+    let start = Instant::now();
+    let window = engine.open_for_screen_window("paged-300", WINDOW).unwrap();
+    let cold_window = start.elapsed();
+    assert_eq!((window.earlier, window.messages.len()), (260, WINDOW));
+    let (whole_time, whole_bytes) = fastest(|| serde_json::to_vec(&engine.open_for_screen("paged-300").unwrap()).unwrap());
+    let (window_time, window_bytes) = fastest(|| serde_json::to_vec(&engine.open_for_screen_window("paged-300", WINDOW).unwrap()).unwrap());
+    let measurement = format!(
+        "300-message delivery: whole {whole_bytes} bytes in {whole_time:?}; newest 40 {window_bytes} bytes in {window_time:?}; cold newest {cold_window:?}"
+    );
+    eprintln!("{measurement}");
+    // Keep the measurement available when the runner captures successful test output.
+    let report = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/faber-300-message-delivery.txt");
+    std::fs::create_dir_all(report.parent().unwrap()).unwrap();
+    std::fs::write(report, measurement).unwrap();
+    assert!(window_bytes * 7 < whole_bytes, "the screen receives only its requested window");
+    let mut seen = window.messages;
+    while let Some(older) = engine.messages_before("paged-300", &seen[0].id, WINDOW).filter(|page| !page.is_empty()) {
+        seen.splice(0..0, older);
+    }
+    assert_eq!(seen.len(), 300);
+    assert_eq!(seen[4].id, "m4");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn a_huge_conversation_opens_with_its_newest_messages_and_walks_back_without_gaps() {
     let dir = support::DataFolder::new();
     let mut c: Conversation = serde_json::from_value(json!({

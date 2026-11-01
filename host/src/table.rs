@@ -71,7 +71,11 @@ table! {
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
         lock(&h.feed).forget();
-        Ok(h.engine.open_for_screen(&id))
+        Ok(h.engine.open_for_screen_window(&id, 40))
+    }
+    /// The previous screen page, oldest first; message ids keep the boundary stable while a reply grows.
+    Read Screen fn messages_before(h, id: String, message_id: String) -> Option<Vec<faber_engine::model::Message>> {
+        Ok(h.engine.messages_before(&id, &message_id, 40))
     }
     /// The conversations, the running ones first, then pinned, then the newest, each with its state in plain words
     /// (`working`, `waiting`, `idle`; read one conversation for how it ended). `state` keeps only these states (`running` is
