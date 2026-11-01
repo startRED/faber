@@ -64,6 +64,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
 | [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
+| [dev/dev-edition.md](dev/dev-edition.md) | Faber Dev: the owner's separate copy that follows the green base and opens as a new person every time |
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
 | [tasks/README.md](tasks/README.md) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
