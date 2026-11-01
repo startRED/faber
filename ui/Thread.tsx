@@ -615,6 +615,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
+      <Show when={working() && m().overloadRetry}>
+        <div class="note" role="status">{t('answer.overloadRetry', { n: m().overloadRetry!, total: 5 })}</div>
+      </Show>
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>

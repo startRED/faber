@@ -1756,6 +1756,7 @@ export const ptBR: Messages = {
   'reason.failed': 'A IA parou porque algo deu errado. Envie uma mensagem para tentar de novo.',
   'reason.fail.limit': 'A IA parou porque o limite de uso desta conta acabou. Envie uma mensagem quando ele voltar, ou escolha outra IA.',
   'reason.fail.rateLimit': 'A IA parou porque muitos pedidos saíram em pouco tempo. Espere um minuto e envie uma mensagem para tentar de novo.',
+  'answer.overloadRetry': 'O serviço está ocupado. Tentativa {n} de {total}…',
   'reason.fail.overloaded': 'A IA parou porque o serviço dela está ocupado ou com problemas. Envie uma mensagem daqui a pouco para tentar de novo.',
   'reason.fail.connection': 'A IA parou porque a conexão com o serviço dela caiu. Confira a internet e envie uma mensagem para tentar de novo.',
   'reason.fail.signIn': 'A IA parou porque o login dela não vale mais. Entre de novo em Configurações, Contas e limites, e envie uma mensagem.',

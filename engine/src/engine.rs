@@ -59,6 +59,7 @@ mod look;
 mod mcp_servers;
 mod memory_search;
 mod move_chat;
+mod overload;
 mod parked;
 mod pick_up;
 mod plan;
@@ -264,6 +265,8 @@ struct Live {
     capabilities: crate::events::Capabilities,
     /// How the turn that is ending ended, when the CLI named a reason (a `reason.*` key), until its `Done` takes it.
     ended: Option<&'static str>,
+    overload_retries: usize,
+    overload_wait: Option<tokio::sync::oneshot::Sender<()>>,
     effort: String,
     /// Tells this process's events apart from those of a replaced one.
     sid: u64,
@@ -1494,6 +1497,7 @@ impl Engine {
                     && let Some(m) = conv.messages.last_mut().filter(|m| m.status == Some(Status::Streaming))
                 {
                     m.closed = true;
+                    m.overload_retry = None;
                     conv.pending_parent_report |= conv.started_by.is_some() && conv.keep_going.is_none();
                 }
                 c.stop_waiting(&id, false);
@@ -2281,6 +2285,8 @@ impl Core {
     /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
+        let waiting = self.live.get_mut(id).is_some_and(|l| l.overload_wait.take().is_some());
+        let retry_line = self.turn(id).is_some_and(|m| m.overload_retry.take().is_some());
         self.cancel_workers(id);
         self.settings_changes.remove(id);
         self.revoke_replacement(id);
@@ -2300,6 +2306,10 @@ impl Core {
             self.goal_stopped(id);
         }
         self.save(id);
+        if retry_line {
+            let reply = self.live.get(id).and_then(|l| l.turn.clone());
+            self.push(id, reply.as_deref(), true);
+        }
         self.emit_queue(id);
         if by_person {
             self.keep_going_off(id);
@@ -2318,7 +2328,15 @@ impl Core {
         }
         self.rewind_stop_retired(id);
         self.stop_helpers(id, false);
-        if !active {
+        if waiting {
+            let reply = self.live.get(id).and_then(|l| l.turn.clone());
+            if let Some(m) = self.turn(id) {
+                m.overload_retry = None;
+                m.status = Some(Status::Stopped);
+                m.error = None;
+            }
+            self.finish(id, reply);
+        } else if !active {
             // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
             self.stop_checks(id);
             self.stop_waiting(id, true);
@@ -2436,6 +2454,11 @@ impl Core {
             }
         }
         // What the reply says or does moves it: its age counts from here, and more words after the agent finished mean it was not done.
+        if event.moves_reply().is_some()
+            && let Some(m) = self.turn(conv)
+        {
+            m.overload_retry = None;
+        }
         if let Some(main) = event.moves_reply()
             && let Some(m) = self.turn(conv)
         {
@@ -2923,6 +2946,9 @@ impl Core {
                 if let Some(sign) = offered {
                     self.count_look("offered", &sign, area);
                 }
+                if !ok && !by_person && vendor == Vendor::Codex && why == Some("reason.fail.overloaded") && self.retry_overload(conv) {
+                    return;
+                }
                 if let Some(reply) = looked {
                     self.look_around(conv, &reply);
                 }
@@ -3069,6 +3095,13 @@ impl Core {
 
     /// The rest of a turn's end, with the keep-going reading `finish` already made when it held the turn.
     fn end_turn(&mut self, conv: &str, turn_id: Option<String>, read: Option<Option<String>>) {
+        if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| Some(&m.id) == turn_id.as_ref())) {
+            m.overload_retry = None;
+        }
+        if let Some(l) = self.live.get_mut(conv) {
+            l.overload_wait = None;
+            l.overload_retries = 0;
+        }
         self.transfers.remove(conv);
         self.installs.remove(conv);
         self.settings_changes.remove(conv);
@@ -4422,6 +4455,8 @@ impl Core {
                 running: None,
                 capabilities: Default::default(),
                 ended: None,
+                overload_retries: 0,
+                overload_wait: None,
                 effort: pick.effort.clone(),
                 sid,
                 session,
@@ -5367,6 +5402,8 @@ mod tool_in_tests {
             running: None,
             capabilities: Default::default(),
             ended: None,
+            overload_retries: 0,
+            overload_wait: None,
             effort: String::new(),
             sid: 1,
             session: Session::from_fn(move |_| {
@@ -5458,6 +5495,8 @@ mod tool_in_tests {
                         running: None,
                         capabilities: Default::default(),
                         ended: None,
+                        overload_retries: 0,
+                        overload_wait: None,
                         effort: String::new(),
                         sid: 1,
                         session: Session::from_fn(move |cmd| {

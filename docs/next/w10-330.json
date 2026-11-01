@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Replies now retry automatically when Codex reports a busy service, with a quiet attempt counter.",
+      "pt-BR": "As respostas agora tentam de novo quando o Codex avisa que o serviço está ocupado, com um contador discreto.",
+      "es": "Las respuestas ahora se reintentan cuando Codex indica que el servicio está ocupado, con un contador discreto.",
+      "fr": "Les réponses sont désormais relancées quand Codex signale un service occupé, avec un compteur discret.",
+      "de": "Antworten werden jetzt automatisch wiederholt, wenn Codex einen ausgelasteten Dienst meldet, mit einem unauffälligen Versuchszähler."
+    }
+  }
+}

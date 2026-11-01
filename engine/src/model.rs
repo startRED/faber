@@ -320,6 +320,8 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_retry: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolUse>>,
@@ -839,6 +841,7 @@ impl Message {
             model: None,
             effort: None,
             reason: None,
+            overload_retry: None,
             thinking: None,
             tools: None,
             commits: vec![],

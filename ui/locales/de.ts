@@ -1759,6 +1759,7 @@ export const de: Messages = {
   'reason.failed': 'Die KI hat angehalten, weil etwas schiefgelaufen ist. Schick eine Nachricht, um es noch einmal zu versuchen.',
   'reason.fail.limit': 'Die KI hat angehalten, weil das Nutzungslimit dieses Kontos aufgebraucht ist. Schick eine Nachricht, sobald es zurückgesetzt ist, oder wähl eine andere KI.',
   'reason.fail.rateLimit': 'Die KI hat angehalten, weil in kurzer Zeit zu viele Anfragen rausgingen. Warte eine Minute und schick dann eine Nachricht, um es noch einmal zu versuchen.',
+  'answer.overloadRetry': 'Der Dienst ist ausgelastet. Neuer Versuch {n} von {total}…',
   'reason.fail.overloaded': 'Die KI hat angehalten, weil ihr Dienst ausgelastet ist oder Probleme hat. Schick gleich eine Nachricht, um es noch einmal zu versuchen.',
   'reason.fail.connection': 'Die KI hat angehalten, weil die Verbindung zu ihrem Dienst abgebrochen ist. Prüf das Internet und schick dann eine Nachricht, um es noch einmal zu versuchen.',
   'reason.fail.signIn': 'Die KI hat angehalten, weil ihre Anmeldung nicht mehr gilt. Melde dich unter Einstellungen, Konten und Limits neu an und schick dann eine Nachricht.',
