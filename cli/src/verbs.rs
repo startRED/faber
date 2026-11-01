@@ -34,15 +34,15 @@ const VERBS: &[&str] = &[
 ];
 type ResultValue = Result<Value, i32>;
 async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultValue {
-    match client.call(command, args).await {
+    match client.call_detailed(command, args).await {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(key)) => {
-            let code = if matches!(key.as_str(), "error.reach.ask" | "error.reach.person" | "error.reach.screen") {
+        Ok(Err(error)) => {
+            let code = if matches!(error.key.as_str(), "error.reach.ask" | "error.reach.person" | "error.reach.screen") {
                 out::PERSON
             } else {
                 out::REFUSED
             };
-            Err(out.fail(&key, code))
+            Err(out.fail_detail(&error.key, error.detail.as_deref(), code))
         }
         Err(_) => Err(out.fail("cli.error.channel", out::UNREACHED)),
     }

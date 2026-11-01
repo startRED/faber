@@ -58,9 +58,29 @@ impl Backend for Fake {
             }
         })
     }
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> faber_channel::server::DetailedAnswer {
+        if cmd == "detailed_refusal" {
+            return Box::pin(async {
+                Err(faber_channel::wire::Error { key: "error.test.refused".into(), detail: Some("The request cannot go ahead.".into()) })
+            });
+        }
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refusal_detail_reaches_json_and_human_output() {
+    let (json, _) = faber(false, &["call", "detailed_refusal", "--json"], "", &[]).await;
+    assert_eq!(json.code, 1);
+    assert_eq!(lines(&json.stdout)[0]["error"], "error.test.refused");
+    assert_eq!(lines(&json.stdout)[0]["detail"], "The request cannot go ahead.");
+    let (human, _) = faber(false, &["call", "detailed_refusal", "--human"], "", &[]).await;
+    assert_eq!(human.code, 1);
+    assert!(human.stderr.contains("The request cannot go ahead."));
 }
 
 struct Run {

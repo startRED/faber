@@ -100,7 +100,7 @@ Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--ti
 When `--json` is passed or stdout is not a terminal (every AI tool call), `faber` writes one compact JSON value per line
 on stdout, and failures write `{"error":"<key>","message":"<English words>"}` on stdout as well. When stdout is a
 terminal (or `--human` is passed), `faber` prints short lines in the user's language (`cli.*` in `ui/locales/*.ts`) and
-errors on stderr.
+errors on stderr. When a refusal includes a detail, both modes show it; JSON puts it in a separate `detail` field and keeps `error` unchanged.
 
 | Exit code | Meaning |
 | :--- | :--- |
