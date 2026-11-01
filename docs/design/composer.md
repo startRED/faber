@@ -11,10 +11,12 @@ above eight manual models, matches partial names without case sensitivity and se
 
 Picking another model resets effort to Medium; picking the same model preserves effort. Auto removes manual effort.
 The menu uses named groups and pressed buttons, native light dismissal, Escape with focus return, and arrow/Home/End
-navigation alongside ordinary Tab and Enter/Space. Effort stays inside the menu; the closed chip states both values.
+navigation alongside ordinary Tab and Enter/Space. Folded models stay outside keyboard navigation. Effort stays inside
+the menu; the closed chip states both values.
 No motion, stored field, AI call or background process is added. The menu DOM exists only while open.
 Checks: `tests/ui/models.check.ts` (groups, folds, search, placement, keyboard, selection and locking), and
 `tests/ui/composer.check.ts` (the composer's single chip and unchanged warm/reset path).
+Screen scenarios choose models through this same chip and its menu buttons, including while account models load.
 
 The attachment picker copies its selected files and immediately clears the native input. Removing a file and choosing
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule

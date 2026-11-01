@@ -65,10 +65,12 @@ check('models: grouped menu folds older models, searches partial names, and keep
     ok(menu().querySelector('.model-group .mk.codex'));
     const older = menu().querySelector('details')!;
     equal(older.open, false);
-    ok(button('GPT-5').getClientRects().length === 0, 'older entries are initially folded');
+    ok(!button('GPT-5').checkVisibility(), 'older entries are initially folded');
+    menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    equal(document.activeElement, older.querySelector('summary'), 'keyboard navigation skips folded models');
     equal(menu().querySelector('section[aria-label="Codex"] .model-option')?.textContent, 'GPT-6.1 Sol', 'current comes before older models even if the account listed it last');
     older.querySelector('summary')!.click(); await settle();
-    ok(button('GPT-5').getClientRects().length > 0);
+    ok(button('GPT-5').checkVisibility());
     const search = menu().querySelector<HTMLInputElement>('input[type="search"]')!;
     search.value = 'Pt-5'; search.dispatchEvent(new Event('input', { bubbles: true }));
     equal(menu().querySelectorAll('section .model-option').length, 1);

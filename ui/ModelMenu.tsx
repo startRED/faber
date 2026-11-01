@@ -74,7 +74,7 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); trigger.focus(); return; }
           if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || (e.target instanceof HTMLInputElement && !e.key.startsWith('Arrow'))) return;
-          const items = [...e.currentTarget.querySelectorAll<HTMLElement>('button, summary, input')].filter((item) => item.getClientRects().length > 0);
+          const items = [...e.currentTarget.querySelectorAll<HTMLElement>('button, summary, input')].filter((item) => item.checkVisibility());
           const at = items.indexOf(document.activeElement as HTMLElement);
           const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
           e.preventDefault(); items[next]?.focus();

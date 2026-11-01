@@ -57,11 +57,7 @@ fn run(ctx: &mut Ctx, codex: bool, stop: bool) -> Result {
         ..Launch::default()
     })?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    if codex {
-        page.wait_for("Codex models", "[...document.querySelectorAll('.composer select option')].some(o => o.text === 'GPT-6.1 Sol')")?;
-    }
-    page.select_option(&model, if codex { "GPT-6.1 Sol" } else { "Claude Haiku" })?;
+    super::select_model(page, if codex { "GPT-6.1 Sol" } else { "Claude Haiku" })?;
     ask(page, "Plan this change.")?;
     let card = css("article [data-testid=plan-approval]");
     page.wait_visible(&card)?;
