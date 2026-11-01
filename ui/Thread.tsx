@@ -543,7 +543,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!message.reason) return '';
     const moved = message.reason === 'reason.moved.full' || message.reason === 'reason.moved.summary';
     const key = moved && (!message.movedFrom || message.movedFrom === message.vendor)
-      ? message.reason.replace('reason.moved.', 'reason.moved.same.') : message.reason;
+      ? (message.reason === 'reason.moved.full' ? 'reason.moved.same.full' : 'reason.moved.same.summary') : message.reason;
     const from = message.movedFrom ? vendorName(message.movedFrom) : '';
     return fromEngine(key, {
       when: message.waitUntil ? untilReset(message.waitUntil) : t('quota.unknown'),
