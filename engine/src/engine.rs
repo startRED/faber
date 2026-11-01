@@ -71,6 +71,7 @@ mod rewind;
 mod settings_change;
 mod siblings;
 mod silence;
+mod stage;
 mod stuck_watch;
 mod toolbox;
 mod toolbox_replace;
@@ -134,7 +135,8 @@ pub enum AppEvent {
         conversation_id: String,
         parts: Vec<crate::model::ContextPart>,
     },
-    /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
+    /// "Keep going" stopped by itself in a conversation, or a leading agent's job ended on its closing box, and why (a
+    /// `reason.keepGoing.*` key): the tray tells the person.
     Halted {
         conversation_id: String,
         title: String,
@@ -451,6 +453,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// The closing box each leading agent last told the tray about (`stage.rs`), so one box is told once. Never saved: after a
+    /// restart only a new run ends.
+    stage_told: HashMap<String, String>,
     /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
     /// (`resume_cut_leaders`, which takes them once).
     quiet_teams: HashMap<String, Vec<String>>,
@@ -682,6 +687,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                stage_told: HashMap::new(),
                 quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
@@ -3838,6 +3844,7 @@ impl Core {
         if items == self.running.items {
             return;
         }
+        self.tell_stages(&items);
         self.mark_ended(&items);
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });

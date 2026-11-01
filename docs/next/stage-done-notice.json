@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "new": {
+      "en": "Faber tells you once when a big job is finished or needs you.",
+      "pt-BR": "O Faber avisa uma vez quando um trabalho grande termina ou precisa de você.",
+      "es": "Faber te avisa una vez cuando un trabajo grande termina o te necesita.",
+      "fr": "Faber vous prévient une fois quand un gros travail est fini ou a besoin de vous.",
+      "de": "Faber sagt dir einmal Bescheid, wenn eine große Arbeit fertig ist oder dich braucht."
+    }
+  },
+  "decisions": ["| R-next | 2026-10-30 | A project agent that started other conversations and ends its run on a closing box that is done or asks the person tells the tray once (\"{title}: done, come and look\", \"{title}: needs a decision from you\"), through the same notice Keep going uses when it stops, only once none of its members is still working. A member never notifies; a reply Keep going already stopped on is not told twice; each box is told once (in memory, so a restart never repeats an old one). Notifications on/off and R92's delivery rules cover it; no setting of its own. | AI (Erick delegou) |"]
+}
