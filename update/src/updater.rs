@@ -67,6 +67,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Ready {
     version: String,
     installer: PathBuf,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    signature: String,
 }
 
 struct Inner {
@@ -178,7 +180,11 @@ impl Release for Live {
         };
         release::download(&found.platform, &found.version, &installer, progress).await.map_err(|e| self.failed("download-failed", e))?;
         // A newer download replaces the one kept before, which would never install now.
-        let before = lock(&self.inner.ready).replace(Ready { version: found.version, installer: installer.clone() });
+        let before = lock(&self.inner.ready).replace(Ready {
+            version: found.version,
+            signature: found.platform.signature,
+            installer: installer.clone(),
+        });
         if let Some(before) = before.filter(|before| before.installer != installer) {
             release::discard(&before.installer);
         }
@@ -222,7 +228,7 @@ impl Release for Live {
         #[cfg(windows)]
         {
             let (inner, tray) = (&self.inner, self.reopen == Reopen::Tray);
-            crate::handoff::start(&ready.installer, &inner.install_dir, &inner.data_dir, tray)
+            crate::handoff::start(&ready.installer, &ready.signature, &ready.version, &inner.install_dir, &inner.data_dir, tray)
                 .map_err(|e| self.failed("install-failed", e))?;
             self.end()
         }
@@ -279,7 +285,7 @@ async fn keep_updated(inner: Arc<Inner>) {
     loop {
         // A downloaded update is kept and installed first; the next one is looked for after it.
         if lock(&inner.ready).is_none() && Instant::now() >= next_check {
-            next_check = Instant::now() + next_check_delay(fetch(&Live::new(&inner, Reopen::Tray), LATER_DOWNLOAD).await);
+            next_check = Instant::now() + next_check_delay(fetch(&Live::new(&inner, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await);
         }
         install_when_idle(&inner);
         sleep(LOOK_EVERY).await;
@@ -446,7 +452,7 @@ mod tests {
         updater.0.set_stage(Phase::Checking);
         assert_eq!(updater.status(), Status::of(Phase::Checking));
         updater.0.set_stage(Phase::None);
-        *lock(&updater.0.ready) = Some(Ready { version: "0.4.1".into(), installer: PathBuf::from("x") });
+        *lock(&updater.0.ready) = Some(Ready { version: "0.4.1".into(), signature: String::new(), installer: PathBuf::from("x") });
         updater.0.announce();
         assert_eq!(updater.status(), Status::of(Phase::Ready), "no stage, but an update is kept");
         updater.0.set_stage(Phase::Installing);

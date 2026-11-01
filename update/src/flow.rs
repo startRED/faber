@@ -86,13 +86,13 @@ async fn start_steps(release: &impl Release, check_wait: Duration, download_wait
 }
 
 /// Looks for a newer release and downloads it. False when the check or the download failed.
-pub async fn fetch(release: &impl Release, download_wait: Duration) -> bool {
-    match release.check().await {
-        Err(_) => false,
-        Ok(None) => fetch_succeeded(false, false),
+pub async fn fetch(release: &impl Release, check_wait: Duration, download_wait: Duration) -> bool {
+    match timeout(check_wait, release.check()).await {
+        Err(_) | Ok(Err(_)) => false,
+        Ok(Ok(None)) => fetch_succeeded(false, false),
         // A version tried a day ago is left alone: it would only be refused again.
-        Ok(Some(version)) if release.tried(&version) => true,
-        Ok(Some(_)) => fetch_succeeded(true, matches!(timeout(download_wait, release.download()).await, Ok(Ok(())))),
+        Ok(Ok(Some(version))) if release.tried(&version) => true,
+        Ok(Ok(Some(_))) => fetch_succeeded(true, matches!(timeout(download_wait, release.download()).await, Ok(Ok(())))),
     }
 }
 
@@ -289,7 +289,8 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(5));
         assert_eq!(release.saw(), ["checking", "check", "downloading", "download", "none"]);
         // A download in the background is bounded too, so the six-hour loop is never held for good.
-        assert!(!fetch(&Fake { stalls: true, ..Fake::found() }, WAIT).await);
+        assert!(!fetch(&Fake { stalls: true, ..Fake::found() }, WAIT, WAIT).await);
+        assert!(!fetch(&Fake { hangs: true, ..Fake::found() }, WAIT, WAIT).await);
     }
 
     #[tokio::test]
@@ -310,7 +311,7 @@ mod tests {
             "the relaunch after a failed install does not start the same install again"
         );
         let later = Fake { tried: true, ..Fake::found() };
-        assert!(fetch(&later, WAIT).await);
+        assert!(fetch(&later, WAIT, WAIT).await);
         assert_eq!(later.saw(), ["check"], "nor does the periodic check download it");
     }
 }

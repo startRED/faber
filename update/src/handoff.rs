@@ -18,6 +18,7 @@
 use crate::FOLDER;
 use std::ffi::OsString;
 use std::io::Read;
+use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -43,7 +44,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Puts a copy of the running program beside `installer` (the verified file `release::download` left in its own temporary
 /// folder), starts the copy, and returns. The caller ends the process right after. `install_dir` is the installer
 /// `/D=<folder>` argument (`install_dir_arg`).
-pub fn start(installer: &Path, install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
+pub fn start(installer: &Path, signature: &str, version: &str, install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
     // The file and its folder are ours, made new by the download: a link in either place is not run.
     let temp = installer.parent().ok_or("no folder for the installer")?;
     if !is_plain(installer, false) || !is_plain(temp, true) {
@@ -55,7 +56,7 @@ pub fn start(installer: &Path, install_dir: &OsString, data_dir: &Path, tray: bo
     if &head != b"MZ" {
         return Err("the update is not an installer".into());
     }
-    spawn_copy(temp, installer.as_os_str(), install_dir, data_dir, tray)
+    spawn_copy(temp, installer.as_os_str(), signature, version, install_dir, data_dir, tray)
 }
 
 /// Opens Faber again without installing anything: for an install that could not start, after the app has ended. The same
@@ -64,10 +65,18 @@ pub fn start(installer: &Path, install_dir: &OsString, data_dir: &Path, tray: bo
 pub fn relaunch(install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
     install_folder(install_dir).ok_or("no install folder")?;
     let temp = crate::staging_in(&std::env::temp_dir(), "reopen").map_err(|e| e.to_string())?;
-    spawn_copy(&temp, std::ffi::OsStr::new(""), install_dir, data_dir, tray)
+    spawn_copy(&temp, std::ffi::OsStr::new(""), "", "", install_dir, data_dir, tray)
 }
 
-fn spawn_copy(temp: &Path, installer: &std::ffi::OsStr, install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
+fn spawn_copy(
+    temp: &Path,
+    installer: &std::ffi::OsStr,
+    signature: &str,
+    version: &str,
+    install_dir: &OsString,
+    data_dir: &Path,
+    tray: bool,
+) -> Result<(), String> {
     let folder = install_folder(install_dir).ok_or("no install folder")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let copy = temp.join(COPY);
@@ -75,6 +84,8 @@ fn spawn_copy(temp: &Path, installer: &std::ffi::OsStr, install_dir: &OsString, 
     Command::new(copy)
         .arg(FLAG)
         .arg(installer)
+        .arg(signature)
+        .arg(version)
         .arg(folder.join(APP))
         .arg(data_dir)
         .arg(if tray { "tray" } else { "window" })
@@ -84,17 +95,17 @@ fn spawn_copy(temp: &Path, installer: &std::ffi::OsStr, install_dir: &OsString, 
         .map_err(|e| e.to_string())
 }
 
-/// The copy's work: `[installer, installed faber.exe, data folder, "window" | "tray"]`, the installer empty to only open Faber
+/// The copy's work: `[installer, signature, version, installed faber.exe, data folder, "window" | "tray"]`, the installer empty to only open Faber
 /// again (`relaunch`). Returns the exit code.
 pub fn finish(args: &[OsString]) -> i32 {
-    let [installer, exe, data, reopen] = args else { return 1 };
+    let [installer, signature, version, exe, data, reopen] = args else { return 1 };
     let (exe, data) = (PathBuf::from(exe), PathBuf::from(data));
     let Some(folder) = exe.parent() else { return 1 };
     if !wait_until(CLOSE_WAIT, || is_free(&exe) && is_free(&folder.join(SIDECAR[0]).join(SIDECAR[1]))) {
         crate::log(&data, "install-wait", "Faber was still closing; the installer closes it");
     }
     if !installer.is_empty() {
-        run_installer(installer, folder, reopen != "tray", &data);
+        run_installer(installer, signature, version, folder, reopen != "tray", &data);
     }
     // Back in every case: the new version, or the same one when the install did not happen.
     let mut again = Command::new(&exe);
@@ -108,9 +119,24 @@ pub fn finish(args: &[OsString]) -> i32 {
     0
 }
 
-fn run_installer(installer: &OsString, folder: &Path, shown: bool, data: &Path) {
+fn run_installer(installer: &OsString, signature: &OsString, version: &OsString, folder: &Path, shown: bool, data: &Path) {
+    let checked = || -> Result<std::fs::File, String> {
+        // Deny write and delete sharing until the verified executable has started.
+        let mut file = std::fs::OpenOptions::new().read(true).share_mode(1).open(installer).map_err(|e| e.to_string())?;
+        crate::release::verify_file(&mut file, signature.to_str().ok_or("invalid signature")?, version.to_str().ok_or("invalid version")?)?;
+        Ok(file)
+    };
+    let verified = match checked() {
+        Ok(file) => file,
+        Err(error) => {
+            crate::log(data, "install-failed", &error);
+            return;
+        }
+    };
     let began = Instant::now();
-    match Command::new(installer).raw_arg(installer_line(folder, shown)).creation_flags(CREATE_NO_WINDOW).spawn() {
+    let spawned = Command::new(installer).raw_arg(installer_line(folder, shown)).creation_flags(CREATE_NO_WINDOW).spawn();
+    drop(verified);
+    match spawned {
         Ok(mut child) => {
             let mut status = None;
             wait_until(INSTALL_WAIT, || {
@@ -263,7 +289,10 @@ mod tests {
         let link = holder.path().join("linked");
         junction::create(real.path(), &link).unwrap();
         let dir = OsString::from(r"/D=E:\Apps\Faber");
-        assert_eq!(start(&link.join("Faber-setup.exe"), &dir, data.path(), false), Err("the update is not where it was left".into()));
+        assert_eq!(
+            start(&link.join("Faber-setup.exe"), "", "", &dir, data.path(), false),
+            Err("the update is not where it was left".into())
+        );
         assert!(!real.path().join(COPY).exists(), "no copy of the program was made");
     }
 
@@ -278,6 +307,19 @@ mod tests {
         assert!(copy_new(&from, &to).is_err(), "a file that is already there is never written through");
     }
 
+    #[test]
+    fn a_locked_installer_cannot_be_changed_or_replaced() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("setup.exe");
+        std::fs::write(&path, b"MZ").unwrap();
+        let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
+        assert!(std::fs::write(&path, b"changed").is_err());
+        assert!(std::fs::remove_file(&path).is_err());
+        drop(held);
+        assert!(std::fs::remove_file(&path).is_ok());
+    }
+
     // These stop before any program is started: a file that is not an installer, and arguments the copy refuses.
     #[test]
     fn a_file_that_is_not_an_installer_is_never_run() {
@@ -286,8 +328,8 @@ mod tests {
         let archive = temp.path().join("Faber-setup.exe");
         std::fs::write(&archive, b"PK\x03\x04").unwrap();
         let dir = OsString::from(r"/D=E:\Apps\Faber");
-        assert_eq!(start(&archive, &dir, data.path(), false), Err("the update is not an installer".into()));
-        assert!(start(&temp.path().join("missing.exe"), &dir, data.path(), false).is_err(), "no file, nothing to run");
+        assert_eq!(start(&archive, "", "", &dir, data.path(), false), Err("the update is not an installer".into()));
+        assert!(start(&temp.path().join("missing.exe"), "", "", &dir, data.path(), false).is_err(), "no file, nothing to run");
         assert!(!temp.path().join(COPY).exists(), "no copy of the program was made for it");
     }
 
@@ -297,7 +339,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let installer = temp.path().join("Faber-setup.exe");
         std::fs::write(&installer, b"MZ").unwrap();
-        assert!(start(&installer, &OsString::from(r"E:\Apps\Faber"), data.path(), true).is_err(), "not a /D= argument");
+        assert!(start(&installer, "", "", &OsString::from(r"E:\Apps\Faber"), data.path(), true).is_err(), "not a /D= argument");
         assert!(!temp.path().join(COPY).exists());
         assert!(relaunch(&OsString::from("/D="), data.path(), true).is_err());
     }

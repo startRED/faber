@@ -112,7 +112,7 @@ impl Meter {
 /// proof of newer code. Only a strictly greater `X.Y.Z` is. A stable install is never held back by this.
 pub fn is_upgrade(current: &semver::Version, remote: &semver::Version, previews: bool) -> bool {
     let same_line = (remote.major, remote.minor, remote.patch) <= (current.major, current.minor, current.patch);
-    remote > current && (previews || current.pre.is_empty() || !same_line)
+    remote > current && (previews || (remote.pre.is_empty() && (current.pre.is_empty() || !same_line)))
 }
 
 /// A downloaded update installs only when it is ready, no answer is running, and the window is not visible.
@@ -329,6 +329,8 @@ mod tests {
 
     #[test]
     fn previews_off_never_takes_the_stable_of_the_version_that_runs_as_a_preview() {
+        assert!(!is_upgrade(&v("1.2.3"), &v("1.2.4-preview.1"), false));
+        assert!(!is_upgrade(&v("1.2.3-preview.1"), &v("1.2.4-preview.1"), false));
         // The stable 0.3.16 may be built from preview.2, so it is not newer code than a running preview.3 (R156).
         assert!(!is_upgrade(&v("0.3.16-preview.3"), &v("0.3.16"), false), "same X.Y.Z: not proven newer");
         assert!(!is_upgrade(&v("0.3.16-preview.1"), &v("0.3.16"), false));

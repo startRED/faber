@@ -1,6 +1,6 @@
 //! The release reader, in place of the Tauri updater plugin: the signed manifest of the channel, and the installer it points
-//! to. The manifest is the plugin's own format (`latest.json`, the one every installed Faber already reads), signed with the
-//! same minisign key, so one release serves both the Tauri Faber and this one.
+//! to. The manifest is the plugin's unsigned format (`latest.json`); its installer is signed with the same minisign key,
+//! so one release serves both the Tauri Faber and this one.
 //!
 //! Nothing is installed from a release that cannot be verified: a bad signature, a platform the manifest lacks and an
 //! address that is not HTTPS are errors, written to `update.log` by the caller.
@@ -86,11 +86,20 @@ pub fn newer(manifest: &Manifest, key: &str, current: &semver::Version, previews
     Ok(Some(Found { version: remote.to_string(), platform }))
 }
 
-/// The release server and every redirect must use HTTPS.
+/// Only release hosts can receive requests, including redirects from the unsigned manifest.
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .https_only(true)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 || !approved_url(attempt.url()) {
+                attempt.error("unapproved update redirect")
+            } else {
+                attempt.follow()
+            }
+        }))
         .connect_timeout(CONNECT_WITHIN)
+        .timeout(Duration::from_secs(600))
+        .read_timeout(Duration::from_secs(30))
         .user_agent(concat!("faber-update/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())
@@ -115,10 +124,18 @@ pub async fn manifest(previews: bool) -> Result<Manifest, String> {
     Manifest::parse(&body)
 }
 
+fn approved_url(url: &reqwest::Url) -> bool {
+    url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com"))
+}
+
 fn https_url(url: &str) -> Result<reqwest::Url, String> {
     let url = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
-    if url.scheme() != "https" {
-        return Err("the update address must use HTTPS".into());
+    if !approved_url(&url) {
+        return Err("the update address is not an approved release host".into());
     }
     Ok(url)
 }
@@ -151,6 +168,36 @@ fn binds_version(comment: &str, version: &str) -> Result<(), String> {
         return Err("the signed installer is for another version than the release says".into());
     }
     Ok(())
+}
+
+/// Rechecks the exact file held open by the installer handoff.
+#[cfg(windows)]
+pub(crate) fn verify_file(file: &mut std::fs::File, signature: &str, version: &str) -> Result<(), String> {
+    verify_file_with_key(file, signature, version, PUBLIC_KEY)
+}
+
+#[cfg(windows)]
+fn verify_file_with_key(file: &mut std::fs::File, signature: &str, version: &str, public_key: &str) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let key = minisign_verify::PublicKey::decode(&decode(public_key)?).map_err(|e| e.to_string())?;
+    let signature = minisign_verify::Signature::decode(&decode(signature)?).map_err(|e| e.to_string())?;
+    let mut verifier = key.verify_stream(&signature).map_err(|e| e.to_string())?;
+    let mut bytes = [0u8; 65536];
+    let mut total = 0u64;
+    loop {
+        let n = file.read(&mut bytes).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > MAX_DOWNLOAD {
+            return Err("the update is too large".into());
+        }
+        verifier.update(&bytes[..n]);
+    }
+    verifier.finalize().map_err(|e| format!("the update is not signed by Faber: {e}"))?;
+    binds_version(signature.trusted_comment(), version)
 }
 
 /// Writes what `source` gives to `file` and checks it against `signature` with `key` as it goes, so an installer is never
@@ -244,6 +291,22 @@ pub async fn download(platform: &Platform, version: &str, installer: &Path, prog
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_approved_release_hosts_are_requested() {
+        for url in ["https://github.com/startRED/faber/releases/a", "https://release-assets.githubusercontent.com/a"] {
+            assert!(https_url(url).is_ok());
+        }
+        for url in [
+            "http://github.com/a",
+            "https://evil.example/a",
+            "https://github.com.evil.example/a",
+            "https://github.com:444/a",
+            "https://user@github.com/a",
+        ] {
+            assert!(https_url(url).is_err(), "{url}");
+        }
+    }
+
     /// A test key pair made once with the Tauri signer; only the public key and the signed file are kept (never a private key).
     const TEST_KEY: &str = include_str!("../tests/fixtures/test.key.pub");
     const PAYLOAD: &[u8] = include_bytes!("../tests/fixtures/payload.bin");
@@ -293,6 +356,18 @@ mod tests {
         assert!(run(PAYLOAD, SIGNATURE, PUBLIC_KEY, 1024).await.0.is_err(), "signed by another key than Faber release key");
         assert!(run(PAYLOAD, "not a signature", TEST_KEY, 1024).await.0.is_err());
         assert!(run(PAYLOAD, SIGNATURE, "not a key", 1024).await.0.is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn handoff_rechecks_the_held_file_and_the_signed_version() {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(PAYLOAD).unwrap();
+        assert!(verify_file_with_key(&mut file, SIGNATURE, "1.0.0", TEST_KEY).unwrap_err().contains("another version"));
+        use std::io::{Seek, SeekFrom};
+        file.seek(SeekFrom::Start(0)).unwrap();
+        file.write_all(b"tampered").unwrap();
+        assert!(verify_file_with_key(&mut file, SIGNATURE, "1.0.0", TEST_KEY).unwrap_err().contains("not signed"));
     }
 
     /// What `download` asks of the signed comment for release `version`.
