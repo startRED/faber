@@ -68,6 +68,20 @@ fn data_url(source: &Path, kind: &str, max: u64) -> Option<String> {
 }
 
 table! {
+    /// This conversation's requests and their current state.
+    Read Free fn asks(h) -> Vec<ask::View> {
+        Ok(Vec::new())
+    }
+    /// Allow one identical retry, or decline the request.
+    Write Person fn answer_ask(h, id: String, allow: bool) -> bool {
+        let (answered, pending) = {
+            let mut book = lock(&h.asks);
+            let answered = book.answer(&id, allow);
+            (answered, book.pending())
+        };
+        if answered { h.announce(&json!({"type": "asks", "asks": pending})); }
+        Ok(answered)
+    }
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
         lock(&h.feed).forget();

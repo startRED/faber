@@ -1,5 +1,28 @@
 [
   {
+    "name": "asks",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "This conversation's requests and their current state."
+  },
+  {
+    "name": "answer_ask",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "allow",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person",
+    "about": "Allow one identical retry, or decline the request."
+  },
+  {
     "name": "conversations",
     "args": [
       [

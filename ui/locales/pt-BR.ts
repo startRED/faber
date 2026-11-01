@@ -17,6 +17,8 @@ export const ptBR: Messages = {
   "cli.help.unpin": "Desafixar uma conversa",
   "cli.help.rename": "Renomear uma conversa",
   "cli.help.projects": "Listar projetos",
+  "cli.help.asks": "Listar seus pedidos de permissão",
+  "cli.ask.request": "Pedido de permissão",
   "cli.help.quota": "Mostrar limite de uso",
   "cli.help.settings": "Mostrar configurações",
   "cli.help.watch": "Acompanhar mudanças de estado",

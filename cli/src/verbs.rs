@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+<<<<<<< HEAD
 pub const VERBS: &[(&str, &[&str])] = &[
     ("help", &[]),
     ("status", &["conversations"]),
@@ -34,17 +35,45 @@ pub const VERBS: &[(&str, &[&str])] = &[
     ("watch", &["conversations", "conversation"]),
     ("wait", &["conversation"]),
     ("call", &[]),
+=======
+const VERBS: &[&str] = &[
+    "help",
+    "status",
+    "list",
+    "read",
+    "send",
+    "stop",
+    "continue",
+    "archive",
+    "unarchive",
+    "pin",
+    "unpin",
+    "rename",
+    "projects",
+    "quota",
+    "settings",
+    "asks",
+    "watch",
+    "wait",
+    "call",
+>>>>>>> w4-s2-ask
 ];
 type ResultValue = Result<Value, i32>;
 async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultValue {
-    match client.call(command, args).await {
+    match client.call_detailed(command, args).await {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(key)) => {
+        Ok(Err(error)) => {
+            let key = error.key;
             let code = if matches!(key.as_str(), "error.reach.ask" | "error.reach.person" | "error.reach.screen") {
                 out::PERSON
             } else {
                 out::REFUSED
             };
+            if key == "error.reach.ask" {
+                if let Some(request) = error.data.as_ref().and_then(|data| data.get("request")).and_then(Value::as_str) {
+                    return Err(out.ask_refused(request));
+                }
+            }
             Err(out.fail(&key, code))
         }
         Err(_) => Err(out.fail("cli.error.channel", out::UNREACHED)),
@@ -72,7 +101,7 @@ fn valid(args: &Args, verb: &str) -> bool {
         "search" => (2, usize::MAX),
         "rename" => (3, 3),
         "call" => (2, 3),
-        "status" | "list" | "projects" | "quota" | "settings" | "watch" => (1, 1),
+        "status" | "list" | "projects" | "quota" | "settings" | "asks" | "watch" => (1, 1),
         _ => return false,
     };
     if !(min..=max).contains(&count) || args.on("archived") && args.on("all") {
@@ -246,7 +275,7 @@ pub async fn run(args: Args, out: Out) -> i32 {
         "archive" | "unarchive" => ask(&client, &out, "archive", json!({"id":id,"on":verb=="archive"})).await,
         "pin" | "unpin" => ask(&client, &out, "pin", json!({"id":id,"on":verb=="pin"})).await,
         "rename" => ask(&client, &out, "rename", json!({"id":id,"title":args.word(2)})).await,
-        "projects" | "quota" | "settings" => ask(&client, &out, verb, json!({})).await,
+        "projects" | "quota" | "settings" | "asks" => ask(&client, &out, verb, json!({})).await,
         "wait" => return wait(&client, &out, id, num(&args, "timeout", 300).unwrap()).await,
         "watch" => return watch(&client, &out, &args).await,
         "call" => {

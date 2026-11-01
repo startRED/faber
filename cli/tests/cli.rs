@@ -65,6 +65,15 @@ impl Backend for Fake {
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> faber_channel::server::DetailedAnswer {
+        if cmd == "ask" {
+            return Box::pin(async {
+                Err(faber_channel::wire::Error { key: "error.reach.ask".into(), data: Some(json!({"request":"abcd1234"})) })
+            });
+        }
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
 }
 
 struct Run {
@@ -158,6 +167,11 @@ async fn errors_use_the_contract_exit_codes() {
         let (r, _) = faber(false, &["call", cmd], "", &[]).await;
         assert_eq!(r.code, code, "{}", r.stdout);
     }
+    let (r, _) = faber(false, &["call", "ask"], "", &[]).await;
+    assert_eq!(lines(&r.stdout), vec![json!({"error":"error.reach.ask", "request":"abcd1234"})]);
+    let (r, fake) = faber(false, &["asks"], "", &[]).await;
+    assert_eq!(r.code, 0);
+    assert!(fake.calls.lock().unwrap().iter().any(|(cmd, _)| cmd == "asks"));
     let (r, _) = faber(true, &["wait", "c1", "--timeout", "1"], "", &[]).await;
     assert_eq!(r.code, 5);
     assert_eq!(lines(&r.stdout)[0]["state"], "working");

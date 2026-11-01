@@ -128,6 +128,19 @@ fn key(result: Result<Value, Failure>) -> String {
 }
 
 #[tokio::test]
+async fn unidentified_agents_never_record_or_receive_a_grant() {
+    let (host, _dir) = host().await;
+    let agent = Caller::Agent { conversation: None };
+    for _ in 0..2 {
+        let failure = host.dispatch_as(&agent, "save_settings", json!({"patch": {"language": "en"}})).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask");
+        assert!(failure.data.is_none());
+    }
+    assert!(lock(&host.asks).pending().is_empty());
+    assert_eq!(host.dispatch_as(&agent, "asks", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test]
 async fn arguments_that_do_not_fit_and_names_not_in_the_table_are_refused_by_key() {
     let (host, _dir) = host().await;
     assert_eq!(key(host.dispatch("open", json!({})).await), "error.host.badArgs");
