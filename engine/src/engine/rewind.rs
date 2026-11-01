@@ -628,9 +628,6 @@ impl Core {
             if c.is_some_and(|c| c.compacting) {
                 writers.push("compaction".into());
             }
-            if c.is_some_and(verifying::checking) {
-                writers.push("checks".into());
-            }
             if self.helpers_in(id) {
                 writers.push("helpers".into());
             }
@@ -1350,6 +1347,7 @@ mod tests {
                         let _ = sent.send(cmd);
                     }),
                     turn: None,
+                    parent_reported: None,
                     break_pending: false,
                     answer_started: false,
                     settled: false,

@@ -918,7 +918,6 @@ export const en = {
   'details.changeFailed': "A saved change needs fixing",
   'details.changeFixing': "A saved change needs fixing; Faber is working on it",
   'details.unfinished': "The work is not finished",
-  'details.weighing': "Looking for changes to check",
   'details.checked': {"one":"Checked {n} thing","other":"Checked {n} things"},
   'details.checksFailed': {"one":"{n} did not work","other":"{n} did not work"},
   'aside.title': 'Quick question',
@@ -1167,10 +1166,10 @@ export const en = {
   'follow.stop': 'Stop following',
   'wake.checksFailed': 'Checks failed on pull request {pr} ({checks}). Faber asked the agent to fix them.',
   'wake.conflict': 'Pull request {pr} conflicts with its base branch. Faber asked the agent to settle it.',
+  // Legacy histories only; nothing new produces this wake.
   'wake.checksFixing': "Faber's checks failed ({checks}). Faber asked the agent to fix them.",
   'wake.goalBroke': 'A goal no longer holds: {checks}. Faber started a fix.',
   'checks.running': 'Faber is running the checks on these changes…',
-  'checks.weighing': 'Faber is checking whether files changed…',
   'checks.passed': { one: "Faber's checks passed ({n} check).", other: "Faber's checks passed ({n} checks)." },
   'checks.failed': "Faber's checks failed: {checks}.",
   'checks.needsYou': "Faber's checks failed: {checks}. This needs you.",
@@ -1353,6 +1352,7 @@ export const en = {
   'reason.keepGoing.quota': 'Stopped keeping going until {ai} has quota again.',
   'reason.keepGoing.stuck': 'Keep going stopped: still nothing delivered after Faber asked the AI to change approach.',
   'reason.keepGoing.billed': 'Stopped keeping going: {ai} may be billed per use, and Faber does not spend on it by itself.',
+  // Legacy histories only; nothing new produces this halt.
   'reason.keepGoing.checks': "Stopped keeping going: Faber's checks still fail.",
   'error.helperEmpty': 'Write something first.',
   'error.aside.empty': 'Write a question first.',

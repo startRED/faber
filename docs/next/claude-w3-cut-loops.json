@@ -1,0 +1,22 @@
+{
+  "decisions": [
+    "| R-next | 2026-11-01 | Turn-end delivery drains the existing queue and reports to the parent through one shared, idempotent path. A per-reply live receipt and the parent's saved report id prevent duplicate delivery during compaction and interrupted-turn recovery. No new process, timer or stored conversation field. | AI |",
+    "| R-next-2 | 2026-11-01 | Remove automatic reply checks and their fix wakes; keep the explicit verify tool and historical check rows. Keep going stops on the first done conclusion or stop line, without a second-stop request. Preserve shared automatic sending for the stuck watchdog and queued messages, bounded conclusion requests, interrupted-run continuation and Stop holds. Keep wake.checksFixing in all five languages for old histories only. | Owner (W3 a2) |"
+  ],
+  "notes": {
+    "fixed": {
+      "en": "Queued messages and child reports continue after a turn ends, even when no checks run.",
+      "pt-BR": "As mensagens na fila e os relatórios dos agentes seguem quando o turno termina, mesmo sem verificações.",
+      "es": "Los mensajes en espera y los informes de los agentes siguen al terminar el turno, aunque no se ejecuten comprobaciones.",
+      "fr": "Les messages en attente et les comptes rendus des agents suivent la fin du tour, même sans vérification.",
+      "de": "Nach dem Ende eines Durchgangs werden wartende Nachrichten und Berichte der Agenten weitergegeben, auch wenn keine Prüfungen laufen."
+    },
+    "better": {
+      "en": "Finished replies no longer start checks or correction turns on their own; you can still ask for checks, and Keep going stops at the first done conclusion.",
+      "pt-BR": "Respostas encerradas deixam de iniciar verificações ou correções sozinhas; você ainda pode pedir verificações, e o Continuar sozinho para na primeira conclusão.",
+      "es": "Al terminar una respuesta ya no se inician comprobaciones ni correcciones por su cuenta; puedes seguir pidiendo comprobaciones y Seguir solo se detiene con la primera conclusión.",
+      "fr": "Une réponse terminée ne lance plus de vérifications ni de corrections toute seule ; vous pouvez toujours demander des vérifications, et Continuer seul s’arrête à la première conclusion.",
+      "de": "Nach einer fertigen Antwort starten keine Prüfungen oder Korrekturen mehr von selbst; Prüfungen bleiben auf Wunsch möglich, und Selbst weitermachen endet beim ersten Abschluss."
+    }
+  }
+}

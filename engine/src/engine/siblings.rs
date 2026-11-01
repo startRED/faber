@@ -89,7 +89,7 @@ impl Core {
                 continue;
             }
             let owed = self.load(&child).is_some_and(|c| c.pending_parent_report);
-            self.tell_parent(&child);
+            self.turn_ended(&child);
             if self.convs.get(&child).is_some_and(|c| c.pending_parent_report) {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
             } else if !owed {
@@ -282,7 +282,7 @@ impl Core {
         }
         let Some(lead) = c.started_by.clone() else { return };
         if self.edit_worker_step(&lead, child, |s| (s.state, s.worker) = (StepState::Pending, None)) {
-            self.tell_parent(child);
+            self.turn_ended(child);
         }
     }
 
@@ -424,10 +424,14 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return };
         let Some(parent) = c.started_by.clone() else { return };
         let state = state_of(busy, c);
-        if c.keep_going.is_some() || state == State::Working || state == State::Waiting {
+        if c.keep_going.is_some() || c.compacting || state == State::Working || state == State::Waiting {
             return;
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
+        if reply.is_some_and(|m| self.live.get(conv).is_some_and(|l| l.parent_reported.as_deref() == Some(&m.id))) {
+            self.finish_parent_report(conv, &parent);
+            return;
+        }
         let report_id = format!("report-{conv}-{}", reply.map_or("empty", |m| m.id.as_str()));
         let last = ended::conclusion_line(c).unwrap_or_else(|| {
             let text = reply.map(Message::said).unwrap_or_default();
@@ -468,6 +472,10 @@ impl Core {
     }
 
     fn finish_parent_report(&mut self, child: &str, parent: &str) {
+        if let Some(l) = self.live.get_mut(child) {
+            l.parent_reported =
+                self.convs.get(child).and_then(|c| c.messages.iter().rev().find(|m| m.role == Role::Assistant)).map(|m| m.id.clone());
+        }
         if let Some(c) = self.convs.get_mut(child).filter(|c| c.pending_parent_report) {
             c.pending_parent_report = false;
             self.save(child);

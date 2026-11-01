@@ -66,7 +66,6 @@ impl Core {
             && c.queued.is_empty()
             && c.keep_going.is_none()
             && !c.compacting
-            && c.weighing.is_none()
             && c.send_after_stop.is_none()
             && !self.save_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(id)
             && !self.transfers.contains_key(id)
@@ -80,7 +79,6 @@ impl Core {
             && !self.boundary.contains_key(id)
             && !self.pending.contains_key(id)
             && !self.compacts.contains_key(id)
-            && !self.before.contains_key(id)
             && !self.parent_reports.contains_key(id)
             && !self.codex_prepared.contains_key(id)
             && !self.bigger.contains_key(id)

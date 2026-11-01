@@ -32,8 +32,8 @@ under one header in the work log's disclosure: the loop icon, "Worked on its own
 line with an ellipsis, its tooltip counting what Faber asked ("Faber asked it to keep going ×12"). Closed by default; open,
 it shows the earlier turns, a little dimmer, each with its own work log folded, and a turn with nothing in it is not
 drawn. The newest turn with content stays open under the header, with "While you were away" and the answers card at its top.
-The agent's own closing box (R248, [layout.md](layout.md)) ends Keep going when it says the request is done, checked
-once like the stop line. A box that asks the person something makes Keep going wait ten minutes, its row saying "waiting
+The agent's own closing box (R248, [layout.md](layout.md)) ends Keep going on its first done conclusion, just like the stop line,
+without another request to double-check. A box that asks the person something makes Keep going wait ten minutes, its row saying "waiting
 for your answer"; then Faber sends the first reply for them and the box says which. A conversation with a plan shows
 "2 of 5" before its title in the running column, and the sidebar row's tooltip adds it; the agent's now line is the
 row's quiet line while Keep going is off.

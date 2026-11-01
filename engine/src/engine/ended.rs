@@ -14,6 +14,23 @@ impl Engine {
 }
 
 impl Core {
+    /// Every completion path meets here, even when the turn ran no automatic checks.
+    pub(super) fn turn_ended(&mut self, conv: &str) {
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
+            || self.convs.get(conv).is_none_or(|c| {
+                c.compacting
+                    || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+                    || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
+            })
+        {
+            return;
+        }
+        self.drain(conv);
+        self.tell_parent(conv);
+    }
+
     pub(super) fn seen(&mut self, id: &str) -> Result<(), String> {
         let c = self.load(id).ok_or("error.conversationGone")?;
         if c.ended.take().is_none() {
@@ -25,8 +42,8 @@ impl Core {
     }
 
     /// Reads the running list about to be sent against the last one: a conversation that leaves it ended its run; one back at
-    /// work starts a new run and loses its old mark. A reply only closing (`settled`) has not left yet: Faber's checks may still
-    /// follow it, and a card that came and went would be noise.
+    /// work starts a new run and loses its old mark. A reply only closing (`settled`) has not left yet: showing a card before
+    /// the turn-end decision would make it come and go.
     pub(super) fn mark_ended(&mut self, items: &[RunningItem]) {
         let at = now();
         let listed = |id: &str| items.iter().any(|i| i.conversation_id == id);
@@ -183,7 +200,7 @@ impl Core {
             || c.archived_at.is_some()
             || c.keep_going.is_some()
             || !c.queued.is_empty()
-            || verifying::checking(c)
+            || c.compacting
             || result_kind(c) != Some(EndKind::Unconcluded)
             || !needs_conclusion(c)
         {
@@ -210,6 +227,76 @@ impl Core {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn turn_end_drains_queue_without_checks_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let capture = sent.clone();
+        let id = super::super::answer::tests::seed(
+            &engine,
+            Session::from_fn(move |command| {
+                if let crate::events::SessionCommand::Send(turn) = command {
+                    capture.lock().unwrap().push(turn.text);
+                }
+            }),
+            &[("reply", &[])],
+        );
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            core.ledger.claude.billing = Billing::Subscription;
+            let cwd = core.cwd_of(&core.convs[&id]).unwrap();
+            let live = core.live.get_mut(&id).unwrap();
+            live.cwd = cwd;
+            live.model = Some(crate::router::default_model(Vendor::Claude, None, &[]));
+            live.tuning = core.store.settings().tuning();
+            let choice = Choice { vendor: "claude".into(), model: None, effort: None };
+            let c = core.convs.get_mut(&id).unwrap();
+            c.choice = Some(choice.clone());
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            c.queued.push(QueuedTurn {
+                id: "queued".into(),
+                text: "Follow up".into(),
+                images: None,
+                attachments: None,
+                choice,
+                at: now(),
+                sending: false,
+                wake: None,
+            });
+            core.end_turn(&id, Some("reply".into()), None);
+            core.turn_ended(&id);
+            assert!(core.convs[&id].queued.is_empty());
+            assert_eq!(core.convs[&id].messages.iter().filter(|m| m.id == "queued").count(), 1);
+            assert!(core.convs[&id].messages.iter().all(|m| m.checks.is_none()));
+            assert_eq!(core.convs[&id].messages.last().unwrap().status, Some(Status::Streaming));
+            assert_eq!(sent.lock().unwrap().len(), 1, "repeated completion cannot dispatch twice");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_reply_that_never_started_reports_its_failed_end_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.live.remove(&child);
+            core.convs.get_mut(&child).unwrap().started_by = Some(parent.clone());
+            core.fail_reply(&child, "child", "error.turnFailed".into());
+            assert_eq!(core.convs[&parent].queued.len(), 1, "the failed-start boundary itself delivers the report");
+            core.turn_ended(&child);
+            let reports: Vec<_> =
+                core.convs[&parent].queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).collect();
+            assert_eq!(reports.len(), 1);
+            assert_eq!(result_kind(&core.convs[&child]), Some(EndKind::Failed));
+            assert!(reports[0].text.contains("stopped with an error in its latest turn"), "{}", reports[0].text);
+        });
+        engine.shutdown();
+    }
 
     fn conv(messages: Vec<Message>) -> Conversation {
         let mut c: Conversation = serde_json::from_value(json!({

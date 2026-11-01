@@ -758,7 +758,6 @@ export const de: Messages = {
   'details.changeFailed': "Eine gespeicherte Änderung muss korrigiert werden",
   'details.changeFixing': "Eine gespeicherte Änderung muss korrigiert werden; Faber kümmert sich darum",
   'details.unfinished': "Die Arbeit ist nicht fertig",
-  'details.weighing': "Änderungen werden zur Prüfung gesucht",
   'details.checked': {"one":"{n} Sache geprüft","other":"{n} Dinge geprüft"},
   'details.checksFailed': {"one":"{n} hat nicht funktioniert","other":"{n} haben nicht funktioniert"},
   'aside.title': 'Kurze Frage',
@@ -1007,10 +1006,10 @@ export const de: Messages = {
   'follow.stop': 'Nicht mehr verfolgen',
   'wake.checksFailed': 'Prüfungen von Pull Request {pr} sind fehlgeschlagen ({checks}). Faber hat den Agenten gebeten, sie zu beheben.',
   'wake.conflict': 'Pull Request {pr} hat einen Konflikt mit seinem Basis-Branch. Faber hat den Agenten gebeten, ihn zu lösen.',
+  // Legacy histories only; nothing new produces this wake.
   'wake.checksFixing': 'Fabers Prüfungen sind fehlgeschlagen ({checks}). Faber hat den Agenten gebeten, sie zu beheben.',
   'wake.goalBroke': 'Ein Ziel gilt nicht mehr: {checks}. Faber hat eine Reparatur gestartet.',
   'checks.running': 'Faber führt die Prüfungen für diese Änderungen aus …',
-  'checks.weighing': 'Faber prüft, ob sich Dateien geändert haben…',
   'checks.passed': { one: 'Fabers Prüfungen sind bestanden ({n} Prüfung).', other: 'Fabers Prüfungen sind bestanden ({n} Prüfungen).' },
   'checks.failed': 'Fabers Prüfungen sind fehlgeschlagen: {checks}.',
   'checks.needsYou': 'Fabers Prüfungen sind fehlgeschlagen: {checks}. Hier bist du gefragt.',
@@ -1194,6 +1193,7 @@ export const de: Messages = {
   'reason.keepGoing.quota': 'Hat aufgehört weiterzumachen, bis {ai} wieder Kontingent hat.',
   'reason.keepGoing.stuck': 'Weitermachen wurde gestoppt: Auch nach Fabers Bitte an die KI, anders vorzugehen, gab es kein Ergebnis.',
   'reason.keepGoing.billed': 'Hat aufgehört weiterzumachen: {ai} wird vielleicht nach Nutzung abgerechnet, und Faber gibt dort allein nichts aus.',
+  // Legacy histories only; nothing new produces this halt.
   'reason.keepGoing.checks': 'Hat aufgehört weiterzumachen: Fabers Prüfungen schlagen weiter fehl.',
   'error.helperEmpty': 'Schreib zuerst etwas.',
   'error.aside.empty': 'Schreib zuerst eine Frage.',

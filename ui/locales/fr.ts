@@ -758,7 +758,6 @@ export const fr: Messages = {
   'details.changeFailed': "Un changement enregistré doit être corrigé",
   'details.changeFixing': "Un changement enregistré doit être corrigé ; Faber s’en occupe",
   'details.unfinished': "Le travail n’est pas terminé",
-  'details.weighing': "Recherche des changements à vérifier",
   'details.checked': {"one":"{n} élément vérifié","other":"{n} éléments vérifiés"},
   'details.checksFailed': {"one":"{n} n’a pas fonctionné","other":"{n} n’ont pas fonctionné"},
   'aside.title': 'Question rapide',
@@ -1007,10 +1006,10 @@ export const fr: Messages = {
   'follow.stop': 'Ne plus suivre',
   'wake.checksFailed': 'Des vérifications de la pull request {pr} ont échoué ({checks}). Faber a demandé à l’agent de les corriger.',
   'wake.conflict': 'La pull request {pr} est en conflit avec sa branche de base. Faber a demandé à l’agent de le résoudre.',
+  // Legacy histories only; nothing new produces this wake.
   'wake.checksFixing': 'Les vérifications de Faber ont échoué ({checks}). Faber a demandé à l’agent de les corriger.',
   'wake.goalBroke': 'Un objectif n’est plus tenu : {checks}. Faber a lancé une réparation.',
   'checks.running': 'Faber lance les vérifications de ces changements…',
-  'checks.weighing': 'Faber regarde si des fichiers ont changé…',
   'checks.passed': { one: 'Les vérifications de Faber sont passées ({n} vérification).', other: 'Les vérifications de Faber sont passées ({n} vérifications).' },
   'checks.failed': 'Les vérifications de Faber ont échoué : {checks}.',
   'checks.needsYou': 'Les vérifications de Faber ont échoué : {checks}. Cela demande votre intervention.',
@@ -1194,6 +1193,7 @@ export const fr: Messages = {
   'reason.keepGoing.quota': 'A cessé de continuer jusqu’à ce que {ai} ait de nouveau du quota.',
   'reason.keepGoing.stuck': 'Continuer s’est arrêté : toujours aucun résultat après la demande de Faber à l’IA de changer d’approche.',
   'reason.keepGoing.billed': 'A cessé de continuer : {ai} est peut-être facturé à l’usage, et Faber n’y dépense rien de lui-même.',
+  // Legacy histories only; nothing new produces this halt.
   'reason.keepGoing.checks': 'A cessé de continuer : les vérifications de Faber échouent encore.',
   'error.helperEmpty': 'Écrivez d’abord quelque chose.',
   'error.aside.empty': 'Écrivez d’abord une question.',

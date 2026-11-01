@@ -88,7 +88,7 @@ check('details: text-only updates do not reclassify a conversation history', asy
   } finally { dispose(); host.remove(); }
 });
 
-function mountThread(messages: () => Message[], busy: () => boolean, weighing: () => boolean = () => false) {
+function mountThread(messages: () => Message[], busy: () => boolean) {
   const host = document.createElement('div');
   host.dataset.motion = 'none';
   host.style.width = '720px';
@@ -96,7 +96,7 @@ function mountThread(messages: () => Message[], busy: () => boolean, weighing: (
   document.body.append(host);
   const dispose = render(() => createComponent(Thread, {
     area: 'project', conversationId: 'plain-problems', options: [], from: 0, onBranch: () => {},
-    get messages() { return messages(); }, get busy() { return busy(); }, get weighing() { return weighing(); },
+    get messages() { return messages(); }, get busy() { return busy(); },
   }), host);
   return { host, close: () => { dispose(); host.remove(); } };
 }
@@ -218,21 +218,6 @@ check('details: project checks announce each result politely in plain words', as
     probe.remove();
     equal(style.color, amber, 'failed project checks use amber text');
     ok(style.boxShadow.includes(amber), 'the marker uses the same amber as the text');
-  } finally { view.close(); }
-});
-
-check('details: looking for files to check uses the same plain thread line as its result', async () => {
-  const [list, setList] = createSignal<Message[]>([{ ...messages[0]!, tools: [] }]);
-  const [weighing, setWeighing] = createSignal(true);
-  const view = mountThread(list, () => true, weighing);
-  try {
-    ok(view.host.querySelector('.det-line')!.textContent!.includes(t('details.weighing')));
-    equal(view.host.querySelector('.ai .checks[data-state="weighing"]'), null, 'no detached waiting line');
-    setWeighing(false);
-    setList([{ ...list()[0]!, checks: { state: 'failed', passed: 0 } }]);
-    await settle();
-    equal(view.host.querySelectorAll('.det-line').length, 1);
-    ok(view.host.querySelector('.det-line')!.textContent!.includes(t('details.fixing')));
   } finally { view.close(); }
 });
 

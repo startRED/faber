@@ -917,7 +917,6 @@ export const ptBR: Messages = {
   'details.changeFailed': "Uma alteração salva precisa de correção",
   'details.changeFixing': "Uma alteração salva precisa de correção; o Faber está cuidando disso",
   'details.unfinished': "O trabalho não terminou",
-  'details.weighing': "Procurando alterações pra verificar",
   'details.checked': {"one":"Verificou {n} coisa","other":"Verificou {n} coisas"},
   'details.checksFailed': {"one":"{n} não funcionou","other":"{n} não funcionaram"},
   'aside.title': 'Pergunta rápida',
@@ -1166,10 +1165,10 @@ export const ptBR: Messages = {
   'follow.stop': 'Parar de acompanhar',
   'wake.checksFailed': 'As verificações do pull request {pr} falharam ({checks}). O Faber pediu ao agente que as corrija.',
   'wake.conflict': 'O pull request {pr} tem conflito com a branch base. O Faber pediu ao agente que o resolva.',
+  // Legacy histories only; nothing new produces this wake.
   'wake.checksFixing': 'As verificações do Faber falharam ({checks}). O Faber pediu ao agente que as corrija.',
   'wake.goalBroke': 'Uma meta deixou de valer: {checks}. O Faber iniciou um conserto.',
   'checks.running': 'O Faber está rodando as verificações destas mudanças…',
-  'checks.weighing': 'O Faber está vendo se algum arquivo mudou…',
   'checks.passed': { one: 'As verificações do Faber passaram ({n} verificação).', other: 'As verificações do Faber passaram ({n} verificações).' },
   'checks.failed': 'As verificações do Faber falharam: {checks}.',
   'checks.needsYou': 'As verificações do Faber falharam: {checks}. Isto precisa de você.',
@@ -1352,6 +1351,7 @@ export const ptBR: Messages = {
   'reason.keepGoing.quota': 'Parou de continuar até o {ai} ter cota de novo.',
   'reason.keepGoing.stuck': 'Continuar parou: ainda não houve entrega depois que o Faber pediu à IA que mudasse de abordagem.',
   'reason.keepGoing.billed': 'Parou de continuar: o {ai} pode ser cobrado por uso, e o Faber não gasta nele sozinho.',
+  // Legacy histories only; nothing new produces this halt.
   'reason.keepGoing.checks': 'Parou de continuar: as verificações do Faber ainda falham.',
   'error.helperEmpty': 'Escreva algo primeiro.',
   'error.aside.empty': 'Escreva uma pergunta primeiro.',

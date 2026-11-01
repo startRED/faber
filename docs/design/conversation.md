@@ -101,17 +101,11 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. It turns
   amber when it fails, conflicts or needs the person. When checks fail, Faber's own message is the loop
   mark on the next reply, its tooltip naming the pull request and its failed checks.
-- A project reply that changed files, in full access, has Faber's own checks (R146) in Technical details in the same pace-style line,
-  above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
-  "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
-  first three short failures in the data face. Faber's fix turn is the loop mark on the next reply ("Faber's checks failed (npm run
-  lint). Faber asked the agent to fix them." in its tooltip); after two in a row, or where Faber does not ask (the reply asked the
-  person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
-  While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
-  the queue. Changing permissions or reply style leaves a scheduled compaction and its exact continuation waiting for
-  the checks; an automatic correction after failed checks may replace the session with the new settings without
-  losing that pending work. A retired Codex server closes once its last
-  session finishes. The shared running-state refresh handles every end of work, including Stop, passed or failed checks,
+- The agent runs project checks explicitly with the verify tool, shown in the work log. Ending a reply starts no
+  automatic checks, file-change scan or correction turn (R-next-2). Older histories keep their check rows and fix-wake
+  tooltips. Permissions and reply-style changes preserve scheduled compaction and its exact continuation. A retired
+  server closes once its last
+  session finishes. The shared running-state refresh handles every end of work, including Stop, explicit checks ending,
   Keep going ending by itself or being turned off, archive and quota stops; removing a conversation closes its session
   too. A settings relaunch lets background commands finish on their original driver while the next reply uses the new
   settings. Commands announced after replacement still show their output and keep their own Stop. Waiting for an old

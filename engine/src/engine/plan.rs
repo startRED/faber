@@ -144,7 +144,7 @@ impl Core {
     }
 
     /// Method 2, slice 6: a message from the person right after a done closing box says the result was not accepted as it
-    /// stood. It is read once the message and its reply are in the conversation (`note_before`, on every path that starts
+    /// stood. It is read once the message and its reply are in the conversation (`count_correction`, on every path that starts
     /// or steers a turn), so a send that was refused counts nothing; Faber's own messages (`wake`) are not the person's, and
     /// a turn started again shows the same message, whose time the log takes once. shortcut: any next message counts, with
     /// no reading of its words (a thanks counts too); classify it if the number turns out too noisy.

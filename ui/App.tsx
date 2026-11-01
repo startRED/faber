@@ -1932,7 +1932,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     conversationNames={Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title]))}
                                     queued={c().queued}
                                     busy={checking()}
-                                    weighing={items().some((i) => i.conversationId === c().id && i.weighing)}
                                     onError={fail}
                                     area={current()!.area}
                                     onQueuedRecovered={showRecoveredQueue}
