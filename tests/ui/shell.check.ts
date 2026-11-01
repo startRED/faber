@@ -315,24 +315,27 @@ check('shell: over the stage, an opened subagent as a full thread is no dialog: 
   );
 });
 
-check('shell: empty Projects explains its purpose and exposes Add at 720 by 480', async () => {
+check('shell: empty Projects keeps one explanation on its home and exposes Add at 720 by 480', async () => {
   const originalAdd = api.addProject;
   let additions = 0;
   api.addProject = async () => { additions++; return null; };
   try {
     for (const { code } of LANGUAGES) {
-      await atWidth(720, () => shell([], 'none', async (root) => {
+      await atWidth(720, () => shell(['claude'], 'none', async (root) => {
         root.style.width = '720px';
         root.style.height = '480px';
         root.querySelector<HTMLButtonElement>('.topbar .menu')!.click(); await settle();
         const side = root.querySelector<HTMLElement>('.side')!;
         side.querySelectorAll<HTMLButtonElement>('.areas .area')[1].click(); await settle();
         const purpose = side.querySelector<HTMLElement>('.projects .side-empty p');
-        ok(purpose, `${code}: an empty project list explains what a project does`);
-        equal(purpose.textContent, t('empty.openProjectBody'), 'reuse the Projects home wording');
+        ok(purpose, `${code}: the existing sidebar markup is retained`);
+        equal(getComputedStyle(purpose).display, 'none', 'the home owns the explanation; the sidebar does not repeat it');
+        equal(getComputedStyle(side.querySelector('.projects .side-empty .peek')!).display, 'none', 'the duplicate illustration is absent from layout and accessibility');
+        equal(side.querySelector('.projects .side-empty span')!.textContent, t('side.noProjects'), 'the quiet list status stays');
+        const home = root.querySelector<HTMLElement>('.projects-stage.home .empty p')!;
+        equal(home.textContent, t('empty.openProjectBody'), 'Projects home still explains the folder action');
+        ok(home.getBoundingClientRect().height > 0, 'the main explanation is visible');
         const view = side.querySelector('.side-scroll')!.getBoundingClientRect();
-        const words = purpose.getBoundingClientRect();
-        ok(words.height > 0 && words.top >= view.top && words.bottom <= view.bottom, `${code}: the purpose fits before any scrolling`);
         const add = side.querySelector<HTMLButtonElement>('.projects .group-h .plus')!;
         equal(getComputedStyle(add).opacity, '1', 'the existing Add control does not require hover');
         equal(add.getAttribute('aria-label'), t('side.addProject'));

@@ -91,6 +91,10 @@ rest of the shell are in [layout.md](layout.md).
   postpones automatic opening: release, cancellation or window blur starts that same quiet period, so a permission
   button cannot move between pressing and releasing it. Returning with no button held recovers a release outside the
   window. Pointer movement alone does not postpone it, and the run button and shortcut still open it immediately.
+  When there is no room to dock (including 720 px), the automatically opened list uses a full-width strip below the page
+  and composer, capped at 30% of the work area's height and 220 px, with its own scrolling. It leaves the page's width,
+  focus and controls available and hides the horizontal resize grip. A manually opened view still uses the modal column;
+  docked and full-stage views keep their layouts (`tests/ui/changes.check.ts`).
   If the user closes it
   while questions are waiting, those questions never reopen it. Only the button stays amber.
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the

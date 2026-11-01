@@ -23,9 +23,9 @@ remain usable from the keyboard in both areas.
 - The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
   when the list refreshes, so a refresh moves nothing the person is pointing at.
-- An empty Projects list puts the existing folder-purpose sentence before its illustration and keeps the existing
-  add-folder control visible without hover. This also explains the narrow drawer without closing navigation or adding
-  a second folder action (`tests/ui/shell.check.ts`, `shell: empty Projects explains its purpose`).
+- An empty Projects list keeps its quiet status and the existing add-folder control visible without hover. The
+  duplicate folder-purpose sentence and illustration are hidden from layout and accessibility; Projects home owns
+  that explanation (`tests/ui/shell.check.ts`, `shell: empty Projects keeps one explanation`).
 - In Chat with no groups, the Groups label is visually hidden but still names the section for assistive technology; the existing New group button stays visible and keyboard reachable (`shell: empty Chat hides its Groups label`).
 - Chat groups extend the same project row, expand/collapse and menu parts: a folder name opens its [short page](chat-groups.md), and its + starts a chat there. New group is the quiet + beside Groups; naming happens in the same inline rename box as chats. Groups precede the existing outside-chat lists. A group keeps its own Pinned and date sections; search lists matching chats once in the usual flat list, with matching group names above. The chat menu adds Move to group after Export, and Remove from group when assigned; moving uses an inline labelled group picker, with Escape to cancel. The group menu offers Rename and Delete; Delete asks once and keeps its chats outside the group.
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows

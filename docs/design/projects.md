@@ -13,6 +13,8 @@ mission board and the local build card left the bundle with their 30 s poll (R17
 
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
   recent folders and saved environments, and at most three project conversations to pick up.
+  Its folder-purpose sentence and illustration appear here only: the empty sidebar keeps its quiet status and Add button,
+  with the duplicate sentence and illustration hidden from layout and accessibility (`tests/ui/shell.check.ts`).
 - With a project open, the new-conversation screen of Chat (`welcome-grid project`) scoped to the folder, in one column:
   Curioso, then the folder in short form as one quiet line in the interface size (the last two folder names,
   the full path on hover; the sidebar and the crumb already name the project, so the page says it only to screen readers), the greeting "What should we tackle?", the shared
