@@ -48,6 +48,7 @@ impl Core {
             && c.pinned_at.is_none()
             && c.queued.is_empty()
             && c.keep_going.is_none()
+            && c.waiting_on.is_none()
             && c.weighing.is_none()
             && !self.copying.contains_key(&c.id)
             && self.live.get(&c.id).is_none_or(|l| l.turn.is_none())

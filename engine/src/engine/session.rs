@@ -20,43 +20,35 @@ pub struct NewSession {
     pub step: Option<String>,
 }
 
-const NOT_YET: &str = "this verb is not built yet";
-
 impl Engine {
     /// Starts a conversation of the project `by` works in, linked to it. Gives the new id.
     pub fn session_start(&self, by: &str, new: NewSession) -> Result<String, String> {
-        let _ = (by, new);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_start(by, new))
     }
 
     /// Sends `message` to another conversation of `by`'s project as a message Faber labels. Gives what the AI is told.
     pub fn session_message(&self, by: &str, id: &str, message: &str) -> Result<String, String> {
-        let _ = (by, id, message);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_message(by, id, message))
     }
 
     /// Stops the turn of a conversation `by` started. Gives what the AI is told.
     pub fn session_stop(&self, by: &str, id: &str) -> Result<String, String> {
-        let _ = (by, id);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_stop(by, id))
     }
 
     /// Goes on with a conversation `by` started that is stopped, cut off, failed or ended, with `message` or the usual
     /// "Continue where you stopped" line. Gives what the AI is told.
     pub fn session_resume(&self, by: &str, id: &str, message: Option<&str>) -> Result<String, String> {
-        let _ = (by, id, message);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_resume(by, id, message))
     }
 
     /// Archives a conversation `by` started that is not working, not waiting for the person and not pinned.
     pub fn session_archive(&self, by: &str, id: &str) -> Result<String, String> {
-        let _ = (by, id);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_archive(by, id))
     }
 
     /// Declares that `by` waits for the conversations in `on` (all started by it) and/or for `note`; see `Conversation::waiting_on`.
     pub fn session_wait(&self, by: &str, on: Vec<String>, note: Option<String>) -> Result<String, String> {
-        let _ = (by, on, note);
-        Err(NOT_YET.into())
+        self.with(|c| c.session_wait(by, on, note))
     }
 }

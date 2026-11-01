@@ -63,6 +63,9 @@ impl Core {
 
     /// One leader of `resume_cut_leaders`, whose `members` owed nothing when Faber opened.
     fn continue_cut_leader(&mut self, id: &str, members: &[String]) {
+        if self.load(id).is_some_and(|c| c.waiting_on.is_some()) {
+            return;
+        }
         // Something a member does since (the person sent it a turn) will wake the leader when it ends.
         let woken = members.iter().any(|m| {
             self.live.get(m).is_some_and(|l| l.turn.is_some())
