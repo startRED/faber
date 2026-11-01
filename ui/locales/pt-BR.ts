@@ -2244,6 +2244,7 @@ export const ptBR: Messages = {
   'notes.322.fixed': 'A porcentagem do Claude na barra lateral e em Ajustes não fica mais presa num número antigo: ela volta a acompanhar o seu uso real da semana.',
   'notes.323.fixed': 'Numa janela pequena, os botões Instalar e Entrar da primeira execução não ficam mais escondidos sob o rodapé.',
   'notes.324.better': 'Depois de uma hora sem nada entregue, o Faber pede uma vez à IA que mude de rumo. Se continuar sem nada, o Continuar sozinho para e conta o motivo.',
+  'notes.325.fixed': 'Uma decisão que você manteve e depois apagou na Memória não volta como mantida quando um agente a escreve de novo: ela aparece como não revisada.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

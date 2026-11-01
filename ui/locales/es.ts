@@ -2257,6 +2257,7 @@ export const es: Messages = {
   'notes.322.fixed': 'El porcentaje de Claude en la barra lateral y en Ajustes ya no se queda en un número viejo: vuelve a seguir tu uso real de la semana.',
   'notes.323.fixed': 'En una ventana pequeña, los botones Instalar e Iniciar sesión del primer inicio ya no quedan ocultos bajo el pie.',
   'notes.324.better': 'Tras una hora sin nada entregado, Faber le pide una vez a la IA que cambie de enfoque. Si sigue sin nada, Seguir solo se detiene y te dice por qué.',
+  'notes.325.fixed': 'Una decisión que conservaste y luego borraste en Memoria ya no vuelve como conservada si un agente la escribe otra vez: aparece sin revisar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

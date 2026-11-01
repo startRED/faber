@@ -2257,6 +2257,7 @@ export const de: Messages = {
   'notes.322.fixed': 'Der Claude-Anteil in der Seitenleiste und in den Einstellungen bleibt nicht mehr auf einer alten Zahl hängen: Er folgt wieder deiner echten Wochennutzung.',
   'notes.323.fixed': 'In einem kleinen Fenster verschwinden die Knöpfe Installieren und Anmelden beim ersten Start nicht mehr unter der Fußleiste.',
   'notes.324.better': 'Nach einer Stunde ohne Ergebnis bittet Faber die KI einmal, anders vorzugehen. Bleibt es dabei, hört Selbst weitermachen auf und sagt dir warum.',
+  'notes.325.fixed': 'Eine Entscheidung, die du behalten und dann im Gedächtnis gelöscht hast, gilt nicht mehr als behalten, wenn ein Agent sie neu schreibt: Sie erscheint als nicht geprüft.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

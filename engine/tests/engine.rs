@@ -675,6 +675,102 @@ async fn project_memory_keep_is_stored_outside_the_project_and_follows_the_words
 }
 
 #[tokio::test]
+async fn project_memory_words_deleted_or_rewritten_in_memory_lose_their_review() {
+    use faber_engine::project::memory::{Edit, MemoryFile};
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    std::fs::create_dir(root.path().join(".faber")).unwrap();
+    let file = root.path().join(".faber/decisions.md");
+    let written = "- Use SQLite. [by AI]
+- Use tabs. [by AI]
+- Use Go. [by AI]
+";
+    std::fs::write(&file, written).unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(&data, Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|f| f.path == ".faber/decisions.md").unwrap();
+    let reviewed = || read().entries.iter().map(|e| e.reviewed).collect::<Vec<_>>();
+    let edit = |f: &MemoryFile, i: usize, text: Option<&str>, keep: bool| Edit {
+        path: f.path.clone(),
+        revision: f.revision.clone(),
+        start: f.entries[i].start,
+        end: f.entries[i].end,
+        text: text.map(Into::into),
+        keep,
+    };
+    for i in 0..3 {
+        engine.edit_project_memory(&project.id, &edit(&read(), i, None, true)).unwrap();
+    }
+    assert_eq!(reviewed(), [true, true, true]);
+    engine.edit_project_memory(&project.id, &edit(&read(), 0, None, false)).unwrap();
+    engine.edit_project_memory(&project.id, &edit(&read(), 1, Some("- Use Rust. [by AI]"), false)).unwrap();
+    // Saving the same words again takes nothing back.
+    engine.edit_project_memory(&project.id, &edit(&read(), 0, Some("- Use tabs. [by AI]"), false)).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "- Use tabs. [by AI]
+- Use Rust. [by AI]
+"
+    );
+    assert_eq!(reviewed(), [true, false]);
+    // An agent writes the deleted and the replaced words again: they wait for a new review; the kept one stays kept.
+    std::fs::write(&file, written).unwrap();
+    assert_eq!(reviewed(), [false, true, false], "a review dies with the words Memory took away");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn project_memory_an_edit_that_keeps_or_cannot_change_the_words_keeps_their_review() {
+    use faber_engine::project::memory::Edit;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    std::fs::create_dir(root.path().join(".faber")).unwrap();
+    let file = root.path().join(".faber/decisions.md");
+    std::fs::write(
+        &file,
+        "- Use SQLite.
+  It is one file. [by AI]
+",
+    )
+    .unwrap();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _rx) = engine(&data, Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|f| f.path == ".faber/decisions.md").unwrap();
+    let edit = |text: Option<&str>, keep: bool| {
+        let f = read();
+        Edit {
+            path: f.path.clone(),
+            revision: f.revision.clone(),
+            start: f.entries[0].start,
+            end: f.entries[0].end,
+            text: text.map(Into::into),
+            keep,
+        }
+    };
+    engine.edit_project_memory(&project.id, &edit(None, true)).unwrap();
+    // The editor sends its own line ends: the same words saved again keep their review.
+    engine
+        .edit_project_memory(
+            &project.id,
+            &edit(
+                Some(
+                    "- Use SQLite.
+  It is one file. [by AI]",
+                ),
+                false,
+            ),
+        )
+        .unwrap();
+    assert!(read().entries[0].reviewed);
+    // An edit that is refused takes nothing back.
+    assert!(engine.edit_project_memory(&project.id, &edit(Some("   "), false)).is_err());
+    assert!(read().entries[0].reviewed, "a refused edit leaves the review");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn project_memory_kept_item_records_upgrade_legacy_approvals_on_the_real_reader() {
     use sha2::{Digest, Sha256};
     let data = support::DataFolder::new();
