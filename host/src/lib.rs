@@ -380,6 +380,13 @@ impl Host {
                 }
             }
         }
+        if command == "asks" {
+            let requests = match caller {
+                Caller::Agent { conversation: Some(id) } => lock(&self.asks).for_conversation(id),
+                _ => Vec::new(),
+            };
+            return serde_json::to_value(requests).map_err(|_| Failure::key("error.host.badReply"));
+        }
         self.dispatch(command, args).await
     }
 
