@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "better": {
+      "en": "Settings uses simpler words, and access choices explain what the AI can do before you choose.",
+      "pt-BR": "As Configurações usam palavras mais simples, e as opções de acesso explicam o que a IA pode fazer antes da escolha.",
+      "es": "Los Ajustes usan palabras más sencillas, y las opciones de acceso explican qué puede hacer la IA antes de elegir.",
+      "fr": "Les réglages emploient des mots plus simples, et les choix d’accès expliquent ce que l’IA peut faire avant de choisir.",
+      "de": "Die Einstellungen verwenden einfachere Wörter, und die Zugriffsoptionen erklären vor der Auswahl, was die KI tun darf."
+    }
+  },
+  "decisions": []
+}

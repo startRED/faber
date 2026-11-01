@@ -1,4 +1,4 @@
-import { createSignal, createUniqueId, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, createUniqueId, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { keepForExit } from './motion.ts';
@@ -162,16 +162,18 @@ export function Fold(props: { id: string; title: string; hint?: string; children
 
 /** A select whose open menu shows each choice with its own line. Focus stays on the button (a select-only combobox); the
  * arrows move, Enter or Space picks, and Esc closes the menu without leaving Settings. */
-export function PickMenu<T extends string>(props: { id: string; label: string; value: T; options: [T, string, string][]; onPick: (v: T) => void }) {
+export function PickMenu<T extends string>(props: { id: string; label: string; value: T; options: [T, string, string][]; onPick: (v: T) => void; disabled?: boolean; compact?: boolean }) {
   const [open, setOpen] = createSignal(false);
   const [active, setActive] = createSignal(0);
   // The menu stays in the page for its short exit, and only in full motion.
   const shown = keepForExit(open);
   let root: HTMLDivElement | undefined;
   let button: HTMLButtonElement | undefined;
+  let menu: HTMLDivElement | undefined;
   const at = () => Math.max(0, props.options.findIndex(([v]) => v === props.value));
   const name = () => props.options[at()]?.[1] ?? '';
   const show = () => {
+    if (props.disabled) return;
     setActive(at());
     setOpen(true);
   };
@@ -180,11 +182,22 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
     button?.focus();
   };
   const pick = (index: number) => {
+    if (props.disabled) return;
     const choice = props.options[index];
     if (choice) props.onPick(choice[0]);
     hide();
   };
   const move = (step: number) => setActive((i) => Math.min(props.options.length - 1, Math.max(0, i + step)));
+  createEffect(() => { if (props.disabled) setOpen(false); });
+  createEffect(() => {
+    const index = active();
+    if (!open()) return;
+    queueMicrotask(() => {
+      const option = menu?.children[index] as HTMLElement | undefined;
+      if (!open() || !menu?.isConnected || !option) return;
+      menu.scrollTop = Math.min(option.offsetTop, Math.max(menu.scrollTop, option.offsetTop + option.offsetHeight - menu.clientHeight));
+    });
+  });
   onMount(() => {
     const away = (e: PointerEvent) => {
       if (open() && root && !root.contains(e.target as Node)) setOpen(false);
@@ -193,6 +206,7 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
     onCleanup(() => document.removeEventListener('pointerdown', away));
   });
   const onKey = (e: KeyboardEvent) => {
+    if (props.disabled) return;
     const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' ', 'Escape', 'Tab'];
     if (!keys.includes(e.key)) return;
     if (e.key === 'Tab') return setOpen(false);
@@ -214,7 +228,7 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
     <div class="st-pick" ref={(el) => (root = el)} on:keydown={onKey}>
       <button
         type="button"
-        class="pill st-pick-btn"
+        class={props.compact ? 'chip choose mode st-pick-btn' : 'pill st-pick-btn'}
         id={props.id}
         ref={(el) => (button = el)}
         role="combobox"
@@ -223,13 +237,15 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
         aria-controls={`${props.id}-list`}
         aria-activedescendant={open() ? `${props.id}-opt-${active()}` : undefined}
         aria-label={props.label}
+        aria-description={props.options[at()]?.[2]}
+        disabled={props.disabled}
         onClick={() => (open() ? setOpen(false) : show())}
       >
         <span>{name()}</span>
         <Icon name="down" small />
       </button>
       <Show when={shown()}>
-        <div class="st-menu" classList={{ leaving: !open() }} inert={!open()} id={`${props.id}-list`} role="listbox" aria-label={props.label}>
+        <div class="st-menu" ref={(el) => (menu = el)} classList={{ leaving: !open() }} inert={!open()} id={`${props.id}-list`} role="listbox" aria-label={props.label}>
           <For each={props.options}>
             {([v, text, line], i) => (
               <div
