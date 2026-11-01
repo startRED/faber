@@ -311,13 +311,13 @@ fn creative_worklog(ctx: &mut Ctx, language: &str) -> Result {
     app.page.click(&projects)?;
     app.page.click(&css(".prow .item").has_text("Demo"))?;
     app.page.click(&css(".proj-chats .item").has_text(TITLE))?;
-    app.page.wait_visible(&css("article.ai details.activity"))?;
-    app.page.click(&css("article.ai details.activity > summary"))?;
+    app.page.wait_visible(&css("article.ai .steps.one .step-line"))?;
+    app.page.click(&css("article.ai .steps.one .step-line"))?;
     let label = app.page.text_of("tool.creativeJudge")?;
     let mut peak = before;
     for width in [720, 1028, 1280] {
         super::shell::set_size(&mut app.page, width, 800)?;
-        app.page.wait_visible(&css("article.ai .tools").has_text(&label))?;
+        app.page.wait_visible(&css("article.ai .steps.one").has_text(&label))?;
         let text = app.page.inner_text(&css("article.ai"))?;
         ensure(PRIVATE.iter().all(|draft| !text.contains(draft)), || format!("{language}/{width}: private draft shown in the answer"))?;
         ensure(app.page.eval("document.documentElement.scrollWidth <= innerWidth")? == true, || {
@@ -419,10 +419,17 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
     page.wait_for_within(
         "the model's name in the header",
         &format!(
-            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.querySelector('b')?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
+            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.querySelector('b')?.innerText === '{name}' && ('{first_words}' === '' || [...document.querySelectorAll('article.ai .md')].some(p => p.innerText.includes('{first_words}'))); }})()"
         ),
         Duration::from_secs(60),
     )?;
+    if first_words.is_empty() {
+        same(
+            page.eval("[...document.querySelectorAll('article.ai .md')].map(p => p.innerText).join('').trim()")?,
+            json!(""),
+            "the name appears before the first word",
+        )?;
+    }
     let during = page.eval(HEADER)?;
     if let Some(height) = choosing {
         same(during["height"].clone(), height, "the header's height once the name is there")?;
@@ -692,7 +699,7 @@ const THREAD: &str = r#"(() => {
   const parts = [
     ['your message', '.thread .you', 4.5, true],
     ['the model name', 'article.ai .model b', 4.5, true],
-    ['the activity row', 'article.ai .activity > summary', 4.5, true],
+    ['the activity row', 'article.ai .steps.one .step-line, article.ai .steps-head', 4.5, true],
     ['the question title', '.thread .ask b', 4.5, true],
     ['the question text', '.thread .ask pre', 4.5, true],
     ['Allow', '.thread .ask .btn.primary', 4.5, true],
@@ -2137,8 +2144,12 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
     let model = app.page.labelled("composer.model")?;
     app.page.select_option(&model, "Claude Haiku")?;
     ask(&mut app.page, QUESTION)?;
-    app.page
-        .wait_for("live tool output to fill the thread", "document.querySelectorAll('article.ai .activity .tools > span').length >= 25")?;
+    app.page.wait_visible(&css("article.ai .steps-head"))?;
+    app.page.click(&css("article.ai .steps-head"))?;
+    app.page.wait_for(
+        "live tool output to fill the thread",
+        "document.querySelectorAll('article.ai .steps .step:not(.thought)').length >= 25",
+    )?;
     app.page.fill(&css(".composer textarea"), "Synthetic unsent draft")?;
     let point = app.page.eval(
         "(() => { const r=document.querySelector('.thread').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()",
@@ -2147,7 +2158,7 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
         .cdp
         .call("Input.dispatchMouseEvent", json!({"type":"mouseWheel","x":point["x"],"y":point["y"],"deltaX":0,"deltaY":-100000}))?;
     app.page.wait_for("the person to reach the old question", "document.querySelector('.thread').scrollTop < 2")?;
-    let before = app.page.eval("(() => {window.__streamQuestion=document.querySelector('.you'); const t=document.querySelector('.thread');return {offset:window.__streamQuestion.getBoundingClientRect().top-t.getBoundingClientRect().top,tools:document.querySelectorAll('article.ai .activity .tools > span').length};})()")?;
+    let before = app.page.eval("(() => {window.__streamQuestion=document.querySelector('.you'); const t=document.querySelector('.thread');return {offset:window.__streamQuestion.getBoundingClientRect().top-t.getBoundingClientRect().top,tools:document.querySelectorAll('article.ai .steps .step:not(.thought)').length};})()")?;
     for reduced in [false, true] {
         super::system_motion(&mut app.page, reduced)?;
         for _ in 0..3 {
@@ -2155,7 +2166,7 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
             app.page.wait_visible(&css(".runcol"))?;
             app.page.click(&css(".pane-aside"))?;
             app.page.wait_for("the side chat to finish leaving", "!document.querySelector('.runcol')")?;
-            let state = app.page.eval("(() => {const t=document.querySelector('.thread'),q=document.querySelector('.you');return {same:q===window.__streamQuestion,offset:q.getBoundingClientRect().top-t.getBoundingClientRect().top,top:t.scrollTop,draft:document.querySelector('.composer textarea').value,tools:document.querySelectorAll('article.ai .activity .tools > span').length,finished:!!document.querySelector('article.ai .actions')};})()")?;
+            let state = app.page.eval("(() => {const t=document.querySelector('.thread'),q=document.querySelector('.you');return {same:q===window.__streamQuestion,offset:q.getBoundingClientRect().top-t.getBoundingClientRect().top,top:t.scrollTop,draft:document.querySelector('.composer textarea').value,tools:document.querySelectorAll('article.ai .steps .step:not(.thought)').length,finished:!!document.querySelector('article.ai .actions')};})()")?;
             ensure(state["same"] == true && state["top"].as_f64().is_some_and(|n| n < 2.0), || {
                 format!("pane toggling replaced the old question or stole reading position: {state}")
             })?;
@@ -2168,7 +2179,7 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
     }
     app.page.wait_for(
         "more tool output after the reading probe",
-        &format!("document.querySelectorAll('article.ai .activity .tools > span').length > {}", before["tools"]),
+        &format!("document.querySelectorAll('article.ai .steps .step:not(.thought)').length > {}", before["tools"]),
     )?;
     ctx.shot(&mut app, "streaming-panes-reading-preserved")?;
     let stop = app.page.named("button", "composer.stop")?;
@@ -2215,15 +2226,15 @@ fn long_streaming_answer(ctx: &mut Ctx) -> Result {
         started.elapsed().as_secs_f64(),
         samples.join(" ")
     ));
+    app.page.eval("document.querySelectorAll('article.ai .steps-head[aria-expanded=\"false\"]').forEach(button => button.click())")?;
     let shown = app.page.eval(
-        "(() => { const chips = [...document.querySelectorAll('article.ai .activity .tools > span')]; return { n: chips.length, first: chips[0]?.textContent, last: chips.at(-1)?.textContent, summary: document.querySelector('article.ai .activity summary')?.textContent }; })()",
+        "(() => { const rows = [...document.querySelectorAll('article.ai .steps .step:not(.thought)')]; return { n: rows.length, first: rows[0]?.textContent, last: rows.at(-1)?.textContent }; })()",
     )?;
     same(shown["n"].as_u64(), Some(STEPS as u64), "steps on screen")?;
     ensure(shown["first"].as_str().is_some_and(|t| t.contains("src/part_0.rs")), || format!("the first step: {shown}"))?;
     ensure(shown["last"].as_str().is_some_and(|t| t.contains(&format!("src/part_{}.rs", STEPS - 1))), || {
         format!("the last step: {shown}")
     })?;
-    ensure(shown["summary"].as_str().is_some_and(|t| t.contains(&format!("{STEPS} steps"))), || format!("the work log: {shown}"))?;
     ensure(peak - before <= GROWTH_MB, || {
         format!("the app grew {:.0} MB while the reply streamed (from {before:.0} to {peak:.0} MB)", peak - before)
     })?;

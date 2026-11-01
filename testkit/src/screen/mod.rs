@@ -28,6 +28,8 @@ pub mod sentinel;
 pub mod settings;
 pub mod setup;
 pub mod shell;
+pub mod streaming;
+pub mod thread_order;
 pub mod visual_network;
 
 use crate::app::{Ctx, Paths};
@@ -68,6 +70,8 @@ pub fn all() -> Vec<Scenario> {
         .chain(draft_attachments::scenarios())
         .chain(reading::scenarios())
         .chain(long_session::scenarios())
+        .chain(streaming::scenarios())
+        .chain(thread_order::scenarios())
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
@@ -121,6 +125,7 @@ impl Costs {
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
     (long_session::NAME, "memory"),
+    (streaming::NAME, "processor, memory and main-thread long tasks while a reply streams"),
     (app::CREATIVE_WORKLOG[0], "processor, memory"),
     (app::CREATIVE_WORKLOG[1], "processor, memory"),
     (app::CREATIVE_WORKLOG[2], "processor, memory"),

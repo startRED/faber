@@ -1,6 +1,6 @@
 # Conversation
 
-Answers with their bar, the person's messages and the viewer. The work log above an answer is in [work-log.md](work-log.md). Window widths, the sidebar
+Answers with their bar, the person's messages and the viewer. The steps and thinking inside an answer are in [work-log.md](work-log.md). Window widths, the sidebar
 and the running column are in [layout.md](layout.md); helper rows, memory waits and creative comparisons are in
 [subagents.md](subagents.md).
 
@@ -37,8 +37,8 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   then "Done", "Done · 12 min of work" once the work took a minute or more, and on the newest reply "· updated 3 min ago"
   ("just now" under a minute, none past a day). A working reply shows only this text in the row; the buttons join it when
   done, so the row does not grow. The agent is done when its last message ended and no tool call of the reply is open,
-  though the CLI may close its turn up to a minute later (its Stop hooks): from then the work folds into
-  its activity, the buttons appear, the running column and the topbar's count leave it out, and the composer reads Send,
+  though the CLI may close its turn up to a minute later (its Stop hooks): from then the buttons appear, the running
+  column and the topbar's count leave it out, and the composer reads Send,
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before times were kept, a stop and an error
   say nothing here. Nothing animates.
@@ -50,10 +50,14 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   style; a failure (`reason.failed`, and `reason.other` for an unknown ending) keeps the red note (C001).
   A plan limit is the quota card's, and an ending the CLI reports as a stop says nothing. The line is a sentence from
   `ui/locales/`, never the CLI's own word.
-- In the work log, what the agent wrote between steps shows its last two paragraphs; earlier ones wait under a quiet
-  "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
-- The caret blinks only while words arrive; a reply at work after its words shows its step under them in the status
-  line's style, or "Thinking…" with its thinking headline once words stop. Older messages without decision rows keep the loop mark after the next reply's model (R241; the
+- A reply shows as it happened (`ui/timeline.ts`): stretches of the agent's words (`div.md`), steps and thinking
+  (`Steps`, see [work-log.md](work-log.md)), and helper rows (`AgentRow`, see [subagents.md](subagents.md)) appear in the
+  order they arrived. The agent's words never fold.
+- The caret blinks on the last stretch of words only while words arrive (before the first word, and for 1.5 s after each
+  text change, never while a step runs). When nothing in the reply already shows the agent at work (no running step, live
+  thought, running helper or arriving words, and no question or quota card waiting), one quiet live line
+  (`div.activity-latest.live-line`) under the reply says what the agent is doing now (its `status` words, else
+  "Thinking…"). Older messages without decision rows keep the loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check
@@ -90,7 +94,7 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   at the end. Its planning step uses the shared plan approval card above; Keep planning leaves edits to the composer.
   Retry keeps the report's approved research context; a later ordinary message uses ordinary instructions,
   without interrupting another Codex conversation underway.
-  Web searches remain ordinary work-log chips. There is no separate report surface (`tests/ui/research.check.ts`).
+  Web searches remain ordinary step rows. There is no separate report surface (`tests/ui/research.check.ts`).
 - Keep going (R199): the chip, its quiet lines, its quota warning and what it shows on coming back are in
   [keep-going.md](keep-going.md).
 - A project reply that opened, queued or pushed a pull request has one pace-style line in Technical details (R200): its words ("Following
@@ -113,9 +117,13 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   settings. Commands announced after replacement still show their output and keep their own Stop. Waiting for an old
   shared-server thread to close blocks rewind without keeping the current idle session alive. Stop leaves waiting messages in the queue without
   keeping a retired session alive; the person can send them later on a new session. Nothing moves, and no setting or first-run step comes with it.
-- While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
-  (`ui/markdown.tsx`): an unchanged block keeps its DOM and only the open one is parsed and sanitised
-  again. A tick that changed only tools builds no text. Everything that reaches the page passes DOMPurify.
+- While an answer streams the engine reports it at most every 33 ms, and each update carries only what changed: the
+  words and thinking added since the last one (`textFrom`, `thinkingFrom` in `host/src/feed.rs`) and the steps that
+  changed (`toolsFrom`), rebuilt and combined in `ui/opening.ts`. The screen applies every waiting event in one batch
+  once per animation frame (`ui/frame.ts`, with a 100 ms fallback while hidden), keeps unchanged timeline parts as the
+  same object (`keepParts` in `ui/timeline.ts`), and draws the text block by block (`ui/markdown.tsx`): an unchanged
+  block keeps its DOM and only the open one is parsed and sanitised again. A tick that changed only tools builds no text.
+  Everything that reaches the page passes DOMPurify.
 
 - [Queued messages and editing](queue.md).
 - Agent-to-agent recados use that same queue with a quiet origin line while pending, never the person's message

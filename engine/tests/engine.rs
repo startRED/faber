@@ -1,7 +1,7 @@
 use crate::support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Experience, MemberState, Message, Permissions, Role, Settings, Setup, Status, Vendor};
+use faber_engine::model::{Area, Experience, MemberState, Message, Permissions, Role, Settings, Setup, Status, ThinkingMark, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -2797,6 +2797,40 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     assert_eq!(reply.text_breaks.as_ref().unwrap()[0], blocks[0].encode_utf16().count() + 2);
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["messages"][1]["textBreaks"], serde_json::json!(reply.text_breaks));
+    // Each step records where the words stood when it started, so the thread draws them in the order they happened (W1).
+    let tools = reply.tools.as_ref().unwrap();
+    let len = reply.text.encode_utf16().count();
+    assert!(tools.iter().all(|t| t.at.is_some_and(|at| at <= len)), "{tools:?}");
+    assert!(tools.windows(2).all(|w| w[0].at <= w[1].at), "steps keep their order among the words");
+    let first_break = reply.text_breaks.as_ref().unwrap()[0];
+    assert!(tools.iter().any(|t| t.at == Some(first_break - 2)), "the step between the two blocks sits at the end of the first");
+    assert_eq!(saved["messages"][1]["tools"][0]["at"], serde_json::json!(tools[0].at));
+}
+
+#[tokio::test]
+async fn each_piece_of_thinking_records_where_it_falls_among_the_words() {
+    let thinking = |text: &str| Entry {
+        input: false,
+        msg: serde_json::json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":text}}}),
+    };
+    let mut entries = fixture("claude", "chat");
+    let first = entries.iter().position(|e| e.msg["event"]["delta"]["type"] == "text_delta").unwrap();
+    let last = entries.iter().rposition(|e| e.msg["event"]["delta"]["type"] == "text_delta").unwrap();
+    entries.insert(last + 1, thinking("Check the wording."));
+    entries.insert(first, thinking(" again."));
+    entries.insert(first, thinking("Light scatters"));
+    let dir = support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(entries).spawn);
+    engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.thinking.as_deref(), Some("Light scatters again.Check the wording."));
+    let at = reply.text.encode_utf16().count();
+    assert_eq!(
+        reply.thinking_marks,
+        [ThinkingMark { from: 0, at: 0, steps: 0 }, ThinkingMark { from: "Light scatters again.".len(), at, steps: 0 }],
+        "a piece that follows new words starts a new place; one that follows only thinking joins it"
+    );
 }
 
 #[tokio::test]

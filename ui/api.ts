@@ -65,6 +65,8 @@ export interface ToolUse {
   name: string;
   input: unknown;
   ok?: boolean;
+  /** Where the reply's words stood when the agent's own call started, in UTF-16 units (`ui/timeline.ts`). */
+  at?: number;
   /** No running CLI owns this unfinished agent call after restore or copy. */
   interrupted?: boolean;
   output?: string;
@@ -109,9 +111,10 @@ export interface SameTool {
   id: string;
   same: true;
 }
-/** A reply as an update brings it (`src-tauri/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
- * holds them, and after them a step that did not change is a `SameTool`. `upsert` (`ui/opening.ts`) makes it whole again. */
-export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number };
+/** A reply as an update brings it (`host/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
+ * holds them, and after them a step that did not change is a `SameTool`; with `textFrom` (`thinkingFrom`) its text
+ * (thinking) is only what was added after that many UTF-16 units. `upsert` (`ui/opening.ts`) makes it whole again. */
+export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number; textFrom?: number; thinkingFrom?: number };
 export interface Permission {
   requestId: string;
   tool: string;
@@ -148,6 +151,8 @@ export interface Message {
   took?: number;
   textBreaks?: number[];
   activityEnd?: number;
+  /** Where each piece of the thinking starts and falls among the words and the steps (`ui/timeline.ts`). */
+  thinkingMarks?: { from: number; at: number; steps: number }[];
   images?: Image[];
   attachments?: string[];
   vendor?: Vendor;

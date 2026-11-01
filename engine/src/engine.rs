@@ -2640,8 +2640,17 @@ impl Core {
                 {
                     l.settled = false;
                 }
-                if let Some(m) = self.turn(conv) {
-                    m.thinking.get_or_insert_default().push_str(&delta);
+                if let Some(m) = self.turn(conv)
+                    && !delta.is_empty()
+                {
+                    // A piece of thinking after new words or a new step of the agent's own starts a new place in the thread.
+                    let at = m.text.encode_utf16().count();
+                    let steps = m.tools.iter().flatten().filter(|t| t.parent.is_none()).count();
+                    let thinking = m.thinking.get_or_insert_default();
+                    if m.thinking_marks.last().is_none_or(|mark| (mark.at, mark.steps) != (at, steps)) {
+                        m.thinking_marks.push(crate::model::ThinkingMark { from: thinking.encode_utf16().count(), at, steps });
+                    }
+                    thinking.push_str(&delta);
                 }
             }
             EngineEvent::Tool { id, name, input, parent } => {
@@ -2677,7 +2686,11 @@ impl Core {
                         check: false,
                         started: Some(now()),
                         ended: None,
+                        at: None,
                     };
+                    if tool.parent.is_none() {
+                        tool.at = Some(m.text.encode_utf16().count());
+                    }
                     if matches!(tool.name.as_str(), "Agent" | "Task" | "Helper") {
                         tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
                     }
