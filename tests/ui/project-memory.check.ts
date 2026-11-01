@@ -43,8 +43,14 @@ check('project memory: the project page lists each source and line, edits and de
   }), root);
   try {
     equal(reads, 0, 'a closed fold reads nothing');
+    equal(root.querySelector('.project-memory:not(.project-goals) .project-summary')?.textContent, t('memory.summary'));
+    equal(root.querySelector('.project-goals .project-summary')?.textContent, t('goals.summary'));
+    for (const fold of root.querySelectorAll<HTMLButtonElement>('.project-memory > button')) { equal(fold.getAttribute('aria-expanded'), 'false'); ok(fold.tabIndex >= 0); }
     button(root, 'memory.title').click(); await settle();
     equal(reads, 1);
+    equal(button(root, 'memory.title').getAttribute('aria-expanded'), 'true');
+    equal(button(root, 'memory.title').getAttribute('aria-describedby'), 'memory-summary');
+    equal(root.querySelector('#memory-summary')?.textContent, t('memory.summary'));
     ok(root.textContent!.includes('Claude Code · CLAUDE.md:3'));
     ok(root.textContent!.includes('Codex · src/AGENTS.override.md:1'));
     ok(root.textContent!.includes('Faber · .faber/learning.md'));
@@ -64,6 +70,8 @@ check('project memory: the project page lists each source and line, edits and de
     equal(reads, 3);
     button(root, 'memory.refresh').click(); await settle(); equal(reads, 4);
     button(root, 'memory.title').click(); await settle();
+    equal(button(root, 'memory.title').getAttribute('aria-expanded'), 'false');
+    equal(root.querySelector('#memory-summary')?.textContent, t('memory.summary'));
     button(root, 'memory.title').click(); await settle(); equal(reads, 5, 'reopening rereads');
   } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
 });

@@ -1,7 +1,7 @@
 //! Stable product contract. Hard controls remain in driver policy and the engine.
 use crate::model::ReplyStyle;
 
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 /// The evidence contract lives in `PROJECT_DETAILS`, not in the common persona: only a project's agent has tools that produce receipts, and Chat talks like the AI itself.
 /// Task 130 (from the delay audit of 2026-10-29): project agents slept up to 47 minutes a day and polled pull requests
 /// hundreds of times, although Faber follows pull requests and background commands wake the agent.

@@ -31,9 +31,15 @@ export const finished = (animations: Animation[], limit = 1500): Promise<unknown
  * Runs matching registered checks, in registration order, and reports each one. `onStart` hears each check just
  * before it runs, so a runner can tell a slow page from a stuck one.
  */
-export async function runAll(onStart?: (index: number, total: number, name: string) => void, filter?: string, checks = registry): Promise<Result[]> {
+export async function runAll(
+  onStart?: (index: number, total: number, name: string) => void,
+  filter?: string,
+  checks = registry,
+  /** Starts of names of checks to leave out: what the shell under test cannot do yet (`shell-gaps.ts`). */
+  skip: readonly string[] = [],
+): Promise<Result[]> {
   const results: Result[] = [];
-  const selected = checks.filter(({ name }) => filter === undefined || name.includes(filter));
+  const selected = checks.filter(({ name }) => (filter === undefined || name.includes(filter)) && !skip.some((start) => name.startsWith(start)));
   let timedOut: string | undefined;
   for (const [index, { name, run }] of selected.entries()) {
     if (timedOut !== undefined) {

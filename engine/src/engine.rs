@@ -4519,7 +4519,8 @@ impl Core {
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
-            Vendor::Claude => start_claude(
+            Vendor::Claude => start_conversation_claude(
+                conv,
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
@@ -5434,10 +5435,58 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
     Some(&mut messages[at])
 }
 
+fn start_conversation_claude(id: &str, opts: ClaudeOptions, sink: EventSink) -> Session {
+    crate::proc::as_conversation(id, || start_claude(opts, sink))
+}
+
 #[cfg(test)]
 mod tool_in_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn proc_conversation_session_starts_its_spawner_with_its_identity() {
+        crate::proc::set_token_minter(Arc::new(|id| format!("test-{id}")));
+        let seen = Arc::new(Mutex::new(None));
+        let record = seen.clone();
+        let spawn: crate::proc::Spawner = Arc::new(move |bin, args, cwd| {
+            let command = crate::proc::marked(bin, args, cwd);
+            let env = command
+                .as_std()
+                .get_envs()
+                .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned())))
+                .collect::<std::collections::HashMap<_, _>>();
+            *record.lock().unwrap() = Some(env);
+            Err(std::io::Error::other("test"))
+        });
+        let launch = ClaudeLaunch {
+            area: Area::Chat,
+            model: None,
+            effort: None,
+            resume: None,
+            user_hooks: false,
+            permissions: Permissions::Ask,
+            instructions: None,
+            research: None,
+            group_instructions: None,
+            user_name: None,
+            flags: Default::default(),
+            tuning: Default::default(),
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            leads: false,
+            verify: false,
+            progress: false,
+            tools: Default::default(),
+        };
+        let opts = ClaudeOptions { bin: "test".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None };
+        start_conversation_claude("session-one", opts, Arc::new(|_| {}));
+        let guard = seen.lock().unwrap();
+        let env = guard.as_ref().unwrap();
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).unwrap(), "test-session-one");
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "session-one");
+    }
 
     #[tokio::test]
     async fn streamed_reply_events_and_open_keep_captured_bytes_out_of_the_screen_store() {

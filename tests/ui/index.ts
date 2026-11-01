@@ -13,6 +13,7 @@ import type { Key } from '../../ui/locales/en.ts';
 import { runAll, type Result } from './check.ts';
 import { mojibake } from '../ux/mojibake.ts';
 import { crash, progress, report } from './crash.ts';
+import { shellGaps } from './shell-gaps.ts';
 import { ignoreSystemMotion } from './system-motion.ts';
 import './appearance.check.ts';
 import './check.check.ts';
@@ -99,6 +100,7 @@ import './steer.check.ts';
 import './edit-queued.check.ts';
 import './stop-helpers.check.ts';
 import './thread.check.ts';
+import './results.check.ts';
 import './faber-act.check.ts';
 import './viewer.check.ts';
 import './tutorial.check.ts';
@@ -143,7 +145,7 @@ window.__faberMojibake = mojibake;
 export async function runChecksOnBoot(): Promise<void> {
   try {
     await ignoreSystemMotion();
-    report(await runAll(progress, window.__faberChecksFilter));
+    report(await runAll(progress, window.__faberChecksFilter, undefined, await shellGaps()));
   } catch (error: unknown) {
     crash(String(error));
   }

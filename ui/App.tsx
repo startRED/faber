@@ -1926,6 +1926,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                   <Thread
                                     workingFolder={c().workingFolder}
                                     messages={c().messages}
+                                    endState={state().conversations.find((conversation) => conversation.id === c().id)?.state}
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}
                                     onRewind={() => go(place())}

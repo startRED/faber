@@ -13,7 +13,8 @@ export function ProjectMemory(props: { projectId: string }) {
   const [open, setOpen] = createSignal(false);
   return (
     <section class="project-memory">
-      <button type="button" class="btn ghost" aria-expanded={open()} onClick={() => setOpen(!open())}>{t('memory.title')}</button>
+      <button type="button" class="btn ghost" aria-describedby="memory-summary" aria-expanded={open()} onClick={() => setOpen(!open())}>{t('memory.title')}</button>
+      <p id="memory-summary" class="project-summary">{t('memory.summary')}</p>
       <Collapse open={open()}>
         <Show when={open() && props.projectId} keyed>{(id) => <MemoryList projectId={id} />}</Show>
       </Collapse>

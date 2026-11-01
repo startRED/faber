@@ -76,6 +76,10 @@ const MAX_REQUEST: usize = 1024 * 1024;
 /// Faber on the same data) is an error at once.
 pub async fn serve(data: &Path, backend: Arc<dyn Backend>) -> io::Result<()> {
     let secret = Arc::new(Secret::fresh()?);
+    serve_with_secret(data, backend, secret).await
+}
+
+pub(crate) async fn serve_with_secret(data: &Path, backend: Arc<dyn Backend>, secret: Arc<Secret>) -> io::Result<()> {
     let guard = Guard::watching(backend.subscribe());
     match Address::of(data) {
         Address::Pipe(name) => serve_pipe(&name, data, backend, guard, secret).await,
