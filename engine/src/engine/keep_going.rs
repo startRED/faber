@@ -22,11 +22,6 @@ Stop only when the whole request is done and verified, or when only the person c
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
 with outcome done, saying what you checked; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
 
-/// What the agent is told once, when it first says nothing is left: a second look at the original request before Faber believes it.
-pub const CHECK: &str = "Before you stop: reread the person's original request word for word. List anything that is not done or not \
-verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with outcome done again, saying what you checked; only if you \
-have no wrap_up tool, end your reply with this line alone again: [keep going: stop]";
-
 /// The line the agent ended its reply with when nothing was left, before the closing box's `done` (task 017). Still read for a
 /// release, so a run under way stops, and always taken off the answer.
 pub const STOP: &str = "[keep going: stop]";
@@ -125,23 +120,20 @@ pub fn next(kg: &KeepGoing, ended: Ended, room: Result<(), &'static str>) -> Nex
     if ended.asked {
         return Next::Halt("reason.keepGoing.asked");
     }
-    // A stop after a stop ends it, whoever sent the turn: the person asking "is it done?" between Faber's turns must not keep
-    // it going forever without a word (task 015). A first stop, in any turn, is checked once.
-    if ended.said_stop && kg.checked {
+    if ended.said_stop {
         return Next::Halt("reason.keepGoing.done");
     }
     if kg.work >= MAX_TURNS {
         return Next::Halt("reason.keepGoing.cap");
     }
     // The closing box's question waits for the person like a question card, then gets its first button.
-    if ended.boxed && !ended.said_stop {
+    if ended.boxed {
         return Next::Wait { secs: QUESTION_WAIT, why: "question" };
     }
     if let Err(why) = room {
         return Next::Halt(why);
     }
-    // The first stop is not believed yet: the check turn goes at once.
-    if ended.idle && !ended.said_stop {
+    if ended.idle {
         return Next::Wait { secs: rest(kg), why: "rest" };
     }
     Next::Continue
@@ -300,11 +292,11 @@ impl Core {
         }
         c.keep_going = on.then(|| KeepGoing { since: now(), ..KeepGoing::default() });
         drop_own_turns(c);
-        // While Faber's checks of the reply run, their end goes on instead (`verifying.rs`).
+        // A pending compaction owns the continuation until it ends.
         let idle_reply = c
             .messages
             .last()
-            .filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming) && !verifying::checking(c))
+            .filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming) && !c.compacting)
             .map(|m| m.id.clone());
         // A question that already waits is answered for the person if they do not come back in time.
         let waiting: Vec<(String, String)> = c
@@ -405,13 +397,6 @@ impl Core {
     pub(super) fn keep_going_ended(&mut self, conv: &str, turn_id: Option<&str>) -> Option<String> {
         let reply_id = turn_id?;
         let c = self.convs.get_mut(conv)?;
-        // Whether Faber sent the turn itself: a turn of the person's in between never takes back a stop the agent already said.
-        let own = c
-            .messages
-            .len()
-            .checked_sub(2)
-            .and_then(|i| c.messages.get(i))
-            .is_some_and(|u| u.wake.as_ref().is_some_and(|w| matches!(w.why.as_str(), "wake.keepGoing" | "wake.stuck")));
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
         // The stop line leaves every reply, Keep going on or off: an agent told about it once may write it again later.
         let stripped = {
@@ -486,9 +471,7 @@ impl Core {
         } else {
             next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
         };
-        // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
-            kg.checked = said_stop || (before.checked && !own);
             kg.failed = 0;
             kg.last_error = None;
         }
@@ -587,8 +570,7 @@ impl Core {
     }
 
     /// Turned on after a reply that ended (done, failed or stopped), or a wait that ended: only a lack of room can hold it
-    /// back, and a message the person left goes first. A rest that has not ended yet holds it (the end of Faber's checks can
-    /// call this while it runs).
+    /// back, and a message the person left goes first. A rest that has not ended yet holds it.
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         let Some(c) = self.convs.get(conv) else { return };
         if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
@@ -597,7 +579,7 @@ impl Core {
             return;
         }
         // A closing box that asks the person something gets its ten minutes first, however Faber came here (the end of the
-        // turn, Keep going turned on, the end of Faber's checks).
+        // turn or Keep going turned on).
         let boxed =
             c.messages.iter().rev().find(|m| m.role == Role::Assistant).filter(|m| m.id == reply_id).and_then(|m| m.wrap_up.as_ref());
         if boxed.is_some_and(asks) && c.keep_going.as_ref().is_some_and(|k| k.asked_on.as_deref() != Some(reply_id)) {
@@ -650,9 +632,6 @@ impl Core {
                 kg.turns += 1;
                 kg.moves = 0;
                 kg.failed_on = None;
-                if kg.checked {
-                    text = CHECK.to_string();
-                }
                 if let Some(answer) = &chosen {
                     kg.answered += 1;
                     text = format!("{}{text}", answered_for_you(answer));
@@ -930,20 +909,6 @@ impl Core {
         kg.moves += 1;
         kg.moves <= MAX_MOVES
     }
-
-    /// Faber could not send a turn of its own (asking the agent to fix a failed check) while keep going is on: it tries
-    /// again instead of stopping when it was busy with an update, or when the failure already set its own wait (`fail_reply`).
-    /// True when it does.
-    pub(super) fn keeps_trying(&mut self, conv: &str, reply_id: &str, error: &str) -> bool {
-        if self.convs.get(conv).is_none_or(|c| c.keep_going.is_none()) {
-            return false;
-        }
-        if error == "error.update.activeOperations" {
-            self.arm(conv, reply_id, BUSY_RETRY * self.keep_pace, "busy");
-            return true;
-        }
-        self.reported(conv, error)
-    }
 }
 
 /// A saved wait's reason as the engine names it.
@@ -993,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn it_goes_on_until_a_question_the_checked_end_the_cap_or_no_ai() {
+    fn it_goes_on_until_a_question_the_end_the_cap_or_no_ai() {
         let kg = KeepGoing::default();
         assert_eq!(next(&kg, DONE, Ok(())), Next::Continue);
         assert_eq!(next(&kg, Ended { asked: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.asked"));
@@ -1002,10 +967,7 @@ mod tests {
             Next::Halt("reason.keepGoing.asked"),
             "a question is for the person whatever the quota"
         );
-        // The first stop is not believed: the check turn goes (nothing halts); the second is.
-        assert_eq!(next(&kg, Ended { said_stop: true, ..DONE }, Ok(())), Next::Continue);
-        let checked = KeepGoing { checked: true, ..kg.clone() };
-        assert_eq!(next(&checked, Ended { said_stop: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.done"));
+        assert_eq!(next(&kg, Ended { said_stop: true, ..DONE }, Ok(())), Next::Halt("reason.keepGoing.done"));
         assert_eq!(next(&KeepGoing { work: MAX_TURNS, ..kg.clone() }, DONE, Ok(())), Next::Halt("reason.keepGoing.cap"));
         assert_eq!(next(&kg, DONE, Err("reason.keepGoing.billed")), Next::Halt("reason.keepGoing.billed"));
     }
@@ -1029,13 +991,17 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_that_only_waited_rests_two_to_five_minutes_and_the_stop_check_does_not() {
+    fn a_turn_that_only_waited_rests_two_to_five_minutes_and_a_stop_ends_it() {
         let kg = KeepGoing::default();
         let quick = Ended { idle: true, ..DONE };
         assert_eq!(next(&kg, quick, Ok(())), wait(120.0, "rest"));
         assert_eq!(next(&KeepGoing { idle: 3, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"));
         assert_eq!(next(&KeepGoing { idle: 40, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"), "five minutes at most");
-        assert_eq!(next(&kg, Ended { said_stop: true, ..quick }, Ok(())), Next::Continue, "the check turn follows a first stop at once");
+        assert_eq!(
+            next(&kg, Ended { said_stop: true, ..quick }, Ok(())),
+            Next::Halt("reason.keepGoing.done"),
+            "the first stop ends it without another turn"
+        );
     }
 
     #[test]
@@ -1187,6 +1153,5 @@ fim", 2
     fn the_prompt_never_lets_the_agent_stop_to_wait() {
         assert!(CONTINUE.contains("never a reason to stop"));
         assert!(CONTINUE.contains("only the person can decide"));
-        assert!(CHECK.contains("original request word for word") && CHECK.ends_with(STOP));
     }
 }

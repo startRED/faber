@@ -20,7 +20,7 @@ impl Core {
             || self.compacts.contains_key(conv)
             || self.compactions.contains_key(conv)
             || self.convs.get(conv).is_none_or(|c| {
-                verifying::checking(c)
+                c.compacting
                     || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
                     || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
             })
@@ -42,8 +42,8 @@ impl Core {
     }
 
     /// Reads the running list about to be sent against the last one: a conversation that leaves it ended its run; one back at
-    /// work starts a new run and loses its old mark. A reply only closing (`settled`) has not left yet: Faber's checks may still
-    /// follow it, and a card that came and went would be noise.
+    /// work starts a new run and loses its old mark. A reply only closing (`settled`) has not left yet: showing a card before
+    /// the turn-end decision would make it come and go.
     pub(super) fn mark_ended(&mut self, items: &[RunningItem]) {
         let at = now();
         let listed = |id: &str| items.iter().any(|i| i.conversation_id == id);
@@ -200,7 +200,7 @@ impl Core {
             || c.archived_at.is_some()
             || c.keep_going.is_some()
             || !c.queued.is_empty()
-            || verifying::checking(c)
+            || c.compacting
             || result_kind(c) != Some(EndKind::Unconcluded)
             || !needs_conclusion(c)
         {

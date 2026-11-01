@@ -13,9 +13,9 @@
   A stable child/reply id prevents duplicate notices after an interrupted save. The inbox keeps its ten-message
   limit, and a child has at most one pending notice while its full answers stay in its conversation.
   Other automatic continuations keep waiting for their own turn.
-- Turn completion also drains this queue when no automatic checks ran. Child reports use the same completion path
-  after checks, compaction and interrupted-turn recovery, carrying the existing conclusion state once per reply.
-  Running checks, plan approval, Stop and Keep going keep their existing holds. No new screen control or timer is added.
+- Turn completion drains this queue and reports to the parent through the same idempotent path, including after
+  compaction and interrupted-turn recovery, carrying the existing conclusion state once per reply. Reply endings
+  start no automatic checks or fix wakes. Plan approval, Stop and Keep going keep their holds. No new control or timer.
 - A queued chip keeps its badge, words and attachments. Edit uses the same quiet text button as Remove and Send now;
   while editing, a small text box replaces only the words and Save and Cancel replace the actions. Enter saves,
   Shift+Enter adds a line and Escape cancels from any control in the editor form; composition input never saves or

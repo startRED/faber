@@ -595,8 +595,6 @@ export interface RunningItem {
   keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start' | 'question'; until: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
-  /** Faber asks git whether the last reply changed files, before its checks would start. */
-  weighing?: boolean;
   /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
   settled?: boolean;
   /** How far the agent's plan has come. */

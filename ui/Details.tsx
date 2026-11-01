@@ -86,7 +86,7 @@ export function detailsOf(messages: Message[], cache = new Map<string, ToolIndex
 }
 
 /** Every project conversation has an entry, even before its first saved change. */
-export function DetailsLine(props: { conversationId: string; messages: Message[]; busy?: boolean; weighing?: boolean; background?: BackgroundCommand[] }) {
+export function DetailsLine(props: { conversationId: string; messages: Message[]; busy?: boolean; background?: BackgroundCommand[] }) {
   const cache = createBackgroundCache();
   const active = createMemo(() => backgroundOf(props.messages, props.background ?? [], props.conversationId, cache).filter((row) => workStatus(row).running).length);
   const state = createMemo(() => {
@@ -103,10 +103,9 @@ export function DetailsLine(props: { conversationId: string; messages: Message[]
     else if (follow?.state === 'failing' || follow?.state === 'conflict') key = busy ? 'details.changeFixing' : 'details.changeFailed';
     else if (reply?.error || reply?.status === 'error' || reply?.wrapUp?.done === false) key = 'details.unfinished';
     else if (reply?.status === 'stopped') return { saved, n: saved, key: 'details.unfinished' as const, need };
-    else if (props.weighing) key = 'details.weighing';
-    need = !['details.saved', 'details.line', 'details.weighing'].includes(key);
+    need = !['details.saved', 'details.line'].includes(key);
     // Observed running work replaces only neutral words; engine attention and the person's neutral Stop still win.
-    if (!need && key !== 'details.weighing' && active()) return { saved, n: active(), key: 'background.count' as const, need };
+    if (!need && active()) return { saved, n: active(), key: 'background.count' as const, need };
     return { saved, n: saved, key, need };
   });
   return <p class="det-line" classList={{ need: state().need }} data-state={state().key}><span>{t(state().key, { n: state().n })}</span>{' · '}

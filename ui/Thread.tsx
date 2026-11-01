@@ -369,8 +369,6 @@ interface Shared {
   versions?: Versions[];
   onVersion?: (to: VersionAt, messageIndex: number, by: number) => void;
   usage?: VendorUsage[];
-  /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
-  weighing?: boolean;
   background?: import('./api.ts').BackgroundCommand[];
   /** The agent's plan for the request, drawn under the newest reply (task 017). */
   plan?: Plan;
@@ -694,12 +692,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
       <Show when={props.area !== 'project' && m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
-      {/* The moment git is asked whether the reply changed files, before checks would start: one quiet line, Stop ends it. */}
-      <Show when={props.area !== 'project' && props.last && props.weighing && !m().checks}>
-        <div class="pace checks" data-state="weighing">
-          <p>{t('checks.weighing')}</p>
-        </div>
-      </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
@@ -1139,7 +1131,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
         )}
       </Index>
       <Show when={props.area === 'project' && props.until === undefined}>
-        <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} weighing={props.weighing} background={props.background} />
+        <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} background={props.background} />
       </Show>
       <Show when={props.conversationId} keyed>{(conversationId) =>
         <For each={queuedIds()}>{(id) => {

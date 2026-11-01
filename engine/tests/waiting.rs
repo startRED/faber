@@ -620,7 +620,6 @@ fn seed(dir: &Path, long: bool) -> Conversation {
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,
         ],
-        weighing: None,
     };
     Store::new(dir).save(&c);
     c

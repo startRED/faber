@@ -622,9 +622,6 @@ pub struct KeepGoing {
     /// The error of the last failure, so one that cannot mend by waiting stops it when it comes again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
-    /// The agent said nothing is left and Faber asked it once to check against the original request: a second stop is taken.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub checked: bool,
     /// When it was turned on, in milliseconds since the Unix epoch.
     #[serde(default)]
     pub since: u64,
@@ -1168,13 +1165,9 @@ pub struct Conversation {
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]
     pub reported: (Option<u64>, Option<u64>),
-    /// The context is being compacted: the conversation is at work meanwhile, like during Faber's checks. Never saved.
+    /// The context is being compacted: the conversation is at work meanwhile. Never saved.
     #[serde(skip)]
     pub compacting: bool,
-    /// Faber is asking git whether the last reply changed files with a command, before its checks would start
-    /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
-    #[serde(skip)]
-    pub weighing: Option<String>,
     /// The person pressed Stop: the closing turn cannot drain the queue or leave a done card (`engine/src/engine/ended.rs`).
     /// A new turn clears it; running-list updates never do. Never saved.
     #[serde(skip)]
@@ -1376,10 +1369,6 @@ pub struct RunningItem {
     /// "Keep going" is on: how far it has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_progress: Option<KeepProgress>,
-    /// Faber is asking git whether the last reply changed files with a command (`Conversation::weighing`), usually under a
-    /// second: the reply says so and Stop ends it.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub weighing: bool,
     /// The agent said all it will say and only the CLI's turn is still closing (its Stop hooks, say), with nothing else running
     /// for the conversation: the screen reads it as done and leaves it out of what it shows as running. Updates, the tray and
     /// the awake lock still count it, since a process is still at work.

@@ -96,7 +96,7 @@ rest of the shell are in [layout.md](layout.md).
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
 - A reply whose agent has finished, with only the CLI's turn still closing, is not a row: it is done for the person. Keep going,
-  Faber's checks, a compaction and approved work waiting to advance keep the row. Messages held after a failed or stopped
+  explicitly requested checks, a compaction and approved work waiting to advance keep the row. Messages held after a failed or stopped
   turn, or unable to start, do not count as working and keep Send now available. The topbar's count follows the column.
 - With no items it shows an empty state with Curioso.
 - "Quick question" (R250) is the first of the topbar's pane buttons, and Ctrl+; does the same. It opens the quick

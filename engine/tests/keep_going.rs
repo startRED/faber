@@ -191,31 +191,13 @@ async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_i
     assert_eq!(act["change"], "keepGoing");
     assert_eq!(act["sent"], c.messages[2].text);
     assert_eq!(c.keep_going.as_ref().map(|k| k.turns), Some(1));
-    // The next item ends with the stop line, which leaves the answer. The first stop is not believed: Faber asks the agent to
-    // reread the original request word for word.
     answers_at(&mut pipe, "The list is done.\n\n[keep going: stop]", true, 0.1).await;
-    until_turns(&pipe, 3).await;
-    assert!(turns(&pipe)[2].contains("original request word for word"), "{:?}", turns(&pipe));
-    let c = until(&engine, &id, |c| c.messages.len() == 6).await;
-    assert_eq!(c.messages[3].text, "The list is done.", "the line leaves the answer");
-    assert!(c.keep_going.is_some() && c.messages[3].halt.is_none(), "one stop is not the end");
-    assert!(halts(&mut rx).is_empty());
-    // It found something left: it goes on, and the next stop is checked again.
-    answers_at(&mut pipe, "Not yet: the docs are left, and now they are done.", true, 0.1).await;
-    until_turns(&pipe, 4).await;
-    assert!(turns(&pipe)[3].contains("keep going on your own"), "back to the plain prompt: {:?}", turns(&pipe));
-    answers_at(&mut pipe, "All done.\n[keep going: stop]", true, 0.1).await;
-    until_turns(&pipe, 5).await;
-    assert!(turns(&pipe)[4].contains("original request word for word"));
-    // The second stop is believed: nothing more is sent.
-    answers_at(&mut pipe, "Nothing is left.\n[keep going: stop]", true, 0.1).await;
     let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
     let reply = c.messages.last().unwrap();
     assert_eq!(reply.halt.as_deref(), Some("reason.keepGoing.done"));
-    assert_eq!(reply.text, "Nothing is left.");
-    tokio::time::sleep(Duration::from_millis(60)).await;
-    assert_eq!(turns(&pipe).len(), 5, "no turn after nothing was left");
-    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()], "the tray is told once");
+    assert_eq!(reply.text, "The list is done.");
+    assert_eq!(turns(&pipe).len(), 2, "the first stop sends no second-look turn");
+    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
     engine.shutdown();
 }
 
@@ -459,66 +441,14 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
     };
     engine.send(status).unwrap();
     answers_at(&mut pipe, "All of it is done.\n[keep going: stop]", true, 0.1).await;
-    // The line leaves the answer even with a message waiting; it is a first stop, so it is not the end yet.
     let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.text == "All of it is done.")).await;
-    assert!(c.keep_going.as_ref().is_some_and(|k| k.checked), "the stop is remembered across the person's turn");
+    assert!(c.keep_going.is_none(), "the first stop ends Keep going even with a queued message");
     until_turns(&pipe, 2).await;
-    assert!(turns(&pipe)[1].contains("How is it going?"), "the person's message still goes: {:?}", turns(&pipe));
+    assert!(turns(&pipe)[1].contains("How is it going?"));
     echo(&mut pipe, 1).await;
     answers_at(&mut pipe, "Fine.", true, 0.1).await;
-    // Then Faber asks the agent to check against the original request, and a second stop ends it.
-    until_turns(&pipe, 3).await;
-    assert!(turns(&pipe)[2].contains("original request word for word"), "{:?}", turns(&pipe));
-    answers_at(&mut pipe, "Checked, nothing left.\n[keep going: stop]", true, 0.1).await;
-    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
-    assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.done"));
-    tokio::time::sleep(Duration::from_millis(60)).await;
-    assert_eq!(turns(&pipe).len(), 3, "nothing by itself after the stop");
-    assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
-    engine.shutdown();
-}
-
-// Task 015: the person asking "is it done?" between Faber's turns never keeps it going without a word. A stop after a stop
-// ends it, whoever sent the turn, and the tray says so.
-#[tokio::test]
-async fn a_second_stop_in_the_persons_own_turn_ends_it_with_a_notice() {
-    let (dir, project) = (support::DataFolder::new(), support::work_folder());
-    let (engine, mut rx, mut pipe, id) = started(&dir, project.path()).await;
-    engine.keep_going(&id, true).unwrap();
-    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
-    let status = SendRequest {
-        conversation_id: Some(id.clone()),
-        area: Area::Project,
-        project_id: None,
-        text: "Is all of it done?".into(),
-        images: vec![],
-        files: vec![],
-        choice,
-    };
-    engine.send(status).unwrap();
-    answers_at(
-        &mut pipe,
-        "All of it is done.
-[keep going: stop]",
-        true,
-        0.1,
-    )
-    .await;
-    until_turns(&pipe, 2).await;
-    echo(&mut pipe, 1).await;
-    answers_at(
-        &mut pipe,
-        "Yes, all of it.
-[keep going: stop]",
-        true,
-        0.1,
-    )
-    .await;
-    let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
-    let reply = c.messages.last().unwrap();
-    assert_eq!((reply.text.as_str(), reply.halt.as_deref()), ("Yes, all of it.", Some("reason.keepGoing.done")));
-    tokio::time::sleep(Duration::from_millis(60)).await;
-    assert_eq!(turns(&pipe).len(), 2, "no check turn after the second stop");
+    until(&engine, &id, |c| idle(c)).await;
+    assert_eq!(turns(&pipe).len(), 2, "no second-look turn after the person's message");
     assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
     engine.shutdown();
 }
@@ -1267,7 +1197,7 @@ async fn a_conversation_saved_before_the_estimate_loads_without_it() {
 }
 
 /// Task 017: under Keep going, a closing box that says the request is done ends it like the stop line, on the second time
-/// (the first is checked against the original request).
+/// The first done box ends Keep going without another model turn.
 #[tokio::test]
 async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
@@ -1277,14 +1207,10 @@ async fn keep_going_ends_when_the_closing_box_says_the_request_is_done() {
         json!({ "outcome": "done", "did": "Fixed the login page and the rest.", "result": "Both work.", "verified": "Checked both." });
     calls(&mut pipe, "d1", "wrap_up", done.clone()).await;
     answers_at(&mut pipe, "All fixed.", true, 0.1).await;
-    until_turns(&pipe, 2).await;
-    assert!(turns(&pipe)[1].contains("original request word for word"), "{:?}", turns(&pipe));
-    calls(&mut pipe, "d2", "wrap_up", done).await;
-    answers_at(&mut pipe, "Nothing is left.", true, 0.1).await;
     let c = until(&engine, &id, |c| idle(c) && c.keep_going.is_none()).await;
     assert_eq!(c.messages.last().unwrap().halt.as_deref(), Some("reason.keepGoing.done"));
     tokio::time::sleep(Duration::from_millis(60)).await;
-    assert_eq!(turns(&pipe).len(), 2, "no turn after nothing was left");
+    assert_eq!(turns(&pipe).len(), 1, "no turn after nothing was left");
     assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
     engine.shutdown();
 }
@@ -1590,12 +1516,12 @@ async fn a_team_member_given_a_list_goes_through_it_and_reports_once_when_it_end
     member.say(json!({ "type": "system", "subtype": "init", "session_id": "m", "model": "claude-haiku-5-5" })).await;
     assert!(engine.open(&child).unwrap().keep_going.is_some(), "Keep going is on for it");
     let reports = |c: &Conversation| c.queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).count();
-    for (turn, text) in ["Fixed a.", "Fixed b.", "Fixed c.\n[keep going: stop]"].into_iter().enumerate() {
+    for (turn, text) in ["Fixed a.", "Fixed b."].into_iter().enumerate() {
         answers_at(&mut member, text, true, 0.1).await;
         until_turns(&member, turn + 2).await;
         assert_eq!(reports(&engine.open(&parent).unwrap()), 0, "no report while the list goes on");
     }
-    answers_at(&mut member, "Nothing is left.\n[keep going: stop]", true, 0.1).await;
+    answers_at(&mut member, "Fixed c.\n[keep going: stop]", true, 0.1).await;
     until(&engine, &child, |c| idle(c) && c.keep_going.is_none()).await;
     until(&engine, &parent, |c| reports(c) == 1).await;
     tokio::time::sleep(Duration::from_millis(60)).await;

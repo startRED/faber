@@ -56,7 +56,7 @@ impl Engine {
                         || conv.keep_going.is_some()
                         || conv.stopped
                         || !conv.queued.iter().map(|q| &q.id).eq(queued.iter())
-                        || verifying::checking(conv)
+                        || conv.compacting
                         || !conv.messages.last().is_some_and(|m| m.id == last && m.closed)
                         || c.live.get(&id).is_some_and(|l| l.turn.is_some())
                     {

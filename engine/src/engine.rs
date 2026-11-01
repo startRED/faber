@@ -87,7 +87,6 @@ mod verifying;
 mod versions;
 pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
-pub use verifying::{FIX, MAX_FIXES};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -492,8 +491,6 @@ struct Core {
     agent_installs: usize,
     /// Tests: catalog items the agent can install in place of the shipped ones (`Engine::set_catalog_items`).
     test_items: Vec<&'static crate::tools::Item>,
-    /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
-    before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
     /// When each conversation was last continued after a restart cut its reply (`closed.rs`), the newest few, in memory.
     closed_continues: HashMap<String, Vec<u64>>,
@@ -767,7 +764,6 @@ impl Engine {
                 bigger: HashMap::new(),
                 agent_installs: 0,
                 test_items: Vec::new(),
-                before: HashMap::new(),
                 git: None,
                 rewind,
                 _data_directory: data_directory,
@@ -1164,7 +1160,7 @@ impl Engine {
         self.with(|c| c.warm(req))
     }
     pub fn interrupt(&self, id: &str) {
-        // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
+        // One lock for all of it: no completion can send a turn in between.
         self.with(|c| c.interrupt(id, true))
     }
     /// Opens a session started in a terminal as a project conversation (parity F5). Gives the conversation's id.
@@ -2416,8 +2412,8 @@ impl Core {
         self.rewind_stop_retired(id);
         self.stop_helpers(id, false);
         if !active {
-            // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
-            self.stop_checks(id);
+            // Explicit checks stop with their owning conversation.
+            self.stop_verify(id);
             self.stop_waiting(id, true);
         }
     }
@@ -3159,9 +3155,9 @@ impl Core {
         self.stop_helpers(conv, true);
         // Claude Code takes a line handed to its turn at the turn's next step; one still unread when the turn ends is the next
         // turn by itself, after a stop too (fixture `steer-stopped`). The conversation stays busy until that turn takes it in, so
-        // nothing starts before it: not the queue, Faber's checks or keep going, and a plan limit there still continues it. The
+        // nothing starts before it: not the queue or Keep going, and a plan limit there still continues it. The
         // reply is read for keep going now (its stop line leaves it, a stop is said on it); if the line fails after all, the turn
-        // ends from that reading (`steer_failed`). The checks of the reply that follows cover this one's changes too.
+        // ends from that reading (`steer_failed`).
         if self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude && !l.steering.is_empty()) {
             let read = self.keep_going_ended(conv, turn_id.as_deref());
             if let Some(l) = self.live.get_mut(conv) {
@@ -3230,13 +3226,9 @@ impl Core {
             Some(read) => read,
             None => self.keep_going_ended(conv, turn_id.as_deref()),
         };
-        // A Keep going halt above must not close the session before its reply's checks are scheduled.
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
         }
-        // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
-        let checking =
-            completed_ok && !approving && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -3253,25 +3245,19 @@ impl Core {
         let requested = self.convs.get_mut(conv).and_then(|c| c.send_after_stop.take());
         if let Some(requested) = requested {
             let _ = self.send_queued(conv, &requested);
-        } else if !checking && !approving {
+        } else if !approving {
             // A changed CLI was replaced above before the next turn starts, never under it.
             self.drain(conv);
         }
-        if !checking {
-            if !approving {
-                self.keep_going_unless_compacting(conv, keep_going);
-            }
-            self.request_conclusion(conv);
-            // Keep the existing check-free path alongside the unconditional boundary; the receipts deduplicate both.
-            if turn_id.is_some() {
-                self.turn_ended(conv);
-            }
+        if !approving {
+            self.keep_going_unless_compacting(conv, keep_going);
         }
+        self.request_conclusion(conv);
         self.turn_ended(conv);
         self.try_seal_rewind(conv);
     }
 
-    /// Checks and a scheduled compaction/continuation are work even when no CLI turn runs. An unsent queue can stay
+    /// A scheduled compaction/continuation is work even when no CLI turn runs. An unsent queue can stay
     /// after Stop and needs no live process, regardless of whether the running list already consumed `stopped`.
     fn session_idle(&self, conv: &str) -> bool {
         !self.live.get(conv).is_some_and(|l| l.turn.is_some())
@@ -3280,7 +3266,7 @@ impl Core {
             && !self.rewind_writing(conv)
             && !self.compacts.contains_key(conv)
             && self.convs.get(conv).is_none_or(|c| {
-                !verifying::checking(c) && c.keep_going.is_none() && c.messages.last().is_none_or(|m| m.status != Some(Status::Streaming))
+                !c.compacting && c.keep_going.is_none() && c.messages.last().is_none_or(|m| m.status != Some(Status::Streaming))
             })
     }
 
@@ -3568,7 +3554,7 @@ impl Core {
         c.messages.push(reply);
         c.updated_at = now;
         let text = self.model_text(conv, &item);
-        self.note_before(conv);
+        self.count_correction(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = Some(reply_id.clone());
             l.answer_started = false;
@@ -3636,7 +3622,7 @@ impl Core {
             return;
         }
         let Some(c) = self.convs.get_mut(conv) else { return };
-        if !idle || c.stopped || verifying::checking(c) {
+        if !idle || c.stopped || c.compacting {
             return;
         }
         let next = c.queued.remove(next);
@@ -3733,14 +3719,11 @@ impl Core {
             return Ok(());
         }
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
-            || self
-                .convs
-                .get(id)
-                .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
+            || self.convs.get(id).is_some_and(|c| c.compacting || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
         let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
         let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
         let item = c.queued.remove(pos);
-        // Something with no turn to take it runs (Faber's checks, a wait for quota, the pick of an AI): it goes first.
+        // Something with no turn to take it runs (compaction, a wait for quota, the pick of an AI): it goes first.
         if busy {
             let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
             c.queued.insert(at, item);
@@ -4185,7 +4168,7 @@ impl Core {
             return Err("error.conversationGone".into());
         }
         self.begin_unbounded(pick.vendor)?;
-        self.note_before(id);
+        self.count_correction(id);
         if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
             t.approved = None;
         }
@@ -4688,7 +4671,6 @@ impl Core {
             rewind_summary: None,
             reported: (None, None),
             compacting: false,
-            weighing: None,
             stopped: false,
             send_after_stop: None,
         };
@@ -4723,7 +4705,7 @@ impl Core {
                 || self
                     .convs
                     .get(id)
-                    .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
+                    .is_some_and(|c| c.compacting || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
         {
             return self.enqueue(id, req);
         }
@@ -5199,7 +5181,6 @@ impl Core {
         }
         self.kit_checks.retain(|_, check| check.owner != id);
         self.follows.remove(id);
-        self.before.remove(id);
         self.goals.at.remove(id);
         if existed {
             self.keep_family(id, heir);
@@ -5325,7 +5306,6 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         });
     if reply.status != Some(Status::Streaming)
         && !c.compacting
-        && c.weighing.is_none()
         && kg_wait.is_none()
         && keep_wait.is_none()
         && !approved_work
@@ -5357,7 +5337,6 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         && reply.finished_at.is_some()
         && reply.wait_until.is_none()
         && !c.compacting
-        && c.weighing.is_none()
         && c.keep_going.is_none()
         && c.queued.is_empty()
         && checks != Some(ChecksState::Running);
@@ -5385,7 +5364,6 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
             since: k.since,
             last: keep_going::progress_line(&c.messages),
         }),
-        weighing: c.weighing.is_some(),
         settled,
         plan: c.plan.as_ref().map(Plan::count),
         now: reply.now.clone().filter(|_| reply.status == Some(Status::Streaming)),

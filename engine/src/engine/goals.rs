@@ -230,7 +230,7 @@ impl Core {
     fn goal_conv_working(&self, id: &str) -> bool {
         self.copying.contains_key(id)
             || self.convs.get(id).is_some_and(|c| {
-                running_item(c, self.live.get(id)).is_some() || c.messages.is_empty() || !c.queued.is_empty() || verifying::checking(c)
+                running_item(c, self.live.get(id)).is_some() || c.messages.is_empty() || !c.queued.is_empty() || c.compacting
             })
     }
 

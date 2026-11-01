@@ -2,7 +2,7 @@
 //! Faber's conversation tool (`compact`). A subagent's or a helper's context never counts here.
 //!
 //! Compacting happens once the agent's turn is over, never inside it: the CLI replaces the conversation with a summary, so a
-//! turn that goes on would lose what it still needs. When the turn ends well and nothing else runs (Faber's checks included),
+//! turn that goes on would lose what it still needs. When the turn ends well and nothing else runs including explicit checks,
 //! Faber asks the CLI to compact (`Session::compact`); the conversation counts as at work meanwhile (`Conversation::compacting`),
 //! so what the person writes and what Faber sends by itself wait in the queue. When the CLI says it ended, the agent's own
 //! `next` joins the end of the queue as a message Faber writes (`wake.compacted`), after whatever already waited.
@@ -154,7 +154,7 @@ impl Core {
             return Ok(());
         }
         let turn = self.live.get(conv).is_some_and(|l| l.turn.is_some());
-        if turn || verifying::checking(c) || !c.queued.is_empty() || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
+        if turn || c.compacting || !c.queued.is_empty() || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
             return Err("error.compact.busy".into());
         }
         if let Err(error) = self.resume_compaction(conv) {
@@ -223,7 +223,7 @@ impl Core {
         }
     }
 
-    /// The point where the queue, Faber's checks and Keep going would go on (`drain`): when a compaction was asked for and
+    /// The point where the queue and Keep going would go on (`drain`): when a compaction was asked for and
     /// the agent's last turn ended well, it starts now. True while it starts or runs, so nothing else goes out meanwhile.
     pub(super) fn compact_due(&mut self, conv: &str) -> bool {
         if self.rewind_blocked(conv) {
@@ -237,7 +237,7 @@ impl Core {
         if c.compacting {
             return true;
         }
-        if verifying::checking(c) || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
+        if c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) {
             return false;
         }
         if let Some(reply) = fresh {
@@ -342,8 +342,7 @@ impl Core {
 
     /// Keep going is about to send its next turn after `reply_id`: when the context is large enough (`boundary_due`), Faber
     /// compacts it first, with no `next` of its own, and the end of the compaction goes on with the turn (`compaction_ended`
-    /// calls `go_on`). Once per turn Faber sent, so a compaction that failed is not asked again in a loop; never before the
-    /// check turn, which rereads the original request. True while it compacts.
+    /// calls `go_on`). Once per turn Faber sent, so a compaction that failed is not asked again in a loop. True while it compacts.
     pub(super) fn compact_at_boundary(&mut self, conv: &str, reply_id: &str) -> bool {
         // A compaction is a paid turn: a goal's fix with the day's money gone does not start one (`send_next` refuses next).
         if self.goal_out_of_money(conv) {
@@ -352,7 +351,7 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return false };
         let Some(kg) = c.keep_going.as_ref() else { return false };
         let turns = kg.turns;
-        if kg.checked || self.boundary.get(conv) == Some(&turns) || self.compacts.contains_key(conv) {
+        if self.boundary.get(conv) == Some(&turns) || self.compacts.contains_key(conv) {
             return false;
         }
         let Some(fill) = c.context else { return false };

@@ -615,7 +615,6 @@ mod tests {
             keep_going: false,
             keep_wait: None,
             keep_progress: None,
-            weighing: false,
             settled: false,
             plan: None,
             now: None,

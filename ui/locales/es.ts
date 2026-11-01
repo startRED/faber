@@ -919,7 +919,6 @@ export const es: Messages = {
   'details.changeFailed': "Un cambio guardado necesita una corrección",
   'details.changeFixing': "Un cambio guardado necesita una corrección; Faber se está ocupando",
   'details.unfinished': "El trabajo no ha terminado",
-  'details.weighing': "Buscando cambios que comprobar",
   'details.checked': {"one":"Comprobó {n} cosa","other":"Comprobó {n} cosas"},
   'details.checksFailed': {"one":"{n} no funcionó","other":"{n} no funcionaron"},
   'aside.title': 'Pregunta rápida',
@@ -1168,10 +1167,10 @@ export const es: Messages = {
   'follow.stop': 'Dejar de seguir',
   'wake.checksFailed': 'Fallaron comprobaciones de la pull request {pr} ({checks}). Faber pidió al agente que las arregle.',
   'wake.conflict': 'La pull request {pr} tiene un conflicto con su rama base. Faber pidió al agente que lo resuelva.',
+  // Legacy histories only; nothing new produces this wake.
   'wake.checksFixing': 'Fallaron las comprobaciones de Faber ({checks}). Faber pidió al agente que las arregle.',
   'wake.goalBroke': 'Una meta ya no se cumple: {checks}. Faber inició un arreglo.',
   'checks.running': 'Faber está ejecutando las comprobaciones de estos cambios…',
-  'checks.weighing': 'Faber está viendo si cambió algún archivo…',
   'checks.passed': { one: 'Las comprobaciones de Faber pasaron ({n} comprobación).', other: 'Las comprobaciones de Faber pasaron ({n} comprobaciones).' },
   'checks.failed': 'Fallaron las comprobaciones de Faber: {checks}.',
   'checks.needsYou': 'Fallaron las comprobaciones de Faber: {checks}. Esto necesita tu intervención.',
@@ -1355,6 +1354,7 @@ export const es: Messages = {
   'reason.keepGoing.quota': 'Dejó de seguir hasta que {ai} vuelva a tener cuota.',
   'reason.keepGoing.stuck': 'Continuar se detuvo: sigue sin haber resultados después de que Faber pidió a la IA cambiar de enfoque.',
   'reason.keepGoing.billed': 'Dejó de seguir: {ai} puede cobrarse por uso, y Faber no gasta en él por su cuenta.',
+  // Legacy histories only; nothing new produces this halt.
   'reason.keepGoing.checks': 'Dejó de seguir: las comprobaciones de Faber siguen fallando.',
   'error.helperEmpty': 'Escribe algo primero.',
   'error.aside.empty': 'Escribe una pregunta primero.',
