@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-11-01 | The hidden walkthrough keeps fake Claude as its default and selects fake Codex with --codex using the existing sandbox and setup recordings; a shared-launch screen check requires both answers. This test-only slice does not satisfy or close the release 1.0 checklist. | AI |"
+  ]
+}
