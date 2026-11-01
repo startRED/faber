@@ -1047,6 +1047,23 @@ impl Engine {
             )
         })
     }
+    /// Like `open_for_screen`, with only the newest `newest` messages; `earlier` says how many came before them.
+    pub fn open_for_screen_window(&self, id: &str, newest: usize) -> Option<Conversation> {
+        self.with(|core| {
+            let opened = core.opened_window(id, newest)?;
+            core.shown(id);
+            Some(opened.for_screen())
+        })
+    }
+    /// The `n` messages just before `message_id`, oldest first, as the screen gets them. None when the conversation or that
+    /// message is gone.
+    pub fn messages_before(&self, id: &str, message_id: &str, n: usize) -> Option<Vec<Message>> {
+        self.with(|core| {
+            let messages = &core.load(id)?.messages;
+            let at = messages.iter().position(|m| m.id == message_id)?;
+            Some(messages[at.saturating_sub(n)..at].iter().cloned().map(Message::for_screen).collect())
+        })
+    }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
         self.with(|c| c.load(id).map(|conversation| crate::visual::list(&conversation.messages, message_id.zip(block))).unwrap_or_default())
     }
@@ -1956,8 +1973,21 @@ impl Core {
 
     /// A copy of conversation `id` as the screen reads it, its last reply saying whether it waits for the person.
     fn opened(&mut self, id: &str) -> Option<Conversation> {
-        let mut c = self.load(id)?.clone();
-        let needs = reply_needs_you(&c, self.live.get(id));
+        self.opened_window(id, usize::MAX)
+    }
+
+    /// A copy of the conversation with only its newest `newest` messages cloned, and how many came before them.
+    fn opened_window(&mut self, id: &str, newest: usize) -> Option<Conversation> {
+        self.load(id)?;
+        let conv = self.convs.get_mut(id)?;
+        let needs = reply_needs_you(conv, self.live.get(id));
+        // The other messages never leave the loaded conversation, so a window of a huge one costs only its own messages.
+        let all = std::mem::take(&mut conv.messages);
+        let mut c = conv.clone();
+        let start = all.len().saturating_sub(newest);
+        c.messages = all[start..].to_vec();
+        c.earlier = start;
+        conv.messages = all;
         if let Some(reply) = c.messages.last_mut().filter(|m| m.role == Role::Assistant) {
             reply.needs_you = needs;
         }
@@ -4558,6 +4588,7 @@ impl Core {
             working_folder: None,
             project_start_pending: area == Area::Project,
             copy: None,
+            earlier: 0,
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),
             session_start_cards: BTreeMap::new(),
