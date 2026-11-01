@@ -35,6 +35,7 @@ async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusal
     let spawn: Spawner = Arc::new(|_, _, _| Err(std::io::Error::other("no CLI in this test")));
     let opts = EngineOptions {
         data_dir: data_dir.clone(),
+        #[cfg(windows)]
         chat_dir: data.path().join("work"),
         clis: BTreeMap::<Vendor, _>::new(),
         spawn,
