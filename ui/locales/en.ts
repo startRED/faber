@@ -2299,6 +2299,7 @@ export const en = {
   'notes.342.better': "The live line shows the agent's own status or its latest thinking headline, and folded steps sit neatly between its words.",
   'notes.343.better': 'Project sections now explain themselves, Catalog puts search first, and Chat and French quota labels are tidier.',
   'notes.344.better': 'The AI can choose when to use plans, progress updates, checks and the closing box.',
+  'notes.345.fixed': 'Command-line refusals now include the explanation when one is available.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

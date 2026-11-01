@@ -28,7 +28,7 @@ async fn client(host: &Arc<faber_host::Host>, depth: u32) -> Client {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusals() {
+async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     let data = tempfile::tempdir().unwrap();
     let data_dir = data.path().join("data");
     let wiring = Wiring::new(Arc::new(NoWindow));
@@ -50,6 +50,9 @@ async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusal
     let host = Arc::new(wiring.host(engine, data_dir, true, tokio::runtime::Handle::current()));
 
     let person = client(&host, 0).await;
+    let refusal = person.call_detailed("save_settings", json!({"patch": {"appearance": {"base": "nowhere"}}})).await.unwrap().unwrap_err();
+    assert_eq!(refusal.key, "error.look.fileInvalid");
+    assert_eq!(refusal.detail.as_deref(), Some("base"));
     let answer = person.offer["commands"].as_array().unwrap().iter().find(|c| c["name"] == "answer").unwrap().clone();
     assert_eq!(answer["args"][1], json!(["turnId", "String"]), "arguments are named as the screen sends them");
     assert!(person.offer["commands"].as_array().unwrap().iter().all(|c| c["name"] != "state" && c["name"] != "screen_ready"));

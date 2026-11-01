@@ -16,6 +16,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Semaphore, broadcast, mpsc, watch};
 
 pub type Answer = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
+pub type DetailedAnswer = Pin<Box<dyn Future<Output = Result<Value, wire::Error>> + Send>>;
 
 /// Whatever hosts Faber's commands: the same table, names and arguments the screen uses.
 pub trait Backend: Send + Sync + 'static {
@@ -26,6 +27,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Whether a command starts a turn of an AI (the table's `StartsTurn`).
     fn starts_turn(&self, cmd: &str) -> bool;
     fn dispatch(&self, who: &Who, cmd: String, args: Value) -> Answer;
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> DetailedAnswer {
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value>;
     /// Whether a connected client is a program an AI that Faber started runs, whatever its hello says: on Windows, one in
     /// a job Faber's CLIs run in, which nothing they start can leave. A backend that starts no CLI knows of none.
@@ -286,16 +291,16 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     None => None,
                 };
                 let (tx, guard) = (tx.clone(), guard.clone());
-                let run = backend.dispatch(caller, cmd, args);
+                let run = backend.dispatch_detailed(caller, cmd, args);
                 tokio::spawn(async move {
                     let result = run.await;
                     if let Some((ticket, asked)) = ticket {
-                        if matches!(&result, Err(key) if key.starts_with("error.reach.") || key == "error.host.badArgs") {
+                        if matches!(&result, Err(error) if error.key.starts_with("error.reach.") || error.key == "error.host.badArgs") {
                             guard.refund(&ticket);
                         }
                         guard.answered(ticket, &asked, result.as_ref().ok());
                     }
-                    let _ = tx.send(wire::reply(id, &result)).await;
+                    let _ = tx.send(wire::reply_detailed(id, &result)).await;
                     drop(place);
                 });
             }
