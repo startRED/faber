@@ -277,13 +277,13 @@ check('calm: the sidebar footer is one row with the name and Settings, then one 
   }
 });
 
-check('calm: the usage line never wraps, "still counting" reads "≥ share" with the words in the tooltip, and amber appears only near the limit', () => {
+check('calm: the usage line never wraps, "still counting" reads "at least share" with the words in the tooltip, and amber appears only near the limit', () => {
   useLanguage('pt-BR');
   const view = sidebar('chat', { usage: usageOf('low', true) });
   try {
     const line = view.root.querySelector<HTMLElement>('.usage .vendor')!;
     ok(line.classList.contains('low'), 'the engine says it is nearly used');
-    ok(line.querySelector('.share')!.textContent!.startsWith('≥ ') && line.title.includes(t('quota.counting')), `"≥" and the words: ${line.title}`);
+    ok(line.querySelector('.share')!.textContent!.startsWith('pelo menos ') && line.title.includes(t('quota.counting')), `"at least" and the words: ${line.title}`);
     ok(!line.textContent!.includes('…'), 'nothing that reads as cut text');
     ok(line.getBoundingClientRect().height <= 32, `one line even in Portuguese: ${line.getBoundingClientRect().height}`);
     ok(line.querySelector('.name')!.textContent === 'Codex', 'the vendor name shows on the line');

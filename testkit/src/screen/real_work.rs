@@ -158,7 +158,7 @@ fn limits(ctx: &mut Ctx) -> Result {
     let sent = Instant::now();
     ask(page, QUESTION)?;
     // The CLI reports its limits with the turn: the tightest window of the recording is 47 % of the 7-day one.
-    page.wait_for("the limit to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the limit to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     ctx.notes.push(format!("turn and limit shown {}", seconds(sent)));
     memory(ctx, app.id)
 }
