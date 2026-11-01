@@ -1,6 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
+import { ToolGlyph } from '../../ui/icons/kinds.tsx';
 import { keepParts, timeline } from '../../ui/timeline.ts';
 import type { Message, ToolUse } from '../../ui/api.ts';
 import { applyLook } from '../../ui/appearance.ts';
@@ -29,6 +30,10 @@ check('worklog: file paths use the conversation folder and keep the full detail'
     const button = root.querySelector<HTMLButtonElement>('.step-line')!;
     equal(button.querySelector('i')!.textContent, 'src/b.txt');
     equal(button.title, path);
+    const icon = document.createElement('div');
+    const disposeIcon = render(() => createComponent(ToolGlyph, { kind: 'read', small: true }), icon);
+    equal(button.querySelector('.step-icon svg')?.innerHTML, icon.querySelector('svg')?.innerHTML, 'a read uses the shared read drawing');
+    disposeIcon();
     button.click();
     equal(root.querySelector('.step-what')!.textContent, path);
   } finally { dispose(); root.remove(); }
@@ -288,6 +293,9 @@ check('worklog: folded steps fit a 720 px window in English and German', () => {
       const dispose = render(() => createComponent(Thread, { messages: [{ id: 'look', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools }], from: 0, conversationId: 'look', options: [], onBranch: () => {} }), root);
       try {
         const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
+        head.click();
+        ok(root.querySelector('.step[data-state=failed] .st-failed'), 'a failed step uses the shared failure mark');
+        head.click();
         for (const open of [false, true]) {
           equal(head.getAttribute('aria-expanded'), String(open));
           ok(head.getBoundingClientRect().right <= root.getBoundingClientRect().right + 1, language);
