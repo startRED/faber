@@ -331,7 +331,7 @@ impl Core {
         }
         // Turned off between two turns of a list, a conversation an agent started has ended: its parent hears now.
         if !on {
-            self.tell_parent(id);
+            self.turn_ended(id);
         }
         Ok(())
     }
@@ -371,7 +371,7 @@ impl Core {
         }
         // A conversation an agent started reports once, when its list ends, not at every turn of it.
         if was_on {
-            self.tell_parent(id);
+            self.turn_ended(id);
         }
     }
 
@@ -921,7 +921,7 @@ impl Core {
         }
         self.list_changed();
         (self.emit)(AppEvent::Halted { conversation_id: conv.into(), title, why: why.into(), vendor });
-        self.tell_parent(conv);
+        self.turn_ended(conv);
     }
 
     /// Another move to an AI with room inside the turn that runs, while the count allows it.

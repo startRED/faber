@@ -286,6 +286,7 @@ mod tests {
                     sid: 1,
                     session,
                     turn: Some("reply".into()),
+                    parent_reported: None,
                     break_pending: false,
                     answer_started: false,
                     settled: false,

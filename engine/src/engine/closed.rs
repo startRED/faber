@@ -58,6 +58,7 @@ impl Core {
         }
         self.send_by_itself(id, CONTINUE.into(), crate::model::Wake::of("wake.closed"))?;
         self.closed_continues.entry(id.to_string()).or_default().push(at);
+        self.turn_ended(id);
         Ok(())
     }
 

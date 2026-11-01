@@ -278,6 +278,8 @@ struct Live {
     session: Session,
     /// The answer being written right now.
     turn: Option<String>,
+    /// The reply reported on this session; the parent's saved report id is the receipt across restarts.
+    parent_reported: Option<String>,
     break_pending: bool,
     answer_started: bool,
     /// The main thread said all it will say (`Settled`) and only helpers in the background may still run: a message written now
@@ -3260,12 +3262,12 @@ impl Core {
                 self.keep_going_unless_compacting(conv, keep_going);
             }
             self.request_conclusion(conv);
-            // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
-            // exits ends no reply, so it reports nothing twice.
+            // Keep the existing check-free path alongside the unconditional boundary; the receipts deduplicate both.
             if turn_id.is_some() {
-                self.tell_parent(conv);
+                self.turn_ended(conv);
             }
         }
+        self.turn_ended(conv);
         self.try_seal_rewind(conv);
     }
 
@@ -3991,6 +3993,7 @@ impl Core {
         self.compacts.remove(id);
         self.keep_going_failed(id, reply_id, &error);
         self.drain(id);
+        self.turn_ended(id);
     }
 
     /// A loaded Codex thread ignores resume overrides: use a fresh server without stopping its active peers.
@@ -4584,6 +4587,7 @@ impl Core {
                 sid,
                 session,
                 turn: None,
+                parent_reported: None,
                 break_pending: false,
                 answer_started: false,
                 settled: false,
@@ -5540,6 +5544,7 @@ mod tool_in_tests {
                 let _ = id;
             }),
             turn: None,
+            parent_reported: None,
             break_pending: false,
             answer_started: false,
             settled: false,
@@ -5631,6 +5636,7 @@ mod tool_in_tests {
                             let _ = sent.send((id, cmd));
                         }),
                         turn: None,
+                        parent_reported: None,
                         break_pending: false,
                         answer_started: false,
                         settled: false,

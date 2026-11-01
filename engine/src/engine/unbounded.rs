@@ -162,6 +162,7 @@ mod tests {
                         }
                     }),
                     turn: Some("turn".into()),
+                    parent_reported: None,
                     break_pending: false,
                     answer_started: false,
                     settled: false,

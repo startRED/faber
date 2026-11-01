@@ -309,7 +309,7 @@ impl Core {
             None => {}
         }
         self.request_conclusion(conv);
-        self.tell_parent(conv);
+        self.turn_ended(conv);
     }
 
     /// Shows the reply's row running and runs the fast checks; `checks_ended` takes their outcome.
@@ -404,7 +404,7 @@ impl Core {
             }
         }
         self.request_conclusion(conv);
-        self.tell_parent(conv);
+        self.turn_ended(conv);
     }
 
     fn set_checks(&mut self, conv: &str, reply_id: &str, checks: Option<Checks>) {
@@ -469,6 +469,60 @@ fn fixes_before(messages: &[Message], reply_id: &str) -> usize {
 mod tests {
     use super::*;
     use crate::verify::{CheckResult, Level};
+
+    #[tokio::test]
+    async fn turn_end_reports_once_with_or_without_checks_and_after_reloading() {
+        for checks in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+            let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+            engine.with(|core| {
+                core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+                let c = core.convs.get_mut(&child).unwrap();
+                c.area = Area::Project;
+                c.started_by = Some(parent.clone());
+                let reply = c.messages.last_mut().unwrap();
+                reply.status = Some(Status::Done);
+                reply.text = "The requested answer.".into();
+                reply.wrap_up = Some(
+                    crate::progress::wrap_up(&serde_json::json!({
+                        "outcome": "done", "did": "Answered the request.", "result": "Answer ready.", "verified": "Read the source."
+                    }))
+                    .unwrap(),
+                );
+                if checks {
+                    reply.checks = Some(Checks { state: ChecksState::Running, passed: 0, failed: vec![] });
+                }
+                core.end_turn(&child, Some("child".into()), None);
+                if checks {
+                    assert!(core.convs[&parent].queued.is_empty(), "checks still own completion");
+                    core.checks_ended(&child, "child", None, outcome(&[("check", Verdict::Passed)]));
+                }
+                core.turn_ended(&child);
+                core.tell_parent(&child);
+                let report_id = format!("report-{child}-child");
+                let saved = core.store.get(&parent).unwrap();
+                assert_eq!(saved.queued.iter().filter(|q| q.id == report_id).count(), 1);
+                assert!(saved.queued.last().unwrap().text.contains("concluded"), "{}", saved.queued.last().unwrap().text);
+                assert_eq!(core.live[&child].parent_reported.as_deref(), Some("child"));
+                let mut next = Message::new("next-child".into(), Role::Assistant, "Another answer.".into(), now());
+                next.status = Some(Status::Done);
+                next.wrap_up = core.convs[&child].messages.last().unwrap().wrap_up.clone();
+                core.convs.get_mut(&child).unwrap().messages.push(next);
+                core.save(&child);
+                core.turn_ended(&child);
+                core.turn_ended(&child);
+                assert_eq!(core.store.get(&parent).unwrap().queued.len(), 2, "a distinct reply gets its own receipt on the same session");
+                core.live.remove(&child);
+                core.convs.remove(&child);
+                core.load(&child);
+                core.turn_ended(&child);
+                assert_eq!(core.store.get(&parent).unwrap().queued.len(), 2, "saved receipt survives retiring or restarting");
+            });
+            engine.shutdown();
+        }
+    }
 
     fn outcome(verdicts: &[(&str, Verdict)]) -> Outcome {
         Outcome {

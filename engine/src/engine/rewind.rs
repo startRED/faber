@@ -1350,6 +1350,7 @@ mod tests {
                         let _ = sent.send(cmd);
                     }),
                     turn: None,
+                    parent_reported: None,
                     break_pending: false,
                     answer_started: false,
                     settled: false,

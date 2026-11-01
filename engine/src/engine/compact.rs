@@ -514,7 +514,7 @@ impl Core {
         match reply {
             Some(reply) => self.go_on(conv, &reply),
             // Nothing follows: a conversation an agent started reports to its parent now.
-            None => self.tell_parent(conv),
+            None => self.turn_ended(conv),
         }
     }
 }

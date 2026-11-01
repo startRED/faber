@@ -487,6 +487,7 @@ pub(super) mod tests {
                 sid: 1,
                 session,
                 turn: turns.last().map(|t| t.0.to_string()),
+                parent_reported: None,
                 break_pending: false,
                 answer_started: false,
                 settled: false,

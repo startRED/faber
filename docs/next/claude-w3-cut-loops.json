@@ -1,0 +1,14 @@
+{
+  "decisions": [
+    "| R-next | 2026-11-01 | Turn-end delivery drains the existing queue and reports to the parent through one shared, idempotent path regardless of automatic checks. Keep all existing completion paths; a per-reply live receipt and the parent's saved report id prevent duplicate delivery during checks, compaction and interrupted-turn recovery. No new process, timer or stored conversation field. | AI |"
+  ],
+  "notes": {
+    "fixed": {
+      "en": "Queued messages and child reports continue after a turn ends, even when no checks run.",
+      "pt-BR": "As mensagens na fila e os relatórios dos agentes seguem quando o turno termina, mesmo sem verificações.",
+      "es": "Los mensajes en espera y los informes de los agentes siguen al terminar el turno, aunque no se ejecuten comprobaciones.",
+      "fr": "Les messages en attente et les comptes rendus des agents suivent la fin du tour, même sans vérification.",
+      "de": "Nach dem Ende eines Durchgangs werden wartende Nachrichten und Berichte der Agenten weitergegeben, auch wenn keine Prüfungen laufen."
+    }
+  }
+}

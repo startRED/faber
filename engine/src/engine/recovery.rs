@@ -602,6 +602,7 @@ mod tests {
                     sid: 1,
                     session: Session::from_fn(|_| {}),
                     turn: Some("reply".into()),
+                    parent_reported: None,
                     break_pending: false,
                     answer_started: false,
                     settled: false,
