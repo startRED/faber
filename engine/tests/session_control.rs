@@ -1,5 +1,4 @@
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::NewSession;
