@@ -907,6 +907,8 @@ async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
         json!({ "recap": "The login page works. The rest is not checked yet.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
     let (said, error) = calls(&mut pipe, "w1", "wrap_up", box_).await;
     assert!(!error && said.contains("End your turn"), "{said}");
+    assert!(said.contains("Results: 0 files, 0/0 checks passed, 0 commits, 0 pull requests, 0 artifacts, 0 answers; cost:"), "{said}");
+    assert!(said.contains("input and 0 output tokens") && said.contains("current turn may be incomplete"), "{said}");
     answers(&mut pipe, "Done for now.", true).await;
     let c = until(&engine, &id, idle).await;
     let plan = c.plan.clone().expect("the plan stays with the conversation");

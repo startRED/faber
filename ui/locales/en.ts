@@ -2158,6 +2158,7 @@ export const en = {
   'notes.328.fixed': 'When a limit has no current reading, you can see where to check it instead of an empty bar.',
   'notes.329.better': 'You can see why Faber continued a conversation and what it asked a helper to do.',
   'notes.330.fixed': "An address you are typing in Faber's browser is no longer lost when the window is resized.",
+  'notes.331.better': 'The agent sees what the conversation delivered and cost when it wraps up.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

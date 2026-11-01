@@ -2278,6 +2278,7 @@ export const fr: Messages = {
   'notes.328.fixed': 'Quand la limite n’a pas de relevé actuel, vous voyez où la consulter à la place d’une barre vide.',
   'notes.329.better': 'Vous voyez pourquoi Faber a poursuivi une conversation et ce qu’il a demandé à un assistant.',
   'notes.330.fixed': "Une adresse que vous tapez dans le navigateur de Faber n'est plus perdue quand la fenêtre change de taille.",
+  'notes.331.better': 'En terminant, l’agent voit les résultats de la conversation et leur coût.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
