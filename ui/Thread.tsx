@@ -8,6 +8,8 @@ import {
   type QueuedTurn,
   type RewindRedoInfo,
   type ToolUse,
+  type Summary,
+  type RunningItem,
   type VendorUsage,
   type VersionAt,
   type Versions,
@@ -203,11 +205,23 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
 // One step of the work log, or a run of the same kind as one phrase with a count ("Changing 3 files") that opens into its steps.
 // A failed step inside says so beside the phrase, since the phrase itself cannot be struck through.
 // `live` names the step the agent is on, which carries the running mark; `onToggle` reports a run opening or closing.
-function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: (open: boolean) => void }) {
+function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: (open: boolean) => void; conversations?: Summary[]; running?: RunningItem[]; onOpenConversation?: (c: Summary) => void }) {
   const group = () => props.group();
+  const child = () => {
+    const tool = group().tools[0];
+    if (tool?.name !== 'Conversation' || tool.ok !== true) return undefined;
+    const input = tool.input as { action?: string; id?: string } | undefined;
+    let id = input?.id;
+    if (!id && tool.output) {
+      try { id = (JSON.parse(tool.output.split('\n').at(-1) ?? '') as { childId?: string }).childId; } catch { /* Older calls have no link. */ }
+    }
+    return props.conversations?.find((c) => c.id === id && c.startedBy);
+  };
+  const running = () => props.running?.find((r) => r.conversationId === child()?.id);
+  const state = () => child()?.archived ? 'archived' : running()?.state === 'needsYou' ? 'waiting' : running() ? 'working' : child()?.childState ?? 'done';
   const failed = () => group().tools.filter((tool) => tool.ok === false && !tool.declined).length;
   return (
-    <Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} live={group().tools[0]!.id === props.live} />}>
+    <Show when={child() && props.onOpenConversation} fallback={<Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} live={group().tools[0]!.id === props.live} />}>
       <details class="step-group" onToggle={(e) => props.onToggle?.(e.currentTarget.open)}>
         <summary>
           <b>{groupLabel(group())}</b>
@@ -218,6 +232,11 @@ function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: 
           <Index each={group().tools}>{(tool) => <ToolChip tool={tool()} live={tool().id === props.live} />}</Index>
         </div>
       </details>
+    </Show>}>
+      <button type="button" class="btn child-conversation" onClick={() => props.onOpenConversation?.(child()!)}>
+        <b>{child()!.title}</b>
+        <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child()!.childChoice?.vendor === 'auto' ? t('model.auto') : child()!.childChoice?.vendor ? vendorName(child()!.childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child()!.childChoice?.model), t(`child.${state()}`), child()!.waitingOn?.note, running()?.now ?? child()!.childLine].filter(Boolean).join(' · ')}</span>
+      </button>
     </Show>
   );
 }
@@ -225,6 +244,9 @@ function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: 
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  conversations?: Summary[];
+  running?: RunningItem[];
+  onOpenConversation?: (c: Summary) => void;
   pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
@@ -530,7 +552,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
             <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} pieceRevision={props.pieceRevision} />}</For>
             <Show when={own().length}>
               <div class="tools">
-                <Index each={groups()}>{(group) => <StepRow group={group} live={runningStep()?.id} onToggle={(open) => toggleRun(group().tools[0]!.id, open)} />}</Index>
+                <Index each={groups()}>{(group) => <StepRow conversations={props.conversations} running={props.running} onOpenConversation={props.onOpenConversation} group={group} live={runningStep()?.id} onToggle={(open) => toggleRun(group().tools[0]!.id, open)} />}</Index>
               </div>
             </Show>
           </div>

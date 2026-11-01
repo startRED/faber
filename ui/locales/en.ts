@@ -1,6 +1,12 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "child.working": "Working",
+  "child.waiting": "Waiting",
+  "child.stopped": "Stopped",
+  "child.done": "Done",
+  "child.failed": "Failed",
+  "child.archived": "Archived",
   "tools.marketing-aso.needs": "Needs web access to inspect store listings.",
   "catalog.cliName": "Name in the AI tool: {name}",
   "catalog.job.code": "Working on code",

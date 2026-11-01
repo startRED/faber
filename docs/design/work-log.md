@@ -39,7 +39,7 @@ and a useful file location is allowed when the person needs to find or open an a
   the newest step) instead of each file in turn. Nothing animates beyond the chevron's turn (none in
   reduced motion). Every chip, single or grouped, has a real 1 px border, so forced colours still draws its edge.
 - A conversation the agent starts by itself (R198) is one chip, "Working in parallel" with its title (or
-  the id when the agent reads it back); the conversation is a normal sidebar row, never a step inside.
+  the id when the agent reads it back). A linked child appears in that tool call as a quiet button showing its title, AI and model, state, waiting note and latest short line; opening it goes to the conversation. An archived child stays visible as archived. The existing conversation events update it, with no row timers.
 - The agent running Faber's checks (the `verify` tool) is one chip with no detail: "Running the quick checks", or
   "Running every check" for the full level. What failed is the agent's to read.
 - Subagent and helper rows have their own page, [subagents.md](subagents.md).

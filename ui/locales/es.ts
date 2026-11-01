@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const es: Messages = {
+  "child.working": "Trabajando",
+  "child.waiting": "En espera",
+  "child.stopped": "Detenida",
+  "child.done": "Terminada",
+  "child.failed": "Falló",
+  "child.archived": "Archivada",
   "tools.marketing-aso.needs": "Necesita acceso web para revisar las páginas de las tiendas.",
   "catalog.cliName": "Nombre en la herramienta de IA: {name}",
   "catalog.job.code": "Programar",

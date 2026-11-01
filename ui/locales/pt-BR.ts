@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "child.working": "Trabalhando",
+  "child.waiting": "Aguardando",
+  "child.stopped": "Parada",
+  "child.done": "Concluída",
+  "child.failed": "Falhou",
+  "child.archived": "Arquivada",
   "tools.marketing-aso.needs": "Precisa de acesso à web pra examinar as páginas das lojas.",
   "catalog.cliName": "Nome na ferramenta de IA: {name}",
   "catalog.job.code": "Programar",

@@ -1855,3 +1855,6 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
 .goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
 .goal-add .goal-words { flex-basis: 100%; margin: 0; }
+
+.child-conversation { display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 100%; white-space: normal; }
+.child-conversation span { overflow-wrap: anywhere; }

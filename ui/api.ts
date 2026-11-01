@@ -346,6 +346,10 @@ export interface Summary {
   pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
+  waitingOn?: { ids?: string[]; note?: string };
+  childState?: 'working' | 'waiting' | 'stopped' | 'done' | 'failed';
+  childChoice?: Choice;
+  childLine?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
   ended?: Ended;
   /** How far the agent's plan has come. */

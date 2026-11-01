@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  "child.working": "En cours",
+  "child.waiting": "En attente",
+  "child.stopped": "Arrêtée",
+  "child.done": "Terminée",
+  "child.failed": "Échec",
+  "child.archived": "Archivée",
   "tools.marketing-aso.needs": "Nécessite un accès web pour examiner les pages des boutiques.",
   "catalog.cliName": "Nom dans l’outil d’IA : {name}",
   "catalog.pluginRecord": "Registre du plugin",
