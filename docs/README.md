@@ -30,6 +30,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
+| [design/icons.md](design/icons.md) | The drawing of each kind of step and each state, and who is speaking: when a screen needs a picture for one |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
@@ -59,7 +60,8 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
-| [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
+| [dev/workflow.md](dev/workflow.md) | Lane claims, the task queue, a red base and the numbers given at landing |
+| [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
 | [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |

@@ -25,6 +25,30 @@ fn arguments_are_listed_as_the_screen_sends_them() {
     assert_eq!(Host::kind("hello"), None);
 }
 
+#[test]
+fn mcp_schema_maps_table_argument_types() {
+    assert_eq!(
+        argument_schema(&[
+            ("text", "String"),
+            ("enabled", "bool"),
+            ("count", "u64"),
+            ("ratio", "f64"),
+            ("tags", "Option<Vec<String>>"),
+            ("choice", "Vendor")
+        ]),
+        json!({"type":"object", "properties":{"text":{"type":"string"}, "enabled":{"type":"boolean"}, "count":{"type":"integer"}, "ratio":{"type":"number"}, "tags":{"type":"array","items":{"type":"string"}}, "choice":{"type":"object","description":"Vendor JSON value"}}, "required":["text","enabled","count","ratio","choice"]})
+    );
+}
+
+#[test]
+fn mcp_channel_keeps_error_detail() {
+    let failure = channel_detail(Failure::with("error.example", "field"));
+    assert_eq!(failure.data, Some(json!({"detail":"field"})));
+    let mut failure = Failure::with("error.example", "field");
+    failure.data = Some(json!({"detail":"original"}));
+    assert_eq!(channel_detail(failure).data, Some(json!({"detail":"field","value":{"detail":"original"}})));
+}
+
 /// Every command name `ui/api.ts` invokes: the text between `invoke<...>(` or `invoke(` and the first quote pair after it.
 fn names_the_screen_calls() -> Vec<String> {
     let source = include_str!("../../ui/api.ts");
@@ -67,7 +91,7 @@ fn the_table_holds_every_command_the_screen_calls_once() {
 /// the AI's tools are made from the same list: a command anything but the screen may send that the list lacks fails here.
 /// `FABER_WRITE_COMMANDS=1` writes the list again.
 #[test]
-fn the_command_line_lists_every_command_anything_but_the_screen_may_send() {
+fn mcp_and_the_command_line_list_every_command_anything_but_the_screen_may_send() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../cli/commands.json");
     let now = serde_json::to_string_pretty(&Host::exported().collect::<Vec<_>>()).unwrap() + "\n";
     if std::env::var_os("FABER_WRITE_COMMANDS").is_some() {

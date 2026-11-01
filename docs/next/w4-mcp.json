@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "You can connect Faber's tools to an AI through MCP.",
+      "pt-BR": "Você pode conectar as ferramentas do Faber a uma IA por MCP.",
+      "es": "Puedes conectar las herramientas de Faber a una IA mediante MCP.",
+      "fr": "Vous pouvez connecter les outils de Faber à une IA par MCP.",
+      "de": "Sie können Fabers Werkzeuge über MCP mit einer KI verbinden."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-11-01 | The command table supplies MCP tools and argument schemas through a standard-input server using the calling agent's own channel identity; complex argument types stay loosely typed. | AI (owner delegated) |"
+  ]
+}

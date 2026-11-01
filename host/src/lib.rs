@@ -72,6 +72,7 @@ pub enum Kind {
 pub(crate) struct Entry {
     pub name: &'static str,
     pub args: &'static [(&'static str, &'static str)],
+    pub schema: fn() -> Value,
     pub kind: Kind,
     pub reach: Reach,
     /// The doc comment's lines, each with its leading space.
@@ -86,12 +87,61 @@ pub(crate) struct Entry {
 pub struct CommandInfo {
     pub name: &'static str,
     pub args: Vec<(String, &'static str)>,
+    pub input_schema: Value,
     pub kind: Kind,
     pub reach: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation: Option<&'static str>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub about: String,
+}
+
+fn argument_type(ty: &str) -> Value {
+    let ty = ty.trim();
+    if let Some(inner) = ty.strip_prefix("Option<").and_then(|s| s.strip_suffix('>')) {
+        return argument_type(inner);
+    }
+    if let Some(inner) = ty.strip_prefix("Vec<").and_then(|s| s.strip_suffix('>')) {
+        return serde_json::json!({"type":"array", "items":argument_type(inner)});
+    }
+    match ty {
+        "String" => serde_json::json!({"type":"string"}),
+        "bool" => serde_json::json!({"type":"boolean"}),
+        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => {
+            serde_json::json!({"type":"integer"})
+        }
+        "f64" | "f32" => serde_json::json!({"type":"number"}),
+        _ => serde_json::json!({"type":"object", "description":format!("{ty} JSON value")}),
+    }
+}
+
+fn argument_schema(args: &[(&str, &str)]) -> Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for (name, ty) in args {
+        let name = camel(name);
+        properties.insert(name.clone(), argument_type(ty));
+        if !ty.starts_with("Option<") {
+            required.push(name);
+        }
+    }
+    serde_json::json!({"type":"object", "properties":properties, "required":required})
+}
+
+fn channel_detail(mut failure: Failure) -> Failure {
+    if let Some(detail) = &failure.detail {
+        let mut fields = match failure.data.take() {
+            Some(Value::Object(fields)) if fields.contains_key("detail") => {
+                serde_json::Map::from_iter([("value".into(), Value::Object(fields))])
+            }
+            Some(Value::Object(fields)) => fields,
+            Some(value) => serde_json::Map::from_iter([("value".into(), value)]),
+            None => serde_json::Map::new(),
+        };
+        fields.insert("detail".into(), json!(detail));
+        failure.data = Some(Value::Object(fields));
+    }
+    failure
 }
 
 /// Names the table never holds: a connection answers them itself (the command line's greeting and its event stream).
@@ -334,6 +384,7 @@ impl Host {
                 .map(|e| CommandInfo {
                     name: e.name,
                     args: e.args.iter().map(|(arg, ty)| (camel(arg), *ty)).collect(),
+                    input_schema: (e.schema)(),
                     kind: e.kind,
                     reach: e.reach.word(),
                     conversation: if let Reach::Own(pointer) = e.reach { Some(pointer) } else { None },
@@ -391,7 +442,8 @@ impl Host {
             };
             return serde_json::to_value(requests).map_err(|_| Failure::key("error.host.badReply"));
         }
-        self.dispatch(command, args).await
+        let result = self.dispatch(command, args).await;
+        if *caller == Caller::Screen { result } else { result.map_err(channel_detail) }
     }
 
     /// The first conversation of `id`'s family (who started whom), None for a conversation that does not exist.

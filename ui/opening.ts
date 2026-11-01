@@ -2,10 +2,20 @@ import type { Conversation, HeardMessage, Message, ToolUse } from './api.ts';
 
 /** A reply as an update brought it, made whole from the version the screen holds: the steps it left out are taken from
  * `before`, by place for the first `toolsFrom` and by id after them, so a step that did not change keeps its own object
- * (and its row on screen). `undefined` when `before` lacks one of them: the screen then asks for the reply again. */
+ * (and its row on screen); words and thinking sent from a point (`textFrom`, `thinkingFrom`) go after what `before`
+ * holds up to it. `undefined` when `before` lacks one of them: the screen then asks for the reply again. */
 export function whole(before: Message | undefined, heard: HeardMessage): Message | undefined {
-  const { toolsFrom, tools, ...rest } = heard;
-  if (toolsFrom === undefined) return heard as Message;
+  if (heard.toolsFrom === undefined && heard.textFrom === undefined && heard.thinkingFrom === undefined) return heard as Message;
+  const { toolsFrom, tools, textFrom, thinkingFrom, ...rest } = heard;
+  if (textFrom !== undefined) {
+    if (before?.text.length !== textFrom) return undefined;
+    rest.text = before.text + rest.text;
+  }
+  if (thinkingFrom !== undefined) {
+    if ((before?.thinking ?? '').length !== thinkingFrom) return undefined;
+    rest.thinking = (before?.thinking ?? '') + (rest.thinking ?? '');
+  }
+  if (toolsFrom === undefined) return tools === undefined ? (rest as Message) : ({ ...rest, tools } as Message);
   const held = before?.tools ?? [];
   if (toolsFrom > held.length) return undefined;
   let byId: Map<string, ToolUse> | undefined;
@@ -16,6 +26,39 @@ export function whole(before: Message | undefined, heard: HeardMessage): Message
     filled.push(kept);
   }
   return { ...rest, tools: filled };
+}
+
+/** Two updates of one reply as one, as if the screen had heard both in turn: what a screen held back (`ui/quiet.ts`) keeps
+ * one update per reply. A part the later one sends whole replaces the earlier one's; a part it sends from a point the
+ * earlier one reached goes after it. */
+export function combine(earlier: HeardMessage, later: HeardMessage): HeardMessage {
+  if (earlier.id !== later.id) return later;
+  const out: HeardMessage = { ...later };
+  const grow = (key: 'text' | 'thinking', from: 'textFrom' | 'thinkingFrom') => {
+    const next = later[from];
+    if (next === undefined) return;
+    const base = earlier[from] ?? 0;
+    const held = earlier[key] ?? '';
+    // The later one starts where the earlier one ended: one piece from the earlier start (or whole, when that was whole).
+    if (base + held.length !== next) return;
+    out[key] = held + (later[key] ?? '');
+    if (earlier[from] === undefined) delete out[from];
+    else out[from] = base;
+  };
+  grow('text', 'textFrom');
+  grow('thinking', 'thinkingFrom');
+  if (later.toolsFrom !== undefined && earlier.tools) {
+    const from = earlier.toolsFrom ?? 0;
+    const held = earlier.tools;
+    const byId = new Map(held.filter((tool): tool is ToolUse => !('same' in tool)).map((tool) => [tool.id, tool]));
+    const after = (later.tools ?? []).map((tool) => ('same' in tool ? (byId.get(tool.id) ?? tool) : tool));
+    if (later.toolsFrom >= from) {
+      out.tools = [...held.slice(0, later.toolsFrom - from), ...after];
+      if (earlier.toolsFrom === undefined) delete out.toolsFrom;
+      else out.toolsFrom = from;
+    } else out.tools = after;
+  }
+  return out;
 }
 
 /** Puts a message into a conversation: it replaces the one with the same id, or goes last. An update that cannot be made

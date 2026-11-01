@@ -122,3 +122,14 @@ fn every_shipped_catalog_item_has_one_display_name_in_every_locale() {
         }
     }
 }
+
+#[test]
+fn every_wake_reason_exists_in_every_locale() {
+    for locale in ["en", "pt-BR", "es", "fr", "de"] {
+        let text = std::fs::read_to_string(repo(&format!("ui/locales/{locale}.ts"))).unwrap();
+        let found = keys(&text);
+        for key in ["act.why.keepGoing", "act.why.compacted", "act.why.compactFailed"] {
+            assert_eq!(found.iter().filter(|entry| entry.as_str() == key).count(), 1, "{locale}: {key}");
+        }
+    }
+}

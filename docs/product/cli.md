@@ -7,6 +7,15 @@ on its `PATH` and the full path in `FABER_CLI`.
 One command table (`host/src/table.rs`, R459) sits behind the screen, the command line and the AI's tools. A command added
 to the table is immediately callable through `faber call <command>` and listed in `faber help --json`.
 
+`faber mcp` serves that same exported table as MCP tools over standard input and output. Configure an AI client to run
+`faber mcp` as a stdio MCP server; this command does not register itself with a client. The client starts the process
+and sends JSON-RPC `initialize`, `tools/list` and `tools/call` messages; tool failures carry the channel's error key and
+detail. Argument schemas are generated from the table's Rust types: optional arguments are not required, lists describe
+their items, and structures, enums and other complex types are loose objects described by their Rust type name. Nested
+fields are not expanded. The process passes its own `FABER_AGENT_TOKEN` and `FABER_CONVERSATION` to the channel; only a
+valid token establishes the conversation. Without one it is an agent without a conversation, never a person. An invalid
+token is refused. The AI client starts this process only when it needs it; Faber does not keep it running.
+
 ## Reaching Faber
 
 `faber` talks to the running Faber over a local channel (`channel/`), never a network port:

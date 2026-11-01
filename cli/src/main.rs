@@ -1,6 +1,7 @@
 //! Faber's command line.
 mod args;
 mod connect;
+mod mcp;
 mod out;
 mod verbs;
 mod words;
@@ -24,6 +25,12 @@ fn run() -> i32 {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
         return out.fail("cli.error.channel", out::UNREACHED);
     };
+    if args.word(0) == Some("mcp") && !args.on("help") {
+        if args.words.len() != 1 || !args.only(&[]) {
+            return out.fail("cli.error.usage", out::USAGE);
+        }
+        return runtime.block_on(mcp::run(&args));
+    }
     runtime.block_on(async {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => out::STOPPED,
