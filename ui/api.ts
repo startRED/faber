@@ -65,6 +65,8 @@ export interface ToolUse {
   name: string;
   input: unknown;
   ok?: boolean;
+  /** Where the reply's words stood when the agent's own call started, in UTF-16 units (`ui/timeline.ts`). */
+  at?: number;
   /** No running CLI owns this unfinished agent call after restore or copy. */
   interrupted?: boolean;
   output?: string;
@@ -89,15 +91,30 @@ export interface ToolUse {
   started?: number;
   /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
   ended?: number;
+  /** On an edit step: what it changed, as the engine read it when the step started; absent on older conversations. */
+  change?: Change;
+}
+/** A line an edit step added or removed. */
+export interface ChangedLine {
+  added: boolean;
+  text: string;
+}
+/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
+ * removed, and the changed lines themselves (from the engine, only the first 40). */
+export interface Change {
+  added: number;
+  removed: number;
+  lines: ChangedLine[];
 }
 /** A step of a streaming reply that has not changed since the screen last heard it: only its id. */
 export interface SameTool {
   id: string;
   same: true;
 }
-/** A reply as an update brings it (`src-tauri/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
- * holds them, and after them a step that did not change is a `SameTool`. `upsert` (`ui/opening.ts`) makes it whole again. */
-export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number };
+/** A reply as an update brings it (`host/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
+ * holds them, and after them a step that did not change is a `SameTool`; with `textFrom` (`thinkingFrom`) its text
+ * (thinking) is only what was added after that many UTF-16 units. `upsert` (`ui/opening.ts`) makes it whole again. */
+export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number; textFrom?: number; thinkingFrom?: number };
 export interface Permission {
   requestId: string;
   tool: string;
@@ -115,7 +132,16 @@ export interface Parked {
   does?: 'delete' | 'history' | 'publish' | 'install' | 'network';
   at: number;
 }
+export type FaberActor = { who: 'faber' } | { who: 'ai'; vendor: 'claude' | 'codex'; model?: string; role: 'router' | 'helper' };
+export interface FaberAct {
+  kind: 'route' | 'kit' | 'wake' | 'recovery' | 'helper';
+  actor: FaberActor;
+  what: string; why?: string; params?: Record<string, string>;
+  change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
+  sent?: string;
+}
 export interface Message {
+  acts?: FaberAct[];
   visualFileCount?: number;
   id: string;
   role: 'user' | 'assistant';
@@ -125,6 +151,8 @@ export interface Message {
   took?: number;
   textBreaks?: number[];
   activityEnd?: number;
+  /** Where each piece of the thinking starts and falls among the words and the steps (`ui/timeline.ts`). */
+  thinkingMarks?: { from: number; at: number; steps: number }[];
   images?: Image[];
   attachments?: string[];
   vendor?: Vendor;
@@ -198,7 +226,8 @@ export interface Message {
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
-  steps: { text: string; state: 'pending' | 'active' | 'done' }[];
+  /** `conversation`: one the agent started that does the step (task 040); `member`: where it stands, put here by the engine. */
+  steps: { text: string; state: 'pending' | 'active' | 'done'; conversation?: string; member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped' }[];
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };

@@ -181,7 +181,7 @@ impl Core {
                     cwd,
                     launch: ClaudeLaunch {
                         area: Area::Project,
-                        model,
+                        model: model.clone(),
                         effort,
                         resume: None,
                         user_hooks,
@@ -209,7 +209,7 @@ impl Core {
                 CodexThread {
                     leave_plan: false,
                     cwd,
-                    model,
+                    model: model.clone(),
                     effort,
                     resume: None,
                     instructions: None,
@@ -231,7 +231,22 @@ impl Core {
         };
         self.worker_memory.registry.register(session.owned_tree());
         self.rewind_helper_session(call, hsid, session.clone());
-        session.send(UserTurn::text(super::kits::with_resources(prompt, resources)));
+        let prompt = super::kits::with_resources(prompt, resources);
+        if let Some(reply) = self.turn(conv) {
+            reply.acts.push(crate::act::FaberAct {
+                kind: crate::act::ActKind::Helper,
+                actor: crate::act::Actor::Ai { vendor, model: model.clone(), role: crate::act::ActorRole::Helper },
+                what: "act.helper.started".into(),
+                why: None,
+                params: [("vendor".into(), vendor.name().into()), ("model".into(), shown.clone())].into(),
+                change: None,
+                sent: Some(prompt.chars().take(4000).collect()),
+            });
+            let id = reply.id.clone();
+            self.save(conv);
+            self.emit_message(conv, &id);
+        }
+        session.send(UserTurn::text(prompt));
         let started = self.secs();
         let run = Run {
             conv: conv.to_string(),

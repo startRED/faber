@@ -30,3 +30,5 @@ src-tauri/gen/
 
 # The direction check's report and proposed tasks: local drafts until someone picks one (docs/dev/workflow.md#direction-check).
 /docs/tasks/proposed/
+
+/src-tauri/binaries/

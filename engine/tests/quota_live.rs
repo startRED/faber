@@ -542,6 +542,56 @@ async fn a_usage_command_that_turns_out_to_ask_a_model_is_never_run_again() {
     engine.shutdown();
 }
 
+/// A `/usage` that prints no percentages, and a spawner whose tiny request answers with both windows; the probes it was asked
+/// for are kept.
+fn no_percentages() -> (Spawner, Calls) {
+    let mut local: serde_json::Value = serde_json::from_str(&usage_json(0)).unwrap();
+    local["result"] =
+        "You are currently using your subscription to power your Claude Code usage\n\nWhat's contributing to your limits usage?\n\nLast 24h · 655 requests".into();
+    let event = json!({"type":"rate_limit_event","rate_limit_info":{"overageStatus":"rejected","unifiedWindows":{
+        "five_hour":{"utilization":0,"resetsAt":WHEN + 7_000},
+        "seven_day":{"utilization":0.15,"resetsAt":WHEN + 400_000}}}});
+    let result = json!({"type":"result","is_error":false,"num_turns":1,"total_cost_usd":0.0001});
+    let (stream, asked) = (format!("{event}\n{result}\n"), Calls::default());
+    let seen = asked.clone();
+    let tiny: Spawner = Arc::new(move |_, args, _| {
+        if args.iter().any(|a| a == "Reply ok.") {
+            seen.lock().unwrap().push(args.to_vec());
+        }
+        Ok(printing(stream.clone()))
+    });
+    (Probe::saying(local.to_string()).spawner(Some(tiny)), asked)
+}
+
+#[tokio::test]
+async fn a_usage_command_that_prints_no_percentages_is_read_by_one_tiny_request() {
+    let dir = support::DataFolder::new();
+    let (spawn, asked) = no_percentages();
+    let (engine, _) = start(&dir, spawn);
+    // A turn said a moment ago that extra usage is off, so the probe cannot be charged (the guard is tested in `quota_watch.rs`).
+    let off = Signals { paid_fallback: Some(false), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(off)]);
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("both windows read", || engine.ledger().claude.readings.get("seven_day").is_some_and(|r| r.used == 0.15)).await;
+    let l = engine.ledger().claude;
+    assert_eq!((l.readings["five_hour"].used, l.readings["seven_day"].used), (0.0, 0.15));
+    assert_eq!(l.readings["seven_day"].resets_at, (WHEN + 400_000) as f64);
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    let args = &asked[0];
+    // The smallest request there is: one turn on the cheapest model, no tools, no skills, nothing saved, under a cent.
+    for flag in ["--max-turns", "--max-budget-usd", "--disable-slash-commands", "--no-session-persistence", "--tools"] {
+        assert!(args.iter().any(|a| a == flag), "{flag} in {args:?}");
+    }
+    assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-haiku-5-5"));
+    assert!(!args.iter().any(|a| a == "--resume"));
+    support::assert_no_user_customizations(args);
+    assert!(l.spans.is_empty() && l.own_spend.is_empty(), "a reading is never metered as a request");
+    assert!(l.zero_turn_readings.is_empty(), "a probe is a model turn, never zero-turn evidence");
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn focus_and_the_end_of_a_turn_read_again_after_the_debounce_and_a_hidden_window_does_not() {
     let dir = support::DataFolder::new();
