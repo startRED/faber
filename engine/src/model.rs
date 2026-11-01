@@ -1185,6 +1185,8 @@ pub struct Summary {
     /// The conversation whose agent started this one: the sidebar shows it under that one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,

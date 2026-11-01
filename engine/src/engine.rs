@@ -3444,6 +3444,7 @@ impl Core {
         reply.finished_at = None;
         let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
         c.stopped = false;
+        c.waiting_on = None;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = now;
@@ -3666,7 +3667,14 @@ impl Core {
         let route = if auto { self.next_route(id) } else { None };
         let point = self.rewind_steer(&item.id);
         let c = self.convs.get_mut(id).expect("checked above");
-        let previous = (c.messages.len(), c.choice.clone(), c.updated_at, c.stopped, c.keep_going.as_ref().and_then(|kg| kg.wait_until));
+        let previous = (
+            c.messages.len(),
+            c.choice.clone(),
+            c.updated_at,
+            c.stopped,
+            c.keep_going.as_ref().and_then(|kg| kg.wait_until),
+            c.waiting_on.clone(),
+        );
         // A turn that starts ends any wait of keep going: its end decides again, and no timer or reading sends a second one.
         if let Some(kg) = c.keep_going.as_mut() {
             kg.wait_until = None;
@@ -3709,6 +3717,7 @@ impl Core {
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.stopped = false;
+        c.waiting_on = None;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
@@ -3716,6 +3725,7 @@ impl Core {
             let c = self.convs.get_mut(id).expect("queued conversation exists");
             c.messages.truncate(previous.0);
             (c.choice, c.updated_at, c.stopped) = (previous.1, previous.2, previous.3);
+            c.waiting_on = previous.5;
             if let Some(kg) = c.keep_going.as_mut() {
                 kg.wait_until = previous.4;
             }
@@ -4594,7 +4604,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
-        let previous = (c.messages.len(), c.title.clone(), c.choice.clone(), c.updated_at, c.stopped, c.copy.clone());
+        let previous = (c.messages.len(), c.title.clone(), c.choice.clone(), c.updated_at, c.stopped, c.copy.clone(), c.waiting_on.clone());
         let reopened = archive::reopen(c);
         c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or_default()), ..req.choice.clone() });
         let routing = route.is_some();
@@ -4645,6 +4655,7 @@ impl Core {
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
         c.stopped = false;
+        c.waiting_on = None;
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
@@ -4657,6 +4668,7 @@ impl Core {
             let c = self.convs.get_mut(&id).expect("new turn's conversation exists");
             c.messages.truncate(previous.0);
             (c.title, c.choice, c.updated_at, c.stopped, c.copy) = (previous.1, previous.2, previous.3, previous.4, previous.5);
+            c.waiting_on = previous.6;
             archive::restore(c, reopened);
             if first {
                 self.draft = Some(id);

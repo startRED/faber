@@ -86,3 +86,7 @@ path = "tests/adopted_read_cost.rs"
 [[test]]
 name = "project_facts_cost"
 path = "tests/project_facts_cost.rs"
+
+[[test]]
+name = "session_control"
+path = "tests/session_control.rs"
