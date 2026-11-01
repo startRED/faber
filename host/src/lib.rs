@@ -364,18 +364,18 @@ impl Host {
             if let Err(key) = reach::check(caller, command, reach, &args, |id| self.family_of(id)) {
                 let mut allowed = false;
                 let mut request = None;
-                if key == reach::ASK_PERSON {
-                    if let Caller::Agent { conversation: Some(id) } = caller {
-                        let pending = {
-                            let mut book = lock(&self.asks);
-                            allowed = book.spend(id, command, &args);
-                            if !allowed {
-                                request = Some(book.record(id, command, args.clone(), ask::label(command)));
-                            }
-                            book.pending()
-                        };
-                        self.announce(&json!({"type": "asks", "asks": pending}));
-                    }
+                if key == reach::ASK_PERSON
+                    && let Caller::Agent { conversation: Some(id) } = caller
+                {
+                    let pending = {
+                        let mut book = lock(&self.asks);
+                        allowed = book.spend(id, command, &args);
+                        if !allowed {
+                            request = Some(book.record(id, command, args.clone(), ask::label(command)));
+                        }
+                        book.pending()
+                    };
+                    self.announce(&json!({"type": "asks", "asks": pending}));
                 }
                 if !allowed {
                     let mut failure = Failure::key(key);
@@ -384,7 +384,7 @@ impl Host {
                 }
             }
         }
-        if command == "asks" {
+        if command == "asks" && *caller != Caller::Screen {
             let requests = match caller {
                 Caller::Agent { conversation: Some(id) } => lock(&self.asks).for_conversation(id),
                 _ => Vec::new(),

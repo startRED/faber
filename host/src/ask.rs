@@ -116,6 +116,13 @@ impl Book {
         self.entries.iter().filter(|entry| entry.view.state == State::Pending).map(|entry| entry.view.clone()).collect()
     }
 
+    pub(crate) fn pending_details(&mut self) -> Vec<Value> {
+        self.expire();
+        self.entries.iter().filter(|entry| entry.view.state == State::Pending).map(|entry| {
+            serde_json::json!({"id": entry.view.id, "conversation": entry.view.conversation, "label": entry.view.label, "state": entry.view.state, "command": entry.command, "args": entry.args})
+        }).collect()
+    }
+
     pub(crate) fn for_conversation(&mut self, conversation: &str) -> Vec<View> {
         self.expire();
         self.entries
@@ -147,6 +154,17 @@ mod tests {
         tokio::time::advance(LIFE).await;
         assert!(!book.spend("one", "interrupt", &args));
         assert_eq!(book.for_conversation("one")[0].state, State::Expired);
+    }
+
+    #[test]
+    fn screen_details_name_the_exact_pending_action() {
+        let mut book = Book::default();
+        let id = book.record("one", "remove_project", json!({"id": "target"}), "projects");
+        assert_eq!(
+            book.pending_details()[0],
+            json!({"id": id, "conversation": "one", "label": "projects", "state": "pending", "command": "remove_project", "args": {"id": "target"}})
+        );
+        assert!(serde_json::to_value(book.for_conversation("one")).unwrap()[0].get("args").is_none());
     }
 
     #[tokio::test(start_paused = true)]

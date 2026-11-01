@@ -71,6 +71,30 @@
     "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it leaves its done mark for the person."
   },
   {
+    "name": "results",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "What a conversation delivered and what it cost, after its first reply."
+  },
+  {
+    "name": "project_results",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "A project's total and each conversation's results, most spent first."
+  },
+  {
     "name": "projects",
     "args": [],
     "kind": "read",

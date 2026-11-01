@@ -160,6 +160,22 @@ async fn a_disconnected_client_cannot_hold_a_slot_by_stopping_its_reader() {
     tokio::time::timeout(Duration::from_secs(6), task).await.unwrap().unwrap();
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_connected_client_that_stops_reading_releases_its_slot() {
+    let (backend, _) = fake();
+    let (client, server) = tokio::io::duplex(512);
+    let task = tokio::spawn(connection_at(server, backend.clone(), Guard::watching(backend.subscribe()), test_secret(), 0));
+    let (read, mut write) = tokio::io::split(client);
+    write.write_all(format!("{}\n", json!({"id":1,"cmd":"hello","args":{"secret":test_secret().hex()}})).as_bytes()).await.unwrap();
+    let mut reader = BufReader::new(read);
+    let mut line = String::new();
+    reader.read_line(&mut line).await.unwrap();
+    write.write_all(b"{\"id\":2,\"cmd\":\"huge\"}\n").await.unwrap();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::time::timeout(Duration::from_secs(6), task).await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn commands_reach_the_backend_and_refusals_keep_their_key() {
     let (backend, _) = fake();

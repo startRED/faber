@@ -141,6 +141,17 @@ async fn unidentified_agents_never_record_or_receive_a_grant() {
 }
 
 #[tokio::test]
+async fn screen_can_recover_exact_pending_requests_without_exposing_them_to_other_agents() {
+    let (host, _dir) = host().await;
+    lock(&host.asks).record("one", "remove_project", json!({"id": "target"}), "projects");
+    let pending = host.dispatch("asks", json!({})).await.unwrap();
+    assert_eq!(pending[0]["command"], "remove_project");
+    assert_eq!(pending[0]["args"]["id"], "target");
+    let other = Caller::Agent { conversation: Some("other".into()) };
+    assert_eq!(host.dispatch_as(&other, "asks", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test]
 async fn arguments_that_do_not_fit_and_names_not_in_the_table_are_refused_by_key() {
     let (host, _dir) = host().await;
     assert_eq!(key(host.dispatch("open", json!({})).await), "error.host.badArgs");

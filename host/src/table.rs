@@ -69,8 +69,8 @@ fn data_url(source: &Path, kind: &str, max: u64) -> Option<String> {
 
 table! {
     /// This conversation's requests and their current state.
-    Read Free fn asks(h) -> Vec<ask::View> {
-        Ok(Vec::new())
+    Read Free fn asks(h) -> Vec<Value> {
+        Ok(lock(&h.asks).pending_details())
     }
     /// Allow one identical retry, or decline the request.
     Write Person fn answer_ask(h, id: String, allow: bool) -> bool {
@@ -111,6 +111,14 @@ table! {
         let engine = h.engine.clone();
         let conversation = off("error.conversationGone", move || engine.open(&id)).await?.ok_or("error.conversationGone")?;
         Ok(views::read(&conversation, running, last))
+    }
+    /// What a conversation delivered and what it cost, after its first reply.
+    Read Free fn results(h, id: String) -> Option<faber_engine::results::Results> {
+        Ok(h.engine.results(&id).filter(|r| r.cost.turns > 0))
+    }
+    /// A project's total and each conversation's results, most spent first.
+    Read Free fn project_results(h, project_id: String) -> faber_engine::results::ProjectResults {
+        Ok(h.engine.project_results(&project_id))
     }
     /// The projects Faber knows, with their folders.
     Read Free fn projects(h) -> Vec<Project> {

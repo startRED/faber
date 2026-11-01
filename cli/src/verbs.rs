@@ -47,10 +47,10 @@ async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultVa
             } else {
                 out::REFUSED
             };
-            if key == "error.reach.ask" {
-                if let Some(request) = error.data.as_ref().and_then(|data| data.get("request")).and_then(Value::as_str) {
-                    return Err(out.ask_refused(request));
-                }
+            if key == "error.reach.ask"
+                && let Some(request) = error.data.as_ref().and_then(|data| data.get("request")).and_then(Value::as_str)
+            {
+                return Err(out.ask_refused(request));
             }
             Err(out.fail(&key, code))
         }
