@@ -163,7 +163,7 @@
       ]
     ],
     "kind": "startsTurn",
-    "reach": "free"
+    "reach": "ask"
   },
   {
     "name": "answer_plan",
@@ -1067,7 +1067,7 @@
       ]
     ],
     "kind": "write",
-    "reach": "free"
+    "reach": "ask"
   },
   {
     "name": "save_environment",
@@ -1181,7 +1181,8 @@
       ]
     ],
     "kind": "read",
-    "reach": "free",
+    "reach": "own",
+    "conversation": "/id",
     "about": "A file a reply names, read only around its line (parity P2), from inside the conversation's folder."
   },
   {
@@ -1197,7 +1198,8 @@
       ]
     ],
     "kind": "read",
-    "reach": "free",
+    "reach": "own",
+    "conversation": "/id",
     "about": "An image from a chat workspace as a data URL, so the page never reads the disk itself."
   },
   {
@@ -1209,7 +1211,8 @@
       ]
     ],
     "kind": "read",
-    "reach": "free",
+    "reach": "own",
+    "conversation": "/id",
     "about": "A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again."
   },
   {
@@ -1225,7 +1228,8 @@
       ]
     ],
     "kind": "read",
-    "reach": "free",
+    "reach": "own",
+    "conversation": "/id",
     "about": "The picture the browser took for a call, as a data URL, so the page never reads the disk itself."
   },
   {

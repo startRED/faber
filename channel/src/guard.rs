@@ -52,7 +52,14 @@ impl Guard {
             loop {
                 let event = match events.recv().await {
                     Ok(event) => event,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // A dropped `running` event could be the one that said a turn ended: forget what was thought to run, so
+                        // a place is never held for good (the hour's limit still holds).
+                        if let Some(guard) = watcher.upgrade() {
+                            guard.lock().running.clear();
+                        }
+                        continue;
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 };
                 let Some(guard) = watcher.upgrade() else { return };

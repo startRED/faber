@@ -137,7 +137,7 @@ table! {
     Write Free fn move_chat_to_group(h, conversation_id: String, group_id: Option<String>) -> () {
         h.engine.move_chat_to_group(&conversation_id, group_id.as_deref())
     }
-    StartsTurn Free fn new_group_chat(h, group_id: String) -> Conversation {
+    StartsTurn Ask fn new_group_chat(h, group_id: String) -> Conversation {
         h.engine.new_group_chat(&group_id).map(Conversation::for_screen)
     }
     Read Screen fn set_clock(h, utc_offset: i64) -> () {
@@ -500,7 +500,7 @@ table! {
     Write Person fn open_folders(h, paths: Vec<String>) -> Vec<Project> {
         h.engine.open_folders(&paths)
     }
-    Write Free fn forget_recent(h, path: String) -> () {
+    Write Ask fn forget_recent(h, path: String) -> () {
         h.engine.forget_recent(&path)
     }
     Write Ask fn save_environment(h, name: String, folders: Vec<String>) -> () {
@@ -549,27 +549,27 @@ table! {
         h.shell.reveal(folder)
     }
     /// A file a reply names, read only around its line (parity P2), from inside the conversation's folder.
-    Read Free fn read_file_at(h, id: String, path: String) -> faber_engine::fileview::FileView {
+    Read Own("/id") fn read_file_at(h, id: String, path: String) -> faber_engine::fileview::FileView {
         let engine = h.engine.clone();
         Ok(tokio::task::spawn_blocking(move || engine.read_file_at(&id, &path))
             .await
             .unwrap_or_else(|_| faber_engine::fileview::FileView::failed("error.file.read")))
     }
     /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
-    Read Free fn read_image(h, id: String, path: String) -> Option<String> {
+    Read Own("/id") fn read_image(h, id: String, path: String) -> Option<String> {
         let Some(source) = h.engine.workspace_file(&id, &path) else { return Ok(None) };
         let ext = source.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
         let Some((_, kind)) = IMAGE_TYPES.iter().find(|(e, _)| Some(*e) == ext.as_deref()) else { return Ok(None) };
         Ok(data_url(&source, kind, 8_000_000))
     }
     /// A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again.
-    Read Free fn site_tabs(h, id: String) -> Option<faber_engine::browser::tabs::Tabs> {
+    Read Own("/id") fn site_tabs(h, id: String) -> Option<faber_engine::browser::tabs::Tabs> {
         // Reading a conversation's file waits on the engine, never on the window's thread.
         let engine = h.engine.clone();
         off("error.conversationGone", move || engine.browser_tabs(&id)).await
     }
     /// The picture the browser took for a call, as a data URL, so the page never reads the disk itself.
-    Read Free fn site_picture(h, id: String, call: String) -> Option<String> {
+    Read Own("/id") fn site_picture(h, id: String, call: String) -> Option<String> {
         let Some(source) = h.engine.site_picture(&id, &call) else { return Ok(None) };
         Ok(data_url(&source, "image/jpeg", 2_000_000))
     }
