@@ -80,7 +80,7 @@ fn every_english_text_is_shown_somewhere() {
     let unused: Vec<&String> = keys
         .iter()
         .filter(|key| {
-            let quoted = [format!("'{key}'"), format!("\"{key}\""), format!("`{key}`")];
+            let quoted = [format!("'{key}'"), format!("\"{key}\""), format!("`{key}`"), format!("\\\"{key}\\\"")];
             !listed(key)
                 && !code.iter().any(|text| quoted.iter().any(|q| text.contains(q.as_str())))
                 && !starts.iter().any(|s| key.starts_with(s.as_str()))
