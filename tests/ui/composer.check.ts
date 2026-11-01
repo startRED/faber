@@ -1,9 +1,57 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer, type Draft } from '../../ui/Composer.tsx';
-import { t } from '../../ui/i18n.ts';
+import { Sidebar } from '../../ui/Sidebar.tsx';
+import type { Summary } from '../../ui/api.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
+import titleWords from '../../ui/locales/conversation-titles.json';
 import { check, equal, ok } from './check.ts';
+
+check('composer: a localized first-exchange title updates the existing sidebar row without changing the draft', async () => {
+  const root = document.createElement('div');
+  root.style.width = '720px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const [conversations, setConversations] = createSignal<Summary[]>([
+    { id: 'first-exchange-title', title: 'https://example.com/private', area: 'chat', updatedAt: 1_800_000_000_000 },
+  ]);
+  let fill!: (text: string) => void;
+  const closeSidebar = render(() => createComponent(Sidebar, {
+    get conversations() { return conversations(); }, projects: [], vendors: [], version: '1',
+    place: { area: 'chat' }, running: [], quotas: {}, now: 1_800_000_000_000,
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {},
+    onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+  }), root);
+  const composer = document.createElement('div');
+  root.append(composer);
+  const closeComposer = render(() => createComponent(Composer, {
+    vendors: [], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    onReady: (ready) => { fill = ready; },
+  }), composer);
+  try {
+    fill('Keep my next message');
+    for (const [language, template] of Object.entries(titleWords)) {
+      useLanguage(language);
+      const title = template.replace('{host}', 'example.com');
+      setConversations((rows) => rows.map((row) => ({ ...row, title })));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const row = root.querySelector('[data-conversation-id="first-exchange-title"]')!;
+      ok(row.textContent!.includes(title), `the ${language} title is visible in the same conversation`);
+      equal(root.querySelectorAll('[data-conversation-id="first-exchange-title"]').length, 1);
+      equal(composer.querySelector('textarea')!.value, 'Keep my next message');
+    }
+    setConversations((rows) => rows.map((row) => ({ ...row, title: 'Consertar o computador' })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ok(root.querySelector('[data-conversation-id="first-exchange-title"]')!.textContent!.includes('Consertar o computador'));
+  } finally {
+    useLanguage('en');
+    closeComposer();
+    closeSidebar();
+    root.remove();
+  }
+});
 
 check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after sending', async () => {
   const root = document.createElement('div');

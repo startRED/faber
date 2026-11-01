@@ -79,6 +79,7 @@ mod settings_change;
 mod siblings;
 mod silence;
 mod stuck_watch;
+mod title;
 mod toolbox;
 mod toolbox_replace;
 mod unbounded;
@@ -584,6 +585,9 @@ struct Core {
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
     asking: HashMap<String, aside::Asking>,
+    titles: HashMap<String, title::Pending>,
+    #[cfg(test)]
+    title_ask: Option<Ask>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
     /// Standing goals: what the 30 second loop keeps between looks (`goals.rs`).
@@ -743,6 +747,9 @@ impl Engine {
                 helpers: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
+                titles: HashMap::new(),
+                #[cfg(test)]
+                title_ask: None,
                 watched: HashMap::new(),
                 goals: Default::default(),
                 heard: HashMap::new(),
@@ -1566,6 +1573,7 @@ impl Engine {
             }
             c.close_helpers();
             c.close_asides(None);
+            c.titles.clear();
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
@@ -3238,6 +3246,7 @@ impl Core {
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
+        self.title_after_answer(conv, completed_ok);
         self.list_changed();
         if unsent {
             self.emit_queue(conv);
@@ -4768,7 +4777,7 @@ impl Core {
             None => fallback.clone(),
         };
         if c.title.is_empty() {
-            c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+            c.title = title::fallback(&req.text, self.store.settings().language.as_deref().unwrap_or("en"));
         }
         let data_dir = self.opts.data_dir.clone();
         let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
@@ -4831,6 +4840,9 @@ impl Core {
             return Err(error);
         }
         self.draft_routes.remove(&id);
+        if previous.0 == 0 && previous.1.is_empty() {
+            self.track_title(&id);
+        }
         self.clear_older_plan_cards(&id, &reply_id);
         self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
@@ -5133,6 +5145,7 @@ impl Core {
     }
 
     fn rename(&mut self, id: &str, title: &str) {
+        self.titles.remove(id);
         let Some(c) = self.load(id) else { return };
         let title: String = title.chars().filter(|ch| !unseen(*ch)).collect::<String>().trim().chars().take(120).collect();
         if !title.is_empty() {
@@ -5193,6 +5206,7 @@ impl Core {
             self.list_changed();
             return Err(FAILED.into());
         }
+        self.titles.remove(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.follows.remove(id);
         self.before.remove(id);
