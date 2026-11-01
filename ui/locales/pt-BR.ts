@@ -2240,6 +2240,7 @@ export const ptBR: Messages = {
   'notes.320.better': 'O branch de uma conversa de projeto agora fica em Detalhes técnicos, com a pasta, e não mais no topo.',
   'notes.321.better': 'A explicação do Acesso total nas Configurações agora é uma lista curta de frases simples, com todos os avisos mantidos.',
   'notes.322.fixed': 'A porcentagem do Claude na barra lateral e em Ajustes não fica mais presa num número antigo: ela volta a acompanhar o seu uso real da semana.',
+  'notes.323.fixed': 'Numa janela pequena, os botões Instalar e Entrar da primeira execução não ficam mais escondidos sob o rodapé.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

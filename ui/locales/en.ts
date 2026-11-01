@@ -2133,6 +2133,7 @@ export const en = {
   'notes.320.better': 'The branch of a project conversation is now in Technical details with its folder, no longer in the top bar.',
   'notes.321.better': 'The Full access explanation in Settings is now a short list of plain sentences, with every warning still there.',
   'notes.322.fixed': 'The Claude share in the sidebar and in Settings no longer sticks at an old number: it follows your real weekly use again.',
+  'notes.323.fixed': 'In a small window, the Install and Sign in buttons of the first run no longer hide under its footer.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2253,6 +2253,7 @@ export const es: Messages = {
   'notes.320.better': 'La rama de una conversación de proyecto ahora está en Detalles técnicos, con su carpeta, y ya no arriba.',
   'notes.321.better': 'La explicación de Acceso total en Ajustes ahora es una lista corta de frases sencillas, con todas las advertencias.',
   'notes.322.fixed': 'El porcentaje de Claude en la barra lateral y en Ajustes ya no se queda en un número viejo: vuelve a seguir tu uso real de la semana.',
+  'notes.323.fixed': 'En una ventana pequeña, los botones Instalar e Iniciar sesión del primer inicio ya no quedan ocultos bajo el pie.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

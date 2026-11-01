@@ -2253,6 +2253,7 @@ export const de: Messages = {
   'notes.320.better': 'Der Branch eines Projektgesprächs steht jetzt mit seinem Ordner in Technische Details, nicht mehr oben in der Leiste.',
   'notes.321.better': 'Die Erklärung zum Vollzugriff in den Einstellungen ist jetzt eine kurze Liste einfacher Sätze, mit allen Warnungen.',
   'notes.322.fixed': 'Der Claude-Anteil in der Seitenleiste und in den Einstellungen bleibt nicht mehr auf einer alten Zahl hängen: Er folgt wieder deiner echten Wochennutzung.',
+  'notes.323.fixed': 'In einem kleinen Fenster verschwinden die Knöpfe Installieren und Anmelden beim ersten Start nicht mehr unter der Fußleiste.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

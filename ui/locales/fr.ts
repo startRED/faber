@@ -2253,6 +2253,7 @@ export const fr: Messages = {
   'notes.320.better': "La branche d'une conversation de projet est désormais dans Détails techniques, avec son dossier, et non plus en haut.",
   'notes.321.better': 'L’explication de l’Accès total dans les Réglages est maintenant une courte liste de phrases simples, avec tous les avertissements.',
   'notes.322.fixed': 'La part de Claude dans la barre latérale et dans Réglages ne reste plus bloquée sur un ancien chiffre : elle suit de nouveau votre usage réel de la semaine.',
+  'notes.323.fixed': 'Dans une petite fenêtre, les boutons Installer et Se connecter du premier lancement ne se cachent plus sous le pied de page.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
