@@ -17,14 +17,16 @@ const ASK_LIMIT: Duration = ROUTE_BUDGET;
 /// counted: it is asked for when the message leaves, or its draft's answer is reused.
 const DRAFT_ROUTES: u8 = 2;
 
+type RouteAnswer = Option<(Option<Asked>, crate::act::Actor)>;
+
 /// A route for a request, ready or on its way.
 pub(super) struct Guess {
     request: String,
     /// What the small model said about the request (kind, level, confidence). The table runs when the message is sent, on the
     /// quota of that moment, so only this is kept.
-    result: Option<Option<(Option<Asked>, crate::act::Actor)>>,
+    result: Option<RouteAnswer>,
     actor: crate::act::Actor,
-    waiters: Vec<oneshot::Sender<Option<(Option<Asked>, crate::act::Actor)>>>,
+    waiters: Vec<oneshot::Sender<RouteAnswer>>,
     /// The new conversation whose answering CLI starts as soon as the route is known.
     warm: Option<String>,
     /// A conversation under way is routed inside its own subscription, where the CLI keeps the history.
@@ -220,12 +222,7 @@ impl Core {
     }
 
     /// The route for a sent message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(
-        &mut self,
-        request: &str,
-        attached: usize,
-        only: Option<Vendor>,
-    ) -> oneshot::Receiver<Option<(Option<Asked>, crate::act::Actor)>> {
+    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
         let (tx, rx) = oneshot::channel();
         match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
             Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
