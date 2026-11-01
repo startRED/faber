@@ -1438,7 +1438,7 @@ export const ptBR: Messages = {
   "set.permissions": "Permissões no Chat e em Projetos",
   "error.projectSandbox": "O Faber não conseguiu preparar o isolamento da pasta de trabalho. Confira as permissões da pasta e tente novamente.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
-  "set.permissionsDontAskBody": "O Chat e os Projetos executam comandos e alteram arquivos sem perguntar, com acesso à internet. Fazem isso em qualquer pasta que você escolher, exceto pastas do sistema e de login. Suas próprias ferramentas conectadas e hooks continuam ativos.\nUma página ou arquivo que a IA lê pode induzi-la a alterar arquivos ou usar a rede sem perguntar.\nO Codex pode ler diretamente suas pastas de login e de chaves (.claude, .codex, .ssh). O Claude Code pode lê-las por meio de comandos. O bloqueio dessas pastas nos comandos funciona só na medida do possível.\nPor isso, para o que não for de confiança, use Perguntar.\nParar pede às ferramentas que parem e encerra os programas que elas iniciaram.",
+  "set.permissionsDontAskBody": "O Chat e os Projetos executam comandos e alteram arquivos sem perguntar, com acesso à internet. Fazem isso em qualquer pasta que você escolher, exceto pastas do sistema e de login. Suas próprias ferramentas conectadas e hooks continuam ativos. O Acesso total também permite alterar a pasta de dados do próprio Faber, incluindo suas conversas e configurações.\nUma página ou arquivo que a IA lê pode induzi-la a alterar arquivos ou usar a rede sem perguntar.\nO Codex pode ler diretamente suas pastas de login e de chaves (.claude, .codex, .ssh). O Claude Code pode lê-las por meio de comandos. O bloqueio dessas pastas nos comandos funciona só na medida do possível.\nPor isso, para o que não for de confiança, use Perguntar.\nParar pede às ferramentas que parem e encerra os programas que elas iniciaram.",
   "set.permissionsAskBody": "O Chat e os Projetos perguntam antes de alterar um arquivo e antes de executar comandos, exceto os que você já liberou nas configurações da própria ferramenta. O Claude Code também deixa passar alguns comandos de leitura simples, como listar uma pasta. Parar, e mudar para este modo, pede às ferramentas que parem e encerra os programas que elas iniciaram.",
   'set.permissions.ask': "Perguntar",
   'set.permissions.acceptEdits': "Aceitar edições",
@@ -2382,6 +2382,7 @@ export const ptBR: Messages = {
   'notes.337.fixed': 'O trabalho não aparece mais como concluído quando a IA não o concluiu; ele diz que terminou sem conclusão, e o Faber pede uma vez à IA que o encerre.',
   'notes.338.better': 'Abrir um passo para ler deixa a página parada enquanto a resposta continua embaixo, e os passos mostram nomes curtos de arquivo em vez de caminhos longos de pasta.',
   'notes.339.better': 'Um pedido grande volta a ser dividido: a IA abre até três conversas lado a lado e confere o trabalho de cada uma. Pedido pequeno continua em uma conversa só.',
+  'notes.340.fixed': 'Os modos que limitam o acesso agora protegem as conversas e configurações do Faber contra alterações, mesmo quando um projeto fica dentro da pasta de dados do Faber.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
