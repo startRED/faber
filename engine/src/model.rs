@@ -720,18 +720,15 @@ pub struct PlanStep {
     pub id: String,
     pub text: String,
     pub state: StepState,
-<<<<<<< HEAD
     /// The conversation this one started that does the step (task 040), checked when the plan is written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<String>,
     /// For the screen only, like `Plan::estimate`: where that conversation stands now (`Core::shown_plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member: Option<MemberState>,
-=======
     /// What the agent ran or looked at that shows a done step is done; absent until it marks the step done (and on older plans).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
->>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
     /// Paths or folders the step expects to change, relative to the project, written with `/`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,

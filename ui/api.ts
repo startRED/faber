@@ -229,15 +229,12 @@ export interface PlanStep {
   text: string;
   state: 'pending' | 'active' | 'done';
   evidence?: string;
+  conversation?: string;
+  member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
-<<<<<<< HEAD
-  /** `conversation`: one the agent started that does the step (task 040); `member`: where it stands, put here by the engine. */
-  steps: { text: string; state: 'pending' | 'active' | 'done'; conversation?: string; member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped' }[];
-=======
   steps: PlanStep[];
->>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };

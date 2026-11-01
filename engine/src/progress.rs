@@ -48,15 +48,10 @@ pub const NO_EVIDENCE: &str = "error.plan.noEvidence";
 const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a short checklist, kept with the conversation \
 across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
 while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
-<<<<<<< HEAD
-own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
-next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
-conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
-=======
 own. Then send {\"advance\": true, \"evidence\": \"...\"} together with the call that starts the next step: it finishes the current \
 step and starts the next pending one. Every step marked done (in steps or with advance) needs evidence: what you ran or looked at \
-that shows it is done. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. For big \
->>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
+that shows it is done. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
+conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
 work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
 spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
@@ -255,8 +250,9 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                 };
                 let evidence = match state {
                     StepState::Done => {
-                        let given = text_of(&s["evidence"], EVIDENCE_CHARS);
-                        let was_done = before.and_then(|p| p.steps.iter().find(|old| old.id == id && old.state == StepState::Done));
+                        let given = text_of(&s["evidence"], EVIDENCE_CHARS - 1);
+                        let was_done = before
+                            .and_then(|p| p.steps.iter().find(|old| old.id == id && old.text == text && old.state == StepState::Done));
                         match (was_done, given) {
                             (Some(old), given) => old.evidence.clone().or(given),
                             (None, Some(ev)) => Some(ev),
@@ -279,11 +275,11 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                         waits.push(w.to_string());
                     }
                 }
-<<<<<<< HEAD
                 steps.push(PlanStep {
                     id,
                     text,
                     state,
+                    evidence,
                     files,
                     waits,
                     read: s["read"].as_bool().unwrap_or(false),
@@ -291,9 +287,6 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                     conversation: text_of(&s["conversation"], CONVERSATION_ID_CHARS),
                     member: None,
                 });
-=======
-                steps.push(PlanStep { id, text, state, evidence, files, waits, read: s["read"].as_bool().unwrap_or(false), worker: None });
->>>>>>> 2cc75d48 (feat(engine): a plan step is done only when the AI marks it with evidence)
             }
             if steps.is_empty() {
                 return Ok(None);
@@ -305,7 +298,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
     };
     if input.get("advance").and_then(Value::as_bool) == Some(true) {
         let current = steps.iter_mut().find(|s| s.state == StepState::Active);
-        let Some(evidence) = text_of(&input["evidence"], EVIDENCE_CHARS) else {
+        let Some(evidence) = text_of(&input["evidence"], EVIDENCE_CHARS - 1) else {
             let (id, text) = current.map_or(("", "advance"), |s| (s.id.as_str(), s.text.as_str()));
             return Err(no_evidence(id, text));
         };
@@ -938,7 +931,7 @@ mod tests {
         let long_ev = format!("  {}\nsecond line  ", "x".repeat(210));
         let p = plan(Some(&p), &json!({ "advance": true, "evidence": long_ev }), 2).unwrap().unwrap();
         let ev = p.steps[0].evidence.as_deref().unwrap();
-        assert!(ev.ends_with('…') && !ev.contains('\n') && ev.chars().count() == EVIDENCE_CHARS + 1, "{ev}");
+        assert!(ev.ends_with('…') && !ev.contains('\n') && ev.chars().count() == EVIDENCE_CHARS, "{ev}");
         assert_eq!(p.steps[1].evidence, None);
 
         // Sending the list again may omit evidence on a step that was already done, and a newly done step still needs its own.
@@ -963,6 +956,11 @@ mod tests {
         )
         .unwrap()
         .unwrap();
+        assert!(
+            plan(Some(&both), &json!({ "steps": [{ "text": "Publish", "state": "done", "id": "read" }] }), 5)
+                .unwrap_err()
+                .starts_with(NO_EVIDENCE)
+        );
         assert_eq!(both.steps[0].evidence, p.steps[0].evidence, "stored evidence is kept when omitted");
         assert_eq!(both.steps[1].evidence.as_deref(), Some("Ran redirect check."));
     }

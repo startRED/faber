@@ -42,7 +42,7 @@ check('plan: done steps are checked, the current one is marked, and the count fo
   }
 });
 
-check('plan: a done step shows its evidence as its tooltip and nothing else', async () => {
+check('plan: a done step shows evidence beside a done step only', async () => {
   const plan: Plan = {
     at: 1,
     steps: [
@@ -55,10 +55,14 @@ check('plan: a done step shows its evidence as its tooltip and nothing else', as
   try {
     await settle();
     const steps = [...view.root.querySelectorAll<HTMLLIElement>('.plan li')];
-    equal(steps[0]!.getAttribute('title'), 'Read ui/Plan.tsx lines 1-42.');
+    equal(steps[0]!.querySelector('.now')!.textContent, ' · Read ui/Plan.tsx lines 1-42.');
     equal(steps[0]!.querySelector('.text')!.textContent, 'Read the page');
-    equal(steps[1]!.getAttribute('title'), null);
-    equal(steps[2]!.getAttribute('title'), null);
+    equal(steps[1]!.querySelector('.now'), null);
+    equal(steps[2]!.querySelector('.now'), null);
+    view.root.style.width = '240px';
+    steps[0]!.querySelector('.now')!.textContent = 'x'.repeat(200);
+    const evidence = steps[0]!.querySelector<HTMLElement>('.now')!;
+    ok(evidence.getBoundingClientRect().right <= view.root.getBoundingClientRect().right + 1, 'long evidence wraps within a narrow plan');
   } finally {
     view.done();
   }
