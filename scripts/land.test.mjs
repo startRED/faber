@@ -280,3 +280,11 @@ test('only a red report of the very queue commit keeps a pull request off trains
   assert.equal(redAt([{ state: 'pending', description: 'Queued as abcdef123' }, { state: 'failure', description: 'abcdef123' }], commit), false);
   assert.equal(redAt([], commit), false);
 });
+
+test('a workflow change of its own lands as checked on a moved base only from a PC (--finish)', () => {
+  const flow = '.github/workflows/release.yml';
+  assert.equal(landsAsChecked(['docs/tasks/a.md'], [flow], ['docs/tasks/a.md'], isWords), null);
+  assert.equal(landsAsChecked(['docs/tasks/a.md'], [flow], ['docs/tasks/a.md'], isWords, { ownWorkflow: true }), 'words');
+  assert.equal(landsAsChecked(['engine/src/a.rs'], [flow], ['engine/src/a.rs'], isWords, { ownWorkflow: true }), 'disjoint');
+  assert.equal(landsAsChecked([flow], ['ui/App.tsx'], [flow], isWords, { ownWorkflow: true }), null, 'a base that changed a workflow changed what checked it');
+});

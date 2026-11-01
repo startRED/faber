@@ -176,8 +176,9 @@ export function wordsOnly(moved, differs, isWords) {
 }
 
 /** Whether the checked batch can land on a base that moved, and why. */
-export function landsAsChecked(moved, changed, differs, isWords) {
-  if (workflow(moved) || workflow(changed)) return null;
+export function landsAsChecked(moved, changed, differs, isWords, { ownWorkflow = false } = {}) {
+  // A workflow change of its own lands only from a PC (`--finish`, `ownWorkflow`); one on the base changed what checked it.
+  if (workflow(moved) || (!ownWorkflow && workflow(changed))) return null;
   if (wordsOnly(moved, differs, isWords)) return 'words';
   const numbered = (f) => f === 'docs/decisions.md' || f.startsWith('docs/next/') || f.startsWith('ui/locales/');
   const files = new Set(moved);
@@ -580,7 +581,7 @@ async function alone(number, oid, why) {
  * The green batch `sha` put on the moved `base`: its new top, each member's commit and why it lands as checked.
  * Null when the trees do not qualify, a member does not apply cleanly, or a check fails on the new tree.
  */
-export async function onMoved(base, sha, batch) {
+export async function onMoved(base, sha, batch, rule = {}) {
   // The checked-out queued commit's own rules, as CI's: the base's land.mjs runs from a temporary folder.
   const { isWords } = await import(pathToFileURL(resolve('scripts/ci-scope.mjs')).href);
   // Both sides of a rename count: a code file renamed into a folder of words is not words.
@@ -588,13 +589,13 @@ export async function onMoved(base, sha, batch) {
   const mergeBase = git('merge-base', base, sha).trim();
   const moved = plain(mergeBase, base);
   const changed = plain(mergeBase, sha);
-  if (!landsAsChecked(moved, changed, [], isWords)) return null;
+  if (!landsAsChecked(moved, changed, [], isWords, rule)) return null;
   const dir = mkdtempSync(join(tmpdir(), 'faber-land-'));
   try {
     git('worktree', 'add', '--quiet', '--detach', dir, base);
     git('-C', dir, 'cherry-pick', '--allow-empty', ...batch.map((m) => m.commit));
     const landing = git('-C', dir, 'rev-parse', 'HEAD').trim();
-    const kind = landsAsChecked(moved, changed, plain(sha, landing), isWords);
+    const kind = landsAsChecked(moved, changed, plain(sha, landing), isWords, rule);
     if (!kind) return null;
     run(process.execPath, ['scripts/docs.mjs'], { cwd: dir });
     run(process.execPath, ['scripts/numbers.mjs', 'check'], { cwd: dir });
@@ -965,10 +966,15 @@ function sweep() {
 
 /**
  * Lands from this PC a queued commit that CI checked but could not push itself, because it changes a workflow file
- * (GitHub refuses that to the workflow's token): only when its `gate` passed, it still sits on top of phase-1-base and
- * the pull request is still at the head that was squashed. The same atomic push as the land job of ci.yml.
+ * (GitHub refuses that to the workflow's token): only when its `gate` passed and the pull request is still at the head that
+ * was squashed. A base that moved meanwhile takes it as checked when it moved by words or by files the commit does not
+ * touch (`onMoved`, the land job's rule): trains land every half hour, and a workflow change checked alone would
+ * otherwise never find the base still. The same atomic push as the land job of ci.yml.
  */
-function finish(number) {
+async function finish(number) {
+  // The pre-push hook's owed-work guard (scripts/owed.mjs) counts this very pull request once its branch moves to the
+  // landed commit, and refused the push onto phase-1-base (#559). Finishing a checked landing is what the guard waits for.
+  process.env.FABER_IGNORE_OWED = '1';
   const queue = `queue/pr-${number}`;
   git('fetch', '--quiet', 'origin', `+refs/heads/${BASE}:refs/remotes/origin/${BASE}`, `+refs/heads/${queue}:refs/remotes/origin/${queue}`, '+refs/heads/main:refs/remotes/origin/main');
   const sha = git('rev-parse', `origin/${queue}`).trim();
@@ -977,11 +983,18 @@ function finish(number) {
     console.error(`The gate of ${sha.slice(0, 9)} has not passed (yet): nothing lands.`);
     return 1;
   }
-  try {
-    git('merge-base', '--is-ancestor', `origin/${BASE}`, sha);
-  } catch {
-    console.error(`${BASE} moved after #${number} was queued: queue it again with node scripts/land.mjs ${number}.`);
-    return 1;
+  const base = git('rev-parse', `origin/${BASE}`).trim();
+  let landing = sha;
+  let checkBase = false;
+  if (!ancestor(base, sha)) {
+    const batch = stacked(git('log', '--reverse', LOG, `${base}..${sha}`));
+    const moved = batch?.length === 1 ? await onMoved(base, sha, batch, { ownWorkflow: true }) : null;
+    if (!moved) {
+      console.error(`${BASE} moved after #${number} was queued, in files it touches: queue it again with node scripts/land.mjs ${number}.`);
+      return 1;
+    }
+    landing = moved.landing;
+    checkBase = moved.kind === 'disjoint';
   }
   const oid = git('log', '-1', '--format=%(trailers:key=Pull-request-head,valueonly)', sha).trim();
   const pr = JSON.parse(run('gh', ['pr', 'view', number, '--json', 'state,isCrossRepository,baseRefName,headRefName,headRefOid']));
@@ -992,24 +1005,25 @@ function finish(number) {
   // The branch first, then the base, as the land job does: GitHub marks the pull request merged only when the base takes
   // the head it already has. A base that refuses puts the branch back.
   const branch = `refs/heads/${pr.headRefName}`;
-  git('push', '--quiet', `--force-with-lease=${branch}:${oid}`, 'origin', `${sha}:${branch}`);
+  git('push', '--quiet', `--force-with-lease=${branch}:${oid}`, 'origin', `${landing}:${branch}`);
   execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { windowsHide: true });
   try {
-    git('push', '--quiet', 'origin', `${sha}:refs/heads/${BASE}`);
+    git('push', '--quiet', 'origin', `${landing}:refs/heads/${BASE}`);
   } catch (error) {
-    git('push', '--quiet', `--force-with-lease=${branch}:${sha}`, 'origin', `${oid}:${branch}`);
+    git('push', '--quiet', `--force-with-lease=${branch}:${landing}`, 'origin', `${oid}:${branch}`);
     console.error(String(error.stderr || error.message).trim());
     console.error(`${BASE} refused it, so #${number}'s branch is back where it was: queue it again.`);
     return 1;
   }
-  try {
-    git('merge-base', '--is-ancestor', 'origin/main', sha);
-    git('push', '--quiet', 'origin', `${sha}:refs/heads/main`);
-  } catch {
-    // main moved on its own: it follows the next green commit (R127).
+  if (checkBase || !ancestor(base, 'origin/main')) {
+    // Independent changes put together were never checked whole: main follows once phase-1-base's own check is green.
+    run('gh', ['workflow', 'run', 'ci.yml', '--ref', BASE]);
+    console.log('main follows once the phase-1-base check is green.');
+  } else if (ancestor('origin/main', landing)) {
+    git('push', '--quiet', 'origin', `${landing}:refs/heads/main`);
   }
   git('push', '--quiet', 'origin', `:refs/heads/${queue}`);
-  console.log(`#${number} landed as ${sha.slice(0, 9)} on ${BASE}.`);
+  console.log(`#${number} landed as ${landing.slice(0, 9)} on ${BASE}.`);
   return 0;
 }
 
@@ -1027,7 +1041,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
     console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--alone] [--head <commit>] | <pull request> --finish | --sweep');
     process.exitCode = 2;
   } else if (args.includes('--finish')) {
-    process.exitCode = finish(number);
+    process.exitCode = await finish(number);
   } else if (args.includes('--land')) {
     process.exitCode = await landQueued(number, value('--land'), self);
   } else if (args.includes('--split')) {

@@ -172,8 +172,8 @@ is and lands at once, provided every file that then differs from the tree CI che
 passes. A task file landing meanwhile no longer sends every queued pull request back to the start.
 GitHub refuses the workflow's own token any push of a commit that changes a file in `.github/workflows`, so such a
 landing ends on the PC: once its gate is green, the land job fails with that reason, and `land.mjs <number> --finish`
-makes the same atomic push with the person's own sign-in, after checking the gate passed, the commit is still on top of
-`phase-1-base` and the pull request is still at the squashed head. `--dry-run` shows the commit it would queue and pushes nothing. A fragment that cannot fold stops `land.mjs` with its
+makes the same atomic push with the person's own sign-in, after checking the gate passed and the pull request is still
+at the squashed head; a base that moved by words or files it does not touch takes it as checked, as in the land job. `--dry-run` shows the commit it would queue and pushes nothing. A fragment that cannot fold stops `land.mjs` with its
 reasons, and `scripts/numbers.test.mjs` checks every waiting fragment wherever the lints run.
 It also fails on a decision number used twice, and on any placeholder or fragment left when CI runs on `phase-1-base` or
 `main`; the `pre-push` hook refuses the same before it leaves the PC. The older form, `notes.next.<kind>` written

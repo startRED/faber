@@ -496,7 +496,8 @@ jobs:
           if [[ "$branch" =~ ^queue/pr-([0-9]+)$ ]]; then pr=${BASH_REMATCH[1]}; fi
           # GitHub refuses this run's token any push of a commit that changes a workflow file, so such a landing ends on
           # the PC that queued it: `land.mjs --finish` there, once this gate is green (docs/dev/workflow.md#numbers).
-          if git diff --name-only origin/phase-1-base "$GITHUB_SHA" -- .github/workflows | grep -q .; then
+          # Three dots: only what this commit changes; a base that changed a workflow since is not this commit's change.
+          if git diff --name-only --no-renames origin/phase-1-base..."$GITHUB_SHA" -- .github/workflows | grep -q .; then
             if [ -n "$pr" ] && git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
               echo "::error::#$pr changes a workflow, which this token may not push. Its gate is green: land it with node scripts/land.mjs $pr --finish"
             else
