@@ -178,18 +178,22 @@ fn a_project_prompt_teaches_the_bigger_offer_and_the_common_persona_does_not() {
 }
 
 #[test]
-fn project_lead_controls_its_children_and_only_forms_a_team_on_request() {
+fn project_lead_controls_its_children_and_forms_a_team_for_big_requests() {
     let text = faber_engine::persona::LEADS;
     for rule in [
         "start, message, stop, resume and archive conversations you started, and wait for them",
-        "parallel only for independent pieces",
+        "A request is big when it cannot land as one reviewable change",
+        "One change is small even when it touches a few places",
+        "For a big request, lead a small team",
+        "Start work in parallel only for independent pieces",
         "resume it rather than start again",
-        "Read and verify its work before archiving it",
+        "Read and verify each child's work before archiving it",
         "Wait for reports instead of polling, then end your turn",
-        "team of conversations only when the person asked for one",
+        "Pick each child's AI with ai set to auto",
+        "never ask the person to choose a model or whether a team may start",
     ] {
         assert!(text.contains(rule), "{rule}");
     }
     assert!(!text.contains("You are Faber"));
-    assert!(!text.contains("For a big request, lead"));
+    assert!(!text.contains("only when the person asked for one"));
 }
