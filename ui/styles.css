@@ -633,6 +633,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .step-out { margin: 0; max-height: 240px; overflow: auto; padding: 6px 8px; border-radius: var(--r-xs); background: var(--s1); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); white-space: pre-wrap; overflow-wrap: anywhere; }
 .step-detail .note { margin: 0; }
 .step-detail .changed { margin-top: 0; }
+/* The newest edit's few lines sit under its own row, lined up with its label, never alone under the reply. */
+.step > .changed, .steps > .changed { margin: 0 0 4px 22px; }
 .thought-text p { margin: 0; white-space: pre-wrap; color: var(--ink-3); }
 .thought-text b { font-weight: 580; color: var(--ink-2); }
 /* Nothing above shows the agent at work: one quiet line says it is thinking, with the running mark. */

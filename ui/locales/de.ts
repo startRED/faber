@@ -2393,6 +2393,7 @@ export const de: Messages = {
   'notes.335.new': 'Ein Agent kann Ihre Unterhaltungen jetzt selbst auflisten, lesen, starten, anhalten und archivieren und wartet, bis eine fertig ist, bevor er weitermacht.',
   'notes.336.better': 'Unterbrochene Arbeit wird beim erneuten Öffnen von Faber einmal fortgesetzt.',
   'notes.337.fixed': 'Arbeit gilt nicht mehr als erledigt, wenn die KI sie nicht abgeschlossen hat; sie zeigt „ohne Abschluss beendet“, und Faber bittet die KI einmal, sie abzuschließen.',
+  'notes.338.better': 'Wer einen Schritt zum Lesen öffnet, behält die Seite ruhig, während die Antwort darunter weiterläuft, und Schritte zeigen kurze Dateinamen statt langer Ordnerpfade.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

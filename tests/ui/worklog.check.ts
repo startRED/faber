@@ -9,6 +9,31 @@ import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, stepsSummary, to
 import { check, deepEqual, equal, ok } from './check.ts';
 import { sala } from './appearance.check.ts';
 
+check('worklog: file paths use the conversation folder and keep the full detail', () => {
+  useLanguage('en');
+  const folder = 'C:\\Projects\\app';
+  const read = (path: string): ToolUse => ({ id: 'path', name: 'Read', input: { file_path: path }, ok: true });
+  equal(toolRow(read('c:\\Projects\\app\\src\\b.txt'), true, folder).detail, 'src/b.txt');
+  equal(toolRow(read('C:/Projects/application/b.txt'), true, folder).detail, 'application/b.txt');
+  equal(toolRow(read('/tmp/proj-cwd/b.txt'), true, folder).detail, 'proj-cwd/b.txt');
+  equal(toolRow(read('\\\\server\\share\\app\\src\\lib\\a.ts'), true, '\\\\SERVER\\Share\\app').detail, 'src/lib/a.ts', 'a network share ignores letter case');
+  equal(toolRow(read('/Home/app/a.ts'), true, '/home/app').detail, 'app/a.ts', 'elsewhere letter case counts');
+  equal(toolRow({ id: 'n', name: 'NotebookEdit', input: { notebook_path: 'C:\\Projects\\app\\book.ipynb' } }, false, folder).detail, 'book.ipynb');
+  equal(toolRow({ id: 'f', name: 'fileChange', input: [{ path: 'C:\\Projects\\app\\a.txt' }, { path: 'D:\\other\\b.txt' }] }, false, folder).detail, 'a.txt, other/b.txt');
+  equal(toolRow({ id: 'f', name: 'fileChange', input: { 'C:\\Projects\\app\\a.txt': {} } }, false, folder).detail, 'a.txt');
+  equal(toolLine({ id: 'c', name: 'Bash', input: { command: 'cat C:\\Projects\\app\\a.txt' } }, folder), 'Running · cat C:\\Projects\\app\\a.txt');
+  const root = document.createElement('div'); document.body.append(root);
+  const path = 'c:\\Projects\\app\\src\\b.txt';
+  const dispose = render(() => createComponent(Thread, { messages: [{ id: 'paths', role: 'assistant', at: 0, status: 'done', text: '', tools: [read(path)] }], workingFolder: folder, from: 0, conversationId: 'paths', options: [], onBranch: () => {} }), root);
+  try {
+    const button = root.querySelector<HTMLButtonElement>('.step-line')!;
+    equal(button.querySelector('i')!.textContent, 'src/b.txt');
+    equal(button.title, path);
+    button.click();
+    equal(root.querySelector('.step-what')!.textContent, path);
+  } finally { dispose(); root.remove(); }
+});
+
 check('worklog: every Claude Code tool reads as what it does, in words', () => {
   equal(toolRow({ id: '1', name: 'Read', input: { file_path: 'C:\\p\\a.txt' } }).label, t('tool.read'));
   equal(toolRow({ id: '2', name: 'Bash', input: { command: 'npm test', description: 'Run the tests' } }).detail, 'npm test', 'a command shows itself');

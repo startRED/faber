@@ -2380,6 +2380,7 @@ export const ptBR: Messages = {
   'notes.335.new': 'Um agente agora pode listar, ler, iniciar, parar e arquivar as suas conversas sozinho, e espera uma terminar antes de continuar.',
   'notes.336.better': 'O trabalho interrompido continua uma vez quando o Faber abre de novo.',
   'notes.337.fixed': 'O trabalho não aparece mais como concluído quando a IA não o concluiu; ele diz que terminou sem conclusão, e o Faber pede uma vez à IA que o encerre.',
+  'notes.338.better': 'Abrir um passo para ler deixa a página parada enquanto a resposta continua embaixo, e os passos mostram nomes curtos de arquivo em vez de caminhos longos de pasta.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

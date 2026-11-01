@@ -2393,6 +2393,7 @@ export const es: Messages = {
   'notes.335.new': 'Un agente ahora puede listar, leer, iniciar, detener y archivar tus conversaciones por su cuenta, y espera a que una termine antes de continuar.',
   'notes.336.better': 'El trabajo interrumpido se retoma una vez al volver a abrir Faber.',
   'notes.337.fixed': 'El trabajo ya no aparece como terminado si la IA no lo concluyó: indica que acabó sin conclusión y Faber le pide una vez a la IA que lo cierre.',
+  'notes.338.better': 'Al abrir un paso para leerlo, la página se queda quieta mientras la respuesta sigue debajo, y los pasos muestran nombres cortos de archivo en lugar de rutas largas.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

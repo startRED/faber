@@ -2273,6 +2273,7 @@ export const en = {
   'notes.335.new': 'An agent can now list, read, start, stop and archive your conversations by itself, and waits for one to finish before it goes on.',
   'notes.336.better': 'Interrupted work resumes once when Faber opens again.',
   'notes.337.fixed': 'Work no longer shows as done when the AI never concluded it; it says it ended without a conclusion, and Faber asks the AI once to close it.',
+  'notes.338.better': 'Opening a step to read it keeps the page still while the reply goes on below, and steps show short file names instead of long folder paths.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
