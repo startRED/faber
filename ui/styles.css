@@ -118,8 +118,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
    never visibility: a hidden button leaves the tab order, so the keyboard could not reach it to reveal it. */
 .group-h .plus { position: absolute; right: 0; top: -7px; opacity: 0; }
 .projects:hover .group-h .plus, .chat-groups:hover .group-h .plus, .group-h:focus-within .plus, .group-h .plus:focus-visible { opacity: 1; }
-.chat-groups.empty .group-h, .projects:has(.side-empty) .group-h { min-height: var(--h-sm); padding-bottom: 0; }
-.chat-groups.empty .group-h .plus, .projects:has(.side-empty) .group-h .plus { top: 0; opacity: 1; }
+.chat-groups.no-groups .group-h, .projects:has(.side-empty) .group-h { min-height: var(--h-sm); padding-bottom: 0; }
+.chat-groups.no-groups .group-h .plus, .projects:has(.side-empty) .group-h .plus { top: 0; opacity: 1; }
 .plus:hover { background: var(--s3); color: var(--ink); }
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
 .list > section, .proj, .crow { min-width: 0; }

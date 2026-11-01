@@ -354,6 +354,7 @@ check('shell: empty Chat hides its Groups label and keeps its creation button vi
     const section = root.querySelector<HTMLElement>('.chat-groups')!;
     const label = section.querySelector<HTMLElement>('#side-chat-groups')!;
     const add = section.querySelector<HTMLButtonElement>('[data-action=new-group]')!;
+    ok(!section.classList.contains('empty'), 'the sidebar is not an empty-state container');
     ok(label.classList.contains('sr'));
     equal(getComputedStyle(add).opacity, '1');
     ok(section.getBoundingClientRect().height >= add.getBoundingClientRect().height);
