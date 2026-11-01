@@ -1,7 +1,9 @@
-import type { Message, ToolUse } from './api.ts';
+import type { Change, ChangedLine, Message, ToolUse } from './api.ts';
 import { lang, t } from './i18n.ts';
 import { readsIn } from './language.ts';
 import type { Key } from './locales/en.ts';
+
+export type { Change, ChangedLine };
 
 // How a turn's work log reads on screen: reasoning summaries as separate short paragraphs and tool rows as a label plus
 // the command itself. The engine keeps what the CLI sent; the tidying lives here so older conversations get it too.
@@ -65,6 +67,30 @@ const KINDS: Record<string, Key> = {
 };
 /** Claude Code's call that starts a subagent; it reads as the few words it was given. */
 const SUBAGENT = new Set(['Agent', 'Task']);
+/** The words of a step that ended, where they differ from the words of one at work. */
+const PAST: Partial<Record<Key, Key>> = {
+  'tool.command': 'step.command',
+  'tool.fileChange': 'step.fileChange',
+  'tool.webSearch': 'step.webSearch',
+  'tool.mcp': 'step.mcp',
+  'tool.tool': 'step.mcp',
+  'tool.read': 'step.read',
+  'tool.write': 'step.write',
+  'tool.edit': 'step.edit',
+  'tool.glob': 'step.glob',
+  'tool.grep': 'step.grep',
+  'tool.webFetch': 'step.read',
+  'tool.browse': 'step.browse',
+  'tool.skill': 'step.skill',
+  'tool.toolSearch': 'step.toolSearch',
+  'tool.plan': 'step.plan',
+  'tool.verify': 'step.verify',
+  'tool.verifyFull': 'step.verifyFull',
+  'tool.map': 'step.map',
+  'tool.memorySearch': 'step.memorySearch',
+  'tool.catalog': 'step.catalog',
+  'tool.quota': 'step.quota',
+};
 
 export interface ToolRow {
   label: string;
@@ -79,46 +105,61 @@ function detailOf(input: unknown): string {
   return typeof detail === 'string' ? detail.replace(/^https?:\/\//, '') : '';
 }
 
-export function toolRow(tool: ToolUse): ToolRow {
+function shownPath(path: string, folder?: string): string {
+  const value = path.replace(/\\/g, '/');
+  const base = folder?.replace(/\\/g, '/').replace(/\/+$/, '') || (folder?.startsWith('/') ? '/' : '');
+  // Windows paths, on a drive or a network share (`\\server\share`), ignore letter case; others keep it.
+  const windows = (/^[a-z]:\//i.test(value) && /^[a-z]:(?:\/|$)/i.test(base)) || (value.startsWith('//') && base.startsWith('//'));
+  const compare = (s: string) => windows ? s.toLowerCase() : s;
+  const prefix = base === '/' ? base : `${base}/`;
+  if (base && compare(value).startsWith(compare(prefix))) return value.slice(prefix.length);
+  if (!/^(?:[a-z]:\/|\/)/i.test(value)) return value;
+  return value.split('/').filter(Boolean).slice(-2).join('/');
+}
+
+export function toolRow(tool: ToolUse, done = false, folder?: string): ToolRow {
+  // A step that ended reads in the past ("Read", "Ran"), one still at work in the present ("Reading", "Running").
+  const say = (key: Key) => t(done && PAST[key] ? PAST[key]! : key);
   if (tool.name === 'Settings') {
     const value = (tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {}).web_search;
-    return { label: t('tool.settingsWebSearch'), detail: value === 'off' || value === 'cached' || value === 'live' ? t(`set.webSearch.${value}`) : '' };
+    return { label: say('tool.settingsWebSearch'), detail: value === 'off' || value === 'cached' || value === 'live' ? say(`set.webSearch.${value}`) : '' };
   }
   const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown; kind?: unknown; query?: unknown; install?: unknown; set_enabled?: unknown; remove?: unknown } | undefined;
   // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
-  if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
+  if (tool.name === 'Verify') return { label: say(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
   // The project map (R146) reads as reading it, with what was looked up.
-  if (tool.name === 'Map') return { label: t('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
+  if (tool.name === 'Map') return { label: say('tool.map'), detail: [input?.kind, input?.query].filter((v) => typeof v === 'string' && v).join(' ') };
   // Faber's two read-only lookups: the limits of the AIs (nothing after) and a catalog search (with its words).
-  if (tool.name === 'CreativeJudge') return { label: t('tool.creativeJudge'), detail: '' };
-  if (tool.name === 'Quota') return { label: t('tool.quota'), detail: '' };
+  if (tool.name === 'CreativeJudge') return { label: say('tool.creativeJudge'), detail: '' };
+  if (tool.name === 'Quota') return { label: say('tool.quota'), detail: '' };
   // A search of the project's own past conversations and notes reads as that, with its words.
-  if (tool.name === 'MemorySearch') return { label: t('tool.memorySearch'), detail: typeof input?.query === 'string' ? input.query : '' };
+  if (tool.name === 'MemorySearch') return { label: say('tool.memorySearch'), detail: typeof input?.query === 'string' ? input.query : '' };
   // With an id to install it reads as installing, with the id; the person's card comes before anything is installed.
-  if (tool.name === 'Catalog' && typeof input?.remove === 'string') return { label: t('tool.catalogRemove'), detail: input.remove };
-  if (tool.name === 'Catalog' && typeof input?.install === 'string') return { label: t('tool.catalogInstall'), detail: input.install };
+  if (tool.name === 'Catalog' && typeof input?.remove === 'string') return { label: say('tool.catalogRemove'), detail: input.remove };
+  if (tool.name === 'Catalog' && typeof input?.install === 'string') return { label: say('tool.catalogInstall'), detail: input.install };
   if (tool.name === 'Catalog' && input?.set_enabled && typeof input.set_enabled === 'object') {
     const change = input.set_enabled as Record<string, unknown>;
     return { label: t(change.enabled === true ? 'tool.catalogEnable' : 'tool.catalogDisable'), detail: typeof change.id === 'string' ? change.id : '' };
   }
-  if (tool.name === 'Catalog') return { label: t('tool.catalog'), detail: typeof input?.query === 'string' ? input.query : '' };
+  if (tool.name === 'Catalog') return { label: say('tool.catalog'), detail: typeof input?.query === 'string' ? input.query : '' };
   // Its own context, and compacting or clearing it, read as what they are, with nothing after.
   const action = tool.name === 'Conversation' ? (tool.input as { action?: unknown } | undefined)?.action : undefined;
-  if (action === 'compact' || action === 'clear' || action === 'context') return { label: t(`tool.${action}`), detail: '' };
+  if (action === 'compact' || action === 'clear' || action === 'context') return { label: say(`tool.${action}`), detail: '' };
   // A conversation the agent starts reads as its title; one it reads back, as its id.
   const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Helper' ? input?.title : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   // A helper's few words show only in the person's language (task 130); its own view keeps them.
-  if (isAgentCall(tool) && !(typeof named === 'string' && readsIn(named, lang()))) return { label: t(KINDS[tool.name]!), detail: '' };
-  const raw = typeof named === 'string' ? named : detailOf(tool.input);
+  if (isAgentCall(tool) && !(typeof named === 'string' && readsIn(named, lang()))) return { label: say(KINDS[tool.name]!), detail: '' };
+  const fileDetail = tool.name === 'fileChange' ? filesOf(tool).join(', ') : detailOf(tool.input);
+  const raw = typeof named === 'string' ? named : fileDetail;
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.
   const mcp = /^mcp__(.+?)__/.exec(tool.name);
-  const label = KINDS[tool.name] ? t(KINDS[tool.name]!) : mcp ? t('tool.mcp') : camel ? t('tool.tool') : tool.name;
+  const label = KINDS[tool.name] ? say(KINDS[tool.name]!) : mcp ? say('tool.mcp') : camel ? say('tool.tool') : tool.name;
   if (mcp && !raw) return { label, detail: mcp[1]! };
   const wrapped = KINDS[tool.name] === 'tool.command' && WRAPPED.exec(raw);
   if (wrapped) {
     const exe = (wrapped[1] ?? wrapped[2] ?? '').split(/[\\/]+/).pop()!.replace(/\.exe$/i, '').toLowerCase();
-    const shell = exe === 'sh' ? t('tool.shell') : SHELLS[exe];
+    const shell = exe === 'sh' ? say('tool.shell') : SHELLS[exe];
     if (shell) {
       let rest = wrapped[3]!.trim();
       if (rest.length > 1 && rest.startsWith('"') && rest.endsWith('"')) rest = rest.slice(1, -1).replace(/\\"/g, '"');
@@ -128,7 +169,9 @@ export function toolRow(tool: ToolUse): ToolRow {
   }
   // The path of the program is the only part Codex escapes twice.
   const detail = raw.replace(/^"([^"]+)"/, (_, path: string) => `"${path.replace(/\\\\/g, '\\')}"`);
-  return { label, detail: KINDS[tool.name] === 'tool.command' ? stripBoilerplate(detail) : detail };
+  const inputObject = tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input) ? tool.input as Record<string, unknown> : undefined;
+  const isFile = tool.name === 'fileChange' || (KINDS[tool.name] !== 'tool.command' && !!inputObject && inputObject.query == null && inputObject.url == null && inputObject.target == null && (typeof inputObject.file_path === 'string' || typeof inputObject.notebook_path === 'string'));
+  return { label, detail: folder !== undefined && isFile ? filesOf(tool).map((path) => shownPath(path, folder)).join(', ') : KINDS[tool.name] === 'tool.command' ? stripBoilerplate(detail) : detail };
 }
 
 /** One line for a row or a status: newlines folded, the middle cut so the start and the end both stay readable. */
@@ -139,8 +182,8 @@ export function middle(text: string, max = 96): string {
   return `${line.slice(0, head)}…${line.slice(line.length - (max - 1 - head))}`;
 }
 
-export const toolLine = (tool: ToolUse): string => {
-  const row = toolRow(tool);
+export const toolLine = (tool: ToolUse, folder?: string): string => {
+  const row = toolRow(tool, false, folder);
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
 
@@ -198,12 +241,12 @@ export const groupLabel = (group: StepGroup): string => (group.kind ? groupPhras
 
 /** The living sentence for a step: inside a group it reads the group so far and then the step ("Reading 3 files · a.ts"), so
  * a burst of reads does not flash by file name; anywhere else it is the step's own line. */
-export function stepLine(groups: StepGroup[], tool: ToolUse): string {
+export function stepLine(groups: StepGroup[], tool: ToolUse, folder?: string): string {
   const group = groups.find((g) => g.kind && g.tools.some((s) => s.id === tool.id));
-  if (!group) return toolLine(tool);
+  if (!group) return toolLine(tool, folder);
   const n = countOf(group.kind!, group.tools.slice(0, group.tools.findIndex((s) => s.id === tool.id) + 1));
-  if (n < 2) return toolLine(tool);
-  const { detail } = toolRow(tool);
+  if (n < 2) return toolLine(tool, folder);
+  const { detail } = toolRow(tool, false, folder);
   return detail ? `${groupPhrase(group.kind!, n)} · ${middle(detail)}` : groupPhrase(group.kind!, n);
 }
 
@@ -368,11 +411,6 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
   });
 }
 
-/** A line an edit step added or removed. */
-export interface ChangedLine {
-  added: boolean;
-  text: string;
-}
 /** The sites a reply opened, the one it opened last at the end, and the one it reads now (R161 step 9). Only a page read
  * names a site: a search names a query, and Codex reports its searches only. */
 export interface Sources {
@@ -405,14 +443,6 @@ export function sourcesOf(tools: ToolUse[]): Sources {
   // Still loading while later ones ended, it moves to the end too, so it never falls out of the four in view.
   if (now) hosts.push(...hosts.splice(hosts.indexOf(now), 1));
   return { hosts, now };
-}
-
-/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
- * removed, and the changed lines themselves. */
-export interface Change {
-  added: number;
-  removed: number;
-  lines: ChangedLine[];
 }
 
 const lines = (text: string) => (text ? text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') : []);
@@ -476,8 +506,9 @@ function codexChange(change: unknown): ChangedLine[] {
 }
 
 /** The lines an edit step changed: Claude Code's Edit, MultiEdit and Write, and Codex's file changes. Anything else, or an
- * edit that changed nothing, has none. */
+ * edit that changed nothing, has none. The engine's own reading comes first; reading the input is for older conversations. */
 export function changeOf(tool: ToolUse): Change | undefined {
+  if (tool.change) return tool.change;
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const input = tool.input as Record<string, unknown> | unknown[] | undefined;
   let changed: ChangedLine[] = [];
@@ -489,4 +520,37 @@ export function changeOf(tool: ToolUse): Change | undefined {
   if (!changed.length) return undefined;
   const added = changed.filter((line) => line.added).length;
   return { added, removed: changed.length - added, lines: changed };
+}
+
+/** What a kind of step is called on its row's icon: the kind it acts on, one per family of tools. */
+export type StepIcon = 'read' | 'change' | 'command' | 'search' | 'web' | 'tool' | 'thought';
+export function stepIcon(tool: ToolUse): StepIcon {
+  const kind = GROUPED[tool.name];
+  if (kind === 'page' || kind === 'web' || tool.name === 'Browser') return 'web';
+  if (kind) return kind;
+  return 'tool';
+}
+
+/** A run of steps that ended, as one short line: a phrase with a count per kind, in the order the kinds first came ("Read 3
+ * files · Ran 2 commands"), and the rest counted as other steps. Empty when none ended. */
+export function stepsSummary(tools: ToolUse[]): string {
+  const ended = tools.filter((tool) => tool.ok !== undefined || tool.interrupted);
+  const kinds: GroupKind[] = [];
+  const byKind = new Map<GroupKind, ToolUse[]>();
+  let others = 0;
+  for (const tool of ended) {
+    const kind = GROUPED[tool.name];
+    if (!kind) {
+      others++;
+      continue;
+    }
+    if (!byKind.has(kind)) {
+      kinds.push(kind);
+      byKind.set(kind, []);
+    }
+    byKind.get(kind)!.push(tool);
+  }
+  const phrases = kinds.map((kind) => t(`step.group.${kind}`, { n: countOf(kind, byKind.get(kind)!) }));
+  if (others) phrases.push(t(phrases.length ? 'step.others' : 'step.only', { n: others }));
+  return phrases.join(' · ');
 }

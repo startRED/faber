@@ -7,8 +7,9 @@ import { t } from './i18n.ts';
 export const planWords = (n: PlanCount) => t('plan.count', { done: n.done, total: n.total });
 
 /** The agent's plan under the newest reply (task 017): done steps checked and dimmed, the current one in ink with what the agent
- * says it is doing now beside it, pending ones plain. It is a list of facts: nothing in it moves or takes input. */
-export function PlanList(props: { plan: Plan; now?: string }) {
+ * says it is doing now beside it, pending ones plain. A step another conversation does names it under the step's text, as a
+ * quiet link that opens it, with where it stands in a subagent row's words (task 040). Nothing else in it moves or takes input. */
+export function PlanList(props: { plan: Plan; now?: string; names?: Record<string, string>; onOpen?: (id: string) => void }) {
   const count = () => ({ done: props.plan.steps.filter((s) => s.state === 'done').length, total: props.plan.steps.length });
   return (
     <section class="plan" aria-label={t('plan.label')}>
@@ -30,6 +31,16 @@ export function PlanList(props: { plan: Plan; now?: string }) {
                 <span class="now"> · {props.now}</span>
               </Show>
               <span class="sr">{t(`plan.state.${step.state}`)}</span>
+              <Show when={step.conversation}>
+                {(id) => (
+                  <span class="member">
+                    <button type="button" class="link" onClick={() => props.onOpen?.(id())}>
+                      {props.names?.[id()] || t('agent.untitled')}
+                    </button>
+                    <Show when={step.member}>{(state) => <span class="member-state" data-state={state()}> · {t(`agent.${state()}`)}</span>}</Show>
+                  </span>
+                )}
+              </Show>
             </li>
           )}
         </For>
@@ -43,30 +54,37 @@ export function PlanList(props: { plan: Plan; now?: string }) {
 
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
  * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
-export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void }) {
+export function WrapUpBox(props: { box: WrapUp; open: boolean; written?: boolean; onReply?: (text: string) => void }) {
+  // A conclusion with its summary is the AI's own last message in the thread: the box then holds only its question, if any.
+  // An AI that concluded and wrote nothing after it leaves the recap here, so the result is never lost.
+  const own = () => !!props.box.summary && props.written !== false;
   return (
-    <section class="wrap-up" aria-label={t('wrap.label')}>
-      <p class="recap">{props.box.recap}</p>
-      <Show when={props.box.ask}>
-        {(ask) => (
-          <div class="wrap-ask">
-            <p class="q">{ask()}</p>
-            <Show when={!props.box.answered}>
-              <Show when={props.open && props.onReply}>
-                <div class="wrap-actions">
-                  <For each={props.box.actions ?? []}>
-                    {(action, i) => (
-                      <button type="button" class={i() === 0 ? 'btn primary' : 'btn secondary'} onClick={() => props.onReply?.(action)}>
-                        {action}
-                      </button>
-                    )}
-                  </For>
-                </div>
+    <Show when={!own() || props.box.ask}>
+      <section class="wrap-up" aria-label={t('wrap.label')}>
+        <Show when={!own()}>
+          <p class="recap">{props.box.recap}</p>
+        </Show>
+        <Show when={props.box.ask}>
+          {(ask) => (
+            <div class="wrap-ask">
+              <p class="q">{ask()}</p>
+              <Show when={!props.box.answered}>
+                <Show when={props.open && props.onReply}>
+                  <div class="wrap-actions">
+                    <For each={props.box.actions ?? []}>
+                      {(action, i) => (
+                        <button type="button" class={i() === 0 ? 'btn primary' : 'btn secondary'} onClick={() => props.onReply?.(action)}>
+                          {action}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
               </Show>
-            </Show>
-          </div>
-        )}
-      </Show>
-    </section>
+            </div>
+          )}
+        </Show>
+      </section>
+    </Show>
   );
 }

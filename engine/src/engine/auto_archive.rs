@@ -43,7 +43,9 @@ impl Core {
 
     fn due(&self, c: &Conversation, now: u64) -> Option<Why> {
         let follow = c.messages.iter().rev().find_map(|m| m.follow.as_ref());
-        let rests = c.area == Area::Project
+        let rests = ended::result_kind(c) == Some(EndKind::Done)
+            && c.messages.last().is_some_and(|m| m.wrap_up.as_ref().is_some_and(|w| w.done))
+            && c.area == Area::Project
             && c.archived_at.is_none()
             && c.pinned_at.is_none()
             && c.queued.is_empty()

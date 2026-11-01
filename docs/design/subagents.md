@@ -42,12 +42,12 @@ conversation export still exports answers, not the work log. No complete vendor 
 
 How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs, and the pages
 the agent opens in Faber's browser, which open in the same place.
-The work log they sit under is in [conversation.md](conversation.md).
+The reply and steps they sit in are in [conversation.md](conversation.md) and [work-log.md](work-log.md).
 
 ## Subagent steps
 
-When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
-the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
+When the agent hands part of the work to a subagent (R161), the reply shows one row per helper in its place in the
+reply (`ui/timeline.ts`), in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
 on the right its kind, its state, its step count and, once it ended, how long it took ("2 min", "45 s"; from a second up,
 none for a refused one) in the third ink, and an arrow pointing right (R411). The time comes from the engine's own
 stamps on the call, so no clock runs on the screen. A click opens the

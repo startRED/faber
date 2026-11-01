@@ -3,10 +3,10 @@
 use super::*;
 
 /// At most this many continues per conversation in `CONTINUES_SECS`, so a Faber that keeps closing cannot loop the agent.
-const CONTINUES: usize = 3;
-const CONTINUES_SECS: u64 = 5 * 60;
+pub(super) const CONTINUES: usize = 3;
+pub(super) const CONTINUES_SECS: u64 = 5 * 60;
 
-const CONTINUE: &str = "Faber was closed while your last answer was running, which cut it short. Before you go on, look at the \
+pub(super) const CONTINUE: &str = "Faber was closed while your last answer was running, which cut it short. Before you go on, look at the \
 files and the work as they are now: some steps may have finished and others not. Then continue from where you stopped; do not \
 start over.";
 
@@ -64,6 +64,9 @@ impl Core {
     /// One leader of `resume_cut_leaders`, whose `members` owed nothing when Faber opened.
     fn continue_cut_leader(&mut self, id: &str, members: &[String]) {
         // Something a member does since (the person sent it a turn) will wake the leader when it ends.
+        if !self.store.settings().resume_interrupted() {
+            return;
+        }
         let woken = members.iter().any(|m| {
             self.live.get(m).is_some_and(|l| l.turn.is_some())
                 || self.convs.get(m).is_some_and(|c| c.pending_parent_report || c.keep_going.is_some() || !c.queued.is_empty())

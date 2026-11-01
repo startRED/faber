@@ -85,9 +85,9 @@ check('review 4/13: full-motion growth is laid out at once and opened up by a cl
   } finally { dispose(); root.remove(); }
 });
 
-check('review 11: focus entering an activity during its exit returns to the summary before hiding', async () => {
+check('review 11: focus entering a disclosure during its exit returns to the summary before hiding', async () => {
   const root = surface();
-  root.innerHTML = '<details class="activity" open><summary>Activity</summary><div class="activity-body"><a href="#">Narration link</a></div></details>';
+  root.innerHTML = '<details class="kit disclosure" open><summary>Tools</summary><div><a href="#">Tool details</a></div></details>';
   const dispose = render(() => { animateDetails(root); return [...root.children] as HTMLElement[]; }, root);
   try {
     const summary = root.querySelector('summary')!;

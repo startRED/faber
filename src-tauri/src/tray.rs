@@ -1,18 +1,17 @@
 //! The tray icon: a number on it while an agent needs the user, a tooltip with the words, and one notification per
-//! question. What to show and when to notify is decided by plain functions (tested without a tray); the rest hands
-//! those answers to Tauri. The deciding lives in `decide`, the drawing in `badge`.
+//! question. What to show and when to notify is decided by plain functions (tested without a tray) in `faber_host::tray`,
+//! which the sidecar of another shell uses too; the rest hands those answers to Tauri.
 
-mod badge;
-mod decide;
 #[cfg(windows)]
 mod native;
 mod sound;
 
-use badge::{glyph, tray_png, tray_side, with_badge};
-pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, delivery, notice_text, parked_notice_text, stopped_text, tooltip};
 use faber_engine::model::{RunningItem, Vendor};
-use std::path::Path;
+use faber_host::tray::badge::{glyph, tray_png, tray_side, with_badge};
+pub(crate) use faber_host::tray::decide::ShellTexts;
+use faber_host::tray::decide::{Counts, Shown, Update, Watch, delivery, spoken, stopped_text, tooltip};
+use faber_host::tray::front;
+use faber_host::tray::{load_texts, save_texts};
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{IsMenuItem, Menu, MenuItem};
@@ -20,6 +19,16 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Manager, Wry};
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_notification::NotificationExt;
+
+/// How a notification is delivered right now; this process owns Faber's window.
+fn attention() -> faber_host::tray::decide::Attention {
+    front::attention(std::process::id())
+}
+
+/// Whether a game or another full-screen app is in front; Faber's own window never counts.
+pub(crate) fn game_in_front() -> bool {
+    front::game_in_front(std::process::id())
+}
 
 #[derive(Default)]
 struct State {
@@ -94,17 +103,6 @@ fn show_counts(app: &AppHandle, s: &State, side: u32) {
     }
 }
 
-/// The words the screen sent last, so a Faber started hidden (with Windows) speaks the person's language; English until
-/// a window has opened once.
-fn load_texts(data_dir: &Path) -> ShellTexts {
-    std::fs::read(data_dir.join("shell-texts.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
-}
-
-fn save_texts(data_dir: &Path, texts: &ShellTexts) -> Result<(), String> {
-    let json = serde_json::to_vec(texts).map_err(|_| "error.store.write")?;
-    faber_engine::store::replace(&faber_engine::store::RealDisk, &data_dir.join("shell-texts.json"), &json).map_err(|e| e.key().into())
-}
-
 pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle();
     let data_dir = handle.state::<crate::Faber>().data_dir.clone();
@@ -164,35 +162,16 @@ pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String
     say(&s)
 }
 
-/// Whether a game or another full-screen app is in front (R191). Only Windows can tell today.
-pub(crate) fn game_in_front() -> bool {
-    #[cfg(windows)]
-    return native::game();
-    // shortcut: no global macOS/Linux full-screen probe; add native detection when those backends are implemented (R92).
-    #[cfg(not(windows))]
-    false
-}
-
 /// What the notifications of one update say: the needs-you titles, then the requests held back for want of an answer.
-fn words(texts: &ShellTexts, update: &decide::Update) -> Vec<String> {
-    update
-        .notices
-        .iter()
-        .map(|title| notice_text(texts, title))
-        .chain(update.parked_notices.iter().map(|(title, n)| parked_notice_text(texts, title, *n)))
-        .collect()
+fn words(texts: &ShellTexts, update: &Update) -> Vec<String> {
+    spoken(texts, update).into_iter().map(|notice| notice.text).collect()
 }
 
 fn deliver_notices(app: &AppHandle, settings: &faber_engine::model::Settings, words: &[String]) {
     for text in words {
         // Recheck focus at delivery, in case the user returned while the tray picture was updating.
         let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
-        #[cfg(windows)]
-        let attention = native::attention();
-        // shortcut: no global macOS/Linux full-screen probe; add native detection when those backends are implemented (R92).
-        #[cfg(not(windows))]
-        let attention = decide::Attention::Normal;
-        let send = delivery(focused, attention, settings);
+        let send = delivery(focused, attention(), settings);
         if send.sound {
             #[cfg(windows)]
             if let Err(e) = native::play() {
@@ -271,26 +250,4 @@ pub(crate) fn on_halted(app: &AppHandle, title: &str, why: &str, ai: Option<Vend
     let text = stopped_text(&s.texts, title, why, ai);
     drop(s);
     deliver_notices(app, &settings, &[text]);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ShellTexts, load_texts, save_texts};
-
-    #[test]
-    fn the_words_the_screen_sent_last_are_there_after_a_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(load_texts(dir.path()), ShellTexts::default(), "English before any window has opened");
-        let texts: ShellTexts = serde_json::from_value(serde_json::json!({
-            "open": "Abrir", "quit": "Sair",
-            "running": { "one": "Faber: {n} em andamento", "other": "Faber: {n} em andamento" },
-            "needsYou": { "one": ", {n} precisa de você", "other": ", {n} precisam de você" },
-            "notify": "{title} precisa de você", "notifyMany": "{title}: {n} pedidos precisam de você"
-        }))
-        .unwrap();
-        save_texts(dir.path(), &texts).unwrap();
-        assert_eq!(load_texts(dir.path()), texts);
-        std::fs::write(dir.path().join("shell-texts.json"), b"{ damaged").unwrap();
-        assert_eq!(load_texts(dir.path()), ShellTexts::default(), "damaged words fall back to English");
-    }
 }
