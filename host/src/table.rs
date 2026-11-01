@@ -207,6 +207,7 @@ table! {
         h.engine.interrupt(&id);
         Ok(())
     }
+    Write Person fn answer(h, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> () {
         h.engine.answer(&id, &turn_id, &request_id, allow, always).await
     }
 
