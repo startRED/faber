@@ -152,7 +152,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 - A theme file is written beside its destination and renamed over it only when the whole write worked, so a full disk
   leaves an old file as it was. A failed read or write shows words of Faber's own, never the system's.
 - "Manage accounts" opens the account cards alone. Closing them (or Esc) brings Settings back on the same section, with
-  the draft that was not applied.
+  the draft that was not applied. An install failure explains what happened and offers Try again and the official page.
 - Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a

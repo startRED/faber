@@ -313,7 +313,16 @@ impl Rig {
                 event["key"].is_null()
                     || matches!(
                         event["key"].as_str(),
-                        Some("error.setup.download" | "error.setup.checksum" | "error.setup.install" | "error.setup.unsupported")
+                        Some(
+                            "error.setup.download"
+                                | "reason.setup.checksum"
+                                | "reason.setup.connection"
+                                | "reason.setup.blocked"
+                                | "reason.setup.write"
+                                | "reason.setup.timeout"
+                                | "error.setup.install"
+                                | "error.setup.unsupported"
+                        )
                     )
             );
             assert!(event["detail"].is_null() || event["detail"].is_string());
@@ -354,7 +363,7 @@ async fn c2_2_checksum_mismatch_never_executes_or_promotes_and_reports_key_separ
         let url = if vendor == "claude" { format!("{BASE}/2.1.89/win32-x64/claude.exe") } else { ARCHIVE.into() };
         rig.responses.insert(url, b"tampered payload".to_vec());
         let error = rig.run().await.expect_err("Corrupt payload must fail before install");
-        assert_eq!(error["key"], "error.setup.checksum");
+        assert_eq!(error["key"], "reason.setup.checksum");
         assert!(!error["detail"].as_str().unwrap().is_empty());
         assert_ne!(error["detail"], error["key"]);
         assert!(rig.calls.lock().unwrap().is_empty());
@@ -368,7 +377,7 @@ async fn c2_2_checksum_mismatch_never_executes_or_promotes_and_reports_key_separ
         );
         rig.assert_stages(&["prerequisite", "download", "verify", "failed"]);
         let events = rig.events.lock().unwrap();
-        assert_eq!(events.last().unwrap()["key"], "error.setup.checksum");
+        assert_eq!(events.last().unwrap()["key"], "reason.setup.checksum");
         assert_eq!(events.last().unwrap()["detail"], error["detail"]);
     }
 }
@@ -965,7 +974,7 @@ async fn a_failed_write_is_an_install_error_and_a_broken_connection_a_download_e
                 Err(if write_failed { faber_engine::install::write_failure(cause) } else { cause })
             };
             let error = rig.run_with(&download).await.expect_err("A download that fails must fail the install");
-            let key = if write_failed { "error.setup.install" } else { "error.setup.download" };
+            let key = if write_failed { "reason.setup.write" } else { "reason.setup.blocked" };
             assert_eq!(error["key"], key, "{vendor}, write failure: {write_failed}");
             assert_eq!(*rig.left_at_failure.lock().unwrap(), Some(vec![]), "The partial file is deleted before the failure is reported");
             assert!(rig.calls.lock().unwrap().is_empty());
@@ -1037,7 +1046,7 @@ async fn a_connection_cut_halfway_through_the_claude_download_leaves_no_file() {
     let mut rig = Rig::new("claude");
     use_loopback(&mut rig, &server.origin);
     let error = rig.run_network().await.expect_err("A body that stops short must fail the install");
-    assert_eq!(error["key"], "error.setup.download");
+    assert_eq!(error["key"], "reason.setup.connection");
     assert_eq!(*rig.left_at_failure.lock().unwrap(), Some(vec![]));
     assert!(rig.calls.lock().unwrap().is_empty());
     assert_eq!(std::fs::read_dir(rig.destination()).unwrap().count(), 0);
@@ -1065,6 +1074,7 @@ async fn a_server_that_stalls_halfway_fails_the_download_and_leaves_no_part_file
     let run = faber_engine::install::download_with(&url, &part, Some(&server.origin), idle, create);
     let error =
         tokio::time::timeout(std::time::Duration::from_secs(30), run).await.expect("A stalled body must fail, not hang").unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     assert!(!faber_engine::install::is_write_failure(&error), "a stall is a network failure: {error}");
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     assert!(!part.exists());
@@ -1113,5 +1123,43 @@ async fn a_second_request_for_the_same_cli_leaves_the_first_one_alone() {
     assert_eq!(again.expect("a repeated request is not an error")["alreadyRunning"], true);
     assert_eq!(rig.calls.lock().unwrap().len(), 1, "only the first install started the installer");
     assert_eq!(rig.events.lock().unwrap().last().unwrap()["stage"], "done");
+    rig.assert_empty_temporary();
+}
+
+#[tokio::test]
+async fn install_failure_reasons_are_specific_and_clean_up() {
+    for (kind, key) in [
+        (io::ErrorKind::NotConnected, "reason.setup.connection"),
+        (io::ErrorKind::TimedOut, "reason.setup.timeout"),
+        (io::ErrorKind::PermissionDenied, "reason.setup.write"),
+    ] {
+        let rig = Rig::new("claude");
+        let download = move |_: &str, path: &Path| {
+            std::fs::write(path, b"partial")?;
+            let err = io::Error::new(kind, "injected");
+            Err(if kind == io::ErrorKind::PermissionDenied { faber_engine::install::write_failure(err) } else { err })
+        };
+        let error = rig.run_with(&download).await.unwrap_err();
+        assert_eq!(error["key"], key);
+        rig.assert_empty_temporary();
+    }
+}
+
+#[tokio::test]
+async fn refused_connection_and_wrong_checksum_report_reasons_and_clean_up() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let mut rig = Rig::new("claude");
+    use_loopback(&mut rig, &origin);
+    let error = rig.run_network().await.unwrap_err();
+    assert_eq!(error["key"], "reason.setup.connection");
+    rig.assert_empty_temporary();
+
+    let server = release_host(Arc::default(), |stream| loopback::send(stream, b"wrong"));
+    let mut rig = Rig::new("claude");
+    use_loopback(&mut rig, &server.origin);
+    let error = rig.run_network().await.unwrap_err();
+    assert_eq!(error["key"], "reason.setup.checksum");
     rig.assert_empty_temporary();
 }

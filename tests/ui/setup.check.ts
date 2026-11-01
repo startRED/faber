@@ -1,4 +1,5 @@
 import { createComponent } from 'solid-js';
+import { api } from '../../ui/api.ts';
 import { render } from 'solid-js/web';
 import { de } from '../../ui/locales/de.ts';
 import { en } from '../../ui/locales/en.ts';
@@ -88,7 +89,7 @@ check('setup C4.5: the empty state tells people to connect without asking them t
 check('setup C4.6: all five languages fill every guide key and preserve English placeholders', () => {
   const mandatory = [
     'setup.title', 'setup.body', 'setup.claude', 'setup.chatgpt', 'setup.none',
-    'setup.checking', 'setup.notInstalled', 'setup.install', 'setup.officialPage', 'setup.installing',
+    'setup.checking', 'setup.notInstalled', 'setup.install', 'setup.retry', 'reason.setup.connection', 'reason.setup.blocked', 'reason.setup.checksum', 'reason.setup.write', 'reason.setup.timeout', 'setup.officialPage', 'setup.installing',
     'setup.step.prerequisite', 'setup.step.download', 'setup.step.verify', 'setup.step.install', 'setup.step.done',
     'setup.signedOut', 'setup.signIn', 'setup.waiting', 'setup.checkAgain', 'setup.connected',
     'setup.details', 'setup.skip', 'setup.close', 'set.subscriptions', 'set.openSetup',
@@ -226,4 +227,33 @@ check('setup: a failed install says what to do and offers the official page besi
   for (const key of ['error.setup.download', 'error.setup.install'] as const) {
     ok(en[key].includes('official page'), `the message says how to go on: ${en[key]}`);
   }
+});
+
+check('setup: each install failure shows its message and retry starts again in both modes', async () => {
+  const oldCheck = api.setupCheck, oldInstall = api.setupInstall;
+  let attempts = 0;
+  api.setupCheck = async (vendor) => ({ vendor, installed: false, account: 'unknown', canInstall: true });
+  api.setupInstall = async () => { attempts++; };
+  try {
+    for (const mode of ['firstRun', 'manage'] as const) {
+      const host = document.createElement('div');
+      document.body.append(host);
+      noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'done' });
+      const dispose = render(() => createComponent(Setup, { mode, onFinish: () => {} }), host);
+      try {
+        host.querySelector<HTMLButtonElement>('.pick')!.click();
+        await Promise.resolve();
+        for (const key of ['reason.setup.connection', 'reason.setup.blocked', 'reason.setup.checksum', 'reason.setup.write', 'reason.setup.timeout'] as const) {
+          noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'failed', error: key });
+          equal(host.querySelector('.setup-error-msg')?.textContent, t(key));
+          const retry = host.querySelector<HTMLButtonElement>('.setup-card-actions .primary')!;
+          equal(retry.textContent?.trim(), t('setup.retry'));
+          const before = attempts;
+          retry.click();
+          equal(attempts, before + 1);
+          equal(host.querySelector('.setup-error-msg'), null);
+        }
+      } finally { dispose(); host.remove(); noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'done' }); }
+    }
+  } finally { api.setupCheck = oldCheck; api.setupInstall = oldInstall; }
 });

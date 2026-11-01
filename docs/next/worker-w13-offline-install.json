@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "When installing an AI fails, you see what happened and how to try again.",
+      "pt-BR": "Se a instalação de uma IA falhar, você vê o que aconteceu e como tentar de novo.",
+      "es": "Si falla la instalación de una IA, ves qué pasó y cómo volver a intentarlo.",
+      "fr": "Si l’installation d’une IA échoue, vous savez pourquoi et comment réessayer.",
+      "de": "Wenn die Installation einer KI fehlschlägt, siehst du den Grund und wie du es erneut versuchst."
+    }
+  }
+}

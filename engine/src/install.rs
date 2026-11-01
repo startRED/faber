@@ -86,12 +86,37 @@ fn failure(progress: &Progress<'_>, key: &str, detail: String) -> Value {
     json!({ "key": key, "detail": detail })
 }
 
-/// Downloads a payload into `part`. Whatever fails, the partial file is gone afterwards: a broken connection is
-/// `error.setup.download`, a file that cannot be written is `error.setup.install`.
+fn download_reason(e: &io::Error) -> &'static str {
+    if is_write_failure(e) {
+        "reason.setup.write"
+    } else if e.kind() == io::ErrorKind::TimedOut {
+        "reason.setup.timeout"
+    } else if matches!(
+        e.kind(),
+        io::ErrorKind::NotConnected | io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted
+    ) {
+        "reason.setup.connection"
+    } else {
+        "reason.setup.blocked"
+    }
+}
+
+fn network_error(e: reqwest::Error) -> io::Error {
+    let kind = if e.is_timeout() {
+        io::ErrorKind::TimedOut
+    } else if e.is_connect() || e.is_body() {
+        io::ErrorKind::NotConnected
+    } else {
+        io::ErrorKind::Other
+    };
+    io::Error::new(kind, e)
+}
+
+/// Downloads a payload into `part`, removing a partial file on failure.
 fn download_payload(download: &Download<'_>, url: &str, part: &Path, what: &str, progress: &Progress<'_>) -> Result<String, Value> {
     download(url, part).map_err(|e| {
         let _ = std::fs::remove_file(part);
-        let key = if is_write_failure(&e) { "error.setup.install" } else { "error.setup.download" };
+        let key = download_reason(&e);
         failure(progress, key, format!("Failed to download {what}: {e}"))
     })
 }
@@ -102,7 +127,7 @@ fn verify_payload(part: &Path, got: &str, expected: &str, what: &str, progress: 
         return Ok(());
     }
     let _ = std::fs::remove_file(part);
-    Err(failure(progress, "error.setup.checksum", format!("Checksum mismatch for {what}: expected {expected}, got {got}")))
+    Err(failure(progress, "reason.setup.checksum", format!("Checksum mismatch for {what}: expected {expected}, got {got}")))
 }
 
 fn notify(progress: &Progress<'_>, stage: &str, err: Option<(&str, &str)>) {
@@ -340,12 +365,10 @@ pub async fn install_windows(
     }
 
     if let Err(e) = std::fs::create_dir_all(&destination) {
-        let detail = format!("Failed to create destination directory: {e}");
-        notify(progress, "failed", Some(("error.setup.install", &detail)));
-        return Err(json!({ "key": "error.setup.install", "detail": detail }));
+        return Err(failure(progress, "reason.setup.write", format!("Failed to create destination directory: {e}")));
     }
     if let Err(e) = std::fs::create_dir_all(&download_dir) {
-        return Err(failure(progress, "error.setup.install", format!("Failed to create download directory: {e}")));
+        return Err(failure(progress, "reason.setup.write", format!("Failed to create download directory: {e}")));
     }
 
     // Stage: download
@@ -360,9 +383,7 @@ pub async fn install_windows(
         let latest_bytes = match fetch(&latest_url) {
             Ok(b) => b,
             Err(e) => {
-                let detail = format!("Failed to fetch latest Claude version: {e}");
-                notify(progress, "failed", Some(("error.setup.download", &detail)));
-                return Err(json!({ "key": "error.setup.download", "detail": detail }));
+                return Err(failure(progress, download_reason(&e), format!("Failed to fetch latest Claude version: {e}")));
             }
         };
         let version = std::str::from_utf8(&latest_bytes).map_err(|e| e.to_string()).map(|s| s.trim().to_string()).unwrap_or_default();
@@ -381,9 +402,7 @@ pub async fn install_windows(
         let manifest_bytes = match fetch(&manifest_url) {
             Ok(b) => b,
             Err(e) => {
-                let detail = format!("Failed to fetch Claude manifest: {e}");
-                notify(progress, "failed", Some(("error.setup.download", &detail)));
-                return Err(json!({ "key": "error.setup.download", "detail": detail }));
+                return Err(failure(progress, download_reason(&e), format!("Failed to fetch Claude manifest: {e}")));
             }
         };
         let manifest: Value = match serde_json::from_slice(&manifest_bytes) {
@@ -529,9 +548,7 @@ pub async fn install_windows(
         let release_bytes = match fetch(codex_release) {
             Ok(b) => b,
             Err(e) => {
-                let detail = format!("Failed to fetch Codex release metadata: {e}");
-                notify(progress, "failed", Some(("error.setup.download", &detail)));
-                return Err(json!({ "key": "error.setup.download", "detail": detail }));
+                return Err(failure(progress, download_reason(&e), format!("Failed to fetch Codex release metadata: {e}")));
             }
         };
         let release: Value = match serde_json::from_slice(&release_bytes) {
@@ -703,7 +720,7 @@ impl std::error::Error for WriteFailure {
     }
 }
 
-/// Marks an error as a failed write (a full disk, a locked file), which a `Download` returns for `error.setup.install`.
+/// Marks an error as a failed write (a full disk, a locked file), which a `Download` reports separately from a network failure.
 pub fn write_failure(e: io::Error) -> io::Error {
     io::Error::new(e.kind(), WriteFailure(e))
 }
@@ -737,7 +754,7 @@ async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<re
         builder = builder.no_proxy();
     }
     let client = builder.build().map_err(io::Error::other)?;
-    let res = client.get(url).send().await.map_err(io::Error::other)?;
+    let res = client.get(url).send().await.map_err(network_error)?;
     if !res.status().is_success() {
         return Err(io::Error::other(format!("HTTP error {}", res.status())));
     }
@@ -756,7 +773,7 @@ pub(crate) async fn metadata_body(mut res: reqwest::Response, limit: usize, url:
         return Err(too_big());
     }
     let mut body = Vec::new();
-    while let Some(chunk) = res.chunk().await.map_err(io::Error::other)? {
+    while let Some(chunk) = res.chunk().await.map_err(network_error)? {
         if body.len() + chunk.len() > limit {
             return Err(too_big());
         }
@@ -797,7 +814,7 @@ async fn stream_to<W: Write>(
     let mut res = get(url, loopback, idle).await?;
     let mut out = create(dest).map_err(write_failure)?;
     let mut hasher = Sha256::new();
-    while let Some(chunk) = res.chunk().await.map_err(io::Error::other)? {
+    while let Some(chunk) = res.chunk().await.map_err(network_error)? {
         hasher.update(&chunk);
         out.write_all(&chunk).map_err(write_failure)?;
     }
