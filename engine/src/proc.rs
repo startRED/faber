@@ -215,14 +215,13 @@ fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
     cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1");
     if let Some(cli) = CLI.get()
         && let Some(folder) = cli.parent()
+        && let Ok(mut path) = std::env::join_paths([folder])
     {
-        if let Ok(mut path) = std::env::join_paths([folder]) {
-            if let Some(original) = std::env::var_os("PATH") {
-                path.push(if cfg!(windows) { ";" } else { ":" });
-                path.push(original);
-            }
-            cmd.env("FABER_CLI", cli).env("PATH", path);
+        if let Some(original) = std::env::var_os("PATH") {
+            path.push(if cfg!(windows) { ";" } else { ":" });
+            path.push(original);
         }
+        cmd.env("FABER_CLI", cli).env("PATH", path);
     }
     cmd
 }
