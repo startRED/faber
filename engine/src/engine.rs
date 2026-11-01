@@ -4199,12 +4199,7 @@ impl Core {
         if pick.vendor == Vendor::Claude && !flags.plugin_dir {
             project_tools.without_plugin();
         }
-        if cli.is_some() && pick.vendor == Vendor::Codex && self.codex_prepared.get(conv).is_some_and(|(key, _)| Some(*key) == prepared_key)
-        {
-            self.codex_prepared.remove(conv);
-        } else {
-            self.release_codex_preparation(conv);
-        }
+        self.release_codex_preparation(conv);
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let group_instructions = group.as_ref().map(|g| g.instructions.clone()).filter(|s| !s.is_empty());
         let group_files = self.group_files(group.as_ref(), &cwd)?;
@@ -4400,29 +4395,48 @@ impl Core {
                 },
                 sink,
             ),
-            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open_with_tools(
-                CodexThread {
-                    helper,
-                    browse,
-                    conversations,
-                    leads,
-                    verify,
-                    progress,
-                    cwd,
-                    model,
-                    effort,
-                    resume,
-                    instructions: None,
-                    research,
-                    group_instructions,
-                    user_name,
-                    permissions,
-                    leave_plan,
-                    tuning: tuning.clone(),
-                },
-                sink,
-                project_tools,
-            ),
+            Vendor::Codex => {
+                let identity = crate::proc::ConversationIdentity::new(conv);
+                let server = CodexServer::start_identified(
+                    CodexServerOptions {
+                        permissions,
+                        cli: cli.clone(),
+                        cwd: self.opts.data_dir.clone(),
+                        area,
+                        user_hooks,
+                        windows: self.opts.windows,
+                        spawn: spawner(&self.opts.spawn, &cli),
+                        tools: Default::default(),
+                    },
+                    identity,
+                    self.opts.spawn.clone(),
+                );
+                let session = server.open_with_tools(
+                    CodexThread {
+                        helper,
+                        browse,
+                        conversations,
+                        leads,
+                        verify,
+                        progress,
+                        cwd,
+                        model,
+                        effort,
+                        resume,
+                        instructions: None,
+                        research,
+                        group_instructions,
+                        user_name,
+                        permissions,
+                        leave_plan,
+                        tuning: tuning.clone(),
+                    },
+                    sink,
+                    project_tools,
+                );
+                server.retire();
+                session
+            }
         };
         self.worker_memory.registry.register(session.owned_tree());
         self.live.insert(
@@ -4940,12 +4954,10 @@ impl Core {
 
     fn release_codex_preparation(&mut self, id: &str) {
         let Some((key, _)) = self.codex_prepared.remove(id) else { return };
-        if !self.codex_prepared.values().any(|(other, _)| *other == key)
-            && !self.live.iter().any(|(id, live)| {
-                live.vendor == Vendor::Codex && live.permissions == key.2 && self.convs.get(id).is_some_and(|c| c.area == key.0)
-            })
-        {
-            self.retire_codex_server(key);
+        if !self.codex_prepared.values().any(|(other, _)| *other == key) {
+            if let Some(server) = self.codex.remove(&key) {
+                server.retire();
+            }
         }
     }
 
@@ -5275,7 +5287,16 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
 }
 
 fn start_conversation_claude(id: &str, opts: ClaudeOptions, sink: EventSink) -> Session {
-    crate::proc::as_conversation(id, || start_claude(opts, sink))
+    let identity = crate::proc::ConversationIdentity::new(id);
+    let on_exit = identity.clone();
+    let sink: EventSink = Arc::new(move |event| {
+        if matches!(&event, EngineEvent::WriterExit { confirmed: true }) {
+            on_exit.revoke();
+        }
+        sink(event);
+    });
+    let sink = identity.token.as_ref().map_or_else(|| sink.clone(), |token| crate::codex::redact_sink(sink.clone(), token.clone()));
+    crate::proc::with_identity(&identity, || start_claude(opts, sink)).with_identity(identity)
 }
 
 #[cfg(test)]

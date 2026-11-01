@@ -67,13 +67,12 @@ async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusal
     assert_eq!(started, Err("error.channel.agentDepth".into()), "a turn the table marks as starting one is held");
 
     let (ours, theirs) = tokio::io::duplex(1 << 16);
-    tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), test_secret(), 0));
-    let named = Client::over(
-        ours,
-        Hello { client: "test".into(), secret: test_secret().hex(), token: Some(test_secret().token("c1")), ..Default::default() },
-    )
-    .await
-    .unwrap();
+    let secret = test_secret();
+    tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), secret.clone(), 0));
+    let named =
+        Client::over(ours, Hello { client: "test".into(), secret: secret.hex(), token: Some(secret.token("c1")), ..Default::default() })
+            .await
+            .unwrap();
     let args = json!({"patch": {"language": "en"}});
     let failure = named.call_detailed("save_settings", args.clone()).await.unwrap().unwrap_err();
     assert_eq!(failure.key, "error.reach.ask");

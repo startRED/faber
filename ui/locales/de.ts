@@ -74,6 +74,7 @@ export const de: Messages = {
   "error.channel.hello": "Die Verbindung hat sich nicht angemeldet.",
   "error.channel.secret": "Der Verbindungsschlüssel wurde abgelehnt.",
   "error.channel.token": "Der Zugriffsschlüssel wurde abgelehnt.",
+  "error.channel.revoked": "Der Zugriffsschlüssel wurde widerrufen.",
   "error.channel.busy": "Faber hat zu viele Verbindungen.",
   "error.channel.agentTurns": "Zu viele KI-Antworten laufen oder wurden kürzlich gestartet.",
   "error.channel.agentDepth": "Diese KI kann keine weitere Antwort starten.",

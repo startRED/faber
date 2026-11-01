@@ -56,8 +56,8 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 - **CLIs that cost almost nothing while idle.** A Claude Code process takes about 120 MB just waiting (more in long
   sessions, and each session starts its own copies of the user's MCP servers), and it has no way to serve two
   conversations. So Faber starts it on the first keystroke, not when the window opens, and closes it after two idle
-  minutes; the next turn resumes the same session. Codex's app-server can serve many conversations as threads, so one
-  shared process per area holds them all (about 50 MB for three). Next: one shared copy of each MCP server for all
+  minutes; the next turn resumes the same session. Each Codex conversation uses its own app-server process so its
+  environment carries only its own revocable channel token. Internal short questions may still share a process. Next: one shared copy of each MCP server for all
   sessions of a project. On Windows, automatic helpers and unattended conversation turns also queue while measured
   owned CLI private working sets reach half physical RAM or less than 2 GiB is available for the person. One new
   automatic start is admitted per fresh sample; the nonempty queue samples every two seconds, off the engine lock.

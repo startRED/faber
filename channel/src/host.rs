@@ -69,7 +69,9 @@ pub fn prepare() -> io::Result<()> {
             SECRET.get_or_init(|| fresh).clone()
         }
     };
-    faber_engine::proc::set_token_minter(Arc::new(move |id| secret.token(id)));
+    let issuer = secret.clone();
+    faber_engine::proc::set_token_minter(Arc::new(move |id| issuer.token(id)));
+    faber_engine::proc::set_token_revoker(Arc::new(move |token| secret.revoke(token)));
     Ok(())
 }
 

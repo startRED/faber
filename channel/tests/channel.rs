@@ -103,7 +103,7 @@ async fn secrets_and_tokens_are_checked_before_any_command() {
     for (args, key) in [
         (json!({}), "error.channel.secret"),
         (json!({"secret": "wrong"}), "error.channel.secret"),
-        (json!({"secret": test_secret().hex(), "token": test_secret().token("c1").replace(".YzE.", ".YzI.")}), "error.channel.token"),
+        (json!({"secret": test_secret().hex(), "token": "fa1.invalid.invalid"}), "error.channel.token"),
     ] {
         let (backend, _) = fake();
         let (mut client, server) = tokio::io::duplex(4096);
@@ -115,11 +115,32 @@ async fn secrets_and_tokens_are_checked_before_any_command() {
     }
     let (backend, _) = fake();
     let (ours, theirs) = tokio::io::duplex(4096);
-    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), test_secret(), 0));
-    let hello = Hello { secret: test_secret().hex(), token: Some(test_secret().token("c1")), ..Default::default() };
+    let secret = test_secret();
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(secret.token("c1")), ..Default::default() };
     let client = Client::over(ours, hello).await.unwrap();
     assert_eq!(client.offer["caller"], json!({"kind":"agent", "conversation":"c1"}));
     assert_eq!(client.call("hello", json!({})).await.unwrap(), Err("error.channel.hello".into()));
+}
+
+#[tokio::test]
+async fn revocation_stops_an_existing_connection_and_does_not_restore_it_on_resume() {
+    let (backend, _) = fake();
+    let secret = test_secret();
+    let token = secret.token("c1");
+    let (ours, theirs) = tokio::io::duplex(4096);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(token.clone()), ..Default::default() };
+    let client = Client::over(ours, hello).await.unwrap();
+    assert!(client.call("state", Value::Null).await.unwrap().is_ok());
+    secret.revoke(&token);
+    let next = secret.token("c1");
+    assert_ne!(token, next);
+    assert_eq!(client.call("state", Value::Null).await.unwrap(), Err("error.channel.revoked".into()));
+    let (ours, theirs) = tokio::io::duplex(4096);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(token), ..Default::default() };
+    assert_eq!(Client::over(ours, hello).await.err().unwrap().to_string(), "error.channel.revoked");
 }
 
 #[tokio::test(start_paused = true)]

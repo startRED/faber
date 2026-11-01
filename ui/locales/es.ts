@@ -74,6 +74,7 @@ export const es: Messages = {
   "error.channel.hello": "La conexión no se identificó.",
   "error.channel.secret": "Se rechazó la clave de conexión.",
   "error.channel.token": "Se rechazó la credencial de acceso.",
+  "error.channel.revoked": "Se revocó la credencial de acceso.",
   "error.channel.busy": "Faber tiene demasiadas conexiones.",
   "error.channel.agentTurns": "Hay demasiadas respuestas de IA en curso o iniciadas recientemente.",
   "error.channel.agentDepth": "Esta IA no puede iniciar otra respuesta.",

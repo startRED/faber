@@ -74,6 +74,7 @@ export const ptBR: Messages = {
   "error.channel.hello": "A conexão não se identificou.",
   "error.channel.secret": "A chave da conexão foi recusada.",
   "error.channel.token": "A credencial de acesso foi recusada.",
+  "error.channel.revoked": "A credencial de acesso foi revogada.",
   "error.channel.busy": "O Faber está com conexões demais.",
   "error.channel.agentTurns": "Há respostas de IA demais em andamento ou iniciadas recentemente.",
   "error.channel.agentDepth": "Esta IA não pode iniciar outra resposta.",
