@@ -355,6 +355,8 @@ export interface Conversation {
   /** When the person pinned it to the top of its sidebar list. */
   pinnedAt?: number;
   messages: Message[];
+  /** Messages before the loaded window; omitted when the entire history is loaded. */
+  earlier?: number;
   rewindNotice?: string;
   rewindSummary?: string;
 }
@@ -964,6 +966,7 @@ export const api = {
   backgroundCommands: () => invoke<BackgroundList>('background_commands'),
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
+  messagesBefore: (id: string, messageId: string) => invoke<Message[] | null>('messages_before', { id, messageId }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
   cliSessions: (projectId: string) => invoke<CliSession[]>('cli_sessions', { projectId }),
