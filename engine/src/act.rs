@@ -64,6 +64,8 @@ impl FaberAct {
         let mut act = Self::new(ActKind::Wake, &wake.why);
         act.why = match wake.why.as_str() {
             "wake.keepGoing" => Some("act.why.keepGoing"),
+            "wake.asked" => Some("act.why.asked"),
+            "wake.childDone" => Some("act.why.childDone"),
             "wake.compacted" => Some("act.why.compacted"),
             "wake.compactFailed" => Some("act.why.compactFailed"),
             _ => None,
@@ -128,8 +130,8 @@ mod tests {
             ("wake.closed", None),
             ("wake.updated", None),
             ("wake.approvedPlan", None),
-            ("wake.asked", None),
-            ("wake.childDone", None),
+            ("wake.asked", Some("act.why.asked")),
+            ("wake.childDone", Some("act.why.childDone")),
             ("wake.unknown", None),
         ] {
             assert_eq!(FaberAct::wake(&Wake::of(key), "sent").why.as_deref(), why, "{key}");
