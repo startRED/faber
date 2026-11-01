@@ -142,6 +142,29 @@ check('plan: a working reply shows the current thinking headline after its words
   }
 });
 
+check('closing box: a conclusion with its summary is the AI\'s own last message, so the box keeps only its question', async () => {
+  const summary = { did: 'Fixed the redirect.', result: 'Login works.', verified: 'Ran the login test.' };
+  const done: WrapUp = { recap: 'Login works.', done: true, outcome: 'done', summary };
+  const [b, setB] = createSignal<WrapUp>(done);
+  const [written, setWritten] = createSignal(true);
+  const view = mount(() => createComponent(WrapUpBox, { get box() { return b(); }, get written() { return written(); }, open: true, onReply: () => {} }));
+  try {
+    await settle();
+    equal(view.root.querySelector('.wrap-up'), null, 'a done conclusion draws nothing beside the AI\'s own message');
+    setWritten(false);
+    await settle();
+    equal(view.root.querySelector('.wrap-up .recap')!.textContent, 'Login works.', 'with no closing message of its own, the recap stays');
+    setWritten(true);
+    await settle();
+    setB({ recap: 'Login works. Not seen on a phone.', outcome: 'needsYou', summary, ask: 'Check it on a phone?', actions: ['Yes', 'Later'] });
+    await settle();
+    equal(view.root.querySelector('.wrap-up .recap'), null, 'the recap is not repeated');
+    equal(view.root.querySelector('.wrap-ask .q')!.textContent, 'Check it on a phone?');
+  } finally {
+    view.done();
+  }
+});
+
 check('plan: a step another conversation does names it with where it stands, and a click opens it, in German at 720 px', async () => {
   useLanguage('de');
   const opened: string[] = [];

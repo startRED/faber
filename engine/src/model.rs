@@ -429,6 +429,9 @@ pub struct Message {
     /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
+    /// The one closing reminder was attempted for this reply, including refused delivery.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conclusion_requested: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
@@ -786,7 +789,7 @@ pub struct PlanCount {
 }
 
 /// The closing box an agent puts at the end of a reply when a task ends (`crate::progress::wrap_up`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapUp {
     /// What is now true, then what is not done or not verified.
@@ -796,12 +799,57 @@ pub struct WrapUp {
     pub ask: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<String>,
-    /// The person's whole request is finished and verified: Keep going stops on it.
+    /// The person's whole request is finished and verified: Keep going stops on it. True only for the outcome `done`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub done: bool,
     /// The reply Faber gave for the person while Keep going ran and nobody answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered: Option<String>,
+    /// How the agent concluded: `done`, `blocked` (it cannot go on without the person) or `needsYou` (a decision is theirs).
+    /// Absent on a box written before conclusions had outcomes; [`WrapUp::outcome`] reads those from `done` and `ask`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
+    /// The four parts of a conclusion in the agent's own words (what it did, the result, what is not done, what it checked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ConclusionSummary>,
+}
+
+/// How an agent ended its task, through the closing call (`crate::progress::wrap_up`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Outcome {
+    /// The whole request is finished and verified.
+    Done,
+    /// It cannot go on until something outside its reach changes.
+    Blocked,
+    /// A decision or an action is the person's.
+    NeedsYou,
+}
+
+/// What a conclusion says, in four short parts. `did` and `result` are always there; the others only when they say something.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConclusionSummary {
+    pub did: String,
+    pub result: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub not_done: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verified: String,
+}
+
+impl WrapUp {
+    /// The conclusion's outcome: the one the agent named, else what an older box meant (`done`, or a question for the person).
+    /// None for a box that concludes nothing: it says what is not done and asks nothing.
+    pub fn outcome(&self) -> Option<Outcome> {
+        self.outcome.or(if self.done {
+            Some(Outcome::Done)
+        } else if self.ask.is_some() && !self.actions.is_empty() {
+            Some(Outcome::NeedsYou)
+        } else {
+            None
+        })
+    }
 }
 
 /// A question the agent asked that Faber answered with the first choice while the person was away.
@@ -913,6 +961,7 @@ impl Message {
             wake: None,
             acts: vec![],
             closed: false,
+            conclusion_requested: false,
             halt: None,
             auto_answers: None,
             away: None,
@@ -1220,6 +1269,10 @@ pub struct Summary {
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,
+    /// Where the conversation stands now, whether or not anyone has opened it (`ended::run_state`): the sidebar and the
+    /// running list read it, so they agree. Absent in a list from before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<crate::sibling::State>,
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
@@ -1250,6 +1303,11 @@ pub struct Ended {
 #[serde(rename_all = "camelCase")]
 pub enum EndKind {
     Done,
+    /// The turn ended and the agent never concluded: a tool turn with no closing call, unfinished plan steps, or a closing call
+    /// that says the work is not done.
+    Unconcluded,
+    /// Faber closed or crashed mid-turn.
+    Interrupted,
     /// It stopped on something only the person can settle: a question, Keep going's cap, an AI billed per use.
     NeedsYou,
     Failed,
@@ -1411,6 +1469,9 @@ pub struct Settings {
     /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_awake: Option<bool>,
+    /// Resume work cut short by Faber closing (on by default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_interrupted: Option<bool>,
     /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
@@ -1466,6 +1527,10 @@ impl Settings {
         self.keep_awake.unwrap_or(true)
     }
 
+    pub fn resume_interrupted(&self) -> bool {
+        self.resume_interrupted.unwrap_or(true)
+    }
+
     pub fn autostart(&self) -> bool {
         self.autostart.unwrap_or(false)
     }
@@ -1483,6 +1548,7 @@ impl Settings {
             notifications: Some(self.notifications()),
             notification_sound: Some(self.notification_sound()),
             keep_awake: Some(self.keep_awake()),
+            resume_interrupted: Some(self.resume_interrupted()),
             autostart: Some(self.autostart()),
             ..self
         }
@@ -1784,7 +1850,7 @@ mod tests {
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
         assert_eq!(
             serde_json::to_value(Settings::default().shown()).unwrap(),
-            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "autostart": false })
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false })
         );
         let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
         assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));

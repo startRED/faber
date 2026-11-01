@@ -142,6 +142,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crow.child { padding-left: 14px; }
 .crow.child::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 1px; background: var(--line-2); }
 .item .tag-quiet, .hit-heading .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
+.item .state-mark { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--amber-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.item .state-mark + .unseen, .item .unseen + .state-mark { margin-left: 6px; }
 .item .unseen { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }

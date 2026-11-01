@@ -499,6 +499,7 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
     host.engine.resume_keep_going();
     // And what the restart for an update cut, from a conversation not on Keep going.
     host.engine.resume_after_update();
+    host.engine.resume_interrupted();
     // And a team leader the close cut off with no member left to wake it.
     host.engine.resume_cut_leaders();
     if let Some(codex) = clis.get(&Vendor::Codex) {
