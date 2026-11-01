@@ -1217,14 +1217,11 @@ impl CodexServer {
     ) -> CodexServer {
         let (tx, rx) = unbounded_channel();
         let mut args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
-        if let Some(identity) = &identity
-            && let Some(token) = &identity.token
-        {
-            for (name, value) in [("FABER_AGENT_TOKEN", token), ("FABER_CONVERSATION", &identity.id)] {
-                args.extend(["-c".into(), format!("shell_environment_policy.set.{name}={}", json!(value))]);
-            }
+        if identity.as_ref().is_some_and(|identity| identity.token.is_some()) {
+            args.extend(["-c".into(), "shell_environment_policy.ignore_default_excludes=false".into()]);
         }
-        let started = (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
+        let spawn = || (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
+        let started = if let Some(identity) = &identity { proc::with_identity(identity, spawn) } else { spawn() };
         let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
         let alive = Arc::new(AtomicBool::new(true));
         tokio::spawn(serve_identified(started, opts, rx, alive.clone(), identity.clone(), command_spawn));
@@ -1953,13 +1950,7 @@ async fn serve_identified(
                             if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
                                 let own_command = proc::cli_binary().and_then(|path| crate::permissions::faber_command(input, &path));
-                                let is_own_command = own_command.is_some();
-                                if let Some(mut argv) = own_command.or_else(|| crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli)) {
-                                    if !is_own_command && let Some(identity) = &identity && let Some(token) = &identity.token && let Some(index) = argv.iter().position(|arg| arg == "sandbox") {
-                                        let extra = [("FABER_AGENT_TOKEN", token), ("FABER_CONVERSATION", &identity.id)].into_iter()
-                                            .flat_map(|(name, value)| ["-c".into(), format!("shell_environment_policy.set.{name}={}", json!(value))]);
-                                        argv.splice(index..index, extra);
-                                    }
+                                if let Some(argv) = own_command.or_else(|| crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli)) {
                                     let key = top.expect("registered command thread");
                                     let (spawn, cwd, tx, id) = (command_spawn.clone().unwrap_or_else(|| opts.spawn.clone()), t.params.cwd.clone(), command_tx.clone(), id.clone());
                                     let identity = identity.clone();
@@ -2689,18 +2680,22 @@ mod rewind_tests {
             write(&mut input, json!({"id":"call","method":"item/tool/call","params":{"threadId":"owner","tool":"run_command","arguments":{"command":"cargo test"}}})).await;
             let (bin, args, env) = commands.recv().await.unwrap();
             assert_eq!(bin, "codex");
-            assert!(args.iter().any(|arg| arg == "shell_environment_policy.set.FABER_AGENT_TOKEN=\"test-key\""));
+            assert!(args.iter().all(|arg| !arg.contains("test-key")));
+            assert!(args.iter().any(|arg| arg == "shell_environment_policy.ignore_default_excludes=false"));
             assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
+            assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
             server.abort();
         }).await.expect("the isolated fake command was never dispatched");
     }
 
     #[tokio::test]
-    async fn identified_server_passes_its_key_as_arguments_to_its_own_process() {
-        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+    async fn identified_server_passes_its_key_in_the_environment_only() {
+        let recorded = Arc::new(std::sync::Mutex::new(None));
         let capture = recorded.clone();
-        let spawn: Spawner = Arc::new(move |_, args, _| {
-            *capture.lock().unwrap() = args.to_vec();
+        let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+            let command = proc::marked(bin, args, cwd);
+            let env = command.as_std().get_envs().filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned()))).collect::<HashMap<_, _>>();
+            *capture.lock().unwrap() = Some((args.to_vec(), env));
             Err(std::io::Error::other("fake"))
         });
         let opts = CodexServerOptions {
@@ -2715,9 +2710,15 @@ mod rewind_tests {
         };
         let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
         let _server = CodexServer::start_identified(opts, identity, spawn);
-        let args = recorded.lock().unwrap();
-        assert!(args.windows(2).any(|pair| pair == ["-c", "shell_environment_policy.set.FABER_AGENT_TOKEN=\"test-key\""]));
-        assert!(args.windows(2).any(|pair| pair == ["-c", "shell_environment_policy.set.FABER_CONVERSATION=\"one\""]));
+        let recorded = recorded.lock().unwrap();
+        let (args, env) = recorded.as_ref().unwrap();
+        assert!(args.iter().all(|arg| !arg.contains("test-key")));
+        assert!(args.iter().any(|arg| arg == "shell_environment_policy.ignore_default_excludes=false"));
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()),
+            Some(std::ffi::OsStr::new("test-key"))
+        );
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("one")));
     }
 
     fn thread(sink: EventSink) -> Thread {

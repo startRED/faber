@@ -20,11 +20,14 @@ to the table is immediately callable through `faber call <command>` and listed i
   `<data>/channel/secret` (readable only by the signed-in user). A client's first line (`hello`, within 5 s) must carry
   that secret; a missing or wrong one fails with `error.channel.secret` and closes.
 - **Conversation tokens:** a token `fa1.<base64url session and id>.<base64url HMAC>` (HMAC-SHA256 with this run's secret, checked in
-  constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`) with `FABER_AGENT_DEPTH`; a
+  constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`, or `FABER_AGENT_AUTH` when
+  Codex's shell filters token-named variables) with `FABER_AGENT_DEPTH`; a
   tampered token or one from a previous run fails with `error.channel.token`; a closed session's token fails with
   `error.channel.revoked`. Each Claude Code and Codex session gets a fresh token, including resumes. Codex gets a separate
   process per conversation. Its shell snapshots may retain a token, but it is revoked when the session closes; Faber does
-  not write the token to its own files. In isolated mode, Faber runs its own command directly with the same identity.
+  not write the token to its own files or put it in process arguments. Codex's own environment filters can still prevent the
+  identity from reaching a shell. In isolated mode, Faber runs its own command directly with the same identity. Revocation
+  cancels pending channel requests; work already completed cannot be undone.
 - **Starting Faber when closed:** if nothing answers on the channel, `faber` finds Faber's program (`FABER_APP`, or the app
   folder above its own `bin` folder), starts it hidden in the tray (`--autostart`, no console) and
   waits up to 10 s for the channel. `--no-start` and any process with `FABER_AGENT_DEPTH >= 1` never start Faber and exit

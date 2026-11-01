@@ -319,10 +319,31 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     Some(Ok(ticket)) => Some((ticket, args.clone())),
                     None => None,
                 };
-                let (tx, guard) = (tx.clone(), guard.clone());
-                let run = backend.dispatch_detailed(caller, cmd, args);
+                let (tx, guard, backend, secret, token, caller) =
+                    (tx.clone(), guard.clone(), backend.clone(), secret.clone(), token.clone(), caller.clone());
                 tokio::spawn(async move {
-                    let result = run.await;
+                    let mut changes = secret.changes();
+                    let revoked = async {
+                        if let Some(token) = token.as_deref() {
+                            loop {
+                                if secret.conversation_of(token).is_none() || changes.changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    };
+                    let result = tokio::select! {
+                        biased;
+                        _ = revoked => Err("error.channel.revoked".into()),
+                        result = async {
+                            match secret.admit(token.as_deref(), || backend.dispatch_detailed(&caller, cmd, args)) {
+                                Some(run) => run.await,
+                                None => Err("error.channel.revoked".into()),
+                            }
+                        } => result,
+                    };
                     if let Some((ticket, asked)) = ticket {
                         if matches!(&result, Err(error) if error.key.starts_with("error.reach.") || error.key == "error.host.badArgs") {
                             guard.refund(&ticket);

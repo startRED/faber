@@ -99,6 +99,16 @@ impl Secret {
         self.1.lock().unwrap_or_else(|e| e.into_inner()).get(token).cloned()
     }
 
+    /// Admit a request under the same lock that revokes its session.
+    pub(crate) fn admit<T>(&self, token: Option<&str>, run: impl FnOnce() -> T) -> Option<T> {
+        if let Some(token) = token {
+            let active = self.1.lock().unwrap_or_else(|e| e.into_inner());
+            active.contains_key(token).then(run)
+        } else {
+            Some(run())
+        }
+    }
+
     pub(crate) fn signed(&self, token: &str) -> bool {
         let mut parts = token.trim().split('.');
         let (Some("fa1"), Some(id), Some(tag), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return false };

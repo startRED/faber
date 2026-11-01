@@ -292,7 +292,12 @@ pub(crate) fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
 
 fn marked_with_minter(bin: &str, args: &[String], cwd: &Path, mint: Option<&(dyn Fn(&str) -> String + Send + Sync)>) -> Command {
     let mut cmd = Command::new(bin);
-    cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1").env_remove("FABER_AGENT_TOKEN").env_remove("FABER_CONVERSATION");
+    cmd.args(args)
+        .current_dir(cwd)
+        .env(AGENT_MARK, "1")
+        .env_remove("FABER_AGENT_TOKEN")
+        .env_remove("FABER_AGENT_AUTH")
+        .env_remove("FABER_CONVERSATION");
     CONVERSATION.with(|current| {
         if let Some(id) = current.borrow().as_deref()
             && let Some(mint) = mint
@@ -304,7 +309,7 @@ fn marked_with_minter(bin: &str, args: &[String], cwd: &Path, mint: Option<&(dyn
         if let Some(identity) = current.borrow().as_ref()
             && let Some(token) = &identity.token
         {
-            cmd.env("FABER_AGENT_TOKEN", token).env("FABER_CONVERSATION", &identity.id);
+            cmd.env("FABER_AGENT_TOKEN", token).env("FABER_AGENT_AUTH", token).env("FABER_CONVERSATION", &identity.id);
         }
     });
     if let Some(cli) = CLI.get()
@@ -978,6 +983,10 @@ mod tests {
             env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).map(|value| value.as_os_str()),
             Some(std::ffi::OsStr::new("test-key"))
         );
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()),
+            Some(std::ffi::OsStr::new("test-key"))
+        );
         assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("one")));
     }
 
@@ -985,7 +994,7 @@ mod tests {
     fn conversation_without_a_minter_gets_no_identity() {
         as_conversation("one", || {
             let cmd = marked_with_minter("cli", &[], Path::new("."), None);
-            for name in ["FABER_AGENT_TOKEN", "FABER_CONVERSATION"] {
+            for name in ["FABER_AGENT_TOKEN", "FABER_AGENT_AUTH", "FABER_CONVERSATION"] {
                 assert_eq!(cmd.as_std().get_envs().find(|(key, _)| *key == name).unwrap().1, None);
             }
         });
