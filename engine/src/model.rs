@@ -117,6 +117,15 @@ pub struct Transcript {
     pub failed: bool,
 }
 
+/// A piece of a reply's thinking: it starts at `from` in the thinking (UTF-16 units) and came when the reply's text was
+/// `at` units long and the agent had started `steps` calls of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThinkingMark {
+    pub from: usize,
+    pub at: usize,
+    pub steps: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -171,6 +180,15 @@ pub struct ToolUse {
     /// Visible child-session pages, kept outside the conversation and read one at a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    /// Where the reply's words stood when the agent's own call started, in UTF-16 units of its text, so the thread draws
+    /// the words and the steps in the order they happened (W1, 2026-10-31). None for a subagent's call (it sits in its
+    /// subagent's row) and for calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<usize>,
+    /// On an edit step: the lines it added and removed and the first of them (`change.rs`), so the screen counts them
+    /// without the whole input. Absent on other steps and on conversations recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::change::Change>,
 }
 
 impl ToolUse {
@@ -302,6 +320,10 @@ pub struct Message {
     /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity_end: Option<usize>,
+    /// Where each piece of the thinking began and where it falls among the words and the steps, oldest first (W1,
+    /// 2026-10-31): the thread draws each piece in its place. Empty on replies recorded before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_marks: Vec<ThinkingMark>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     /// On a reply that ended well: how long it took from its start (`at`), in milliseconds. Absent on older replies.
@@ -403,10 +425,15 @@ pub struct Message {
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acts: Vec<crate::act::FaberAct>,
     /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
     /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
+    /// The one closing reminder was attempted for this reply, including refused delivery.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conclusion_requested: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
@@ -695,6 +722,12 @@ pub struct PlanStep {
     pub id: String,
     pub text: String,
     pub state: StepState,
+    /// The conversation this one started that does the step (task 040), checked when the plan is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    /// For the screen only, like `Plan::estimate`: where that conversation stands now (`Core::shown_plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<MemberState>,
     /// Paths or folders the step expects to change, relative to the project, written with `/`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
@@ -707,6 +740,17 @@ pub struct PlanStep {
     /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<StepWorker>,
+}
+
+/// Where a plan step's conversation stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberState {
+    Running,
+    Waiting,
+    Done,
+    Failed,
+    Stopped,
 }
 
 /// The conversation that works on a plan step, and where its copy started.
@@ -747,7 +791,7 @@ pub struct PlanCount {
 }
 
 /// The closing box an agent puts at the end of a reply when a task ends (`crate::progress::wrap_up`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapUp {
     /// What is now true, then what is not done or not verified.
@@ -757,12 +801,57 @@ pub struct WrapUp {
     pub ask: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<String>,
-    /// The person's whole request is finished and verified: Keep going stops on it.
+    /// The person's whole request is finished and verified: Keep going stops on it. True only for the outcome `done`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub done: bool,
     /// The reply Faber gave for the person while Keep going ran and nobody answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answered: Option<String>,
+    /// How the agent concluded: `done`, `blocked` (it cannot go on without the person) or `needsYou` (a decision is theirs).
+    /// Absent on a box written before conclusions had outcomes; [`WrapUp::outcome`] reads those from `done` and `ask`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
+    /// The four parts of a conclusion in the agent's own words (what it did, the result, what is not done, what it checked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ConclusionSummary>,
+}
+
+/// How an agent ended its task, through the closing call (`crate::progress::wrap_up`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Outcome {
+    /// The whole request is finished and verified.
+    Done,
+    /// It cannot go on until something outside its reach changes.
+    Blocked,
+    /// A decision or an action is the person's.
+    NeedsYou,
+}
+
+/// What a conclusion says, in four short parts. `did` and `result` are always there; the others only when they say something.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConclusionSummary {
+    pub did: String,
+    pub result: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub not_done: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verified: String,
+}
+
+impl WrapUp {
+    /// The conclusion's outcome: the one the agent named, else what an older box meant (`done`, or a question for the person).
+    /// None for a box that concludes nothing: it says what is not done and asks nothing.
+    pub fn outcome(&self) -> Option<Outcome> {
+        self.outcome.or(if self.done {
+            Some(Outcome::Done)
+        } else if self.ask.is_some() && !self.actions.is_empty() {
+            Some(Outcome::NeedsYou)
+        } else {
+            None
+        })
+    }
 }
 
 /// A question the agent asked that Faber answered with the first choice while the person was away.
@@ -833,6 +922,7 @@ impl Message {
             visual_file_count: None,
             text_breaks: None,
             activity_end: None,
+            thinking_marks: vec![],
             at,
             took: None,
             images: None,
@@ -872,7 +962,9 @@ impl Message {
             look: None,
             follow: None,
             wake: None,
+            acts: vec![],
             closed: false,
+            conclusion_requested: false,
             halt: None,
             auto_answers: None,
             away: None,
@@ -1055,7 +1147,14 @@ pub struct Conversation {
     /// The agent's plan for the request (`crate::progress::plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
+    /// The watchdog found this conversation delivering nothing for a long run of turns (`crate::results::Stuck`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<crate::results::Stuck>,
     pub messages: Vec<Message>,
+    /// Only on a copy for the screen that holds the newest messages (`Engine::open_for_screen_window`): how many came before
+    /// them, read with `Engine::messages_before`. Never saved with a value: a stored conversation keeps every message.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub earlier: usize,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub piece_values: Vec<crate::pieces::SavedValue>,
@@ -1173,9 +1272,19 @@ pub struct Summary {
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,
+    /// Where the conversation stands now, whether or not anyone has opened it (`ended::run_state`): the sidebar and the
+    /// running list read it, so they agree. Absent in a list from before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<crate::sibling::State>,
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
+    /// What the conversation delivered and cost, derived from its messages (`crate::results`); none before its first reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<crate::results::Results>,
+    /// The watchdog found it delivering nothing for a long run of turns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
@@ -1197,6 +1306,11 @@ pub struct Ended {
 #[serde(rename_all = "camelCase")]
 pub enum EndKind {
     Done,
+    /// The turn ended and the agent never concluded: a tool turn with no closing call, unfinished plan steps, or a closing call
+    /// that says the work is not done.
+    Unconcluded,
+    /// Faber closed or crashed mid-turn.
+    Interrupted,
     /// It stopped on something only the person can settle: a question, Keep going's cap, an AI billed per use.
     NeedsYou,
     Failed,
@@ -1358,6 +1472,9 @@ pub struct Settings {
     /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_awake: Option<bool>,
+    /// Resume work cut short by Faber closing (on by default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_interrupted: Option<bool>,
     /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
@@ -1413,6 +1530,10 @@ impl Settings {
         self.keep_awake.unwrap_or(true)
     }
 
+    pub fn resume_interrupted(&self) -> bool {
+        self.resume_interrupted.unwrap_or(true)
+    }
+
     pub fn autostart(&self) -> bool {
         self.autostart.unwrap_or(false)
     }
@@ -1430,6 +1551,7 @@ impl Settings {
             notifications: Some(self.notifications()),
             notification_sound: Some(self.notification_sound()),
             keep_awake: Some(self.keep_awake()),
+            resume_interrupted: Some(self.resume_interrupted()),
             autostart: Some(self.autostart()),
             ..self
         }
@@ -1591,8 +1713,8 @@ pub enum Setup {
     Skipped,
 }
 
-fn is_zero(n: &u32) -> bool {
-    *n == 0
+fn is_zero<T: Default + PartialEq>(n: &T) -> bool {
+    *n == T::default()
 }
 
 fn is_zero_usd(n: &f64) -> bool {
@@ -1731,7 +1853,7 @@ mod tests {
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
         assert_eq!(
             serde_json::to_value(Settings::default().shown()).unwrap(),
-            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "autostart": false })
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false })
         );
         let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
         assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));

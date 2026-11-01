@@ -84,6 +84,13 @@ impl Loc {
         Value::Array(self.steps.clone()).to_string()
     }
 
+    fn is_named_button(&self) -> bool {
+        self.steps.len() == 1
+            && self.steps[0]["k"] == "role"
+            && self.steps[0]["role"] == "button"
+            && self.steps[0]["want"]["text"].is_string()
+    }
+
     /// A line for a failure message.
     pub fn describe(&self) -> String {
         let parts: Vec<String> = self
@@ -201,6 +208,27 @@ impl Page {
 
     pub fn wait_gone(&mut self, loc: &Loc) -> Result<(), String> {
         self.wait_until(&format!("{} to disappear", loc.describe()), loc, "!window.__tk.find(steps).some(window.__tk.shown)", DEFAULT_WAIT)
+            .map_err(|e| self.button_diagnostic(loc, e))
+    }
+
+    fn button_diagnostic(&mut self, loc: &Loc, error: String) -> String {
+        if !loc.is_named_button() {
+            return error;
+        }
+        let details = self.probe(loc, r#"
+            return window.__tk.find(steps).filter(window.__tk.shown).map((el) => {
+                const ancestors = [];
+                for (let p = el.parentElement; p && ancestors.length < 3; p = p.parentElement)
+                    ancestors.push(p.tagName.toLowerCase() + (p.getAttribute('class') ? '.' + p.getAttribute('class').trim().replace(/\s+/g, '.') : ''));
+                const context = el.parentElement?.parentElement ?? el.parentElement;
+                const text = (context?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+                return { ancestors, text };
+            });
+        "#);
+        match details {
+            Ok(value) => format!("{error}\nVisible matching buttons (nearest ancestors first): {value}"),
+            Err(e) => format!("{error}\nCould not inspect matching buttons: {e}"),
+        }
     }
 
     pub fn wait_count(&mut self, loc: &Loc, count: usize) -> Result<(), String> {
@@ -224,12 +252,17 @@ impl Page {
         let started = Instant::now();
         let deadline = started + DEFAULT_WAIT;
         let outer = self.cdp.set_deadline(Some(deadline));
-        let result = match self.cdp.settle(&script, Accept::NoWhy, deadline) {
+        let settled = self.cdp.settle(&script, Accept::NoWhy, deadline);
+        self.cdp.set_deadline(outer);
+        let result = match settled {
             Ok(Settled::Accepted(value)) => Ok(value),
-            Ok(Settled::TimedOut(value)) => Err(format!("{}: {}", loc.describe(), value["why"].as_str().unwrap_or("not ready"))),
+            Ok(Settled::TimedOut(value)) => {
+                let why = value["why"].as_str().unwrap_or("not ready");
+                let error = format!("{}: {why}", loc.describe());
+                Err(if why.contains("elements match, but one was expected") { self.button_diagnostic(loc, error) } else { error })
+            }
             Err(e) => Err(e),
         };
-        self.cdp.set_deadline(outer);
         crate::timing::step("page-act", started.elapsed());
         result
     }
@@ -357,6 +390,14 @@ mod tests {
         let loc = css(".setup-card[data-vendor=\"codex\"]").text("Connected").exact().last();
         assert_eq!(loc.describe(), "css \".setup-card[data-vendor=\\\"codex\\\"]\" > text \"Connected\" > last");
         assert_eq!(label("Message").describe(), "label \"Message\"");
+    }
+
+    #[test]
+    fn only_named_button_locators_get_button_diagnostics() {
+        assert!(role("button", "Stop").is_named_button());
+        assert!(!role_any("button").is_named_button());
+        assert!(!role("heading", "Stop").is_named_button());
+        assert!(!css(".composer").role("button", "Stop").is_named_button());
     }
 
     #[test]

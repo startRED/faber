@@ -140,7 +140,10 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
                     .any(|a| a.name.as_deref() == Some("page.html") && a.versions[0].source == "<p>Saved by this fixture turn</p>"),
                 "{vendor:?} {area:?}: the successful turn in a plain-form working folder must capture its written page"
             );
-            assert!(fake.mismatches.lock().unwrap().is_empty());
+            // A project turn that wrote a file and never concluded gets Faber's one request for a conclusion: the recording has
+            // no answer to it, and nothing else may differ.
+            let off = fake.mismatches.lock().unwrap().clone();
+            assert!(off.iter().all(|m| m.contains("ended without concluding the task")), "{off:?}");
             engine.shutdown();
         }
     }

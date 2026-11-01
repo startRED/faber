@@ -142,6 +142,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crow.child { padding-left: 14px; }
 .crow.child::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 1px; background: var(--line-2); }
 .item .tag-quiet, .hit-heading .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
+.item .state-mark { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--amber-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.item .state-mark + .unseen, .item .unseen + .state-mark { margin-left: 6px; }
 .item .unseen { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }
@@ -165,6 +167,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .vendor { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: var(--fs-xs); text-align: left; white-space: nowrap; }
 .vendor :is(.name, .used) { flex: none; }
 .vendor .name { color: var(--ink-2); }
+.vendor.unread { flex-wrap: wrap; }
+.vendor .unavailable { flex-basis: 100%; white-space: normal; }
 .vendor .share + .used { margin-left: -4px; }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .meter { flex: 1; min-width: 0; height: 3px; }
@@ -582,9 +586,6 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .cursor { display: inline-block; width: 8px; height: 16px; background: var(--accent); vertical-align: -3px; margin-left: 2px; animation: blink var(--dur-blink) steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-details.thinking { font-size: var(--fs-sm); color: var(--ink-3); }
-details.thinking summary { font-size: var(--fs-sm); cursor: default; }
-details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left: 2px solid var(--line-3); margin-top: 6px; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--fs-sm); }
 .tools span:not(.sr-only) { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-2); white-space: nowrap; }
 .tools span svg { flex: none; color: var(--accent-text); }
@@ -606,6 +607,42 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .step-group summary b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 580; color: var(--ink); }
 .step-group summary em { flex: none; font-style: normal; color: var(--danger); }
 .step-group > .tools { padding: 8px 0 0 12px; }
+/* The reply as it happened (W1, 2026-10-31): the agent's steps and thinking sit between its words as thin quiet rows, never
+   a card. A row is a button the width of its words: an icon of what it acts on (the words carry the meaning), what it did,
+   what it acted on in the mono face, the lines it changed. Two or more together fold into one row that counts them; the
+   words before and after never fold. Only the background and the chevron move, and not at all with reduced motion. */
+.steps { display: grid; justify-items: start; gap: 1px; min-width: 0; margin: -4px 0; font-size: var(--fs-sm); color: var(--ink-3); }
+.steps-list { display: grid; justify-items: start; gap: 1px; min-width: 0; max-width: 100%; padding-inline-start: 14px; }
+.step { display: grid; justify-items: start; min-width: 0; max-width: 100%; }
+.step-line, .steps-head { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin-inline-start: -6px; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--r-xs); background: transparent; color: var(--ink-3); font: inherit; text-align: start; cursor: default; transition: background-color var(--dur-fast) var(--ease); }
+.step-line:hover, .steps-head:hover, .step-line[aria-expanded='true'], .steps-head[aria-expanded='true'] { background: var(--s1); }
+.step-line b, .steps-head b { flex: none; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.steps-head b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.step-line i { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; font-family: var(--font-mono); font-size: 0.92em; }
+.thought .step-line i { font-family: inherit; font-size: inherit; }
+.step-icon { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--ink-3); }
+.step-icon .live { width: 6px; height: 6px; }
+.step-icon .live::after { inset: -3px; }
+.steps-head .step-icon svg { transition: transform var(--dur-ui) var(--ease); }
+.steps-head[aria-expanded='true'] .step-icon svg { transform: rotate(90deg); }
+.step-failed { flex: none; font-style: normal; color: var(--danger); }
+.step[data-state='declined'] .step-line :is(b, i) { text-decoration: line-through; }
+.steps .long { flex: none; white-space: pre; font-variant-numeric: tabular-nums; }
+.step-detail { display: grid; gap: 6px; width: 100%; min-width: 0; margin: 2px 0 6px 2px; padding: 4px 0 4px 12px; border-inline-start: 1px solid var(--line-2); }
+.step-what { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-out { margin: 0; max-height: 240px; overflow: auto; padding: 6px 8px; border-radius: var(--r-xs); background: var(--s1); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-detail .note { margin: 0; }
+.step-detail .changed { margin-top: 0; }
+/* The newest edit's few lines sit under its own row, lined up with its label, never alone under the reply. */
+.step > .changed, .steps > .changed { margin: 0 0 4px 22px; }
+.thought-text p { margin: 0; white-space: pre-wrap; color: var(--ink-3); }
+.thought-text b { font-weight: 580; color: var(--ink-2); }
+/* Nothing above shows the agent at work: one quiet line says it is thinking, with the running mark. */
+.live-line { align-items: center; gap: 8px; }
+.live-line .live { flex: none; width: 6px; height: 6px; margin-inline-start: 4px; }
+.live-line .live::after { inset: -3px; }
+.kit.disclosure { align-self: start; }
+.kit.disclosure .pace { padding: 0 12px 10px; }
 /* An edit's line count: added in the accent's text ink, removed in the error ink, both in the data face. */
 .delta { display: inline-flex; gap: 6px; flex: none; font-style: normal; font-family: var(--font-data); font-size: 0.92em; }
 .delta .add, .changed .add b { color: var(--accent-text); }
@@ -622,16 +659,10 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .disclosure summary::after { content: ''; flex: none; margin: -2px 2px 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.6; transform: translateY(0) rotate(45deg); transition: transform var(--dur-ui) var(--ease); }
 .disclosure[open] > summary::after { transform: translateY(2px) rotate(225deg); }
 .disclosure summary:hover { background: var(--s2); }
-.activity-body { display: grid; gap: 12px; padding: 0 12px 12px; }
-.activity-thinking { display: grid; gap: 4px; color: var(--ink-3); }
-.activity-thinking p { margin: 0; white-space: pre-wrap; }
-.activity-thinking b { font-weight: 580; color: var(--ink-2); }
 .activity-latest { display: flex; min-width: 0; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); }
 /* The step is cut, never its time. */
 .activity-latest .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .activity-latest .long { flex: none; white-space: pre; font-variant-numeric: tabular-nums; }
-/* The same line under the words, once the reply has some: where the eye already is. */
-.activity-latest.after { margin-top: -4px; }
 /* The checks a running reply ran: one quiet line, a check mark while none failed, the error note's 2 px edge once one did. */
 .tally { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .tally svg { color: var(--accent-text); }
@@ -1118,13 +1149,14 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .urow { display: grid; grid-template-columns: minmax(96px, 150px) 5.2em minmax(80px, 1fr) auto; align-items: center; gap: 12px; font-size: var(--fs-sm); }
 .urow .share { text-align: right; white-space: nowrap; color: var(--ink); }
 .urow .reset { white-space: nowrap; font-size: var(--fs-xs); color: var(--ink-3); }
+.urow .unread { grid-column: 2 / -1; color: var(--ink-3); }
 .acct-foot { margin: 0; padding: 0 16px 14px; font-size: var(--fs-xs); color: var(--ink-3); }
 .acct-details { display: grid; gap: 8px; padding: 12px 16px 14px; }
 .wnote { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .wnote b { font-weight: 500; color: var(--ink-2); }
 @media (max-width: 960px) {
   .urow { grid-template-columns: minmax(0, 1fr) 5.2em; }
-  .urow :is(.meter, .reset) { grid-column: 1 / -1; }
+  .urow :is(.meter, .reset, .unread) { grid-column: 1 / -1; }
 }
 .facts { display: grid; gap: 14px; max-width: 560px; margin: 0; padding: 0; list-style: none; }
 .facts li { display: flex; align-items: center; gap: 12px; font-size: var(--fs-read); color: var(--ink); }
@@ -1617,6 +1649,11 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .plan li.active { color: var(--ink); }
 .plan li.active .mark { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .plan li .now { color: var(--ink-3); }
+/* A step another conversation does: its title as a quiet link under the step's text, then where it stands. */
+.plan li { flex-wrap: wrap; }
+.plan li .member { flex-basis: 100%; min-width: 0; padding-left: 22px; color: var(--ink-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.plan li .member .link { font-size: inherit; }
+.plan li .member-state[data-state='waiting'] { color: var(--amber-ink); }
 .plan .note { margin: 6px 0 0; overflow-wrap: anywhere; }
 .wrap-up { margin: 12px 0 4px; padding: 10px 12px; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; gap: 8px; }
 .wrap-up .recap { margin: 0; }
@@ -1855,3 +1892,10 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .goal-add .field { flex: 1 1 200px; min-width: 0; max-width: 100%; }
 .goal-add .btn { white-space: normal; height: auto; min-height: var(--h-sm); }
 .goal-add .goal-words { flex-basis: 100%; margin: 0; }
+
+.faber-act { min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.faber-act-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.faber-act-line .i { flex: none; }
+.faber-act-line button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.faber-act details { margin-left: 22px; }
+.faber-act-sent { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }

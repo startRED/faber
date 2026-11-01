@@ -1,0 +1,38 @@
+name: queue
+
+# Trains (R497): the land and report jobs of ci.yml send the next train when theirs ends, and every queueing sends one
+# when none runs. A train whose run stopped without either (cancelled by hand, or by GitHub) would hold the queue until the
+# next queueing, so this sends the next one when none runs, every twenty minutes. A job of seconds when nothing waits.
+on:
+  schedule:
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+
+# ci.yml's train job uses the same group, so two never build a train at once.
+concurrency:
+  group: train
+
+permissions:
+  contents: write
+  actions: write
+  statuses: write
+  pull-requests: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: phase-1-base
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node scripts/land.mjs --train --self "$GITHUB_RUN_ID"

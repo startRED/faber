@@ -101,11 +101,13 @@ export function Delta(props: { change: Pick<Change, 'added' | 'removed'> }) {
 }
 
 /** The few lines an edit is changing, while it runs (R161 step 9): removed lines first, then added, past four the count of the rest. */
-export function ChangedLines(props: { change: Change }) {
-  const SHOWN = 4;
-  const rest = () => props.change.lines.length - SHOWN;
+/** `read`: an opened step, where the lines are its content and a screen reader hears them; elsewhere they repeat the status line. */
+export function ChangedLines(props: { change: Change; shown?: number; read?: boolean }) {
+  const SHOWN = props.shown ?? 4;
+  // The engine keeps only the first lines, so the rest is counted from the totals.
+  const rest = () => props.change.added + props.change.removed - SHOWN;
   return (
-    <div class="changed" aria-hidden="true">
+    <div class="changed" aria-hidden={props.read ? undefined : "true"}>
       <For each={props.change.lines.slice(0, SHOWN)}>{(line) => <div classList={{ add: line.added, del: !line.added }}><b>{line.added ? '+' : '−'}</b>{line.text || ' '}</div>}</For>
       <Show when={rest() > 0}><p>{t('tool.moreLines', { n: rest() })}</p></Show>
     </div>

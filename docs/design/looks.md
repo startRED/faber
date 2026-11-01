@@ -171,7 +171,7 @@ accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a b
 
 While a game or another full-screen app is in front of the shown window (R191), the screen acts as if its window were
 hidden. The shell answers `game_in_front` from the check the tray already makes before a notification
-(`src-tauri/src/tray/native.rs`, `decide::game_in_front`): Windows names a full-screen, Direct3D, presentation or store
+(`host/src/tray/front.rs`, `decide::game_in_front`): Windows names a full-screen, Direct3D, presentation or store
 app, or another process's window covers its whole monitor (a borderless game). Faber's own window never counts.
 
 - The screen asks (`ui/quiet.ts`, `watchGames`) only while its window is shown without the focus: once at the blur and
@@ -224,7 +224,7 @@ app, or another process's window covers its whole monitor (a borderless game). F
 
 ### How a look reaches the screen
 
-- `src-tauri/src/themes.json` is the single source of tokens, and `src-tauri/src/look.rs` is the only code that computes
+- `src-tauri/src/themes.json` is the single source of tokens, and `host/src/look.rs` is the only code that computes
   a colour. It applies the theme, the user's choices and the colour validator, checks the 26 pairs, and returns the CSS
   variables, the motion level, the effect switches and any notice. The screen never computes a colour.
 - `state()` returns the look of the saved appearance, and `main.tsx` writes it on `<html>` before the first frame. The

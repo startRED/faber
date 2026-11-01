@@ -1,0 +1,3 @@
+catalog: return stays reachable after reading a small-window detail # intermittent failure, 2026-10-31, pace.mjs weekly report
+browser pane: native navigation and placement within the memory budget # intermittent failure, 2026-10-31, pace.mjs weekly report
+subagent history: long sessions read one page and keep older pages steady while new work arrives # intermittent failure, 2026-10-31, pace.mjs weekly report

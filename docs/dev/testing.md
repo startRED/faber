@@ -2,15 +2,13 @@
 
 Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
 
-The runner resolves the repository from its current folder or the nearest ancestor containing `Cargo.toml`,
-`testkit/Cargo.toml` and `engine/Cargo.toml`. Run it inside the intended checkout, even when reusing a warmed
-`CARGO_TARGET_DIR`; outside a Faber workspace it fails instead of using the checkout where it was compiled.
+The runner finds the repository from its current folder or an ancestor with the workspace, testkit and engine manifests.
+Run it inside the intended checkout, even with a warmed `CARGO_TARGET_DIR`; outside Faber it fails.
 The fake CLI stays beside the runner executable, and the configured target folder is preserved.
 
-`Launch::claude_recording` and `codex_recording` can select independent fake replays for a main agent and its helper.
-They add `--faber-recording <path>` to that fake binary's structured argument prefix; the fake removes it before
-handling status, setup or session arguments. Unset overrides keep the shared `Launch::recording` fallback.
-These options change only the test harness: the sandbox, hidden desktop and real CLI isolation stay the same.
+`Launch::claude_recording` and `codex_recording` select separate fake replays for a main agent and its helper.
+They pass `--faber-recording <path>` to the fake; unset overrides use `Launch::recording`. The sandbox, hidden
+desktop and real CLI isolation stay the same.
 
 ## Screen tests
 
@@ -47,9 +45,8 @@ page's whole event loop partway through a run on CI. So the macOS test build (`t
 corner under every other window, ignores the mouse, never takes focus, and sets WebKit's inactive scheduling policy to
 `Disabled` (`background_throttling`, macOS 14+). Windows keeps the offscreen place and its own desktop.
 
-The four audited ancestor folders use compact names because WebView2 adds nested database paths below the private build
-temporary folder. Longer ancestor names reproduced an IndexedDB backing-store open failure in a long Windows cache path;
-shortening their names fixed that fixture without dropping any audit level or moving data outside the sandbox.
+The four audited ancestor folders use compact names: WebView2 adds nested database paths, and long Windows paths caused
+an IndexedDB backing-store open failure. This keeps every audit level and all data inside the sandbox.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
@@ -106,6 +103,10 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+### Quarantine
+
+Put a check that failed and later passed on the same commit in `testkit/quarantine.txt`, with its reason, date and run or pull request. It still runs everywhere. On GitHub Actions outside the nightly schedule, a listed failure is reported and counted but does not fail the run. Locally and nightly it fails as usual. The person fixing the check removes it from the list once fixed.
 
 ### Parallel scenarios
 

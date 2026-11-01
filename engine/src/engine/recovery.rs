@@ -374,6 +374,7 @@ impl Core {
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
             m.moved_from = m.vendor;
             m.reason = Some(if summary { "reason.moved.summary" } else { "reason.moved.full" }.into());
+            m.acts.push(crate::act::FaberAct::recovery("act.recovery.moved", Some(pick.vendor)));
         }
         if self.start(id, reply, &pick, text, vec![], false).is_err() {
             self.move_failed(id, reply);
@@ -391,6 +392,9 @@ impl Core {
             m.model = t.pick.model.clone();
             m.reason = Some(t.pick.reason.clone());
             m.moved_from = None;
+            if m.acts.last().is_some_and(|act| act.what == "act.recovery.moved") {
+                m.acts.pop();
+            }
             m.wait_until = None;
             m.permissions = None;
         }
@@ -429,6 +433,7 @@ impl Core {
             m.wait_until = until;
             m.status = Some(if queued { Status::Streaming } else { Status::Error });
             m.reason = Some("reason.waiting".into());
+            m.acts.push(crate::act::FaberAct::recovery("act.recovery.waited", None));
             m.error = (!queued).then(|| "error.quotaWait".into());
             m.permissions = None;
         }
@@ -665,7 +670,9 @@ mod tests {
                 words: vec![],
                 words_cut: false,
                 words_chars: None,
+                at: None,
                 transcript: None,
+                change: None,
                 check: false,
                 started: None,
                 ended: None,

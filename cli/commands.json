@@ -1,0 +1,1699 @@
+[
+  {
+    "name": "conversations",
+    "args": [
+      [
+        "state",
+        "Option<Vec<String>>"
+      ],
+      [
+        "archived",
+        "Option<bool>"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ],
+      [
+        "family",
+        "Option<String>"
+      ],
+      [
+        "query",
+        "Option<String>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The conversations, the running ones first, then pinned, then the newest, each with its state in plain words (`working`, `waiting`, `idle`; read one conversation for how it ended). `state` keeps only these states (`running` is working or waiting); `archived` true lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom); `query` keeps titles holding its words. Reads no conversation's messages."
+  },
+  {
+    "name": "conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "last",
+        "Option<usize>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it leaves its done mark for the person."
+  },
+  {
+    "name": "projects",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "The projects Faber knows, with their folders."
+  },
+  {
+    "name": "quota",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "Each vendor's quota windows (how much is used, when each resets) and what Faber has spent of them."
+  },
+  {
+    "name": "settings",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "The settings as Settings shows them."
+  },
+  {
+    "name": "create_chat_group",
+    "args": [
+      [
+        "name",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "save_chat_group",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "name",
+        "Option<String>"
+      ],
+      [
+        "instructions",
+        "Option<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "add_chat_group_files",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "files",
+        "Vec<faber_engine::workspace::Attachment>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "remove_chat_group_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "fileId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "remove_chat_group",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "move_chat_to_group",
+    "args": [
+      [
+        "conversationId",
+        "String"
+      ],
+      [
+        "groupId",
+        "Option<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "new_group_chat",
+    "args": [
+      [
+        "groupId",
+        "String"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "ask"
+  },
+  {
+    "name": "answer_plan",
+    "args": [
+      [
+        "vendor",
+        "Vendor"
+      ],
+      [
+        "plan",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "approve_credits",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "vendor",
+        "Vendor"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "move_turn",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "wait_turn",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "continue_closed",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "Go on with a reply Faber was closed under (R477): one fixed turn, refused once it is no longer the last."
+  },
+  {
+    "name": "forget_auto_learned",
+    "args": [],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "interrupt",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "results",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply."
+  },
+  {
+    "name": "project_results",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The same for a project: its total and each conversation's numbers, most spent first."
+  },
+  {
+    "name": "answer",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "allow",
+        "bool"
+      ],
+      [
+        "always",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "search_messages",
+    "args": [
+      [
+        "query",
+        "String"
+      ],
+      [
+        "area",
+        "Area"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "prompt_history",
+    "args": [
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "cancel",
+        "Option<bool>"
+      ],
+      [
+        "conversationId",
+        "Option<String>"
+      ],
+      [
+        "area",
+        "Area"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "send",
+    "args": [
+      [
+        "req",
+        "SendRequest"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/req/conversationId"
+  },
+  {
+    "name": "cli_sessions",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The sessions started in a terminal in a project's folder (parity F5)."
+  },
+  {
+    "name": "pick_up",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "session",
+        "faber_engine::model::CliSession"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "ask",
+    "about": "Opens a session started in a terminal as a project conversation, or the one already opened for it."
+  },
+  {
+    "name": "branch",
+    "args": [
+      [
+        "req",
+        "BranchRequest"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/req/conversationId"
+  },
+  {
+    "name": "branch_here",
+    "args": [
+      [
+        "conversationId",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/conversationId",
+    "about": "\"Branch from here\" on an answer: a new conversation with every message up to it, where nothing is sent yet."
+  },
+  {
+    "name": "versions",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The messages of a conversation that have other versions; the other conversations of its family are read from disk."
+  },
+  {
+    "name": "visual_answers",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "Option<String>"
+      ],
+      [
+        "block",
+        "Option<usize>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "Pages and drawings, with the versions already held in the conversation's saved replies."
+  },
+  {
+    "name": "visual_pieces",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "save_piece_value",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "block",
+        "usize"
+      ],
+      [
+        "value",
+        "Value"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "approve_plan",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "mode",
+        "Option<faber_engine::model::Permissions>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "answer_question",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "answers",
+        "Value"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person",
+    "about": "The person's choices for a question the agent asked: each question's text to the label picked."
+  },
+  {
+    "name": "rename",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "title",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "remove",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "discard",
+        "Option<bool>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "archive",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "free",
+    "about": "Archives a conversation, or brings an archived one back."
+  },
+  {
+    "name": "pin",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "move_to_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "keep_going",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "remove_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "edit_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "text",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "send_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "child_words",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "What a subagent wrote between its steps (R161 step 3), for its side chat while it is open. The screen's copy of a message carries only their length, so this is the one place they are read."
+  },
+  {
+    "name": "child_transcript",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ],
+      [
+        "page",
+        "u64"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "tell_helper",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ],
+      [
+        "text",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "mentions",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ],
+      [
+        "query",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "`@` in the composer (parity T4): the entries of the working folder that match `query`, at most 50. Git may run, off the async threads. One listing runs at a time, and a query that a newer one replaced while it waited gives up, so typing fast in a big repository never piles up git runs or their output."
+  },
+  {
+    "name": "commands",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "vendor",
+        "Option<Vendor>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The last advertised commands, read from memory without starting a CLI."
+  },
+  {
+    "name": "compact_now",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "\"Compact now\" in the context meter: the CLI's own compaction of the conversation's context."
+  },
+  {
+    "name": "context_parts",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The context meter opened: asks what fills the context; the parts come as an event. False when no CLI can say now."
+  },
+  {
+    "name": "background_commands",
+    "args": [],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "stop_background",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "changes",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "cursor",
+        "Option<String>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "At most one git listing runs and one waits; a newer request replaces the waiting one."
+  },
+  {
+    "name": "change_patch",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_points",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_redos",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_redo_preview",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RedoRequest"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_recover",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "rewind_preview",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RestoreRequest"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_restore",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RestoreRequest"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "rewind_redo",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RedoRequest"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "ask_aside",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "question",
+        "String"
+      ],
+      [
+        "model",
+        "Option<String>"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's."
+  },
+  {
+    "name": "stop_aside",
+    "args": [
+      [
+        "asideId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "clear_asides",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "asides",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "unfollow_pr",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "The person stops following the pull request a project conversation follows (R200)."
+  },
+  {
+    "name": "remove_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "save_settings",
+    "args": [
+      [
+        "patch",
+        "Settings"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "A theme file comes from other people, so an appearance is checked here before anything is saved."
+  },
+  {
+    "name": "save_theme",
+    "args": [
+      [
+        "appearance",
+        "Map<String, Value>"
+      ],
+      [
+        "name",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "export_conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "words",
+        "faber_engine::export::Words"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_theme",
+    "args": [],
+    "kind": "read",
+    "reach": "person"
+  },
+  {
+    "name": "add_project",
+    "args": [],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "recents",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key."
+  },
+  {
+    "name": "open_folders",
+    "args": [
+      [
+        "paths",
+        "Vec<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "forget_recent",
+    "args": [
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "save_environment",
+    "args": [
+      [
+        "name",
+        "String"
+      ],
+      [
+        "folders",
+        "Vec<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "forget_environment",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "start_environment",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "chat_folder",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "scratch",
+        "bool"
+      ],
+      [
+        "path",
+        "Option<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "save_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person",
+    "about": "Copies a file from a chat workspace to wherever the user picks."
+  },
+  {
+    "name": "show_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "ask"
+  },
+  {
+    "name": "show_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "ask",
+    "about": "Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only revealed, never opened: if something else took its place, the file manager selects it and starts nothing."
+  },
+  {
+    "name": "read_file_at",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A file a reply names, read only around its line (parity P2), from inside the conversation's folder."
+  },
+  {
+    "name": "read_image",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "An image from a chat workspace as a data URL, so the page never reads the disk itself."
+  },
+  {
+    "name": "site_tabs",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again."
+  },
+  {
+    "name": "site_picture",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "call",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "The picture the browser took for a call, as a data URL, so the page never reads the disk itself."
+  },
+  {
+    "name": "open_terminal",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_link",
+    "args": [
+      [
+        "url",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "Links in answers open in the user's browser, never inside Faber."
+  },
+  {
+    "name": "project_copies",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "Settings > Projects: whether each new conversation of this project works in a separate copy (R201)."
+  },
+  {
+    "name": "project_goals",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "Settings > Projects and the project page's Goals fold: a project's standing goals, the switch and the day's limit."
+  },
+  {
+    "name": "project_goals_auto",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "The project's switch for starting fixes by itself. Off until the person turns it on."
+  },
+  {
+    "name": "project_goal_add",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "words",
+        "String"
+      ],
+      [
+        "check",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "Adds a goal: the person's words and one of the project's confirmed checks."
+  },
+  {
+    "name": "project_goal_add_crashes",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "words",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "Adds a goal that breaks when the installed Faber's crash file gets a new line: Faber's own repository only."
+  },
+  {
+    "name": "project_goal_remove",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "goalId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "project_goal_resume",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "goalId",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask",
+    "about": "A paused goal, or one that needs the person, is checked again."
+  },
+  {
+    "name": "project_proof",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "project_memory",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "edit_project_memory",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "edit",
+        "faber_engine::project::memory::Edit"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "project_proof_confirm",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "commands",
+        "Vec<String>"
+      ],
+      [
+        "setup",
+        "Vec<String>"
+      ],
+      [
+        "declared",
+        "Vec<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person",
+    "about": "The owner confirms the commands Faber checks a project's work with (R137): the project's declared list, or the edited one."
+  },
+  {
+    "name": "update_status",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "The screen's view of the update: its phase and the download's progress. Changes arrive as `faber:update`."
+  },
+  {
+    "name": "update_restart",
+    "args": [],
+    "kind": "write",
+    "reach": "ask",
+    "about": "\"Update ready, restart\": installs the kept update now. Work that runs is cut and goes on after the restart."
+  },
+  {
+    "name": "setup_check",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "setup_install",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "setup_sign_in",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_list",
+    "args": [],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "tools_inventory",
+    "args": [
+      [
+        "projectId",
+        "Option<String>"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "mcp_servers",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "set_mcp_server",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "name",
+        "String"
+      ],
+      [
+        "enabled",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_install",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_prepare_replacement",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_replace",
+    "args": [
+      [
+        "plan",
+        "faber_engine::tools::ReplacementPlan"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_remove",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_set_enabled",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "enabled",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_restore",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_clear_removed",
+    "args": [],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_in_use",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the engine's memory when the panel opens; nothing is prepared, polled or started."
+  },
+  {
+    "name": "cookie_profiles",
+    "args": [],
+    "kind": "window",
+    "reach": "person",
+    "about": "The Firefox profiles on this computer whose sign-ins the browser pane can bring over."
+  },
+  {
+    "name": "cookie_sites",
+    "args": [
+      [
+        "profile",
+        "String"
+      ]
+    ],
+    "kind": "window",
+    "reach": "person",
+    "about": "The sites with cookies in the profile `profile`, under a ticket the import names."
+  },
+  {
+    "name": "cookie_import",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "ticket",
+        "String"
+      ],
+      [
+        "sites",
+        "Vec<String>"
+      ]
+    ],
+    "kind": "window",
+    "reach": "person",
+    "about": "Brings the person's sign-ins on the sites they picked into conversation `id`'s pages; answers how many sites came over."
+  },
+  {
+    "name": "cookie_held",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "window",
+    "reach": "person",
+    "about": "The sites whose sign-ins conversation `id` holds."
+  },
+  {
+    "name": "cookie_forget",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "window",
+    "reach": "person",
+    "about": "Forgets the sign-ins conversation `id` holds and signs its page out of them."
+  }
+]
