@@ -370,6 +370,22 @@ fn edited_inline(ctx: &mut Ctx) -> Result {
         "the replacement words to be saved",
         "localStorage.getItem('faber.unsent.new-chat-') === \"The person's replacement words\"",
     )?;
+    // The app starts its CLIs (sign-in probes, a warm one) in its first seconds. Each is created paused and only then joins
+    // the job that ends with the app, so a hard close in between leaves it outside, paused (task 023). The close waits until
+    // the app has started no CLI for 2 s. shortcut: a quiet period narrows that window but cannot prove a CLI joined its job;
+    // task 023 closes it in the app, and this wait can go then.
+    let mut last = (0u64, Instant::now());
+    eventually("the app's CLI starts to settle", Duration::from_secs(20), || {
+        let Ok(rows) = crate::proctree::snapshot() else {
+            last.1 = Instant::now();
+            return false;
+        };
+        let newest = rows.iter().filter(|r| r.parent == app.pid && r.name.starts_with("fake-cli")).map(|r| r.born).max().unwrap_or(0);
+        if newest != last.0 {
+            last = (newest, Instant::now());
+        }
+        last.1.elapsed() >= Duration::from_secs(2)
+    })?;
     ctx.close(app.id)?;
     drop(app);
     let mut app = ctx.launch(claude_chat(ctx))?;

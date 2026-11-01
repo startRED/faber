@@ -87,7 +87,7 @@ impl Accounts {
                             .into_iter()
                             .map(|(window, used, resets_at)| EngineEvent::Quota { window: window.into(), used, resets_at })
                             .collect(),
-                        UsageRead::Failed => Vec::new(),
+                        UsageRead::Failed | UsageRead::NoWindows => Vec::new(),
                         UsageRead::Spent => {
                             spent.unknown_cost = true;
                             return Err("quota status unexpectedly used a model; spending is unknown, no more work admitted".into());

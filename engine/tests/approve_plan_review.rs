@@ -50,7 +50,7 @@ fn request(id: Option<&str>, vendor: &str, text: &str) -> SendRequest {
 }
 
 async fn until(engine: &Engine, id: &str, check: impl Fn(&Conversation) -> bool) -> Conversation {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             let conversation = engine.open(id).unwrap();
             if check(&conversation) {

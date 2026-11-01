@@ -351,6 +351,7 @@ async fn a_goal_that_breaks_twice_starts_one_conversation_in_a_copy_and_the_same
     assert_eq!(ids.len(), 1, "exactly one conversation");
     let started = r.engine.open(&ids[0]).unwrap();
     let said = brief(&agent);
+    assert!(!agent.args.iter().any(|a| a.contains(faber_engine::persona::LEADS)), "a goal's fix is never told to lead a team");
     for part in
         [WORDS, CHECK, "assertion failed: parser keeps the comment", "Reproduce it first", "Never merge it", "Do not ask the person"]
     {

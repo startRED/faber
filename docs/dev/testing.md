@@ -73,7 +73,8 @@ from the runner. A condition the page cannot wrap, statements rather than one ex
 only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
 `cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
 `.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, the test files of the engine
-and the shell need only the `rust` suite, a manifest, the runner, CI or a file no rule knows needs every suite, and any
+and the shell need only the `rust` suite, the queue's own scripts and the scripts' tests only the lints (rule `lints`), a
+manifest, the runner, CI or a file no rule knows needs every suite, and any
 file that is not words runs the lints. A push is compared with the commit before it, and a queue commit with
 `phase-1-base`, where it lands; either may skip a suite only when the commit it builds on is green, and anything the job
 cannot tell runs everything (R165). A queue commit whose very tree carries the PC's green `faber/verify` leaves out

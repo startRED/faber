@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { median, p90, percentile, inWindow, summarize, format, countFree } from './pace.mjs';
+import { median, p90, percentile, inWindow, summarize, format, countFree, flaky, checkName, headsOf } from './pace.mjs';
+import { failures } from './base.mjs';
 
 test('percentiles use the nearest rank', () => {
   assert.equal(median([]), null);
@@ -48,4 +49,24 @@ test('an empty window prints dashes, not NaN', () => {
 test('free tasks are the listed ones without a live claim', () => {
   assert.equal(countFree('010 a  free\n020 b  claimed by x\n030 c  stale claim by y\n040 d  waits on a\n'), 2);
   assert.equal(countFree(''), 0);
+});
+
+test('a check is flaky when the same pull request head passed it later, and a red that never passed counts nothing', () => {
+  const log = (check) => `ui\tUNKNOWN STEP\t2026-10-30T10:00:00.0Z FAIL  ui      ${check} (33.0 s)\n`;
+  const check = 'composer: slow attachment restoration preserves new typing';
+  assert.equal(checkName(failures(log(check))[0]), check);
+  assert.equal(checkName('rust: error[E0425]: cannot find value'), null);
+  assert.deepEqual(headsOf('fix: a (#1)\n\nPull-request-head: aaa\n'), ['aaa']);
+  const reds = [
+    { heads: ['aaa'], createdAt: '2026-10-30T09:00:00Z', checks: failures(log(check)).map(checkName) },
+    { heads: ['bbb'], createdAt: '2026-10-30T09:30:00Z', checks: [check] },
+    { heads: ['ccc'], createdAt: '2026-10-30T09:40:00Z', checks: [check, 'sentinel: the picker'] },
+  ];
+  const greens = [
+    { heads: ['aaa'], createdAt: '2026-10-30T10:00:00Z' },
+    { heads: ['bbb'], createdAt: '2026-10-30T09:30:00Z' },
+    { heads: ['ccc'], createdAt: '2026-10-30T09:00:00Z' },
+  ];
+  assert.deepEqual(flaky(reds, greens), [[check, 2]], 'ccc passed only before its red, so its failures were real');
+  assert.match(format('24 h', summarize([], [], now, 3600e3), 0, flaky(reds, greens)), new RegExp(`  flaky: ${check} ×2`));
 });

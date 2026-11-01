@@ -1,5 +1,6 @@
 //! When to read each vendor’s quota: a plain schedule over explicit times, so it is tested with a fake clock. The readings
-//! themselves cost no model tokens (a status command, a rate-limit call); this only decides how often to ask.
+//! themselves cost no model tokens (a status command, a rate-limit call; for a Claude Code that prints no percentages, one
+//! request of about 500 cached tokens); this only decides how often to ask.
 //!
 //! Faber reads when it starts and then every 15 minutes, whether its window is visible or not. Things that happen in between
 //! (a request ended, the window gained focus, the PC woke up) may ask for an earlier reading, but all of them share ONE

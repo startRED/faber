@@ -30,6 +30,8 @@ mod auto_learned;
 mod background;
 #[path = "background_live.rs"]
 mod background_live;
+#[path = "big_conversation.rs"]
+mod big_conversation;
 #[path = "browser_tabs.rs"]
 mod browser_tabs;
 #[path = "budget.rs"]
@@ -42,6 +44,8 @@ mod changes;
 mod claude_session;
 #[path = "claude_sessions.rs"]
 mod claude_sessions;
+#[path = "cli_versions.rs"]
+mod cli_versions;
 #[path = "codex_session.rs"]
 mod codex_session;
 #[path = "compact.rs"]

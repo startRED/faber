@@ -149,7 +149,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: background_commands_memory,
         },
         Scenario {
-            name: "each project conversation works in a copy of its own, its branch in the crumb, and the copy goes with it",
+            name: "each project conversation works in a copy of its own, its branch in Technical details, and the copy goes with it",
             run: copy_per_conversation,
         },
     ]
@@ -1125,12 +1125,16 @@ fn copy_per_conversation(ctx: &mut Ctx) -> Result {
         let model = page.labelled("composer.model")?;
         page.select_option(&model, "Claude Haiku")?;
         ask(page, question)?;
-        let crumb = css("[data-testid=crumb-copy]");
-        page.wait_visible(&crumb)?;
-        let branch = page.inner_text(&crumb)?;
-        let tip = page.attr(&crumb, "title")?.unwrap_or_default();
+        // The topbar keeps the title only; the copy's branch and folder are in Technical details.
+        ensure(page.count(&css(".crumb").has_text("faber/"))? == 0, || "the crumb names no branch".to_string())?;
+        page.click(&css(".det-line button"))?;
+        let row = css("[data-testid=details-copy]");
+        page.wait_visible(&row)?;
+        let text = page.inner_text(&row)?;
+        let branch = text.lines().next().unwrap_or_default().trim_start_matches("Separate copy: ").to_string();
+        let tip = page.inner_text(&css("[data-testid=details-copy] span"))?;
         // The app sees its data folder through the sandbox; the same copy is found here by its name.
-        let shown = std::path::PathBuf::from(tip.lines().last().unwrap_or_default());
+        let shown = std::path::PathBuf::from(tip.trim());
         let named = shown.parent().and_then(|p| p.file_name()).is_some_and(|n| n == "copies");
         let path = ctx.sb.data.join("copies").join(shown.file_name().unwrap_or_default());
         // The crumb names the copy as soon as it is planned; the checkout lands a moment later.
@@ -1140,8 +1144,8 @@ fn copy_per_conversation(ctx: &mut Ctx) -> Result {
             }
             pause(0.25);
         }
-        ensure(branch.starts_with("faber/fix-the-"), || format!("the crumb names the copy's branch: {branch}"))?;
-        ensure(named && path.is_dir(), || format!("the tooltip is the copy's folder, which exists: {tip}"))?;
+        ensure(branch.starts_with("faber/fix-the-"), || format!("the details name the copy's branch: {text}"))?;
+        ensure(named && path.is_dir(), || format!("the details show the copy's folder, which exists: {tip}"))?;
         copies.push((branch, path));
         // The copy is what this checks, not the answer: the reply is stopped so the conversation can go.
         let stop = page.named("button", "composer.stop")?;

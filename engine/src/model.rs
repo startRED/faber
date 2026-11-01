@@ -692,8 +692,39 @@ pub struct Estimate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanStep {
+    /// Short and stable, so other steps can wait on it (`crate::progress::plan` gives `s1`, `s2`… by position when the agent sends
+    /// none); empty only in a plan stored before ids existed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub text: String,
     pub state: StepState,
+    /// Paths or folders the step expects to change, relative to the project, written with `/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Ids of the steps that must be done before this one starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<String>,
+    /// The step only reads (search, collect, review): it goes to a helper and never gets a copy of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read: bool,
+    /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<StepWorker>,
+}
+
+/// The conversation that works on a plan step, and where its copy started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepWorker {
+    pub conversation: String,
+    /// The branch of its copy; empty until the copy is made, and when the project works in its own folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub branch: String,
+    /// The leader's commit the copy started from.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub base: String,
+    /// The conversation stopped working: the step waits for its work to be joined and is not running any more.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub joining: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

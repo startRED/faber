@@ -450,6 +450,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
+    /// (`resume_cut_leaders`, which takes them once).
+    quiet_teams: HashMap<String, Vec<String>>,
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
     /// answers briefly. Never saved.
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
@@ -547,6 +550,9 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// When a Claude probe (`account::claude_probe`) last gave no clean reading: what it saw about extra usage may be lost, so
+    /// only word newer than this lets the next one run.
+    probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
@@ -653,7 +659,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
-        let parent_reports = Core::restore_parent_reports(&store);
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -675,6 +681,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
@@ -712,6 +719,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
@@ -3920,6 +3928,8 @@ impl Core {
         if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
             return Ok(());
         }
+        // A step's conversation that works again, whoever wrote to it, is no longer waiting to be joined.
+        self.edit_worker(id, |w| w.joining = false);
         if let Some(held) = self.copying.get_mut(id) {
             held.reply = reply_id.to_string();
             held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
@@ -4335,6 +4345,8 @@ impl Core {
         let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
         let browse = self.offers_browser(area, tool_mode);
         let conversations = siblings::offers(area);
+        // Only the person's own project conversation leads a team: a team member or a goal's fix never starts one of its own.
+        let leads = conversations && self.convs.get(conv).is_some_and(|c| c.started_by.is_none() && c.goal_fix.is_none());
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
@@ -4349,6 +4361,7 @@ impl Core {
                         helper,
                         browse,
                         conversations,
+                        leads,
                         verify,
                         progress,
                         area,
@@ -4375,6 +4388,7 @@ impl Core {
                     helper,
                     browse,
                     conversations,
+                    leads,
                     verify,
                     progress,
                     cwd,
