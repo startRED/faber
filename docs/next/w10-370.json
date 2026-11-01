@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Long conversations open on the latest 40 messages; older messages load as you scroll up, keeping your place.",
+      "pt-BR": "Conversas longas abrem nas 40 mensagens mais recentes; as anteriores aparecem ao rolar pra cima, sem perder seu lugar.",
+      "es": "Las conversaciones largas abren en los últimos 40 mensajes; los anteriores se cargan al subir, sin perder tu lugar.",
+      "fr": "Les longues conversations s’ouvrent sur les 40 derniers messages ; les précédents se chargent quand vous remontez, sans perdre votre place.",
+      "de": "Lange Gespräche öffnen mit den letzten 40 Nachrichten; beim Hochscrollen werden ältere nachgeladen, ohne dass deine Leseposition verrutscht."
+    }
+  }
+}
