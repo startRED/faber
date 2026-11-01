@@ -662,7 +662,12 @@ impl Core {
             State::Waiting => return Err("the conversation is waiting for the person".into()),
             _ => {}
         }
-        let ai = self.live.get(by).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
+        // The turn runs on the resumed conversation's own AI, so that AI's quota decides, not the asker's.
+        let ai = self.convs[id].choice.as_ref().and_then(|c| {
+            let vendor = Vendor::ALL.into_iter().find(|v| v.name() == c.vendor)?;
+            let family = c.model.as_deref().and_then(|m| family_of(crate::router::pinned(vendor, m))).map(str::to_string);
+            Some((vendor, family))
+        });
         self.sibling_allowed(&ai).map_err(str::to_string)?;
         let text = message.unwrap_or("Continue where you stopped. Check the project's state first.");
         if text.trim().is_empty() {

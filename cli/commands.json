@@ -688,10 +688,15 @@
       [
         "on",
         "bool"
+      ],
+      [
+        "by",
+        "Option<String>"
       ]
     ],
     "kind": "write",
-    "reach": "free"
+    "reach": "free",
+    "about": "Pins a conversation, or unpins it. An AI may pin but never unpin: the person pinned it to keep it."
   },
   {
     "name": "move_to_project",

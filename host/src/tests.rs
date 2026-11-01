@@ -320,3 +320,27 @@ async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_co
     assert_eq!(c2["state"], "new");
     assert!(c2.get("waitingOn").is_none(), "{c2}");
 }
+
+#[test]
+fn by_is_the_askers_own_conversation_or_nothing() {
+    let c1 = Caller::Agent { conversation: Some("c1".into()) };
+    assert_eq!(with_by(&c1, json!({ "id": "x", "by": "c2" })), json!({ "id": "x", "by": "c1" }));
+    assert_eq!(with_by(&c1, Value::Null), json!({ "by": "c1" }));
+    for caller in [Caller::Agent { conversation: None }, Caller::Person, Caller::Screen] {
+        assert_eq!(with_by(&caller, json!({ "id": "x", "by": "c2" })), json!({ "id": "x" }), "{caller:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_ai_pins_but_never_unpins() {
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", None, None);
+    host.dispatch_as(&Caller::Screen, "pin", json!({ "id": "c1", "on": true })).await.unwrap();
+    let agent = Caller::Agent { conversation: Some("c9".into()) };
+    assert_eq!(host.dispatch_as(&agent, "pin", json!({ "id": "c1", "on": false })).await.unwrap_err().key, "error.session.refused");
+    let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
+    assert!(c1["pinnedAt"].is_number(), "{c1}");
+    host.dispatch_as(&Caller::Person, "pin", json!({ "id": "c1", "on": false, "by": "c9" })).await.unwrap();
+    let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
+    assert!(c1["pinnedAt"].is_null(), "{c1}");
+}

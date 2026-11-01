@@ -356,8 +356,12 @@ table! {
         let by = agent_by(by)?;
         h.engine.session_wait(&by, on.unwrap_or_default(), note).map_err(refused)
     }
-    Write Free fn pin(h, id: String, on: bool) -> () {
-        h.engine.pin(&id, on)
+    /// Pins a conversation, or unpins it. An AI may pin but never unpin: the person pinned it to keep it.
+    Write Free fn pin(h, id: String, on: bool, by: Option<String>) -> () [Failure] {
+        if by.is_some() && !on {
+            return Err(refused("only the person unpins a conversation".into()));
+        }
+        h.engine.pin(&id, on).map_err(Failure::from)
     }
     Write Ask fn move_to_project(h, id: String, project_id: String) -> Conversation {
         let engine = h.engine.clone();
