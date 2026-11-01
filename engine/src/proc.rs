@@ -199,7 +199,10 @@ pub(crate) async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot
 pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
 
 static CLI: OnceLock<PathBuf> = OnceLock::new();
-static TOKEN_MINTER: OnceLock<Arc<dyn Fn(&str) -> String + Send + Sync>> = OnceLock::new();
+/// Mints the token a conversation's AI carries (set once by the channel).
+pub type TokenMinter = Arc<dyn Fn(&str) -> String + Send + Sync>;
+
+static TOKEN_MINTER: OnceLock<TokenMinter> = OnceLock::new();
 
 thread_local! {
     static CONVERSATION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
