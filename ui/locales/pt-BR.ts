@@ -2407,6 +2407,8 @@ export const ptBR: Messages = {
   'notes.343.better': 'As seções do projeto agora têm explicações, a busca vem primeiro no Catálogo e os rótulos do Chat e das cotas em francês estão mais claros.',
   'notes.344.better': 'A IA pode escolher quando usar planos, atualizações de andamento, verificações e a caixa de encerramento.',
   'notes.345.fixed': 'Quando um comando é recusado, a explicação aparece se estiver disponível.',
+  'notes.346.new': 'O agente agora pode parar, retomar e arquivar as conversas que iniciou, e esperar por elas sem encerrar a sua vez como pronto.',
+  'notes.347.better': 'Ao iniciar uma conversa, o agente agora pode escolher a IA, o modelo e o esforço.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
@@ -2428,5 +2430,8 @@ export const ptBR: Messages = {
   'piece.discard': "Descartar alteração",
   'piece.retry': "Tentar de novo",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "O Faber recusou este pedido. O motivo vem no detalhe.",
+  'error.session.agentOnly': "Este comando é só para uma IA dentro de uma conversa do Faber. Para enviar uma mensagem, use send.",
+  'error.session.useSession': "Uma IA abre uma conversa com start_conversation e escreve para outra com message_conversation, nunca com send.",
 
 };

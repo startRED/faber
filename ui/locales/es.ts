@@ -2420,6 +2420,8 @@ export const es: Messages = {
   'notes.343.better': 'Las secciones del proyecto tienen una explicación, el Catálogo da prioridad a la búsqueda y las etiquetas de Chat y de cuota en francés son más claras.',
   'notes.344.better': 'La IA puede elegir cuándo usar planes, actualizaciones de progreso, comprobaciones y el cierre.',
   'notes.345.fixed': 'Cuando se rechaza un comando, aparece la explicación si está disponible.',
+  'notes.346.new': 'El agente ahora puede detener, reanudar y archivar las conversaciones que inició, y esperar por ellas sin cerrar su turno como terminado.',
+  'notes.347.better': 'Al iniciar una conversación, el agente ahora puede elegir la IA, el modelo y el esfuerzo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
@@ -2441,5 +2443,8 @@ export const es: Messages = {
   'piece.discard': "Descartar cambio",
   'piece.retry': "Volver a intentar",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "Faber rechazó esta acción. El detalle explica por qué.",
+  'error.session.agentOnly': "Este comando es solo para una IA dentro de una conversación de Faber. Para escribir, usa send.",
+  'error.session.useSession': "Una IA empieza una conversación con start_conversation y escribe en otra con message_conversation, nunca con send.",
 
 };

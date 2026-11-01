@@ -2420,6 +2420,8 @@ export const de: Messages = {
   'notes.343.better': 'Die Projektbereiche haben jetzt Erklärungen, die Suche steht im Katalog im Vordergrund und die Beschriftungen im Chat und bei französischen Kontingenten sind klarer.',
   'notes.344.better': 'Die KI kann selbst entscheiden, wann sie Pläne, Fortschrittsmeldungen, Prüfungen und den Abschluss nutzt.',
   'notes.345.fixed': 'Wird ein Befehl abgelehnt, erscheint die Erklärung, sofern eine vorliegt.',
+  'notes.346.new': 'Der Agent kann von ihm gestartete Unterhaltungen jetzt stoppen, fortsetzen und archivieren sowie auf sie warten, ohne seinen Zug als fertig zu beenden.',
+  'notes.347.better': 'Beim Starten einer Unterhaltung kann der Agent jetzt die KI, das Modell und den Aufwand wählen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
@@ -2441,5 +2443,8 @@ export const de: Messages = {
   'piece.discard': "Änderung verwerfen",
   'piece.retry': "Erneut versuchen",
   'piece.show': "{title} anzeigen",
+  'error.session.refused': "Faber hat das abgelehnt. Der Grund steht im Detail.",
+  'error.session.agentOnly': "Dieser Befehl ist nur für eine KI in einem Faber-Gespräch. Nutze stattdessen send.",
+  'error.session.useSession': "Eine KI startet ein Gespräch mit start_conversation und schreibt an eines mit message_conversation, nie mit send.",
 
 };

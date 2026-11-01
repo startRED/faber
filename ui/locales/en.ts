@@ -2300,6 +2300,8 @@ export const en = {
   'notes.343.better': 'Project sections now explain themselves, Catalog puts search first, and Chat and French quota labels are tidier.',
   'notes.344.better': 'The AI can choose when to use plans, progress updates, checks and the closing box.',
   'notes.345.fixed': 'Command-line refusals now include the explanation when one is available.',
+  'notes.346.new': 'The agent can now stop, resume and archive the conversations it started, and wait for them without ending its turn as if done.',
+  'notes.347.better': 'When starting a conversation, the agent can now choose the AI, model and effort.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
@@ -2321,6 +2323,9 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.session.refused': "Faber refused this action. The detail explains why.",
+  'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
+  'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
 } as const;
 
