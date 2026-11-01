@@ -611,7 +611,8 @@ mod tests {
             .unwrap()
             .unwrap();
             let mut p = plan;
-            p.steps[0].worker = Some(StepWorker { conversation: child.clone(), branch: "faber/model".into(), joining: false });
+            p.steps[0].worker =
+                Some(StepWorker { conversation: child.clone(), branch: "faber/model".into(), base: String::new(), joining: false });
             core.convs.get_mut(&parent).unwrap().plan = Some(p);
 
             let c = core.convs.get_mut(&child).unwrap();
@@ -623,11 +624,9 @@ mod tests {
             reply.wrap_up = Some(
                 crate::progress::wrap_up(&serde_json::json!({
                     "outcome": "done",
-                    "summary": {
-                        "did": "Added evidence field to PlanStep.",
-                        "result": "PlanStep stores optional evidence.",
-                        "verified": "cargo test -p faber-engine --lib -- progress passed."
-                    }
+                    "did": "Added evidence field to PlanStep.",
+                    "result": "PlanStep stores optional evidence.",
+                    "verified": "cargo test -p faber-engine --lib -- progress passed."
                 }))
                 .unwrap(),
             );
@@ -640,16 +639,17 @@ mod tests {
             assert_eq!(step.evidence, None);
             assert_eq!(
                 step.worker.as_ref(),
-                Some(&StepWorker { conversation: child.clone(), branch: "faber/model".into(), joining: true }),
+                Some(&StepWorker { conversation: child.clone(), branch: "faber/model".into(), base: String::new(), joining: true }),
                 "the worker stays attached and waits to be joined"
             );
 
-            let refused = core.write_progress(&parent, "plan", &serde_json::json!({ "advance": true }));
-            assert!(refused.unwrap_err().contains(crate::progress::NO_EVIDENCE));
+            let refused = core.write_progress(&parent, crate::progress::PLAN_TOOL, &serde_json::json!({ "advance": true }));
+            let refused = refused.unwrap_err();
+            assert!(refused.contains(crate::progress::NO_EVIDENCE), "{refused}");
             assert_eq!(core.convs[&parent].plan.as_ref().unwrap().steps[0].state, StepState::Active);
 
             let ok = core
-                .write_progress(&parent, "plan", &serde_json::json!({ "advance": true, "evidence": "Joined branch and ran cargo test." }))
+                .write_progress(&parent, crate::progress::PLAN_TOOL, &serde_json::json!({ "advance": true, "evidence": "Joined branch and ran cargo test." }))
                 .unwrap();
             assert!(ok.contains("1 of 2"), "{ok}");
             let step = &core.convs[&parent].plan.as_ref().unwrap().steps[0];
