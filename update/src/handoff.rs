@@ -44,13 +44,17 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// folder), starts the copy, and returns. The caller ends the process right after. `install_dir` is the installer
 /// `/D=<folder>` argument (`install_dir_arg`).
 pub fn start(installer: &Path, install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
+    // The file and its folder are ours, made new by the download: a link in either place is not run.
+    let temp = installer.parent().ok_or("no folder for the installer")?;
+    if !is_plain(installer, false) || !is_plain(temp, true) {
+        return Err("the update is not where it was left".into());
+    }
     // A Windows program starts with "MZ"; anything else (an archive of an older format) is not run.
     let mut head = [0u8; 2];
     std::fs::File::open(installer).and_then(|mut file| file.read_exact(&mut head)).map_err(|e| e.to_string())?;
     if &head != b"MZ" {
         return Err("the update is not an installer".into());
     }
-    let temp = installer.parent().ok_or("no folder for the installer")?;
     spawn_copy(temp, installer.as_os_str(), install_dir, data_dir, tray)
 }
 
@@ -59,8 +63,7 @@ pub fn start(installer: &Path, install_dir: &OsString, data_dir: &Path, tray: bo
 /// new one leave.
 pub fn relaunch(install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
     install_folder(install_dir).ok_or("no install folder")?;
-    let temp = std::env::temp_dir().join(format!("{FOLDER}reopen-{}", std::process::id()));
-    std::fs::create_dir_all(&temp).map_err(|e| e.to_string())?;
+    let temp = crate::staging_in(&std::env::temp_dir(), "reopen").map_err(|e| e.to_string())?;
     spawn_copy(&temp, std::ffi::OsStr::new(""), install_dir, data_dir, tray)
 }
 
@@ -68,7 +71,7 @@ fn spawn_copy(temp: &Path, installer: &std::ffi::OsStr, install_dir: &OsString, 
     let folder = install_folder(install_dir).ok_or("no install folder")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let copy = temp.join(COPY);
-    std::fs::copy(&exe, &copy).map_err(|e| e.to_string())?;
+    copy_new(&exe, &copy).map_err(|e| e.to_string())?;
     Command::new(copy)
         .arg(FLAG)
         .arg(installer)
@@ -132,10 +135,29 @@ pub fn sweep() {
 
 fn sweep_in(temp: &Path) {
     for entry in std::fs::read_dir(temp).into_iter().flatten().flatten() {
-        if entry.file_name().to_string_lossy().starts_with(FOLDER) && is_free(&entry.path().join(COPY)) {
-            let _ = std::fs::remove_dir_all(entry.path());
+        let path = entry.path();
+        // A link (symlink or junction) named like our folders is not one of ours: it is left alone, never followed.
+        if entry.file_name().to_string_lossy().starts_with(FOLDER) && is_plain(&path, true) && is_free(&path.join(COPY)) {
+            let _ = std::fs::remove_dir_all(path);
         }
     }
+}
+
+/// `path` is what it says: a folder (`dir`) or a file, and not a symlink, a junction or any other reparse point. Not there, or
+/// not readable, is no.
+fn is_plain(path: &Path, dir: bool) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const REPARSE_POINT: u32 = 0x400;
+    std::fs::symlink_metadata(path).is_ok_and(|meta| {
+        !meta.is_symlink() && meta.file_attributes() & REPARSE_POINT == 0 && if dir { meta.is_dir() } else { meta.is_file() }
+    })
+}
+
+/// Copies `from` to the new file `to`: the copy must not exist, so nothing planted there is written through.
+fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut source = std::fs::File::open(from)?;
+    let mut target = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    std::io::copy(&mut source, &mut target).map(drop)
 }
 
 /// The folder in `/D=<folder>`.
@@ -172,7 +194,7 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{COPY, finish, install_folder, installer_line, is_free, relaunch, start, sweep_in, wait_until};
+    use super::{COPY, copy_new, finish, install_folder, installer_line, is_free, is_plain, relaunch, start, sweep_in, wait_until};
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -216,6 +238,44 @@ mod tests {
         sweep_in(temp.path());
         assert!(!done.exists(), "a copy that no longer runs: the folder goes");
         assert!(other.exists(), "nothing else in the temporary folder is touched");
+    }
+
+    #[test]
+    fn the_sweep_leaves_a_junction_named_like_ours_alone_and_never_follows_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("precious.txt"), b"keep").unwrap();
+        let link = temp.path().join("faber-update-planted");
+        junction::create(elsewhere.path(), &link).unwrap();
+        sweep_in(temp.path());
+        assert!(link.exists(), "a link is not one of our folders");
+        assert!(elsewhere.path().join("precious.txt").exists(), "nothing behind it was touched");
+        assert!(!is_plain(&link, true), "a junction is not a plain folder");
+        assert!(is_plain(temp.path(), true) && !is_plain(temp.path(), false) && !is_plain(&temp.path().join("none"), true));
+    }
+
+    #[test]
+    fn an_installer_in_a_linked_folder_is_never_run() {
+        let real = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        std::fs::write(real.path().join("Faber-setup.exe"), b"MZ").unwrap();
+        let holder = tempfile::tempdir().unwrap();
+        let link = holder.path().join("linked");
+        junction::create(real.path(), &link).unwrap();
+        let dir = OsString::from(r"/D=E:\Apps\Faber");
+        assert_eq!(start(&link.join("Faber-setup.exe"), &dir, data.path(), false), Err("the update is not where it was left".into()));
+        assert!(!real.path().join(COPY).exists(), "no copy of the program was made");
+    }
+
+    #[test]
+    fn the_copy_of_the_program_is_a_new_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let from = temp.path().join("from.exe");
+        std::fs::write(&from, b"MZ program").unwrap();
+        let to = temp.path().join(COPY);
+        copy_new(&from, &to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"MZ program");
+        assert!(copy_new(&from, &to).is_err(), "a file that is already there is never written through");
     }
 
     // These stop before any program is started: a file that is not an installer, and arguments the copy refuses.

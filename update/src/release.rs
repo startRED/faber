@@ -137,9 +137,26 @@ pub trait Source {
     async fn next(&mut self) -> Result<Option<Vec<u8>>, String>;
 }
 
+/// The name of the signed file in a minisign trusted comment (`timestamp:<n>\tfile:<name>`, what the Tauri signer writes).
+fn signed_file(comment: &str) -> Option<&str> {
+    comment.split('\t').find_map(|field| field.strip_prefix("file:"))
+}
+
+/// Binds the manifest's version to the signature. The manifest is not signed, but the trusted comment is (with the file), so
+/// a host that pairs `"version":"999.0.0"` with an old installer and its genuine signature is caught here: the signed file name
+/// must hold `_<version>_` (`Faber_<version>_x64-setup.exe`). `version` is the one `newer` normalized.
+fn binds_version(comment: &str, version: &str) -> Result<(), String> {
+    let name = signed_file(comment).ok_or("the signature does not name its file")?;
+    if version.is_empty() || !name.contains(&format!("_{version}_")) {
+        return Err("the signed installer is for another version than the release says".into());
+    }
+    Ok(())
+}
+
 /// Writes what `source` gives to `file` and checks it against `signature` with `key` as it goes, so an installer is never
 /// held in memory. Only when the last byte is in and the signature holds is the file an update; the caller removes it
-/// otherwise. `limit` bounds the size, `progress` hears each piece and the total.
+/// otherwise. `limit` bounds the size, `progress` hears each piece and the total. `accept` is given the signed trusted
+/// comment once the signature has held (it is authenticated only then) and may still refuse the file.
 pub async fn receive(
     source: &mut impl Source,
     file: &mut impl Write,
@@ -147,6 +164,7 @@ pub async fn receive(
     key: &str,
     limit: u64,
     mut progress: impl FnMut(u64, Option<u64>),
+    accept: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     let key = minisign_verify::PublicKey::decode(&decode(key)?).map_err(|e| e.to_string())?;
     let signature = minisign_verify::Signature::decode(&decode(signature)?).map_err(|e| e.to_string())?;
@@ -166,7 +184,8 @@ pub async fn receive(
         progress(chunk.len() as u64, total);
     }
     file.flush().map_err(|e| e.to_string())?;
-    verifier.finalize().map_err(|e| format!("the update is not signed by Faber: {e}"))
+    verifier.finalize().map_err(|e| format!("the update is not signed by Faber: {e}"))?;
+    accept(signature.trusted_comment())
 }
 
 struct Body(reqwest::Response);
@@ -204,15 +223,18 @@ pub fn discard(installer: &Path) {
     }
 }
 
-/// Downloads the installer to `installer` (its folder is made) and verifies it against the Faber key. What stays on the disk
-/// is always a verified installer: the file goes when anything fails, and when the download is dropped half way.
-pub async fn download(platform: &Platform, installer: &Path, progress: impl FnMut(u64, Option<u64>)) -> Result<(), String> {
+/// Downloads the installer of release `version` to `installer`, a new file in a new folder (`installer_path` made the folder;
+/// the file is created exclusively, so nothing planted there is written through), and verifies it against the Faber key and
+/// the version. What stays on the disk is always a verified installer: the file and its folder go when anything fails, and
+/// when the download is dropped half way.
+pub async fn download(platform: &Platform, version: &str, installer: &Path, progress: impl FnMut(u64, Option<u64>)) -> Result<(), String> {
+    // From here on the folder is ours to clean, whatever fails.
+    let mut partial = Partial { path: installer, keep: false };
     let url = https_url(&platform.url)?;
     let response = client()?.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(installer.parent().ok_or("no folder for the installer")?).map_err(|e| e.to_string())?;
-    let mut partial = Partial { path: installer, keep: false };
-    let mut file = std::fs::File::create(installer).map_err(|e| e.to_string())?;
-    let result = receive(&mut Body(response), &mut file, &platform.signature, PUBLIC_KEY, MAX_DOWNLOAD, progress).await;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(installer).map_err(|e| e.to_string())?;
+    let bound = |comment: &str| binds_version(comment, version);
+    let result = receive(&mut Body(response), &mut file, &platform.signature, PUBLIC_KEY, MAX_DOWNLOAD, progress, bound).await;
     drop(file);
     partial.keep = result.is_ok();
     result
@@ -248,7 +270,9 @@ mod tests {
 
     async fn run(bytes: &[u8], signature: &str, key: &str, limit: u64) -> (Result<(), String>, Vec<u8>, u64) {
         let (mut file, mut seen) = (Vec::new(), 0u64);
-        let result = receive(&mut Pieces::of(bytes, 5, Some(bytes.len() as u64)), &mut file, signature, key, limit, |n, _| seen += n).await;
+        let result =
+            receive(&mut Pieces::of(bytes, 5, Some(bytes.len() as u64)), &mut file, signature, key, limit, |n, _| seen += n, |_| Ok(()))
+                .await;
         (result, file, seen)
     }
 
@@ -271,16 +295,82 @@ mod tests {
         assert!(run(PAYLOAD, SIGNATURE, "not a key", 1024).await.0.is_err());
     }
 
+    /// What `download` asks of the signed comment for release `version`.
+    async fn bound_to(version: &str) -> Result<(), String> {
+        let mut file = Vec::new();
+        let mut pieces = Pieces::of(PAYLOAD, 5, None);
+        receive(&mut pieces, &mut file, SIGNATURE, TEST_KEY, 1024, |_, _| {}, |comment| binds_version(comment, version)).await
+    }
+
+    #[tokio::test]
+    async fn a_genuine_signature_of_another_installer_is_refused_for_the_version_the_manifest_claims() {
+        // The fixture's trusted comment is signed with the file and names `payload.bin`: a manifest claiming any version for
+        // it (the rollback: an old installer under a new version) is refused, after the signature itself held.
+        assert!(bound_to("999.0.0").await.unwrap_err().contains("another version"));
+        assert!(bound_to("1.0.0").await.is_err());
+        let seen = std::cell::Cell::new(String::new());
+        let mut file = Vec::new();
+        let seen_ref = &seen;
+        let kept = receive(
+            &mut Pieces::of(PAYLOAD, 5, None),
+            &mut file,
+            SIGNATURE,
+            TEST_KEY,
+            1024,
+            |_, _| {},
+            |comment| {
+                seen_ref.set(comment.to_string());
+                Ok(())
+            },
+        )
+        .await;
+        assert_eq!(kept, Ok(()));
+        assert!(seen.take().ends_with("file:payload.bin"), "the comment given is the signed one");
+        let mut tampered = PAYLOAD.to_vec();
+        tampered[0] ^= 1;
+        let mut asked = false;
+        let refused = receive(
+            &mut Pieces::of(&tampered, 5, None),
+            &mut Vec::new(),
+            SIGNATURE,
+            TEST_KEY,
+            1024,
+            |_, _| {},
+            |_| {
+                asked = true;
+                Ok(())
+            },
+        )
+        .await;
+        assert!(refused.is_err() && !asked, "the comment is trusted only after the signature held");
+    }
+
+    #[test]
+    fn the_signed_file_name_must_hold_the_manifest_version() {
+        let comment = |file: &str| format!("timestamp:1793484081\tfile:{file}");
+        assert_eq!(binds_version(&comment("Faber_1.2.3_x64-setup.exe"), "1.2.3"), Ok(()));
+        assert_eq!(binds_version(&comment("Faber_0.3.18-preview.19_x64-setup.exe"), "0.3.18-preview.19"), Ok(()));
+        assert_eq!(binds_version(&comment("Faber_1.2.3_arm64.app.tar.gz"), "1.2.3"), Ok(()));
+        assert!(binds_version(&comment("Faber_1.0.0_x64-setup.exe"), "999.0.0").is_err(), "an old installer under a new version");
+        assert!(binds_version(&comment("Faber_11.2.3_x64-setup.exe"), "1.2.3").is_err(), "a longer version is not this one");
+        assert!(binds_version(&comment("Faber_1.2.30_x64-setup.exe"), "1.2.3").is_err());
+        assert!(binds_version(&comment("Faber_1.2.3-preview.1_x64-setup.exe"), "1.2.3").is_err(), "a preview is not the release");
+        assert!(binds_version(&comment("Faber_1.2.3_x64-setup.exe"), "").is_err());
+        assert!(binds_version("timestamp:1793484081", "1.2.3").is_err(), "a comment with no file name binds nothing");
+        assert!(binds_version("file:Faber_1.2.3_x", "1.2.3").is_ok(), "the file field alone is enough");
+        assert!(binds_version("note:file:Faber_1.2.3_x\tfile:other", "1.2.3").is_err(), "only a field that starts with file:");
+    }
+
     #[tokio::test]
     async fn a_file_over_the_limit_is_refused_before_and_while_it_arrives() {
         let limit = PAYLOAD.len() as u64 - 1;
         let mut file = Vec::new();
         let mut pieces = Pieces::of(PAYLOAD, 5, Some(PAYLOAD.len() as u64));
-        let announced = receive(&mut pieces, &mut file, SIGNATURE, TEST_KEY, limit, |_, _| {});
+        let announced = receive(&mut pieces, &mut file, SIGNATURE, TEST_KEY, limit, |_, _| {}, |_| Ok(()));
         assert_eq!(announced.await, Err("the update is too large".into()));
         assert!(file.is_empty(), "nothing is written for a size the server announced");
         let (mut pieces, mut sink) = (Pieces::of(PAYLOAD, 5, None), Vec::new());
-        let unannounced = receive(&mut pieces, &mut sink, SIGNATURE, TEST_KEY, limit, |_, _| {});
+        let unannounced = receive(&mut pieces, &mut sink, SIGNATURE, TEST_KEY, limit, |_, _| {}, |_| Ok(()));
         assert_eq!(unannounced.await, Err("the update is too large".into()), "a server that says nothing is counted too");
     }
 

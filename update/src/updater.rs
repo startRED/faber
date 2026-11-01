@@ -169,14 +169,14 @@ impl Release for Live {
 
     async fn download(&self) -> Result<(), String> {
         let found = lock(&self.found).take().ok_or("no release was found")?;
-        let installer = installer_path(&found.version);
+        let installer = installer_path(&found.version).map_err(|e| self.failed("download-failed", e.to_string()))?;
         let (inner, mut meter) = (self.inner.clone(), Meter::default());
         let progress = move |chunk: u64, total: Option<u64>| {
             if let Some(status) = meter.advance(chunk, total, std::time::Instant::now()) {
                 inner.report(status);
             }
         };
-        release::download(&found.platform, &installer, progress).await.map_err(|e| self.failed("download-failed", e))?;
+        release::download(&found.platform, &found.version, &installer, progress).await.map_err(|e| self.failed("download-failed", e))?;
         // A newer download replaces the one kept before, which would never install now.
         let before = lock(&self.inner.ready).replace(Ready { version: found.version, installer: installer.clone() });
         if let Some(before) = before.filter(|before| before.installer != installer) {

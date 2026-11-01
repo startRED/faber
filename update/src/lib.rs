@@ -161,10 +161,18 @@ fn safe(version: &str) -> String {
     version.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect()
 }
 
-/// Where the installer of `version` is kept until it runs: its own new folder in the temporary folder, so the copy that
-/// runs it (`handoff`) starts beside it and a finished install is swept away whole.
-fn installer_path(version: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("{FOLDER}{}-{}", safe(version), std::process::id())).join("Faber-setup.exe")
+/// A new, uniquely named folder in `parent`, made exclusively: `create_dir` fails when the name exists, so a folder (or a link)
+/// another process planted there is never used. The name has a random part, so it cannot be guessed ahead either.
+fn staging_in(parent: &Path, version: &str) -> std::io::Result<PathBuf> {
+    let folder = parent.join(format!("{FOLDER}{}-{}", safe(version), uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir(&folder)?;
+    Ok(folder)
+}
+
+/// Where the installer of `version` is kept until it runs: its own new folder in the temporary folder (made here), so the copy
+/// that runs it (`handoff`) starts beside it and a finished install is swept away whole.
+fn installer_path(version: &str) -> std::io::Result<PathBuf> {
+    Ok(staging_in(&std::env::temp_dir(), version)?.join("Faber-setup.exe"))
 }
 
 const LOG_MAX: usize = 32 * 1024;
@@ -351,9 +359,20 @@ mod tests {
     fn a_version_cannot_leave_its_temporary_folder() {
         assert_eq!(safe("0.3.18-preview.19"), "0.3.18-preview.19");
         assert_eq!(safe(r"..\..\x"), ".._.._x");
-        let installer = installer_path(r"..\..\x");
-        assert_eq!(installer.parent().unwrap().parent().unwrap(), std::env::temp_dir());
-        assert!(installer.parent().unwrap().file_name().unwrap().to_string_lossy().starts_with(FOLDER));
+        let temp = tempfile::tempdir().unwrap();
+        let folder = staging_in(temp.path(), r"..\..\x").unwrap();
+        assert_eq!(folder.parent().unwrap(), temp.path());
+        assert!(folder.file_name().unwrap().to_string_lossy().starts_with(FOLDER));
+    }
+
+    #[test]
+    fn every_staging_folder_is_new_and_a_name_that_exists_is_never_reused() {
+        let temp = tempfile::tempdir().unwrap();
+        let (a, b) = (staging_in(temp.path(), "1.0.0").unwrap(), staging_in(temp.path(), "1.0.0").unwrap());
+        assert_ne!(a, b, "the same version and process still get different folders");
+        assert!(a.is_dir() && b.is_dir());
+        // The exclusive creation itself: a folder that is already there is an error, not a folder to use.
+        assert!(std::fs::create_dir(&a).is_err());
     }
 
     #[test]
