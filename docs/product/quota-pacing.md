@@ -36,6 +36,16 @@ Both vendors' counters are read by commands that answer locally, so a reading co
   version ever answered it with a model, the result is thrown away and `/usage` is never run again. Its text gives the session
   and weekly percentages; the reset times are printed in the PC's own time, which the screen's offset converts. A reset time
   within two minutes of the one already held is the same window (the stream prints seconds, `/usage` the minute).
+  Claude Code 2.1.307 and later print no percentages there (only what contributes to the limits), and the usage report of
+  its stream is empty until a request has been made. When `/usage` answers cleanly with no window, the same scheduled
+  reading sends one tiny request instead (`account::claude_probe`): cheapest model, no tools, no skills, one turn, about 500
+  cached tokens (US$0.0001 at list price, measured 2026-10-28). Its rate-limit event carries both windows. A probe that failed
+  or cost over US$0.01 is no reading; it is never stamped as zero-turn evidence for R131 and never counted as Faber's own
+  spend. The probe runs only when `/usage` says the login is on its subscription, extra usage is not running, and a turn or
+  probe of the last hour said extra usage is off, so a request past the limit is refused, not charged. With nothing known
+  it waits for a real turn to say so, and a probe that gave no clean reading holds the next until newer word. Left open:
+  extra usage switched on within that hour while a window is out, one probe under its US$0.005 budget, whose own event
+  then stops the next.
 - Codex: `account/rateLimits/read` on a short-lived `codex app-server` (handshake, the two reads, nothing else).
 - A successful scheduled reading also refreshes the ledger's confirmed no-model evidence. A failed reading or any result with model turns, tokens or cost never refreshes that evidence.
 - During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's

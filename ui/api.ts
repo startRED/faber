@@ -89,6 +89,20 @@ export interface ToolUse {
   started?: number;
   /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
   ended?: number;
+  /** On an edit step: what it changed, as the engine read it when the step started; absent on older conversations. */
+  change?: Change;
+}
+/** A line an edit step added or removed. */
+export interface ChangedLine {
+  added: boolean;
+  text: string;
+}
+/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
+ * removed, and the changed lines themselves (from the engine, only the first 40). */
+export interface Change {
+  added: number;
+  removed: number;
+  lines: ChangedLine[];
 }
 /** A step of a streaming reply that has not changed since the screen last heard it: only its id. */
 export interface SameTool {
@@ -207,7 +221,8 @@ export interface Message {
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
-  steps: { text: string; state: 'pending' | 'active' | 'done' }[];
+  /** `conversation`: one the agent started that does the step (task 040); `member`: where it stands, put here by the engine. */
+  steps: { text: string; state: 'pending' | 'active' | 'done'; conversation?: string; member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped' }[];
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };

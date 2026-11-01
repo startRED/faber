@@ -1943,6 +1943,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
+                                    onOpenConversation={(id) => {
+                                      const to = state().conversations.find((conversation) => conversation.id === id);
+                                      if (to) openSummary(to);
+                                    }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                     onActChange={(target) => {
                                       if (target === 'composerModel') document.querySelector<HTMLSelectElement>('.composer .choose select')?.focus();
