@@ -587,46 +587,6 @@ impl Core {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::Permission;
-
-    /// `count` conversations the lead started in project `p`, each mid-reply; `asking` ones hold a question for the person.
-    fn started(core: &mut Core, count: usize, asking: bool) {
-        for _ in 0..count {
-            let id = core.blank(Area::Project, Some("p".into()));
-            let mut reply = Message::new(new_id(), Role::Assistant, String::new(), 0);
-            reply.status = Some(Status::Streaming);
-            if asking {
-                let question =
-                    Permission { request_id: "q".into(), tool: "AskUserQuestion".into(), input: serde_json::Value::Null, epoch: None };
-                reply.permissions = Some(vec![question]);
-            }
-            let c = core.convs.get_mut(&id).unwrap();
-            c.started_by = Some("lead".into());
-            c.messages.push(reply);
-        }
-    }
-
-    #[tokio::test]
-    async fn a_member_waiting_for_the_person_frees_a_working_place_but_stays_open() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
-            started(core, 3, true);
-            assert_eq!(core.sibling_room("p"), Ok(()), "three waiting for the person leave room to work");
-            started(core, 2, false);
-            let full = core.sibling_room("p").unwrap_err();
-            assert!(full.starts_with("five conversations") && full.contains("wrap_up"), "{full}");
-            assert_eq!(core.sibling_room("other"), Ok(()), "the limits are per project");
-            started(core, 1, false);
-            assert!(core.sibling_room("p").unwrap_err().starts_with("three conversations"), "three working is the first limit");
-        });
-        engine.shutdown();
-    }
-}
-
 fn result(value: Result<String, String>) -> (bool, String) {
     match value {
         Ok(text) => (true, text),
@@ -787,5 +747,45 @@ impl Core {
             self.tell_parent(&id);
         }
         Ok("End your turn now; Faber wakes you when one of these conversations reports.".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Permission;
+
+    /// `count` conversations the lead started in project `p`, each mid-reply; `asking` ones hold a question for the person.
+    fn started(core: &mut Core, count: usize, asking: bool) {
+        for _ in 0..count {
+            let id = core.blank(Area::Project, Some("p".into()));
+            let mut reply = Message::new(new_id(), Role::Assistant, String::new(), 0);
+            reply.status = Some(Status::Streaming);
+            if asking {
+                let question =
+                    Permission { request_id: "q".into(), tool: "AskUserQuestion".into(), input: serde_json::Value::Null, epoch: None };
+                reply.permissions = Some(vec![question]);
+            }
+            let c = core.convs.get_mut(&id).unwrap();
+            c.started_by = Some("lead".into());
+            c.messages.push(reply);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_member_waiting_for_the_person_frees_a_working_place_but_stays_open() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|core| {
+            started(core, 3, true);
+            assert_eq!(core.sibling_room("p"), Ok(()), "three waiting for the person leave room to work");
+            started(core, 2, false);
+            let full = core.sibling_room("p").unwrap_err();
+            assert!(full.starts_with("five conversations") && full.contains("wrap_up"), "{full}");
+            assert_eq!(core.sibling_room("other"), Ok(()), "the limits are per project");
+            started(core, 1, false);
+            assert!(core.sibling_room("p").unwrap_err().starts_with("three conversations"), "three working is the first limit");
+        });
+        engine.shutdown();
     }
 }
