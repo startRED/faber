@@ -1,9 +1,86 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer, type Draft } from '../../ui/Composer.tsx';
-import { t } from '../../ui/i18n.ts';
+import { Sidebar } from '../../ui/Sidebar.tsx';
+import type { Choice, Summary } from '../../ui/api.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
+import titleWords from '../../ui/locales/conversation-titles.json';
+import { modelOptions } from '../../ui/models.ts';
 import { check, equal, ok } from './check.ts';
+
+check('composer: a localized first-exchange title updates the existing sidebar row without changing the draft', async () => {
+  const root = document.createElement('div');
+  root.style.width = '720px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const [conversations, setConversations] = createSignal<Summary[]>([
+    { id: 'first-exchange-title', title: 'https://example.com/private', area: 'chat', updatedAt: 1_800_000_000_000 },
+  ]);
+  let fill!: (text: string) => void;
+  const closeSidebar = render(() => createComponent(Sidebar, {
+    get conversations() { return conversations(); }, projects: [], vendors: [], version: '1',
+    place: { area: 'chat' }, running: [], quotas: {}, now: 1_800_000_000_000,
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {},
+    onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
+  }), root);
+  const composer = document.createElement('div');
+  root.append(composer);
+  const closeComposer = render(() => createComponent(Composer, {
+    vendors: [], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    onReady: (ready) => { fill = ready; },
+  }), composer);
+  try {
+    fill('Keep my next message');
+    for (const [language, template] of Object.entries(titleWords)) {
+      useLanguage(language);
+      const title = template.replace('{host}', 'example.com');
+      setConversations((rows) => rows.map((row) => ({ ...row, title })));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const row = root.querySelector('[data-conversation-id="first-exchange-title"]')!;
+      ok(row.textContent!.includes(title), `the ${language} title is visible in the same conversation`);
+      equal(root.querySelectorAll('[data-conversation-id="first-exchange-title"]').length, 1);
+      equal(composer.querySelector('textarea')!.value, 'Keep my next message');
+    }
+    setConversations((rows) => rows.map((row) => ({ ...row, title: 'Consertar o computador' })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ok(root.querySelector('[data-conversation-id="first-exchange-title"]')!.textContent!.includes('Consertar o computador'));
+  } finally {
+    useLanguage('en');
+    closeComposer();
+    closeSidebar();
+    root.remove();
+  }
+});
+
+check('composer: one model and effort chip preserves the draft and warms the newly chosen model', async () => {
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:min(720px,100vw)';
+  document.body.append(root);
+  const [choice, setChoice] = createSignal<Choice>({ vendor: 'claude', model: 'sonnet', effort: 'high' });
+  let warmed = 0;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['claude'], options: modelOptions(['claude']), get choice() { return choice(); },
+    busy: false, placeholder: '', onChoice: setChoice, onStop: () => {}, onSend: () => {}, onPause: () => {}, onWarm: () => { warmed++; },
+  }), root);
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+  try {
+    await tick();
+    const field = root.querySelector('textarea')!;
+    field.value = 'Keep this draft'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    equal(warmed, 1);
+    equal(root.querySelectorAll('.model-chip').length, 1);
+    equal(root.querySelectorAll('.effort').length, 0, 'there is no separate effort chip');
+    root.querySelector<HTMLButtonElement>('.model-chip')!.click(); await tick();
+    const opus = [...root.querySelectorAll<HTMLButtonElement>('.model-option')].find((button) => button.textContent === 'Claude Opus')!;
+    opus.click();
+    equal(choice().model, 'opus'); equal(choice().effort, 'medium');
+    equal(field.value, 'Keep this draft');
+    field.value += '!'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    equal(warmed, 2, 'the next edit warms the new model');
+  } finally { dispose(); root.remove(); }
+});
 
 check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after sending', async () => {
   const root = document.createElement('div');

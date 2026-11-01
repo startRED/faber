@@ -1,10 +1,11 @@
 import { readAs } from './attachments.ts';
 import { batch, createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, onMount, Show } from 'solid-js';
-import { DEFAULT_EFFORT, type Choice, type Command, type Effort, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
+import { DEFAULT_EFFORT, type Choice, type Command, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { type Option, vendorName } from './models.ts';
+import { ModelMenu } from './ModelMenu.tsx';
 import { caretOnFirstLine, resizeComposer } from './composer-size.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { Thumb } from './Thumbs.tsx';
@@ -287,7 +288,6 @@ export function Composer(props: Props) {
       window.removeEventListener('resize', resize);
     });
   });
-  const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => attachmentsReady() && !props.locked && !recalling() && historyMode() !== 'search' && hasContent() && props.vendors.length > 0;
   useDraft(hasContent);
@@ -786,43 +786,10 @@ export function Composer(props: Props) {
           if (e.currentTarget.files) void add(e.currentTarget.files);
           e.currentTarget.value = '';
         }} />
-        {/* The model: a chip with the rays of "let the AI choose" and a chevron, over the real select that does the work. */}
-        <label class="chip choose" data-tour="auto">
-          <Icon name="auto" small />
-          <select
-            aria-label={t('composer.model')}
-            value={selected()}
-            disabled={props.locked}
-            onChange={(e) => {
-              const choice = props.options[Number(e.currentTarget.value)]!.choice;
-              // A level means different work on each model, so a new model starts again at the default.
-              const same = choice.vendor === props.choice.vendor && choice.model === props.choice.model;
-              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: same ? (props.choice.effort ?? DEFAULT_EFFORT) : DEFAULT_EFFORT });
-              warmed = false; // the next keystroke warms the newly chosen model
-            }}
-          >
-            <For each={props.options}>
-              {(o, i) => (
-                <option value={i()} selected={i() === selected()}>
-                  {o.label}
-                </option>
-              )}
-            </For>
-          </select>
-          <Icon name="down" small />
-        </label>
-        <Show when={props.choice.vendor !== 'auto' && props.choice.model}>
-          <label class="chip choose effort">
-            <span>{t('effort.label')}</span>
-            <select aria-label={t('effort.label')} value={props.choice.effort ?? DEFAULT_EFFORT} disabled={props.locked} onChange={(e) => {
-              props.onChoice({ ...props.choice, effort: e.currentTarget.value as Effort });
-              warmed = false;
-            }}>
-              <For each={['low', 'medium', 'high'] as const}>{(effort) => <option value={effort}>{t(`effort.${effort}`)}</option>}</For>
-            </select>
-            <Icon name="down" small />
-          </label>
-        </Show>
+        <ModelMenu options={props.options} choice={props.choice} disabled={props.locked} onChoice={(choice) => {
+          props.onChoice(choice);
+          warmed = false;
+        }} />
         <Show when={props.mode && props.onMode}>
           <PermissionChip mode={props.mode!} onMode={props.onMode!} />
         </Show>

@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "better": {
+      "en": "New conversations get a short title in your message's language after the first answer, while names you choose stay yours.",
+      "pt-BR": "Conversas novas ganham um título curto no idioma da sua mensagem depois da primeira resposta, sem mudar os nomes que você escolheu.",
+      "es": "Las conversaciones nuevas reciben un título corto en el idioma de tu mensaje tras la primera respuesta, sin cambiar los nombres que elegiste.",
+      "fr": "Les nouvelles conversations reçoivent un titre court dans la langue de votre message après la première réponse, sans changer les noms que vous avez choisis.",
+      "de": "Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten."
+    }
+  },
+  "decisions": []
+}

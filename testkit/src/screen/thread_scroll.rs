@@ -17,8 +17,7 @@ fn scroll(ctx: &mut Ctx) -> Result {
     })?;
     let page = &mut app.page;
     super::shell::set_size(page, 1280, 720)?;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "Write a long reply.")?;
     page.wait_visible(&css("article.ai .step-line"))?;
     page.click(&css("article.ai .step-line"))?;
