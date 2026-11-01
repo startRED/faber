@@ -1,3 +1,4 @@
+import { confirmProjectRemoval } from './RecoveryNotes.tsx';
 import { createComputed, createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
@@ -508,7 +509,7 @@ export function Sidebar(props: Props) {
                           <button type="button" class="btn" data-action="find-folder" onClick={findFolder}>
                             {t('projects.findFolder')}
                           </button>
-                          <button type="button" class="btn ghost" data-action="remove-project" disabled={tail().running} onClick={removeFromFaber}>
+                          <button type="button" class="btn ghost" data-action="remove-project" disabled={tail().running} onClick={(e) => confirmProjectRemoval(e, removeFromFaber)}>
                             {t('projects.removeFromFaber')}
                           </button>
                         </div>

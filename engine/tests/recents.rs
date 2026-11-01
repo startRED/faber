@@ -188,6 +188,13 @@ async fn recovery_320_missing_project_folder_shows_in_state_and_recents() {
     let e = engine(&data);
     e.open_folder(&f[0]).unwrap();
     std::fs::remove_dir(&f[0]).unwrap();
+    e.set_attention(true, true);
+    for _ in 0..100 {
+        if serde_json::to_value(e.state()).unwrap()["projects"][0]["state"] == "missing" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     let state_json = serde_json::to_value(e.state()).unwrap();
     assert_eq!(state_json["projects"][0]["state"], "missing");
     assert_eq!(e.recents().folders[0].reason, Some("reason.recents.gone"));

@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Fields a newer Faber wrote that this build does not know, kept as they were.
 pub type Extra = BTreeMap<String, Value>;
@@ -53,34 +52,34 @@ impl Project {
     }
 }
 
-static METADATA_CALLS: AtomicU64 = AtomicU64::new(0);
-
-/// Counts metadata checks: one per project, plus one for the volume root only when missing on a mounted-volume path.
-pub fn metadata_calls() -> u64 {
-    METADATA_CALLS.load(Ordering::Relaxed)
-}
-
 /// Checks a project folder with one metadata call, plus one for the volume root only when missing on a mounted-volume path.
 /// Reads no directory contents or files.
 pub fn folder_state(path: &Path) -> FolderState {
-    METADATA_CALLS.fetch_add(1, Ordering::Relaxed);
-    match std::fs::metadata(path) {
-        Ok(meta) if meta.is_dir() => FolderState::Present,
-        Ok(_) => FolderState::Missing,
-        Err(err) => classify_missing(path, &err),
+    folder_state_with(path, &mut |p| std::fs::metadata(p).map(|m| m.is_dir()))
+}
+
+fn folder_state_with(path: &Path, metadata: &mut impl FnMut(&Path) -> std::io::Result<bool>) -> FolderState {
+    match metadata(path) {
+        Ok(true) => FolderState::Present,
+        Ok(false) => FolderState::Missing,
+        Err(err) => classify_missing(path, &err, metadata),
     }
 }
 
 /// Fills each project's live `state` from its folder and, when needed, its volume root.
-pub fn with_folder_states(mut projects: Vec<Project>) -> Vec<Project> {
+pub fn with_folder_states(projects: Vec<Project>) -> Vec<Project> {
+    with_folder_states_using(projects, &mut |p| std::fs::metadata(p).map(|m| m.is_dir()))
+}
+
+fn with_folder_states_using(mut projects: Vec<Project>, metadata: &mut impl FnMut(&Path) -> std::io::Result<bool>) -> Vec<Project> {
     for project in &mut projects {
-        let state = folder_state(Path::new(&project.path));
+        let state = folder_state_with(Path::new(&project.path), metadata);
         project.set_state(state);
     }
     projects
 }
 
-fn classify_missing(path: &Path, err: &std::io::Error) -> FolderState {
+fn classify_missing(path: &Path, err: &std::io::Error, metadata: &mut impl FnMut(&Path) -> std::io::Result<bool>) -> FolderState {
     if is_disconnected_os_error(err.raw_os_error()) {
         return FolderState::Disconnected;
     }
@@ -88,8 +87,8 @@ fn classify_missing(path: &Path, err: &std::io::Error) -> FolderState {
         if cfg!(windows) && err.raw_os_error() == Some(2) && path != root {
             return FolderState::Missing;
         }
-        METADATA_CALLS.fetch_add(1, Ordering::Relaxed);
-        if !root.is_dir() {
+
+        if !metadata(&root).unwrap_or(false) {
             return FolderState::Disconnected;
         }
     }
@@ -160,10 +159,13 @@ mod tests {
             }
             projects.push(Project::new(format!("id-{i}"), format!("p-{i}"), folder.to_string_lossy().into_owned()));
         }
-        let before = metadata_calls();
-        let checked = with_folder_states(projects);
-        let after = metadata_calls();
-        assert_eq!(after - before, 20, "one metadata check per project and zero content reads");
+        let mut calls = 0;
+        let checked = with_folder_states_using(projects, &mut |p| {
+            calls += 1;
+            std::fs::metadata(p).map(|m| m.is_dir())
+        });
+
+        assert_eq!(calls, 20, "one metadata check per project and zero content reads");
         for (i, p) in checked.iter().enumerate() {
             assert_eq!(p.state(), if i % 2 == 0 { FolderState::Present } else { FolderState::Missing });
         }
@@ -171,7 +173,7 @@ mod tests {
             assert_eq!(folder_state(Path::new("Q:/missing-drive/project")), FolderState::Disconnected);
         }
         assert_eq!(
-            classify_missing(Path::new("/Volumes/Unmounted/project"), &std::io::Error::from_raw_os_error(6)),
+            classify_missing(Path::new("/Volumes/Unmounted/project"), &std::io::Error::from_raw_os_error(6), &mut |_| Ok(false)),
             FolderState::Disconnected
         );
     }

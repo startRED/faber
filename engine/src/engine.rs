@@ -597,6 +597,8 @@ struct Core {
     rewind: rewind::State,
     unclean_exit: Option<crate::crash::UncleanExit>,
     project_states: Mutex<HashMap<String, FolderState>>,
+    project_refresh_generation: u64,
+    project_refresh_running: bool,
     chat_dir: PathBuf,
     #[cfg(windows)]
     _chat_directory: faber_winproc::MemoryDirectory,
@@ -768,6 +770,8 @@ impl Engine {
                 rewind,
                 unclean_exit,
                 project_states: Mutex::new(HashMap::new()),
+                project_refresh_generation: 0,
+                project_refresh_running: false,
                 _data_directory: data_directory,
                 #[cfg(windows)]
                 _chat_directory: chat_directory.1,
@@ -775,6 +779,7 @@ impl Engine {
         });
         let _ = search.start();
         let engine = Engine { core, runtime };
+        engine.refresh_project_folders();
         engine.recover_rewind();
         engine.with(|c| {
             for parent in c.parent_reports.keys().cloned().collect::<Vec<_>>() {
@@ -2149,12 +2154,11 @@ impl Core {
     fn state(&self) -> AppState {
         let mut quotas: Vec<QuotaReading> = self.quotas.values().cloned().collect();
         quotas.sort_by(|a, b| (a.vendor, &a.window).cmp(&(b.vendor, &b.window)));
-        let projects = crate::project::with_folder_states(self.store.projects());
-        {
-            let mut states = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
-            states.clear();
-            for p in &projects {
-                states.insert(p.id.clone(), p.state());
+        let states = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut projects = self.store.projects();
+        for project in &mut projects {
+            if let Some(state) = states.get(&project.id) {
+                project.set_state(*state);
             }
         }
         AppState {
@@ -5329,21 +5333,6 @@ impl Core {
         Ok(projects.swap_remove(pos))
     }
 
-    pub(super) fn refresh_project_folders(&mut self) -> bool {
-        let projects = crate::project::with_folder_states(self.store.projects());
-        let next: HashMap<String, FolderState> = projects.into_iter().map(|p| (p.id.clone(), p.state())).collect();
-        let changed = {
-            let mut map = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
-            let changed = *map != next;
-            *map = next;
-            changed
-        };
-        if changed {
-            self.list_changed();
-        }
-        changed
-    }
-
     pub(super) fn check_project_folder(&mut self, project_id: Option<&str>) -> Result<(), String> {
         let Some(project_id) = project_id else { return Err("error.projectGone".into()) };
         let Some(project) = self.store.projects().into_iter().find(|p| p.id == project_id) else {
@@ -5986,6 +5975,13 @@ mod tool_in_tests {
 
         let project = e.open_folder(&old_folder.to_string_lossy()).unwrap();
         std::fs::rename(&old_folder, &new_folder).unwrap();
+        e.refresh_project_folders();
+        for _ in 0..100 {
+            if e.state().projects[0].state() == FolderState::Missing {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert_eq!(e.state().projects[0].state(), FolderState::Missing);
 
         let updated = e.repoint_project(&project.id, &new_folder.to_string_lossy()).unwrap();

@@ -5,6 +5,8 @@ import { api, type Project } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
+import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
+import { installContextMenu } from '../../ui/contextmenu.ts';
 import { Welcome } from '../../ui/Welcome.tsx';
 import { keep, kept } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
@@ -193,6 +195,7 @@ check('settings projects: the separate copies switch is on by default and turns 
 
 check('projects recovery_320: a moved or missing project folder offers Find the folder and Remove from Faber, and an unclean exit shows one calm home note', async () => {
   useLanguage('en');
+  installContextMenu();
   const missing = { id: 'p-moved', name: 'Moved repo', path: 'C:/fixture/moved', state: 'missing' as const } as Project;
   const disconnected = { id: 'p-drive', name: 'USB repo', path: 'E:/fixture/usb', state: 'disconnected' as const } as Project;
   const [unclean, setUnclean] = createSignal<{ at: number; panic: boolean } | undefined>({ at: 1000, panic: true });
@@ -205,6 +208,7 @@ check('projects recovery_320: a moved or missing project folder offers Find the 
   document.body.append(root);
   const dispose = render(
     () => [
+      createComponent(ContextMenuHost, {}),
       createComponent(Sidebar, {
         conversations: [{ id: 'c1', title: 'Existing work', area: 'project', projectId: missing.id, updatedAt: 1000 }],
         projects: [missing, disconnected],
@@ -260,6 +264,9 @@ check('projects recovery_320: a moved or missing project folder offers Find the 
     ok(sideRow?.textContent?.includes('C:/fixture/moved'), 'the sidebar names the missing folder');
     await click(sideRow?.querySelector('[data-action="find-folder"]'));
     await click(sideRow?.querySelector('[data-action="remove-project"]'));
+    ok(document.querySelector('[role=menu]'), 'removal asks for confirmation');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    equal(actions.join('|'), 'side-find:p-moved', 'cancel keeps the project');
 
     const card = root.querySelector('[data-testid="project-missing"]');
     ok(card, 'the project home shows the missing-folder explanation');
@@ -268,6 +275,14 @@ check('projects recovery_320: a moved or missing project folder offers Find the 
     ok(card?.textContent?.includes('Remove from Faber'), 'offers Remove from Faber');
     await click(card?.querySelector('[data-action="find-folder"]'));
     await click(card?.querySelector('[data-action="remove-project"]'));
+    ok(document.querySelector('[role=menu]'), 'home removal asks for confirmation');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    equal(actions.join('|'), 'side-find:p-moved|home-find:p-moved', 'cancel keeps the project');
+    await click(card?.querySelector('[data-action="remove-project"]'));
+    await click(document.querySelector('[role=menuitem]'));
+    await settle(550);
+    await click(document.querySelector('[role=menuitem]'));
+    equal(actions.join('|'), 'side-find:p-moved|home-find:p-moved|home-remove:p-moved', 'confirm removes the project');
 
     setActive(disconnected);
     await settle();
@@ -290,7 +305,7 @@ check('projects recovery_320: a moved or missing project folder offers Find the 
     equal(root.querySelector('[data-testid="crash-note"]'), null, 'dismissing removes the calm crash note');
     equal(
       actions.join('|'),
-      'side-find:p-moved|side-remove:p-moved|home-find:p-moved|home-remove:p-moved|open-logs|dismiss-crash',
+      'side-find:p-moved|home-find:p-moved|home-remove:p-moved|open-logs|dismiss-crash',
       'every recovery action triggers its handler',
     );
   } finally {

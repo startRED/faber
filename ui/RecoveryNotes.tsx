@@ -1,6 +1,11 @@
 import { Show } from 'solid-js';
 import type { AppState, Project } from './api.ts';
 import { lang, t } from './i18n.ts';
+import { openMenu } from './contextmenu.ts';
+
+export function confirmProjectRemoval(e: MouseEvent, run: () => void) {
+  openMenu(e, [{ id: 'remove', label: t('projects.removeFromFaber'), danger: true, confirm: t('menu.removeConfirm'), run }]);
+}
 
 export function CrashNote(props: { exit?: AppState['uncleanExit']; onDismiss?: () => void; onOpenLogs?: () => void }) {
   return <Show when={props.exit}>{(exit) => (
@@ -21,7 +26,7 @@ export function MissingFolder(props: { project?: Project; onFind?: (id: string) 
       <p>{t(project().state === 'disconnected' ? 'projects.disconnectedNote' : 'projects.missingNote', { path: project().path })}</p>
       <div class="project-missing-actions">
         <button type="button" class="btn" data-action="find-folder" onClick={() => props.onFind?.(project().id)}>{t('projects.findFolder')}</button>
-        <button type="button" class="btn ghost" data-action="remove-project" onClick={() => props.onRemove?.(project().id)}>{t('projects.removeFromFaber')}</button>
+        <button type="button" class="btn ghost" data-action="remove-project" onClick={(e) => confirmProjectRemoval(e, () => props.onRemove?.(project().id))}>{t('projects.removeFromFaber')}</button>
       </div>
     </div>
   )}</Show>;

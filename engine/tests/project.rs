@@ -91,8 +91,15 @@ async fn recovery_320_missing_project_folder_refuses_send_and_warm_before_spawni
     assert_eq!(initial["projects"][0]["state"], "present");
 
     fs::remove_dir_all(&folder).unwrap();
+    assert_eq!(serde_json::to_value(e.state()).unwrap()["projects"][0]["state"], "present", "state reads the cached value until refresh");
     events.lock().unwrap().clear();
     e.set_attention(true, true);
+    for _ in 0..100 {
+        if events.lock().unwrap().iter().any(|ev| matches!(ev, AppEvent::List)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert!(
         events.lock().unwrap().iter().any(|ev| matches!(ev, AppEvent::List)),
         "focusing the window refreshes project folder states and notifies the screen when one went missing"
