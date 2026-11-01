@@ -13,6 +13,7 @@ use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
+use crate::project::FolderState;
 use crate::recents::RecentsView;
 use crate::router::{Choice, Pick, pick_model};
 use crate::signals::Signals;
@@ -240,6 +241,9 @@ pub struct AppState {
     /// expired; the engine reports what the CLIs said.
     pub quotas: Vec<QuotaReading>,
     pub usage: Vec<VendorUsage>,
+    /// The previous run ended unexpectedly: shown once as a calm home note until dismissed.
+    #[serde(rename = "uncleanExit", default, skip_serializing_if = "Option::is_none")]
+    pub unclean_exit: Option<crate::crash::UncleanExit>,
 }
 
 /// How to continue a conversation in the CLI's own terminal interface.
@@ -599,6 +603,10 @@ struct Core {
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
     rewind: rewind::State,
+    unclean_exit: Option<crate::crash::UncleanExit>,
+    project_states: Mutex<HashMap<String, FolderState>>,
+    project_refresh_generation: u64,
+    project_refresh_running: bool,
     chat_dir: PathBuf,
     #[cfg(windows)]
     _chat_directory: faber_winproc::MemoryDirectory,
@@ -668,6 +676,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
+        let unclean_exit = crate::crash::take_unclean(&opts.data_dir);
         let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
@@ -768,6 +777,10 @@ impl Engine {
                 before: HashMap::new(),
                 git: None,
                 rewind,
+                unclean_exit,
+                project_states: Mutex::new(HashMap::new()),
+                project_refresh_generation: 0,
+                project_refresh_running: false,
                 _data_directory: data_directory,
                 #[cfg(windows)]
                 _chat_directory: chat_directory.1,
@@ -775,6 +788,7 @@ impl Engine {
         });
         let _ = search.start();
         let engine = Engine { core, runtime };
+        engine.refresh_project_folders();
         engine.recover_rewind();
         engine.with(|c| {
             for parent in c.parent_reports.keys().cloned().collect::<Vec<_>>() {
@@ -958,7 +972,11 @@ impl Engine {
     }
     /// The first message of a conversation in Auto, while the user types it.
     pub fn route_draft(&self, req: WarmRequest, text: String) {
-        self.with(|c| c.route_draft(req, text))
+        self.with(|c| {
+            if c.project_warm_allowed(&req) {
+                c.route_draft(req, text);
+            }
+        })
     }
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
@@ -1392,13 +1410,17 @@ impl Engine {
         self.with(|c| {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
             if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
-                if &projects[pos] != before {
+                let mut before = before.clone();
+                before.extra.remove("state");
+                let mut project = project.clone();
+                project.extra.remove("state");
+                if projects[pos] != before {
                     return Err("error.project.changed".into());
                 }
                 if before == project {
                     return Ok(());
                 }
-                projects[pos] = project.clone();
+                projects[pos] = project;
                 if c.store.save_projects(&projects).is_ok() {
                     c.goals.loaded = None;
                     c.list_changed();
@@ -1410,6 +1432,18 @@ impl Engine {
                 Err("error.project.notFound".into())
             }
         })
+    }
+    /// Points a moved or missing project at its new folder (`Find the folder`), keeping its id and conversations intact.
+    pub fn repoint_project(&self, id: &str, path: &str) -> Result<Project, String> {
+        self.with(|c| c.repoint_project(id, path))
+    }
+    /// Dismisses the one-time calm home note shown after an unclean exit.
+    pub fn dismiss_unclean_exit(&self) {
+        self.with(|c| {
+            if c.unclean_exit.take().is_some() {
+                c.list_changed();
+            }
+        });
     }
     /// A folder picked in a dialog or taken from the recents, as a project. A refused or missing folder adds nothing.
     pub fn open_folder(&self, path: &str) -> Result<Project, String> {
@@ -2129,16 +2163,24 @@ impl Core {
     fn state(&self) -> AppState {
         let mut quotas: Vec<QuotaReading> = self.quotas.values().cloned().collect();
         quotas.sort_by(|a, b| (a.vendor, &a.window).cmp(&(b.vendor, &b.window)));
+        let states = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut projects = self.store.projects();
+        for project in &mut projects {
+            if let Some(state) = states.get(&project.id) {
+                project.set_state(*state);
+            }
+        }
         AppState {
             background: self.background.list(),
             conversations: self.listed(),
-            projects: self.store.projects(),
+            projects,
             groups: self.store.chat_groups().unwrap_or_default(),
             vendors: self.vendors(),
             settings: self.store.settings(),
             running: self.running.clone(),
             quotas,
             usage: self.usage(),
+            unclean_exit: self.unclean_exit,
         }
     }
 
@@ -3756,6 +3798,13 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
+        if let Some((area, project_id)) = self.convs.get(id).map(|c| (c.area, c.project_id.clone()))
+            && area == Area::Project
+            && let Err(err) = self.check_project_folder(project_id.as_deref())
+        {
+            self.requeue(id, item);
+            return Err(err);
+        }
         // A message Faber wrote that waited in the queue is dropped, not kept, once a goal's day is out of money (`goals.rs`).
         if item.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.approvedPlan" | "wake.goalBroke"))
             && self.goal_out_of_money(id)
@@ -4048,6 +4097,11 @@ impl Core {
 
     /// Every turn prepares its separate copy, then its rewind baseline, before starting the CLI.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        if let Some((area, project_id)) = self.convs.get(id).map(|c| (c.area, c.project_id.clone()))
+            && area == Area::Project
+        {
+            self.check_project_folder(project_id.as_deref())?;
+        }
         if self.rewind_blocked(id) {
             return Err("error.rewind.busy".into());
         }
@@ -4699,7 +4753,6 @@ impl Core {
         }
         self.validate_research(&req.text)?;
         let mut req = self.own_cli(req);
-        let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| {
             self.load(id).map(|c| {
                 // A send queued behind a move may still carry the screen's old area and project.
@@ -4708,6 +4761,10 @@ impl Core {
                 c.id.clone()
             })
         });
+        if req.area == Area::Project {
+            self.check_project_folder(req.project_id.as_deref())?;
+        }
+        let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
             return Err("error.rewind.busy".into());
         }
@@ -5008,7 +5065,7 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
-        if self.installing {
+        if self.installing || !self.project_warm_allowed(&req) {
             return;
         }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
@@ -5243,14 +5300,98 @@ impl Core {
         let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
         self.note_folder(path);
         if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
-            return Ok(found.clone());
+            let mut found = found.clone();
+            found.set_state(crate::project::folder_state(Path::new(&found.path)));
+            return Ok(found);
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
-        let project = Project::new(new_id(), name, path.to_string());
+        let mut project = Project::new(new_id(), name, path.to_string());
+        let state = crate::project::folder_state(Path::new(path));
+        project.set_state(state);
         projects.push(project.clone());
         self.store.save_projects(&projects).map_err(|e| e.key().to_string())?;
+        self.project_states.lock().unwrap_or_else(|e| e.into_inner()).insert(project.id.clone(), state);
         self.list_changed();
         Ok(project)
+    }
+
+    /// Points an existing project at a new folder after its folder moved, keeping its id and conversations intact.
+    fn repoint_project(&mut self, id: &str, path: &str) -> Result<Project, String> {
+        let p = Path::new(path);
+        if crate::permissions::forbidden_folder(p) {
+            return Err("error.workingFolder".into());
+        }
+        match crate::project::folder_state(p) {
+            FolderState::Present => {}
+            FolderState::Disconnected => return Err("error.project.disconnected".into()),
+            FolderState::Missing => return Err("error.project.missing".into()),
+        }
+        let Some(resolved) = crate::recents::resolved(path) else {
+            return Err("error.workingFolder".into());
+        };
+        let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
+        let Some(pos) = projects.iter().position(|p| p.id == id) else {
+            return Err("error.project.notFound".into());
+        };
+        if projects.iter().any(|p| p.id != id && crate::recents::same_place(&p.path, &resolved)) {
+            return Err("error.project.changed".into());
+        }
+        if self.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, self.live.get(&conv.id)).is_some()) {
+            return Err("error.project.busy".into());
+        }
+        let old_path = projects[pos].path.clone();
+        let name = Path::new(&resolved).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| resolved.clone());
+        projects[pos].path = resolved.clone();
+        projects[pos].name = name;
+        self.store.save_projects(&projects).map_err(|e| e.key().to_string())?;
+        projects[pos].set_state(FolderState::Present);
+        let mut recents = self.store.recents();
+        if recents.replace_folder(&old_path, &resolved).is_some() {
+            let _ = self.store.save_recents(&recents);
+        }
+        let idle_convs: Vec<String> = self.convs.values().filter(|c| c.project_id.as_deref() == Some(id)).map(|c| c.id.clone()).collect();
+        for conv_id in idle_convs {
+            if let Some(live) = self.retire(&conv_id) {
+                live.session.close();
+            }
+        }
+        self.goals.loaded = None;
+        self.mcp_servers.retain(|(project, _), _| project != id);
+        self.project_states.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), FolderState::Present);
+        self.list_changed();
+        Ok(projects.swap_remove(pos))
+    }
+
+    pub(super) fn check_project_folder(&mut self, project_id: Option<&str>) -> Result<(), String> {
+        let Some(project_id) = project_id else { return Err("error.projectGone".into()) };
+        let Some(project) = self.store.projects().into_iter().find(|p| p.id == project_id) else {
+            return Err("error.projectGone".into());
+        };
+        let state = crate::project::folder_state(Path::new(&project.path));
+        let changed = {
+            let mut map = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
+            map.insert(project.id, state) != Some(state)
+        };
+        if changed {
+            self.list_changed();
+        }
+        match state {
+            FolderState::Present => Ok(()),
+            FolderState::Disconnected => Err("error.project.disconnected".into()),
+            FolderState::Missing => Err("error.project.missing".into()),
+        }
+    }
+
+    /// Refusal is silent because speculative warm-up has no error channel.
+    fn project_warm_allowed(&mut self, req: &WarmRequest) -> bool {
+        let (area, project_id) = match req.conversation_id.as_deref().and_then(|id| self.load(id)) {
+            Some(c) => (c.area, c.project_id.clone()),
+            None => (req.area, req.project_id.clone()),
+        };
+        if area != Area::Project {
+            return true;
+        }
+        self.check_project_folder(project_id.as_deref()).is_ok()
     }
 }
 
@@ -5822,6 +5963,64 @@ mod tool_in_tests {
         let mut twice = vec![reply("a1", &["t"]), reply("a2", &["t"])];
         tool_in(&mut twice, Some("a1"), "t").unwrap().ok = Some(false);
         assert_eq!(twice[0].tools.as_ref().unwrap()[0].ok, Some(false), "the current reply is looked at first");
+    }
+
+    #[tokio::test]
+    async fn recovery_320_repoint_project_keeps_conversations_and_dismiss_clears_unclean_exit() {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        #[cfg(windows)]
+        let chat_dir = crate::permissions::checked_folder(dir.path()).expect("a checked parent").join("work");
+
+        let old_folder = dir.path().join("before-move");
+        let new_folder = dir.path().join("after-move");
+        std::fs::create_dir(&old_folder).unwrap();
+
+        crate::crash::start_run(&data_dir, "0.1.0", "abc");
+        assert!(crate::crash::start_run(&data_dir, "0.1.0", "abc"));
+
+        let e = Engine::new(
+            EngineOptions {
+                data_dir: data_dir.clone(),
+                #[cfg(windows)]
+                chat_dir,
+                clis: BTreeMap::new(),
+                spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no cli"))),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 1,
+                idle: Duration::from_secs(60),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+
+        assert!(e.state().unclean_exit.is_some());
+        e.dismiss_unclean_exit();
+        assert!(e.state().unclean_exit.is_none());
+
+        let project = e.open_folder(&old_folder.to_string_lossy()).unwrap();
+        std::fs::rename(&old_folder, &new_folder).unwrap();
+        e.refresh_project_folders();
+        for _ in 0..100 {
+            if e.state().projects[0].state() == FolderState::Missing {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(e.state().projects[0].state(), FolderState::Missing);
+
+        let updated = e.repoint_project(&project.id, &new_folder.to_string_lossy()).unwrap();
+        assert_eq!(updated.id, project.id);
+        assert_eq!(updated.name, "after-move");
+        assert_eq!(updated.state(), FolderState::Present);
+        assert_eq!(e.state().projects[0].state(), FolderState::Present);
+        assert_eq!(e.recents().folders[0].name, "after-move");
+        e.shutdown();
+        crate::crash::end_run(&data_dir);
     }
 }
 

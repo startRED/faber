@@ -180,3 +180,23 @@ async fn a_damaged_project_list_refuses_to_open_or_remove_and_keeps_every_byte()
     assert_eq!(std::fs::read_to_string(data.path().join("projects.json")).unwrap(), damaged, "the grants it held are not overwritten");
     e.shutdown();
 }
+
+#[tokio::test]
+async fn recovery_320_missing_project_folder_shows_in_state_and_recents() {
+    let data = crate::support::DataFolder::new();
+    let (_root, f) = folders(1);
+    let e = engine(&data);
+    e.open_folder(&f[0]).unwrap();
+    std::fs::remove_dir(&f[0]).unwrap();
+    e.set_attention(true, true);
+    for _ in 0..100 {
+        if serde_json::to_value(e.state()).unwrap()["projects"][0]["state"] == "missing" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let state_json = serde_json::to_value(e.state()).unwrap();
+    assert_eq!(state_json["projects"][0]["state"], "missing");
+    assert_eq!(e.recents().folders[0].reason, Some("reason.recents.gone"));
+    e.shutdown();
+}

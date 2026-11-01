@@ -417,6 +417,7 @@ export interface CliSession {
 }
 
 export interface Project {
+  state?: 'present' | 'missing' | 'disconnected';
   id: string;
   name: string;
   path: string;
@@ -625,6 +626,7 @@ export interface VendorUsage {
   ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
+  uncleanExit?: { at: number; started?: number; panic: boolean };
   conversations: Summary[];
   projects: Project[];
   // Absent in an older engine's state: no groups.
@@ -1041,6 +1043,9 @@ export const api = {
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
+  repointProject: (id: string, path?: string) => invoke<Project | null>('repoint_project', { id, path: path ?? null }),
+  dismissUncleanExit: () => invoke<void>('dismiss_unclean_exit'),
+  openLogFolder: () => invoke<string>('open_log_folder'),
   chatFolder: (id: string | undefined, scratch = false, path?: string) =>
     invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),
   recents: () => invoke<RecentsView>('recents'),

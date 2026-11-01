@@ -2415,5 +2415,17 @@ export const es: Messages = {
   'piece.discard': "Descartar cambio",
   'piece.retry': "Volver a intentar",
   'piece.show': "Mostrar {title}",
+  'error.project.missing': 'La carpeta de este proyecto no está o se movió. Indica su nuevo lugar en Faber o quítalo.',
+  'error.project.disconnected': 'La unidad de la carpeta de este proyecto no está conectada ahora.',
+  'projects.missingNote': 'La carpeta {path} no está o se movió. Tus conversaciones siguen aquí.',
+  'projects.disconnectedNote': 'La unidad de {path} no está conectada ahora. Tus conversaciones siguen aquí.',
+  'projects.findFolder': 'Buscar la carpeta',
+  'projects.removeFromFaber': 'Quitar de Faber',
+  'crash.note': 'Faber no terminó de cerrarse la última vez. Tus conversaciones y proyectos están a salvo.',
+  'crash.noteWhen': "Se detectó que la ejecución anterior no se cerró el {when}.",
+  'crash.notePanic': "Se registró un error grave.",
+  'crash.noteNoPanic': "No se registró ningún error grave.",
+  'crash.openLogs': 'Abrir la carpeta de registros',
+  'crash.dismiss': 'Cerrar',
 
 };

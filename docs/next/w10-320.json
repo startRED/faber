@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Faber now helps you find a moved project folder and tells you when it did not close cleanly.",
+      "pt-BR": "O Faber agora ajuda a encontrar uma pasta de projeto movida e avisa quando não fechou direito.",
+      "es": "Faber ahora te ayuda a encontrar una carpeta de proyecto movida y avisa si no se cerró correctamente.",
+      "fr": "Faber vous aide maintenant à retrouver un dossier de projet déplacé et vous prévient s’il ne s’est pas fermé correctement.",
+      "de": "Faber hilft dir jetzt, einen verschobenen Projektordner zu finden, und meldet, wenn es nicht richtig beendet wurde."
+    }
+  }
+}

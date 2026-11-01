@@ -2415,5 +2415,17 @@ export const de: Messages = {
   'piece.discard': "Änderung verwerfen",
   'piece.retry': "Erneut versuchen",
   'piece.show': "{title} anzeigen",
+  'error.project.missing': 'Der Ordner dieses Projekts fehlt oder wurde verschoben. Zeige Faber den neuen Ort oder entferne es.',
+  'error.project.disconnected': 'Das Laufwerk für den Ordner dieses Projekts ist gerade nicht verbunden.',
+  'projects.missingNote': 'Der Ordner {path} fehlt oder wurde verschoben. Deine Unterhaltungen sind noch da.',
+  'projects.disconnectedNote': 'Das Laufwerk für {path} ist gerade nicht verbunden. Deine Unterhaltungen sind noch da.',
+  'projects.findFolder': 'Ordner suchen',
+  'projects.removeFromFaber': 'Aus Faber entfernen',
+  'crash.note': 'Faber wurde beim letzten Mal nicht ordentlich beendet. Deine Unterhaltungen und Projekte sind sicher.',
+  'crash.noteWhen': "Der vorherige Lauf wurde am {when} als nicht beendet erkannt.",
+  'crash.notePanic': "Ein schwerer Fehler wurde aufgezeichnet.",
+  'crash.noteNoPanic': "Es wurde kein schwerer Fehler aufgezeichnet.",
+  'crash.openLogs': 'Protokollordner öffnen',
+  'crash.dismiss': 'Ausblenden',
 
 };
