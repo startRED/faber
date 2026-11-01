@@ -56,3 +56,52 @@ fn r_next_a_save_and_a_removal_show_in_the_next_list() {
     store.remove("c2");
     assert_eq!(titles(&store), ["Renamed"]);
 }
+
+#[test]
+fn a_conversation_file_is_written_compact_and_an_old_pretty_one_still_loads() {
+    let dir = support::tempdir();
+    let store = Store::new(dir.path());
+    let file = dir.path().join("conversations").join("c1.json");
+    // A file from before, written pretty, loads and is rewritten compact on its next save.
+    std::fs::write(&file, serde_json::to_string_pretty(&conversation("c1", "Old")).unwrap()).unwrap();
+    let mut c = store.get("c1").expect("a pretty file reads");
+    assert_eq!(c.title, "Old");
+    c.title = "Saved".into();
+    store.save(&c);
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(!text.contains('\n') && !text.contains("\": "), "no line break or indent between fields: {}", &text[..200]);
+    assert_eq!(store.get("c1").unwrap(), c, "loads equal");
+}
+
+/// The same 20 MB of tool records written both ways: the numbers of the commit that made conversation files compact.
+#[test]
+fn a_big_conversation_file_is_smaller_compact() {
+    let dir = support::tempdir();
+    let store = Store::new(dir.path());
+    let mut c = conversation("big", "Big");
+    let tool = json!({ "id": "t", "name": "Bash", "input": { "command": "x".repeat(100) }, "ok": true, "output": "y".repeat(2_000) });
+    let message = json!({ "id": "m", "role": "assistant", "text": "z".repeat(10_000), "at": 1, "status": "done", "tools": vec![tool; 35] });
+    c["messages"] = Value::Array(
+        (0..230)
+            .map(|i| {
+                let mut m = message.clone();
+                m["id"] = json!(format!("m{i}"));
+                m
+            })
+            .collect(),
+    );
+    let c: faber_engine::model::Conversation = serde_json::from_value(c).unwrap();
+    let file = dir.path().join("conversations").join("big.json");
+    // Serialised and written the same way, so the numbers differ only by the format.
+    let timed = |bytes: &dyn Fn() -> Vec<u8>| {
+        let start = std::time::Instant::now();
+        std::fs::write(&file, bytes()).unwrap();
+        (start.elapsed(), std::fs::metadata(&file).unwrap().len())
+    };
+    let (pretty_time, pretty) = timed(&|| serde_json::to_vec_pretty(&c).unwrap());
+    let (compact_time, compact) = timed(&|| serde_json::to_vec(&c).unwrap());
+    store.save(&c);
+    assert_eq!(std::fs::metadata(&file).unwrap().len(), compact, "the store writes the compact form");
+    println!("store: pretty {pretty} bytes in {pretty_time:?}, compact {compact} bytes in {compact_time:?}");
+    assert!(compact < pretty, "compact {compact} bytes, pretty {pretty}");
+}
