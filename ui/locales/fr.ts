@@ -74,6 +74,7 @@ export const fr: Messages = {
   "error.channel.hello": "La connexion ne s’est pas identifiée.",
   "error.channel.secret": "La clé de connexion a été refusée.",
   "error.channel.token": "Le jeton d’accès a été refusé.",
+  "error.channel.revoked": "Le jeton d’accès a été révoqué.",
   "error.channel.busy": "Faber a trop de connexions.",
   "error.channel.agentTurns": "Trop de réponses IA sont en cours ou ont été lancées récemment.",
   "error.channel.agentDepth": "Cette IA ne peut pas lancer une autre réponse.",

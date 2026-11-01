@@ -7,6 +7,7 @@ export const en = {
   "error.channel.hello": "The connection was not introduced.",
   "error.channel.secret": "The connection secret was rejected.",
   "error.channel.token": "The access token was rejected.",
+  "error.channel.revoked": "The access token was revoked.",
   "error.channel.busy": "Faber has too many connections.",
   "error.channel.agentTurns": "Too many AI turns are running or were started recently.",
   "error.channel.agentDepth": "This AI cannot start another turn.",

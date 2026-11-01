@@ -19,11 +19,15 @@ to the table is immediately callable through `faber call <command>` and listed i
 - **Per-run secret:** before listening, Faber writes 32 random bytes from the OS CSPRNG as 64 hex characters to
   `<data>/channel/secret` (readable only by the signed-in user). A client's first line (`hello`, within 5 s) must carry
   that secret; a missing or wrong one fails with `error.channel.secret` and closes.
-- **Conversation tokens:** a token `fa1.<base64url id>.<base64url HMAC>` (HMAC-SHA256 with this run's secret over `fa1.<id>`, checked in
-  constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`) with `FABER_AGENT_DEPTH`; a
-  tampered token or one from a previous run fails with `error.channel.token`. Faber gives Claude Code sessions their
-  conversation token at each start, including resumes and restarts. Codex sessions do not receive one yet, so they reach
-  Faber as an AI without a conversation.
+- **Conversation tokens:** a token `fa1.<base64url session and id>.<base64url HMAC>` (HMAC-SHA256 with this run's secret, checked in
+  constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`, or `FABER_AGENT_AUTH` when
+  Codex's shell filters token-named variables) with `FABER_AGENT_DEPTH`; a
+  tampered token or one from a previous run fails with `error.channel.token`; a closed session's token fails with
+  `error.channel.revoked`. Each Claude Code and Codex session gets a fresh token, including resumes. Codex gets a separate
+  process per conversation. Its shell snapshots may retain a token, but it is revoked when the session closes; Faber does
+  not write the token to its own files or put it in process arguments. Codex's own environment filters can still prevent the
+  identity from reaching a shell. In isolated mode, Faber runs its own command directly with the same identity. Revocation
+  cancels pending channel requests; work already completed cannot be undone.
 - **Starting Faber when closed:** if nothing answers on the channel, `faber` finds Faber's program (`FABER_APP`, or the app
   folder above its own `bin` folder), starts it hidden in the tray (`--autostart`, no console) and
   waits up to 10 s for the channel. `--no-start` and any process with `FABER_AGENT_DEPTH >= 1` never start Faber and exit
@@ -59,7 +63,7 @@ The screen reads `asks` on opening and after an `asks` event to recover each pen
 the person must perform the action on the screen. Person-only and screen-only commands are never askable.
 
 What the rules do not stop: they keep a well-meant AI on its own work. An AI runs as the same user as the person, so a
-program that sets out to break them can read `<data>/channel/secret`, make a token for another conversation, or act as
+program that sets out to break them can read `<data>/channel/secret`, copy a live token from another process, or act as
 the person at a terminal (on Unix, with no job to tell it apart, an AI that drops `FABER_AGENT_DEPTH` is taken for the
 person). The channel is a wall against other accounts and other machines, not against the person's own programs.
 

@@ -376,6 +376,7 @@ pub enum SessionCommand {
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
     tree: Option<crate::proc::OwnedTree>,
+    identity: Option<std::sync::Arc<crate::proc::ConversationIdentity>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -400,7 +401,11 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), tree: None }
+        Session { send: std::sync::Arc::new(send), tree: None, identity: None }
+    }
+    pub(crate) fn with_identity(mut self, identity: std::sync::Arc<crate::proc::ConversationIdentity>) -> Self {
+        self.identity = Some(identity);
+        self
     }
     pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
         self.tree = tree;
@@ -444,6 +449,9 @@ impl Session {
         (self.send)(SessionCommand::Interrupt);
     }
     pub fn close(&self) {
+        if let Some(identity) = &self.identity {
+            identity.revoke();
+        }
         (self.send)(SessionCommand::Close);
     }
     pub fn retire(&self) {

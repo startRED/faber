@@ -1,5 +1,4 @@
-//! Codex driver: one shared `codex app-server` process, spoken to over JSON-RPC on stdio, with each conversation as a
-//! thread in it.
+//! Codex driver: `codex app-server` processes spoken to over JSON-RPC on stdio.
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
@@ -1187,26 +1186,46 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     (method, Value::Object(params))
 }
 
-/// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
-/// conversations cost one process instead of one each (measured: about 50 MB for three threads).
+/// A Codex app-server; identified conversations use a dedicated process, while internal sessions may share one.
 #[derive(Clone)]
 pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
     next: Arc<AtomicU64>,
     alive: Arc<AtomicBool>,
     tree: Option<proc::OwnedTree>,
+    identity: Option<Arc<proc::ConversationIdentity>>,
 }
 
 impl CodexServer {
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {
+        Self::start_inner(opts, None, None)
+    }
+
+    pub(crate) fn start_identified(
+        opts: CodexServerOptions,
+        identity: Arc<proc::ConversationIdentity>,
+        command_spawn: Spawner,
+    ) -> CodexServer {
+        Self::start_inner(opts, Some(identity), Some(command_spawn))
+    }
+
+    fn start_inner(
+        opts: CodexServerOptions,
+        identity: Option<Arc<proc::ConversationIdentity>>,
+        command_spawn: Option<Spawner>,
+    ) -> CodexServer {
         let (tx, rx) = unbounded_channel();
-        let args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
-        let started = (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
+        let mut args = codex_args(opts.area, opts.windows, opts.user_hooks, opts.permissions);
+        if identity.as_ref().is_some_and(|identity| identity.token.is_some()) {
+            args.extend(["-c".into(), "shell_environment_policy.ignore_default_excludes=false".into()]);
+        }
+        let spawn = || (opts.spawn)(&opts.cli.command, &args, &opts.cwd);
+        let started = if let Some(identity) = &identity { proc::with_identity(identity, spawn) } else { spawn() };
         let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
         let alive = Arc::new(AtomicBool::new(true));
-        tokio::spawn(serve(started, opts, rx, alive.clone()));
-        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), alive, tree }
+        tokio::spawn(serve_identified(started, opts, rx, alive.clone(), identity.clone(), command_spawn));
+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), alive, tree, identity }
     }
 
     pub fn owned_tree(&self) -> Option<proc::OwnedTree> {
@@ -1229,6 +1248,11 @@ impl CodexServer {
     }
 
     fn open_inner(&self, thread: CodexThread, sink: EventSink, tools: Option<crate::tools::Delivery>) -> Session {
+        let sink = self
+            .identity
+            .as_ref()
+            .and_then(|identity| identity.token.clone())
+            .map_or_else(|| sink.clone(), |token| redact_sink(sink.clone(), token));
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) =
             self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools })
@@ -1238,7 +1262,8 @@ impl CodexServer {
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
-        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone())
+        let session = Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone());
+        if let Some(identity) = &self.identity { session.with_identity(identity.clone()) } else { session }
     }
 
     /// The catalog's tools as the store sees them now (`crate::tools`): a store that could not be made clean takes them away
@@ -1253,12 +1278,138 @@ impl CodexServer {
     }
 }
 
+pub(crate) fn redact_sink(sink: EventSink, token: String) -> EventSink {
+    let pending = std::sync::Mutex::new((String::new(), String::new(), HashMap::<String, String>::new()));
+    let original = sink;
+    Arc::new(move |mut event| {
+        match &mut event {
+            EngineEvent::Tool { input, .. }
+            | EngineEvent::BrowseCall { input, .. }
+            | EngineEvent::ConversationCall { input, .. }
+            | EngineEvent::VerifyCall { input, .. }
+            | EngineEvent::MapCall { input, .. }
+            | EngineEvent::ToolboxCall { input, .. }
+            | EngineEvent::ProgressCall { input, .. }
+            | EngineEvent::HelperCall { input, .. }
+            | EngineEvent::Permission { input, .. }
+            | EngineEvent::Parked { input, .. } => redact_value(input, &token),
+            EngineEvent::Background(crate::background::Update::Start { command, .. }) => *command = command.replace(&token, "[redacted]"),
+            _ => {}
+        }
+        let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+        match event {
+            EngineEvent::Text(delta) => {
+                let safe = redact_delta(&mut pending.0, &delta, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::Text(safe));
+                }
+            }
+            EngineEvent::Thinking(delta) => {
+                let safe = redact_delta(&mut pending.1, &delta, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::Thinking(safe));
+                }
+            }
+            EngineEvent::Background(crate::background::Update::Output { id, text, replace }) => {
+                let buffer = pending.2.entry(id.clone()).or_default();
+                if replace {
+                    buffer.clear();
+                }
+                let safe = redact_delta(buffer, &text, &token);
+                if replace || !safe.is_empty() {
+                    original(EngineEvent::Background(crate::background::Update::Output { id, text: safe, replace }));
+                }
+            }
+            EngineEvent::Background(crate::background::Update::End { id, state }) => {
+                if let Some(words) = pending.2.remove(&id).filter(|words| !words.is_empty()) {
+                    original(EngineEvent::Background(crate::background::Update::Output { id: id.clone(), text: words, replace: false }));
+                }
+                original(EngineEvent::Background(crate::background::Update::End { id, state }));
+            }
+            EngineEvent::Error { message, fatal } => {
+                original(EngineEvent::Error { message: message.replace(&token, "[redacted]"), fatal });
+            }
+            EngineEvent::ToolResult { id, ok, declined, text } => {
+                original(EngineEvent::ToolResult { id, ok, declined, text: text.replace(&token, "[redacted]") });
+            }
+            EngineEvent::HelperDone { id, ok, text } => {
+                if let Some(words) = pending.2.remove(&format!("child:{id}")).filter(|words| !words.is_empty()) {
+                    original(EngineEvent::ChildWords { parent: id.clone(), text: words });
+                }
+                original(EngineEvent::HelperDone { id, ok, text: text.replace(&token, "[redacted]") });
+            }
+            EngineEvent::ChildWords { parent, text } => {
+                let buffer = pending.2.entry(format!("child:{parent}")).or_default();
+                let safe = redact_delta(buffer, &text, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::ChildWords { parent, text: safe });
+                }
+            }
+            other => {
+                if matches!(&other, EngineEvent::Break { .. } | EngineEvent::Done { .. } | EngineEvent::WriterExit { .. }) {
+                    if !pending.0.is_empty() {
+                        original(EngineEvent::Text(std::mem::take(&mut pending.0)));
+                    }
+                    if !pending.1.is_empty() {
+                        original(EngineEvent::Thinking(std::mem::take(&mut pending.1)));
+                    }
+                }
+                original(other);
+            }
+        }
+    })
+}
+
+fn redact_value(value: &mut Value, token: &str) {
+    match value {
+        Value::String(text) => *text = text.replace(token, "[redacted]"),
+        Value::Array(values) => values.iter_mut().for_each(|value| redact_value(value, token)),
+        Value::Object(values) => {
+            let original = std::mem::take(values);
+            for (key, mut value) in original {
+                redact_value(&mut value, token);
+                values.insert(key.replace(token, "[redacted]"), value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_delta(pending: &mut String, delta: &str, token: &str) -> String {
+    pending.push_str(delta);
+    let mut safe = pending.replace(token, "[redacted]");
+    let keep = safe.char_indices().map(|(index, _)| index).find(|&index| token.starts_with(&safe[index..])).unwrap_or(safe.len());
+    *pending = safe.split_off(keep);
+    safe
+}
+
+#[cfg(test)]
 async fn serve(
+    started: std::io::Result<proc::Proc>,
+    opts: CodexServerOptions,
+    rx: UnboundedReceiver<ServerCommand>,
+    alive: Arc<AtomicBool>,
+) {
+    serve_identified(started, opts, rx, alive, None, None).await;
+}
+
+async fn serve_identified(
     started: std::io::Result<proc::Proc>,
     opts: CodexServerOptions,
     mut rx: UnboundedReceiver<ServerCommand>,
     alive: Arc<AtomicBool>,
+    identity: Option<Arc<proc::ConversationIdentity>>,
+    command_spawn: Option<Spawner>,
 ) {
+    struct Revoke(Option<Arc<proc::ConversationIdentity>>);
+    impl Drop for Revoke {
+        fn drop(&mut self) {
+            if let Some(identity) = &self.0 {
+                identity.revoke();
+            }
+        }
+    }
+    let _revoke = Revoke(identity.clone());
     let area = opts.area;
     let mut p = match started {
         Ok(p) => p,
@@ -1268,7 +1419,9 @@ async fn serve(
             rx.close();
             while let Some(cmd) = rx.recv().await {
                 if let ServerCommand::Open { sink, .. } = cmd {
-                    sink(EngineEvent::Error { message: format!("Codex could not start: {err}"), fatal: true });
+                    let message =
+                        if identity.is_some() { "Codex could not start.".into() } else { format!("Codex could not start: {err}") };
+                    sink(EngineEvent::Error { message, fatal: true });
                     sink(EngineEvent::WriterExit { confirmed: true });
                 }
             }
@@ -1493,7 +1646,8 @@ async fn serve(
                     if !stopping {
                         let code = tokio::time::timeout(Duration::from_secs(1), proc::exit_code(&mut child))
                             .await.unwrap_or_else(|_| "unknown".into());
-                        let message = format!("Codex stopped (exit {code}). {}", tail.lock().unwrap()).trim().to_string();
+                        let tail = if identity.is_some() { String::new() } else { tail.lock().unwrap().clone() };
+                        let message = format!("Codex stopped (exit {code}). {tail}").trim().to_string();
                         for t in threads.values() {
                             (t.sink)(EngineEvent::Writers { active: vec![], unknown: true });
                             (t.sink)(EngineEvent::Error { message: message.clone(), fatal: true });
@@ -1501,6 +1655,7 @@ async fn serve(
                     }
                     break;
                 };
+                let line = identity.as_ref().and_then(|i| i.token.as_deref()).map_or(line.clone(), |token| line.replace(token, "[redacted]"));
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -1794,19 +1949,26 @@ async fn serve(
                             let mut accepted = false;
                             if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
-                                if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
+                                let own_command = proc::cli_binary().and_then(|path| crate::permissions::faber_command(input, &path));
+                                if let Some(argv) = own_command.or_else(|| crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli)) {
                                     let key = top.expect("registered command thread");
-                                    let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
+                                    let (spawn, cwd, tx, id) = (command_spawn.clone().unwrap_or_else(|| opts.spawn.clone()), t.params.cwd.clone(), command_tx.clone(), id.clone());
+                                    let identity = identity.clone();
                                     let command = id.to_string();
                                     let (cancel, cancelled) = tokio::sync::oneshot::channel();
                                     // The task cannot start until its writer is visible to the engine.
                                     let (admit, admitted) = tokio::sync::oneshot::channel();
                                     let job = tokio::spawn(async move {
                                         if admitted.await.is_err() { return; }
-                                        let result = match spawn(&argv[0], &argv[1..], &cwd) {
+                                        let run = || spawn(&argv[0], &argv[1..], &cwd);
+                                        let started = if let Some(identity) = &identity { proc::with_identity(identity, run) } else { run() };
+                                        let mut result = match started {
                                             Ok(p) => proc::command_output(p, cancelled).await,
                                             Err(_) => proc::CommandOutput { success: false, text: "error.projectSandbox".into(), confirmed: true, unresolved: None },
                                         };
+                                        if let Some(token) = identity.as_ref().and_then(|identity| identity.token.as_deref()) {
+                                            result.text = result.text.replace(token, "[redacted]");
+                                        }
                                         let _ = tx.send((key, id, result));
                                     });
                                     t.commands.insert(command, (Some(cancel), job));
@@ -2408,6 +2570,156 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
 #[cfg(test)]
 mod rewind_tests {
     use super::*;
+
+    #[test]
+    fn streamed_secret_is_redacted_across_deltas() {
+        let mut pending = String::new();
+        let mut output = redact_delta(&mut pending, "answer fa", "fa1.secret");
+        output.push_str(&redact_delta(&mut pending, "1.sec", "fa1.secret"));
+        output.push_str(&redact_delta(&mut pending, "ret done", "fa1.secret"));
+        output.push_str(&pending);
+        assert_eq!(output, "answer [redacted] done");
+    }
+
+    #[test]
+    fn streamed_secrets_remain_redacted_across_other_events_and_background_output() {
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let capture = recorded.clone();
+        let sink = redact_sink(Arc::new(move |event| capture.lock().unwrap().push(event)), "fa1.secret".into());
+        sink(EngineEvent::Text("fa1.".into()));
+        sink(EngineEvent::Quota { window: "test".into(), used: 0.0, resets_at: 0.0 });
+        sink(EngineEvent::Text("secret".into()));
+        for text in ["fa1.", "secret"] {
+            sink(EngineEvent::Background(crate::background::Update::Output { id: "cmd".into(), text: text.into(), replace: false }));
+        }
+        sink(EngineEvent::Permission {
+            request_id: "r".into(),
+            tool: "Bash".into(),
+            input: json!({"command":"echo fa1.secret", "fa1.secret":"x"}),
+        });
+        sink(EngineEvent::ToolResult { id: "r".into(), ok: true, declined: false, text: "fa1.secret".into() });
+        sink(EngineEvent::Text("off".into()));
+        sink(EngineEvent::Break { final_answer: false });
+        sink(EngineEvent::Text("next".into()));
+        let events = recorded.lock().unwrap();
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::Text(text) if text == "[redacted]")));
+        assert!(events.iter().any(
+            |e| matches!(e, EngineEvent::Permission { input, .. } if input["command"] == "echo [redacted]" && input["[redacted]"] == "x")
+        ));
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::ToolResult { text, .. } if text == "[redacted]")));
+        let words: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(words, ["[redacted]", "of", "f", "next"]);
+        let boundary = events.iter().position(|event| matches!(event, EngineEvent::Break { .. })).unwrap();
+        assert!(matches!(&events[boundary - 1], EngineEvent::Text(text) if text == "f"));
+        assert!(matches!(&events[boundary + 1], EngineEvent::Text(text) if text == "next"));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::Background(crate::background::Update::Output { text, .. }) if text == "[redacted]"))
+        );
+    }
+
+    #[tokio::test]
+    async fn isolated_fake_server_passes_identity_to_the_sandboxed_command() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let message: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if message["method"] != "skills/list" {
+                    return message;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, value: Value) {
+            pipe.write_all(format!("{value}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let root = tempfile::tempdir().unwrap();
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read_pipe, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read_pipe).lines();
+            let (tx, rx) = unbounded_channel();
+            let (captured, mut commands) = unbounded_channel();
+            let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+                let command = proc::marked(bin, args, cwd);
+                let env = command.as_std().get_envs().filter_map(|(k,v)| v.map(|v| (k.to_owned(),v.to_owned())))
+                    .collect::<HashMap<_,_>>();
+                captured.send((bin.to_owned(), args.to_vec(), env)).unwrap();
+                Err(std::io::Error::other("fake"))
+            });
+            let opts = CodexServerOptions {
+                permissions: Permissions::Isolated,
+                cli: crate::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: root.path().into(), area: Area::Chat, user_hooks: false, windows: false,
+                spawn: spawn.clone(), tools: Default::default(),
+            };
+            let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None };
+            let server = tokio::spawn(serve_identified(Ok(p), opts, rx, Arc::new(AtomicBool::new(true)), Some(identity), Some(spawn)));
+            let init = read(&mut output).await;
+            write(&mut input, json!({"id":init["id"],"result":{}})).await;
+            assert_eq!(read(&mut output).await["method"], "initialized");
+            let sink: EventSink = Arc::new(|_| {});
+            let mut params = thread(sink.clone()).params;
+            params.cwd = root.path().into();
+            params.permissions = Permissions::Isolated;
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None }).unwrap();
+            let config = read(&mut output).await;
+            assert_eq!(config["method"], "config/read");
+            write(&mut input, json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
+            let open = read(&mut output).await;
+            assert_eq!(open["method"], "thread/start");
+            write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner","model":"test"}}})).await;
+            write(&mut input, json!({"id":"call","method":"item/tool/call","params":{"threadId":"owner","tool":"run_command","arguments":{"command":"cargo test"}}})).await;
+            let (bin, args, env) = commands.recv().await.unwrap();
+            assert_eq!(bin, "codex");
+            assert!(args.iter().all(|arg| !arg.contains("test-key")));
+            assert!(args.iter().any(|arg| arg == "shell_environment_policy.ignore_default_excludes=false"));
+            assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
+            assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
+            server.abort();
+        }).await.expect("the isolated fake command was never dispatched");
+    }
+
+    #[tokio::test]
+    async fn identified_server_passes_its_key_in_the_environment_only() {
+        let recorded = Arc::new(std::sync::Mutex::new(None));
+        let capture = recorded.clone();
+        let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+            let command = proc::marked(bin, args, cwd);
+            let env = command.as_std().get_envs().filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned()))).collect::<HashMap<_, _>>();
+            *capture.lock().unwrap() = Some((args.to_vec(), env));
+            Err(std::io::Error::other("fake"))
+        });
+        let opts = CodexServerOptions {
+            permissions: Permissions::Ask,
+            cli: crate::cli::Cli { command: "fake".into(), prefix: vec![] },
+            cwd: PathBuf::new(),
+            area: Area::Chat,
+            user_hooks: false,
+            windows: false,
+            spawn: spawn.clone(),
+            tools: Default::default(),
+        };
+        let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
+        let _server = CodexServer::start_identified(opts, identity, spawn);
+        let recorded = recorded.lock().unwrap();
+        let (args, env) = recorded.as_ref().unwrap();
+        assert!(args.iter().all(|arg| !arg.contains("test-key")));
+        assert!(args.iter().any(|arg| arg == "shell_environment_policy.ignore_default_excludes=false"));
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()),
+            Some(std::ffi::OsStr::new("test-key"))
+        );
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("one")));
+    }
 
     fn thread(sink: EventSink) -> Thread {
         Thread {

@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Codex can now ask for permission and work with its own conversation.",
+      "pt-BR": "O Codex agora pode pedir permissão e trabalhar com a própria conversa.",
+      "es": "Codex ya puede pedir permiso y trabajar con su propia conversación.",
+      "fr": "Codex peut maintenant demander une autorisation et travailler avec sa propre conversation.",
+      "de": "Codex kann jetzt um Erlaubnis bitten und mit seiner eigenen Unterhaltung arbeiten."
+    }
+  },
+  "decisions": [
+    "| R-next-8 | 2026-10-31 | Each conversation session receives a fresh revocable channel token; Codex uses a separate process and isolated Faber commands carry the same identity. | AI (owner delegated) |"
+  ]
+}

@@ -263,6 +263,16 @@ pub fn command_argv(
     Some(command)
 }
 
+/// The shipped command reaches only the host's checked command table.
+pub(crate) fn faber_command(input: &Value, executable: &Path) -> Option<Vec<String>> {
+    let mut args = words(input["command"].as_str()?)?;
+    if !["faber", "faber.exe"].iter().any(|name| args[0].eq_ignore_ascii_case(name)) {
+        return None;
+    }
+    args[0] = executable.to_str()?.to_owned();
+    Some(args)
+}
+
 /// Child commands get no Git transport or GitHub authentication, without reading any credential value.
 pub fn child_env(root: &Path) -> Value {
     let tmp = root.join(".faber/tmp");
@@ -906,6 +916,14 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_faber_command_uses_only_the_shipped_executable() {
+        let cli = Path::new("trusted-faber.exe");
+        assert_eq!(faber_command(&json!({"command":"faber asks --json"}), cli).unwrap(), ["trusted-faber.exe", "asks", "--json"]);
+        assert!(faber_command(&json!({"command":"other asks"}), cli).is_none());
+        assert!(faber_command(&json!({"command":"faber asks; other"}), cli).is_none());
+    }
 
     #[test]
     fn review3_sensitive_roots_include_canonical_home_drive_and_system_subtrees() {

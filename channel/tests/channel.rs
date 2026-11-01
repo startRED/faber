@@ -103,7 +103,7 @@ async fn secrets_and_tokens_are_checked_before_any_command() {
     for (args, key) in [
         (json!({}), "error.channel.secret"),
         (json!({"secret": "wrong"}), "error.channel.secret"),
-        (json!({"secret": test_secret().hex(), "token": test_secret().token("c1").replace(".YzE.", ".YzI.")}), "error.channel.token"),
+        (json!({"secret": test_secret().hex(), "token": "fa1.invalid.invalid"}), "error.channel.token"),
     ] {
         let (backend, _) = fake();
         let (mut client, server) = tokio::io::duplex(4096);
@@ -115,11 +115,102 @@ async fn secrets_and_tokens_are_checked_before_any_command() {
     }
     let (backend, _) = fake();
     let (ours, theirs) = tokio::io::duplex(4096);
-    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), test_secret(), 0));
-    let hello = Hello { secret: test_secret().hex(), token: Some(test_secret().token("c1")), ..Default::default() };
+    let secret = test_secret();
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(secret.token("c1")), ..Default::default() };
     let client = Client::over(ours, hello).await.unwrap();
     assert_eq!(client.offer["caller"], json!({"kind":"agent", "conversation":"c1"}));
     assert_eq!(client.call("hello", json!({})).await.unwrap(), Err("error.channel.hello".into()));
+}
+
+#[tokio::test]
+async fn revocation_stops_an_existing_connection_and_does_not_restore_it_on_resume() {
+    let (backend, _) = fake();
+    let secret = test_secret();
+    let token = secret.token("c1");
+    let (ours, theirs) = tokio::io::duplex(4096);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(token.clone()), ..Default::default() };
+    let client = Client::over(ours, hello).await.unwrap();
+    assert!(client.call("state", Value::Null).await.unwrap().is_ok());
+    secret.revoke(&token);
+    let next = secret.token("c1");
+    assert_ne!(token, next);
+    assert_eq!(client.call("state", Value::Null).await.unwrap(), Err("error.channel.revoked".into()));
+    let (ours, theirs) = tokio::io::duplex(4096);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let hello = Hello { secret: secret.hex(), token: Some(token), ..Default::default() };
+    assert_eq!(Client::over(ours, hello).await.err().unwrap().to_string(), "error.channel.revoked");
+}
+
+#[tokio::test]
+async fn revocation_cancels_a_command_before_its_pending_mutation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::Notify;
+
+    struct Pending {
+        events: broadcast::Sender<Value>,
+        started: Arc<Notify>,
+        release: Arc<Notify>,
+        dropped: Arc<Notify>,
+        changed: Arc<AtomicBool>,
+    }
+    struct OnDrop(Arc<Notify>);
+    impl Drop for OnDrop {
+        fn drop(&mut self) {
+            self.0.notify_one();
+        }
+    }
+    impl Backend for Pending {
+        fn version(&self) -> String {
+            String::new()
+        }
+        fn commands(&self) -> Value {
+            json!([])
+        }
+        fn starts_turn(&self, _: &str) -> bool {
+            false
+        }
+        fn dispatch(&self, _: &faber_channel::Who, _: String, _: Value) -> Answer {
+            let (started, release, dropped, changed) =
+                (self.started.clone(), self.release.clone(), self.dropped.clone(), self.changed.clone());
+            Box::pin(async move {
+                let _on_drop = OnDrop(dropped);
+                started.notify_one();
+                release.notified().await;
+                changed.store(true, Ordering::SeqCst);
+                Ok(Value::Null)
+            })
+        }
+        fn subscribe(&self) -> broadcast::Receiver<Value> {
+            self.events.subscribe()
+        }
+    }
+
+    let (events, _) = broadcast::channel(4);
+    let backend = Arc::new(Pending {
+        events,
+        started: Arc::new(Notify::new()),
+        release: Arc::new(Notify::new()),
+        dropped: Arc::new(Notify::new()),
+        changed: Arc::new(AtomicBool::new(false)),
+    });
+    let secret = test_secret();
+    let token = secret.token("one");
+    let other = secret.token("other");
+    let (ours, theirs) = tokio::io::duplex(4096);
+    tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
+    let client = Client::over(ours, Hello { secret: secret.hex(), token: Some(token.clone()), ..Default::default() }).await.unwrap();
+    let call = tokio::spawn(async move { client.call("mutate", Value::Null).await });
+    backend.started.notified().await;
+    secret.revoke(&other);
+    tokio::task::yield_now().await;
+    assert!(!call.is_finished(), "another session's revocation must not cancel this request");
+    secret.revoke(&token);
+    tokio::time::timeout(Duration::from_secs(1), backend.dropped.notified()).await.expect("the revoked command was not cancelled");
+    backend.release.notify_one();
+    assert!(!backend.changed.load(Ordering::SeqCst));
+    let _ = call.await;
 }
 
 #[tokio::test(start_paused = true)]

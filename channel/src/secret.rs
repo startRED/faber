@@ -5,16 +5,19 @@
 //! client can read Faber's own data folder in this run, so a process that only finds the channel's name (another account, a
 //! sandboxed or lower-integrity process, a page in a browser) gets nothing, and a secret copied yesterday opens nothing today.
 //!
-//! An AI's token is `fa1.<conversation id in base64url>.<HMAC-SHA256 of it under the secret, base64url>`: Faber gives it to
+//! An AI's token is `fa1.<session and conversation in base64url>.<HMAC-SHA256 of it under the secret, base64url>`: Faber gives it to
 //! the CLI that runs a conversation, and the channel reads from it which conversation, and so which family, the AI acts for.
-//! Any program of the same user can read the secret file and so make a token; the rules of who may do what keep a well-meant
+//! Any program of the same user may copy a live token from another process; the rules of who may do what keep a well-meant
 //! AI on its own work, and are no wall against a program of the person's that sets out to break them.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The file of the secret inside the data folder.
 pub fn file(data: &Path) -> PathBuf {
@@ -22,7 +25,7 @@ pub fn file(data: &Path) -> PathBuf {
 }
 
 #[derive(Clone)]
-pub struct Secret([u8; 32]);
+pub struct Secret([u8; 32], Arc<Mutex<HashMap<String, String>>>, Arc<AtomicU64>, tokio::sync::watch::Sender<u64>);
 
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,7 +38,7 @@ impl Secret {
     pub fn fresh() -> io::Result<Secret> {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
-        Ok(Secret(bytes))
+        Ok(Secret(bytes, Arc::default(), Arc::default(), tokio::sync::watch::channel(0).0))
     }
 
     pub fn hex(&self) -> String {
@@ -52,7 +55,7 @@ impl Secret {
         for (i, byte) in bytes.iter_mut().enumerate() {
             *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16).ok()?;
         }
-        Some(Secret(bytes))
+        Some(Secret(bytes, Arc::default(), Arc::default(), tokio::sync::watch::channel(0).0))
     }
 
     /// Whether a client said this secret, compared in a time that does not depend on where the two first differ.
@@ -82,16 +85,46 @@ impl Secret {
 
     /// The token of an AI that works in `conversation`.
     pub fn token(&self, conversation: &str) -> String {
-        format!("fa1.{}.{}", URL_SAFE_NO_PAD.encode(conversation), URL_SAFE_NO_PAD.encode(self.tag(conversation)))
+        let payload = format!("{}:{}", self.2.fetch_add(1, Ordering::Relaxed), conversation);
+        let token = format!("fa1.{}.{}", URL_SAFE_NO_PAD.encode(&payload), URL_SAFE_NO_PAD.encode(self.tag(&payload)));
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).insert(token.clone(), conversation.into());
+        token
     }
 
     /// The conversation a token names, when this secret made it.
     pub fn conversation_of(&self, token: &str) -> Option<String> {
+        if !self.signed(token) {
+            return None;
+        }
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).get(token).cloned()
+    }
+
+    /// Admit a request under the same lock that revokes its session.
+    pub(crate) fn admit<T>(&self, token: Option<&str>, run: impl FnOnce() -> T) -> Option<T> {
+        if let Some(token) = token {
+            let active = self.1.lock().unwrap_or_else(|e| e.into_inner());
+            active.contains_key(token).then(run)
+        } else {
+            Some(run())
+        }
+    }
+
+    pub(crate) fn signed(&self, token: &str) -> bool {
         let mut parts = token.trim().split('.');
-        let (Some("fa1"), Some(id), Some(tag), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return None };
-        let id = String::from_utf8(URL_SAFE_NO_PAD.decode(id).ok()?).ok()?;
-        let tag = URL_SAFE_NO_PAD.decode(tag).ok()?;
-        (!id.is_empty() && same(&tag, &self.tag(&id))).then_some(id)
+        let (Some("fa1"), Some(id), Some(tag), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return false };
+        let Some(payload) = URL_SAFE_NO_PAD.decode(id).ok().and_then(|bytes| String::from_utf8(bytes).ok()) else { return false };
+        let Some(tag) = URL_SAFE_NO_PAD.decode(tag).ok() else { return false };
+        same(&tag, &self.tag(&payload))
+    }
+
+    /// Revokes exactly this session's token, including after its conversation resumes.
+    pub fn revoke(&self, token: &str) {
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).remove(token);
+        self.3.send_modify(|generation| *generation = generation.wrapping_add(1));
+    }
+
+    pub(crate) fn changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.3.subscribe()
     }
 
     /// HMAC-SHA256 (RFC 2104) of the conversation id under the secret, with a label so the tag means nothing else.
@@ -185,6 +218,18 @@ mod tests {
         for bad in ["", "fa1", "fa1..", "fa2.YQ.YQ", &format!("{token}.x"), &token.replace("fa1", "fa0")] {
             assert_eq!(secret.conversation_of(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn revoking_one_session_does_not_restore_it_when_the_conversation_reopens() {
+        let secret = Secret::fresh().unwrap();
+        let first = secret.token("one");
+        let next = secret.token("one");
+        assert_ne!(first, next);
+        secret.revoke(&first);
+        assert!(secret.signed(&first));
+        assert_eq!(secret.conversation_of(&first), None);
+        assert_eq!(secret.conversation_of(&next).as_deref(), Some("one"));
     }
 
     #[test]

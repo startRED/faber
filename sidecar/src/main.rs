@@ -40,6 +40,15 @@ fn main() -> ExitCode {
     if let Some(code) = faber_engine::proc::guard_mode() {
         return ExitCode::from(u8::try_from(code).unwrap_or(1));
     }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let name = if cfg!(windows) { "faber.exe" } else { "faber" };
+        let development = if cfg!(windows) { "faber-cli.exe" } else { "faber-cli" };
+        if let Some(cli) = [dir.join("bin").join(name), dir.join(development)].into_iter().find(|path| path.is_file()) {
+            faber_engine::proc::set_cli(cli);
+        }
+    }
     // Before any HTTPS client: reqwest is built without a crypto provider of its own.
     faber_engine::tls::install();
     match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
