@@ -30,7 +30,7 @@ pub(super) const GOAL_CAP: &str = "the day's limit for fixes of the project's go
 const MAX_LISTED: usize = 12;
 
 /// Where a conversation stands; `busy` is whether its CLI runs a turn now.
-fn state_of(busy: bool, c: &Conversation) -> State {
+pub(super) fn state_of(busy: bool, c: &Conversation) -> State {
     if !busy && c.waiting_on.is_some() {
         return State::Waiting;
     }
@@ -120,6 +120,7 @@ impl Core {
     /// The agent called the conversation tool. Every call is answered at once, with why when nothing was done.
     pub(super) fn conversation_call(&mut self, conv: &str, call: String, input: serde_json::Value) {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
+        let is_start = matches!(sibling::request(&input), Ok(Request::Start { .. }));
         let (ok, text) = match sibling::request(&input) {
             Err(why) => (false, format!("Nothing was done: {why}.")),
             Ok(Request::Start { title, brief, ai, model, effort, keep_going, step }) => {
@@ -155,6 +156,10 @@ impl Core {
                 Err(why) => (false, format!("Nothing was archived: {why}.")),
             },
         };
+        // Record the result on the call as well as returning it to the agent.
+        if is_start && ok {
+            self.handle(conv, sid, crate::events::EngineEvent::ToolResult { id: call.clone(), ok, declined: false, text: text.clone() });
+        }
         // The answer goes back only to the process that asked.
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
             l.session.helper_reply(&call, ok, text);
@@ -787,6 +792,22 @@ mod tests {
             c.started_by = Some("lead".into());
             c.messages.push(reply);
         }
+    }
+
+    #[tokio::test]
+    async fn child_summary_tracks_its_reply_and_wait() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|core| {
+            started(core, 1, false);
+            let c = core.convs.values_mut().find(|c| c.started_by.is_some()).unwrap();
+            assert_eq!(crate::engine::child_state(c), "working");
+            c.messages.last_mut().unwrap().status = Some(Status::Error);
+            assert_eq!(crate::engine::child_state(c), "failed");
+            c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "Waiting for review".into(), since: 0 });
+            assert_eq!(crate::engine::child_state(c), "waiting");
+        });
+        engine.shutdown();
     }
 
     #[tokio::test]

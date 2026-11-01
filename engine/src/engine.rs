@@ -220,6 +220,22 @@ pub struct WarmRequest {
     pub choice: Choice,
 }
 
+/// The durable projection used by linked conversation rows.
+pub(crate) fn child_state(c: &Conversation) -> String {
+    use crate::sibling::State;
+    match siblings::state_of(false, c) {
+        State::Working => "working",
+        State::Waiting => "waiting",
+        State::Finished => "done",
+        State::Failed => "failed",
+        State::Stopped | State::Interrupted => "stopped",
+    }.into()
+}
+
+pub(crate) fn child_line(c: &Conversation) -> Option<String> {
+    keep_going::progress_line(&c.messages)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AppState {
     pub background: crate::background::List,

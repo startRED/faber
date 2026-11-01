@@ -69,6 +69,10 @@ pub struct Row {
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<WaitingOn>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_choice: Option<faber_engine::router::Choice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_line: Option<String>,
     /// How its last run ended, while the person has not opened it since (`done`, `needsYou`, `failed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended: Option<Value>,
@@ -133,6 +137,8 @@ pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
                 family: family(&s.id).unwrap_or_else(|| s.id.clone()),
                 state,
                 waiting_on,
+                child_choice: s.child_choice.clone(),
+                child_line: s.child_line.clone(),
                 ended: s.ended.as_ref().and_then(|e| serde_json::to_value(e.kind).ok()),
                 archived: s.archived,
                 pinned: s.pinned_at.is_some(),

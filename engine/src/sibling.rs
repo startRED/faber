@@ -211,7 +211,8 @@ pub fn started(title: &str, id: &str) -> String {
     format!(
         "Started the conversation \"{title}\" (id {id}). It runs on its own in this project and the person sees it in the \
          sidebar. Its answer is sent to you by itself once it stops working; call this tool with {{\"id\": \"{id}\"}} only to \
-         read where it stands before that."
+         read where it stands before that.\n{}",
+        serde_json::json!({ "childId": id })
     )
 }
 
@@ -499,6 +500,9 @@ mod tests {
     #[test]
     fn the_answers_name_the_conversation_and_a_long_answer_is_cut() {
         assert!(started("Docs", "c1").contains("{\"id\": \"c1\"}"));
+        let result = started("Docs", "c1");
+        let link: serde_json::Value = serde_json::from_str(result.lines().last().unwrap()).unwrap();
+        assert_eq!(link["childId"], "c1");
         assert!(prompt("Docs", "Write it.").ends_with("Task: Docs\n\nWrite it."));
         assert_eq!(read("Docs", State::Working, ""), "The conversation \"Docs\" is still working.");
         let long = read("Docs", State::Finished, &"x".repeat(5000));

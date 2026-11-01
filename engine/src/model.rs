@@ -1187,6 +1187,13 @@ pub struct Summary {
     pub started_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<WaitingOn>,
+    /// Details for a conversation started by an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_choice: Option<crate::router::Choice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_line: Option<String>,
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,
