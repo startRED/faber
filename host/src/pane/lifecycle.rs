@@ -115,6 +115,20 @@ impl Pane {
         match event {
             ViewEvent::Gone => self.close(),
             ViewEvent::Titled => self.keep_soon(made),
+            ViewEvent::Moved { url } => {
+                let mut s = crate::lock(&self.state);
+                s.url = Some(url.clone());
+                if s.shown {
+                    if let Ok(page) = Url::parse(&url) {
+                        went_to(&mut s.visited, &page);
+                    }
+                }
+                drop(s);
+                self.keep_soon(made);
+                if self.is_front() {
+                    self.home.tell(PaneEvent::Page(url));
+                }
+            }
             ViewEvent::Started { url } => {
                 self.loads.send_modify(|(started, _)| *started += 1);
                 crate::lock(&self.state).url = Some(url);

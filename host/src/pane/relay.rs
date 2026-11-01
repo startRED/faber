@@ -35,6 +35,7 @@ pub fn event_of(note: ViewNote) -> ViewEvent {
     match note {
         ViewNote::Started { url } => ViewEvent::Started { url },
         ViewNote::Finished { url } => ViewEvent::Finished { url },
+        ViewNote::Moved { url } => ViewEvent::Moved { url },
         ViewNote::Titled => ViewEvent::Titled,
         ViewNote::Gone => ViewEvent::Gone,
     }
@@ -61,7 +62,11 @@ pub struct Relay {
 impl Relay {
     /// `send` carries an order to the shell (the process's one writer).
     pub fn new(send: Arc<dyn Fn(Order) + Send + Sync>) -> Arc<Relay> {
-        Arc::new(Relay { send, next: AtomicU64::new(1), link: Mutex::new(Link { waiting: Some(HashMap::new()), open: HashSet::new(), generation: HashMap::new() }) })
+        Arc::new(Relay {
+            send,
+            next: AtomicU64::new(1),
+            link: Mutex::new(Link { waiting: Some(HashMap::new()), open: HashSet::new(), generation: HashMap::new() }),
+        })
     }
 
     /// The shell answered call `id`. An answer nobody waits for (a call the host gave up on, or an id never sent) changes
@@ -145,9 +150,7 @@ impl Drop for Forget<'_> {
 
 impl Driver for Relay {
     fn open(&self, view: View, profile: String) -> BoxFuture<'_, Res<()>> {
-        Box::pin(async move {
-            self.ask(view, PaneOp::Open { profile }).await.map(drop)
-        })
+        Box::pin(async move { self.ask(view, PaneOp::Open { profile }).await.map(drop) })
     }
 
     fn close(&self, view: View) {
@@ -240,6 +243,29 @@ mod tests {
         assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Park));
         assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
         assert!(relay.place(View::Main, Place::Parked).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_late_open_answer_before_its_replacement_stays_closed() {
+        let (relay, mut orders) = relay();
+        let first = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "first".into()).await }
+        });
+        let (id, _, _) = pane_order(next(&mut orders).await);
+        relay.close(View::Main);
+        assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
+        let second = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "second".into()).await }
+        });
+        let (second_id, _, _) = pane_order(next(&mut orders).await);
+        relay.answer(id.unwrap(), Ok(Value::Null));
+        assert!(first.await.unwrap().is_err());
+        assert!(relay.place(View::Main, Place::Parked).is_err());
+        relay.answer(second_id.unwrap(), Ok(Value::Null));
+        assert!(second.await.unwrap().is_ok());
+        assert!(relay.place(View::Main, Place::Parked).is_ok());
     }
 
     /// Opens `view` the way the pane does, with the shell answering at once.
@@ -381,11 +407,13 @@ mod tests {
         pane.event(view_named(PaneView::Main), event_of(ViewNote::Finished { url: page.clone() }));
         let told = || lock(&home.0).iter().filter(|event| !matches!(event, PaneEvent::Tabs(_))).cloned().collect::<Vec<_>>();
         assert_eq!(told(), [PaneEvent::Loading(true), PaneEvent::Loading(false), PaneEvent::Page(page)]);
+        pane.event(View::Main, event_of(ViewNote::Moved { url: "https://example.org/a#part".into() }));
+        assert_eq!(told().last(), Some(&PaneEvent::Page("https://example.org/a#part".into())));
         // The view is gone (its window closed): the pane closes it and opens a new one next time.
         pane.event(View::Main, event_of(ViewNote::Gone));
         assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
         // An event of a view that is closed changes nothing.
         pane.event(View::Main, event_of(ViewNote::Finished { url: "https://example.org/b".into() }));
-        assert_eq!(told().len(), 3);
+        assert_eq!(told().len(), 4);
     }
 }

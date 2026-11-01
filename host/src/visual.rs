@@ -206,7 +206,10 @@ mod tests {
         let tag = format!("<script>{}</script>", guard().script);
         // A `<head>` inside a comment (or a script string) cannot draw the guard away from the front.
         assert_eq!(guarded("<!-- <head> --><p>x</p>"), format!("{tag}<!-- <head> --><p>x</p>"));
-        assert_eq!(guarded("<script>var s = \"<head>\"</script><head></head>"), format!("{tag}<script>var s = \"<head>\"</script><head></head>"));
+        assert_eq!(
+            guarded("<script>var s = \"<head>\"</script><head></head>"),
+            format!("{tag}<script>var s = \"<head>\"</script><head></head>")
+        );
         assert_eq!(guarded(""), tag);
         // The page's own policy comes after the guard, so it only applies to what follows: it cannot forbid the guard.
         let own = "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'\"><p>x</p>";

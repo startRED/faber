@@ -46,6 +46,8 @@ pub enum ViewEvent {
     Started { url: String },
     /// A page finished loading, at the address it ended up.
     Finished { url: String },
+    /// The main frame moved within the same document.
+    Moved { url: String },
     /// The page's title changed.
     Titled,
     /// The view is gone: its window closed, or its page process died. The pane closes and opens fresh next time.

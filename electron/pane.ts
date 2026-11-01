@@ -24,7 +24,7 @@ export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
 );
 
 /** What a view tells the host (`ViewNote`). */
-type ViewNote = { kind: 'started'; url: string } | { kind: 'finished'; url: string } | { kind: 'titled' } | { kind: 'gone' };
+type ViewNote = { kind: 'started'; url: string } | { kind: 'finished'; url: string } | { kind: 'moved'; url: string } | { kind: 'titled' } | { kind: 'gone' };
 
 /** What the shell tells the host about the pane (`ShellNote::PaneAnswer` and `ShellNote::PaneEvent`). */
 export type PaneNote =
@@ -58,8 +58,7 @@ type Entry = {
   open: boolean;
   /** A page started to load and has not ended, as far as the host was told. */
   loading: boolean;
-  /** A navigation of this view was refused and its end has not come yet. */
-  refused: boolean;
+  loadingUrl: string;
 };
 
 /** A profile in use: the session behind it and the views on it. */
@@ -240,12 +239,15 @@ export class Pane {
         },
       });
       const contents = view.webContents;
-      const entry: Entry = { name, profile, claim, view, contents, bounds: PARKED, open: true, loading: false, refused: false };
+      const entry: Entry = { name, profile, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '' };
       this.views.set(name, entry);
       this.guard(entry);
       view.setBounds(PARKED);
       window.contentView.addChildView(view);
       contents.debugger.attach('1.3');
+      // Interception keeps Chromium's native file chooser from opening for pane pages.
+      await contents.debugger.sendCommand('Page.enable');
+      await contents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true, cancel: true });
       // Pages are told the browser they would have met anywhere, not the shell they run in.
       contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|Faber)\/\S+/gi, ''));
       await contents.loadURL('about:blank');
@@ -270,7 +272,6 @@ export class Pane {
     // Only web pages load, whoever starts the navigation (the page, a redirect, the back button).
     const refuse = (event: { url: string; isMainFrame: boolean; preventDefault: () => void }) => {
       if (event.isMainFrame && !allowedUrl(event.url)) {
-        entry.refused = true;
         event.preventDefault();
       }
     };
@@ -285,7 +286,11 @@ export class Pane {
         return;
       }
       entry.loading = true;
+      entry.loadingUrl = details.url;
       tell({ kind: 'started', url: details.url });
+    });
+    contents.on('did-redirect-navigation', (details) => {
+      if (details.isMainFrame && entry.loading) entry.loadingUrl = details.url;
     });
     contents.on('did-finish-load', () => {
       const url = contents.getURL();
@@ -293,19 +298,22 @@ export class Pane {
       entry.loading = false;
       tell({ kind: 'finished', url });
     });
-    contents.on('did-fail-load', (_event, code, _description, address, isMainFrame) => {
-      if (!isMainFrame) return;
+    const failed = (_event: Electron.Event, code: number, _description: string, address: string, isMainFrame: boolean) => {
+      if (!isMainFrame || address !== entry.loadingUrl) return;
       // A load that failed ends like one that finished, as the system webview did. One cancelled by a newer page ends with
       // that page; one cancelled here ends the page it began.
       let url = address;
       if (code === ABORTED) {
-        if (!entry.refused) return;
-        entry.refused = false;
-        url = contents.getURL();
+        url = allowedUrl(contents.getURL()) ? contents.getURL() : address;
       }
       if (!entry.loading || !allowedUrl(url)) return;
       entry.loading = false;
       tell({ kind: 'finished', url });
+    };
+    contents.on('did-fail-load', failed);
+    contents.on('did-fail-provisional-load', failed);
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (isMainFrame && allowedUrl(url)) tell({ kind: 'moved', url });
     });
     contents.on('page-title-updated', () => tell({ kind: 'titled' }));
     contents.on('render-process-gone', () => this.gone(entry));

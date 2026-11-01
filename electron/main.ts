@@ -43,6 +43,8 @@ protocol.registerSchemesAsPrivileged([
 // Features Faber does not use stay off; each one costs memory in every renderer.
 app.commandLine.appendSwitch('disable-features', ['SpareRendererForSitePerProcess', 'MediaRouter', 'Translate', ...testmode.disabledFeatures].join(','));
 app.commandLine.appendSwitch('disable-spell-checking');
+app.commandLine.appendSwitch('dns-prefetch-disable');
+app.commandLine.appendSwitch('disable-preconnect');
 // The screen fetches nothing from the network (its policy allows only its own scheme), so the network service runs
 // inside the main process instead of one of its own: about 10 MB private and 50 MB working set less, measured.
 app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
