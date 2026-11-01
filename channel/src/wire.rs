@@ -19,18 +19,40 @@ pub struct Request {
 /// What a client reads: a reply to one of its requests, or an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromFaber {
-    Reply { id: u64, result: Result<Value, String> },
+    Reply { id: u64, result: Result<Value, Error> },
     Event(Value),
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Error {
+    pub key: String,
+    pub data: Option<Value>,
+}
+
+impl From<String> for Error {
+    fn from(key: String) -> Self { Self { key, data: None } }
+}
+impl From<&str> for Error {
+    fn from(key: &str) -> Self { key.to_string().into() }
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.key.fmt(f) }
+}
+impl std::error::Error for Error {}
 
 pub fn request(id: u64, cmd: &str, args: Value) -> String {
     json!({ "id": id, "cmd": cmd, "args": args }).to_string()
 }
 
 pub fn reply(id: u64, result: &Result<Value, String>) -> String {
+    reply_detailed(id, &result.clone().map_err(Into::into))
+}
+
+pub fn reply_detailed(id: u64, result: &Result<Value, Error>) -> String {
     match result {
         Ok(ok) => json!({ "id": id, "ok": ok }),
-        Err(err) => json!({ "id": id, "err": err }),
+        Err(err) if err.data.is_some() => json!({ "id": id, "err": err.key, "data": err.data }),
+        Err(err) => json!({ "id": id, "err": err.key }),
     }
     .to_string()
 }
@@ -50,7 +72,7 @@ pub fn parse_from_faber(line: &str) -> Option<FromFaber> {
         return Some(FromFaber::Reply { id, result: Ok(ok.take()) });
     }
     let err = value.get("err")?.as_str()?.to_string();
-    Some(FromFaber::Reply { id, result: Err(err) })
+    Some(FromFaber::Reply { id, result: Err(Error { key: err, data: value.get("data").cloned() }) })
 }
 
 /// Reads one line without its end. None at the end of the stream; an error for a line past `limit` or not UTF-8.

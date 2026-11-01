@@ -359,13 +359,14 @@ impl Host {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
             if let Err(key) = reach::check(caller, command, reach, &args, |id| self.family_of(id)) {
                 let mut allowed = false;
+                let mut request = None;
                 if key == reach::ASK_PERSON {
                     if let Caller::Agent { conversation: Some(id) } = caller {
                         let pending = {
                             let mut book = lock(&self.asks);
                             allowed = book.spend(id, command, &args);
                             if !allowed {
-                                book.record(id, command, args.clone(), ask::label(command));
+                                request = Some(book.record(id, command, args.clone(), ask::label(command)));
                             }
                             book.pending()
                         };
@@ -373,7 +374,9 @@ impl Host {
                     }
                 }
                 if !allowed {
-                    return Err(Failure::key(key));
+                    let mut failure = Failure::key(key);
+                    failure.data = request.map(|id| json!({"request": id}));
+                    return Err(failure);
                 }
             }
         }
