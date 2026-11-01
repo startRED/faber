@@ -14,8 +14,11 @@ const named = (params: Record<string, string> = {}) => ({
 export function FaberActs(props: { acts?: FaberAct[]; onChange?: (target: NonNullable<FaberAct['change']>) => void }) {
   return <For each={props.acts}>{(act) => {
     const label = () => act.actor.who === 'faber' ? t('act.faber') : t(`act.${act.actor.role}`, { name: act.actor.model ? prettyModel(act.actor.model) : vendorName(act.actor.vendor) });
+    const said = () => fromEngine(act.what, named(act.params));
+    // A sentence that already names its actor ("Faber asked it to keep going") needs no label before it.
+    const namesActor = () => said().includes(label());
     return <div class="faber-act">
-      <div class="faber-act-line"><Icon name="loop" small /><span>{label()} · {fromEngine(act.what, named(act.params))}<Show when={act.why}> · {t('act.why', { why: fromEngine(act.why, named(act.params)) })}</Show></span>
+      <div class="faber-act-line"><Icon name="loop" small /><span>{namesActor() ? '' : `${label()} · `}{said()}<Show when={act.why}> · {t('act.why', { why: fromEngine(act.why, named(act.params)) })}</Show></span>
         <Show when={act.change && props.onChange}><button type="button" onClick={() => props.onChange?.(act.change!)}>{t('act.change')}</button></Show>
       </div>
       <Show when={act.sent}><details class="disclosure"><summary>{t('act.sent')}</summary><div class="faber-act-sent">{act.sent}</div></details></Show>
