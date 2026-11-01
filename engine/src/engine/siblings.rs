@@ -150,9 +150,9 @@ impl Core {
                 Err(why) => (false, format!("Nothing was scheduled: {why}.")),
             },
             Ok(Request::Archive { id: Some(id) }) => result(self.session_archive(conv, &id)),
-            Ok(Request::Archive { id: None }) => match self.set_archived(conv, true) {
+            Ok(Request::Archive { id: None }) => match self.archive_itself(conv) {
                 Ok(()) => (true, sibling::ARCHIVED.to_string()),
-                Err(_) => (false, "Nothing was archived: the conversation is gone.".to_string()),
+                Err(why) => (false, format!("Nothing was archived: {why}.")),
             },
         };
         // The answer goes back only to the process that asked.
@@ -686,6 +686,13 @@ impl Core {
         }
         Ok("The conversation will continue with your message.".into())
     }
+    /// An agent archives its own conversation as its last step, never one the person pinned (the person wants it kept).
+    fn archive_itself(&mut self, conv: &str) -> Result<(), String> {
+        if self.convs.get(conv).ok_or("the conversation is gone")?.pinned_at.is_some() {
+            return Err("the person pinned this conversation, so it stays".into());
+        }
+        self.set_archived(conv, true)
+    }
     pub(super) fn session_archive(&mut self, by: &str, id: &str) -> Result<String, String> {
         self.own(by, id)?;
         let c = &self.convs[id];
@@ -721,20 +728,25 @@ impl Core {
         for id in &on {
             self.own(by, id)?;
         }
+        // A conversation that reported before the wait is read by the asker already; waiting on it would never end.
+        let mut reported = Vec::new();
         for id in &on {
             let child = &self.convs[id];
-            let parent_id = child.started_by.clone();
             let reply = child.messages.iter().rev().find(|m| m.role == Role::Assistant);
             let report_id = format!("report-{id}-{}", reply.map_or("empty", |m| m.id.as_str()));
             let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
             let ended = !matches!(state_of(busy, child), State::Working | State::Waiting);
-            if ended
-                && let Some(parent_id) = parent_id
-                && let Some(parent) = self.load(&parent_id)
-                && (parent.queued.iter().any(|q| q.id == report_id) || parent.messages.iter().any(|m| m.id == report_id))
-            {
-                return Ok("That conversation already reported; read its report and continue.".into());
+            let delivered = self
+                .convs
+                .get(by)
+                .is_some_and(|p| p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id));
+            if ended && delivered {
+                reported.push(id.clone());
             }
+        }
+        let on: Vec<String> = on.into_iter().filter(|id| !reported.contains(id)).collect();
+        if on.is_empty() && note.trim().is_empty() {
+            return Ok("Those conversations already reported; read their reports and continue.".into());
         }
         let c = self.load(by).ok_or("the conversation is gone")?;
         let previous = c.waiting_on.replace(crate::model::WaitingOn { ids: on.clone(), note, since: now() });

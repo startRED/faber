@@ -197,6 +197,15 @@ async fn an_agent_can_wait_for_a_child_and_cannot_act_on_itself() {
     assert!(engine.session_archive(&parent, &child).is_ok());
     assert!(engine.session_resume(&parent, &child, None).unwrap_err().contains("archived"));
     assert!(engine.open(&child).unwrap().archived_at.is_some());
+    // A conversation that reported before the wait is not waited for; and an agent never archives itself while the person pins it.
+    assert!(engine.session_wait(&parent, vec![child.clone()], None).unwrap().contains("already reported"));
+    assert!(engine.open(&parent).unwrap().waiting_on.is_none());
+    engine.pin(&parent, true).unwrap();
+    let pinned = tool(&mut agent, "archive-itself", json!({"action":"archive"})).await;
+    assert_eq!(pinned["isError"], true, "{pinned}");
+    assert!(pinned["content"][0]["text"].as_str().unwrap().contains("pinned"), "{pinned}");
+    assert!(engine.open(&parent).unwrap().archived_at.is_none());
+    engine.pin(&parent, false).unwrap();
     let second = engine.session_start(&parent, new(None, None, Ai::Same)).unwrap();
     let mut stopped = support::next_pipe(&made).await;
     stopped.say(json!({"type":"system","subtype":"init","session_id":"stopped","model":"claude-haiku-5-5"})).await;

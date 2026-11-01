@@ -100,32 +100,9 @@ fn families(summaries: &[Summary]) -> impl Fn(&str) -> Option<String> + '_ {
     move |id| crate::reach::root(id, |at| starters.get(at).map(|s| s.map(String::from)))
 }
 
-/// The conversations saved with `waiting_on` in `data_dir`. Only files that mention `"waitingOn"` are parsed.
-pub fn waiting_in(data_dir: &std::path::Path) -> HashMap<String, faber_engine::model::WaitingOn> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Kept {
-        id: String,
-        waiting_on: Option<faber_engine::model::WaitingOn>,
-    }
-    std::fs::read_dir(data_dir.join("conversations"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| std::fs::read_to_string(e.path()).ok().filter(|text| text.contains("\"waitingOn\"")))
-        .filter_map(|text| serde_json::from_str::<Kept>(&text).ok())
-        .filter_map(|k| Some((k.id, k.waiting_on?)))
-        .collect()
-}
-
-/// The conversations, running ones first, then pinned, then the newest; a list reads no conversation's file.
+/// The conversations, running ones first, then pinned, then the newest; a list reads no conversation's file. One that called
+/// `mark_waiting` reads as `waiting` while nothing runs in it.
 pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
-    rows_with(state, &HashMap::new(), filter)
-}
-
-/// Like [`rows`], with the conversations that called `mark_waiting` marked as `waiting`.
-pub fn rows_with(state: &AppState, waiting: &HashMap<String, faber_engine::model::WaitingOn>, filter: &Filter) -> Vec<Row> {
     let running: HashMap<&str, RunState> = state.running.items.iter().map(|i| (i.conversation_id.as_str(), i.state)).collect();
     let family = families(&state.conversations);
     let wanted_family = filter.family.as_deref().and_then(&family);
@@ -140,7 +117,7 @@ pub fn rows_with(state: &AppState, waiting: &HashMap<String, faber_engine::model
         .filter(|s| filter.project_id.as_deref().is_none_or(|p| s.project_id.as_deref() == Some(p)))
         .filter(|s| query.as_deref().is_none_or(|q| s.title.to_lowercase().contains(q)))
         .map(|s| {
-            let waiting_on = waiting.get(s.id.as_str()).map(WaitingOn::from);
+            let waiting_on = s.waiting_on.as_ref().map(WaitingOn::from);
             let state = match running.get(s.id.as_str()) {
                 Some(RunState::Working) => "working",
                 Some(RunState::NeedsYou) => "waiting",

@@ -97,8 +97,7 @@ table! {
         limit: Option<usize>,
     ) -> Vec<views::Row> {
         let filter = views::Filter { states: state.unwrap_or_default(), archived, project_id, family, query, limit };
-        let waiting = views::waiting_in(&h.data_dir);
-        Ok(views::rows_with(&h.engine.state(), &waiting, &filter))
+        Ok(views::rows(&h.engine.state(), &filter))
     }
     /// One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all
     /// when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it
