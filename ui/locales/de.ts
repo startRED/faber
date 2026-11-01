@@ -2418,6 +2418,7 @@ export const de: Messages = {
   'notes.341.new': 'In einem Projekt zeigt jedes Gespräch jetzt am Ende, was es geliefert und was es gekostet hat. Die Projektseite listet alle nebeneinander auf.',
   'notes.342.better': 'Die Live-Zeile zeigt den Status des Agenten oder die Überschrift seines letzten Gedankens; die Schritte sind am Text ausgerichtet.',
   'notes.343.better': 'Die Projektbereiche haben jetzt Erklärungen, die Suche steht im Katalog im Vordergrund und die Beschriftungen im Chat und bei französischen Kontingenten sind klarer.',
+  'notes.344.better': 'Die KI kann selbst entscheiden, wann sie Pläne, Fortschrittsmeldungen, Prüfungen und den Abschluss nutzt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

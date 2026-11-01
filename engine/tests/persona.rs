@@ -197,3 +197,32 @@ fn project_lead_controls_its_children_and_forms_a_team_for_big_requests() {
     assert!(!text.contains("You are Faber"));
     assert!(!text.contains("only when the person asked for one"));
 }
+
+#[test]
+fn project_tools_are_offered_without_requiring_their_use() {
+    let descriptions: Vec<String> = faber_engine::progress::codex_tools()
+        .into_iter()
+        .map(|tool| tool["description"].as_str().unwrap().to_lowercase())
+        .chain(std::iter::once(faber_engine::verify::codex_tool()["description"].as_str().unwrap().to_lowercase()))
+        .collect();
+    let lead = faber_engine::persona::LEADS.to_lowercase();
+    for text in descriptions.iter().chain(std::iter::once(&lead)) {
+        for required in [
+            "always plan",
+            "must call",
+            "before finishing you must",
+            "finish with wrap_up",
+            "the only way a task counts as finished",
+            "call it once",
+            "call it when substantial",
+            "with the first tool call of a task",
+            "full once before you say the work is done",
+            "lead a small team: use plan",
+        ] {
+            assert!(!text.contains(required), "required language: {required}");
+        }
+    }
+    for text in &descriptions {
+        assert!(text.contains("you can"), "missing offer language: {text}");
+    }
+}

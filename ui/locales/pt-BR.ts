@@ -2405,6 +2405,7 @@ export const ptBR: Messages = {
   'notes.341.new': 'Num projeto, cada conversa agora termina mostrando o que entregou e quanto custou. A página inicial do projeto lista todas lado a lado.',
   'notes.342.better': 'A linha ao vivo mostra o que o agente diz estar fazendo ou o título do pensamento mais recente, e os passos ficam alinhados ao texto.',
   'notes.343.better': 'As seções do projeto agora têm explicações, a busca vem primeiro no Catálogo e os rótulos do Chat e das cotas em francês estão mais claros.',
+  'notes.344.better': 'A IA pode escolher quando usar planos, atualizações de andamento, verificações e a caixa de encerramento.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
