@@ -960,7 +960,7 @@ check('settings: the accounts card writes Faber\'s spend in the person\'s format
       look: look(), saved: {}, vendors: ['claude'], quotas: {}, now: 0, usage, start: 'accounts',
       onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
     }));
-    try { return view.host.querySelector('.acct-foot')!.textContent!; } finally { view.stop(); }
+    try { return view.host.querySelector('.acct-foot:not(.acct-unread)')!.textContent!; } finally { view.stop(); }
   };
   try {
     ok(text('en').includes('$3.20'), text('en'));

@@ -206,7 +206,7 @@ closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the l
   only) and the theme file (save or open). Back to default.
 - **Accounts and limits**: one card per AI: its mark, name, plan (capitalised; a question when the CLI cannot tell), one
   status word (amber only near a real limit), one row per quota window (name, share, bar with a mark at the share of the window's time gone (clock time, R481),
-  reset time) and Faber's own spend today in API value ("Faber today: $1.25 in API value", the words of a reply's cost too). Every note about how the figures are read sits behind one
+  reset time) and Faber's own spend today in API value ("Faber today: $1.25 in API value", the words of a reply's cost too). A missing current reading has no bar: its window row reads "No reading yet" and the card says once to check the limits with the provider (the sidebar keeps its short line and says it in the tooltip). Every note about how the figures are read sits behind one
   "Details" fold per card. "Manage accounts" opens the account cards, once, at the top. After the cards, an "Auto" card with one row, "What Auto learned" (a Forget button that reads "Forgotten" for a moment: Auto forgets every nudge it took from the answers retried or kept on this PC; an error shows under the row).
 - **Privacy**: three statements (no telemetry, history stays on this PC, CLI logins are never read). No controls.
 

@@ -608,9 +608,12 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let share = css(".usage .vendor").has_text("Claude").css(".share");
-    let unknown = page.text_of("quota.unknown")?;
-    page.wait_visible(&share)?;
-    same(page.inner_text(&share)?, unknown, "before the CLI has reported")?;
+    // Before the CLI has reported there is no bar and no number: the line says when the usage will show.
+    let waiting = css(".usage .vendor").has_text("Claude").css(".unavailable");
+    let line = page.text_of("side.usage")?;
+    page.wait_visible(&waiting)?;
+    same(page.inner_text(&waiting)?, line, "before the CLI has reported")?;
+    same(page.count(&share)?, 0, "no number before the CLI has reported")?;
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;

@@ -598,7 +598,7 @@ export function Sidebar(props: Props) {
               const q = () => lineReading(props.quotas, v, props.now);
               const fresh = () => freshness(props.usage, v, q()?.window);
               // While use is still being counted the real share can only be higher, so it reads "≥ 44%" (C010).
-              const share = () => (!q() ? t('quota.unknown') : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
+              const share = () => (!q() ? '' : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
               const low = () => props.usage?.find((u) => u.vendor === v)?.state === 'low';
               const details = () =>
                 q()
@@ -609,21 +609,24 @@ export function Sidebar(props: Props) {
                       fresh().readAt !== undefined ? t('quota.read', { when: ageWords(fresh().readAt!, props.now) }) : '',
                       fresh().counting ? t('quota.counting') : '',
                     ]
-                  : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('side.usage')];
+                  : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('quota.unavailable')];
               return (
-                <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
+                <button class="vendor" classList={{ low: low(), unread: !q() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
                   <span class="name">{vendorName(v)}</span>
-                  <span class="meter" aria-hidden="true">
-                    <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}% 0 0)` }} />
-                  </span>
-                  <span class="share num">{share()}</span>
                   <Show when={q()}>
+                    <span class="meter" aria-hidden="true">
+                      <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()!.used)) * 100)}% 0 0)` }} />
+                    </span>
+                  </Show>
+                  <Show when={q()}>
+                    <span class="share num">{share()}</span>
                     <span class="used">{t('quota.used')}</span>
                   </Show>
                   <Show when={q() && fresh().counting}>
                     <span class="sr">{t('quota.counting')}</span>
                   </Show>
+                  <Show when={!q()}><span class="unavailable">{t('side.usage')}</span></Show>
                 </button>
               );
             }}
