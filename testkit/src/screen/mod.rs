@@ -388,6 +388,11 @@ pub fn has_version_after(text: &str, prefix: &str) -> bool {
     })
 }
 
+pub fn select_model(page: &mut Page, model: &str) -> Result {
+    page.click(&css(".composer .model-chip"))?;
+    page.click(&css(".model-menu .model-option").has_text(model))
+}
+
 pub fn ask(page: &mut Page, question: &str) -> Result {
     let composer = page.labelled("composer.message")?;
     page.fill(&composer, question)?;

@@ -65,8 +65,7 @@ fn helper_controls(ctx: &mut Ctx, width: u32) -> Result {
     page.click(&projects)?;
     page.click(&css(".prow .item").has_text("Helper control proof"))?;
     page.wait_for("the synthetic helper subscription and models", "window.__TAURI_INTERNALS__.invoke('state').then(s=>s.models.some(m=>m.id==='gpt-6.1-sol') && s.usage?.some(u=>u.vendor==='codex' && !u.billingUnknown && !u.billedPerUse))")?;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.")?;
     let helper = css("article .agents .agent").has_text("Check config");
     page.wait_visible(&helper)?;

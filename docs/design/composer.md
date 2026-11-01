@@ -3,6 +3,21 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+The model and manual effort share one chip. Its native top-layer popover uses the context menu's surface, stays within
+window edges and opens down when the full menu fits, otherwise toward the side with more room. Auto is first, followed
+by connected AI groups with their existing square/diamond marks. Current models (the Auto profile ids and the account
+default) precede older models in a disclosure; the selected older model is revealed on reopening. Search appears only
+above eight manual models, matches partial names without case sensitivity and searches folded entries too.
+
+Picking another model resets effort to Medium; picking the same model preserves effort. Auto removes manual effort.
+The menu uses named groups and pressed buttons, native light dismissal, Escape with focus return, and arrow/Home/End
+navigation alongside ordinary Tab and Enter/Space. Folded models stay outside keyboard navigation. Effort stays inside
+the menu; the closed chip states both values.
+No motion, stored field, AI call or background process is added. The menu DOM exists only while open.
+Checks: `tests/ui/models.check.ts` (groups, folds, search, placement, keyboard, selection and locking), and
+`tests/ui/composer.check.ts` (the composer's single chip and unchanged warm/reset path).
+Screen scenarios choose models through this same chip and its menu buttons, including while account models load.
+
 The attachment picker copies its selected files and immediately clears the native input. Removing a file and choosing
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
 (`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).

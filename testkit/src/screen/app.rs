@@ -1131,8 +1131,7 @@ fn copy_per_conversation(ctx: &mut Ctx) -> Result {
             page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
         }
         // A chosen model starts at once; Auto would wait for its routing question, which this recording does not hold.
-        let model = page.labelled("composer.model")?;
-        page.select_option(&model, "Claude Haiku")?;
+        super::select_model(page, "Claude Haiku")?;
         ask(page, question)?;
         // The topbar keeps the title only; the copy's branch and folder are in Technical details.
         ensure(page.count(&css(".crumb").has_text("faber/"))? == 0, || "the crumb names no branch".to_string())?;
@@ -1729,8 +1728,7 @@ fn background_commands_memory(ctx: &mut Ctx) -> Result {
     let text = recording.iter().map(serde_json::Value::to_string).collect::<Vec<_>>().join("\n");
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     let mut app = ctx.launch(Launch { claude: CliSlot::Fake, recording: Some(path), ..Launch::default() })?;
-    let model = app.page.labelled("composer.model")?;
-    app.page.select_option(&model, "Claude Haiku")?;
+    super::select_model(&mut app.page, "Claude Haiku")?;
     let (baseline, webview) = ctx.memory_mb(app.id)?;
     ensure(webview, || "the memory reading must include WebView2".into())?;
     ask(&mut app.page, "Start background commands")?;
@@ -1884,8 +1882,7 @@ fn reviews_change(ctx: &mut Ctx) -> Result {
     page.click(&projects)?;
     page.click(&css(".prow .item").has_text("Demo"))?;
     page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     for (key, finding, scope) in [
         ("changes.review", "The changed greeting has no fallback.", "for bugs."),
         ("changes.reviewSecurity", "The changed path accepts untrusted input.", "for bugs and security issues."),
@@ -2026,8 +2023,7 @@ fn edits_queued(ctx: &mut Ctx) -> Result {
     })?;
     let page = &mut app.page;
     // This recording starts with the person's message, not Auto's separate routing question.
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "Start queued edit")?;
     // The CLI has ended its answer but is still closing the turn, so the next message waits.
     page.wait_for("the answer to settle", "document.querySelector('article.ai .actions') !== null")?;
@@ -2141,8 +2137,7 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
     let recording = long_recording(ctx, 360, 2500)?;
     let mut app = ctx.launch(Launch { recording: Some(recording), ..claude_chat(ctx) })?;
     super::system_motion(&mut app.page, false)?;
-    let model = app.page.labelled("composer.model")?;
-    app.page.select_option(&model, "Claude Haiku")?;
+    super::select_model(&mut app.page, "Claude Haiku")?;
     ask(&mut app.page, QUESTION)?;
     app.page.wait_visible(&css("article.ai .steps-head"))?;
     app.page.click(&css("article.ai .steps-head"))?;

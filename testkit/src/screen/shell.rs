@@ -340,8 +340,7 @@ pub(super) fn two_writes(ctx: &Ctx) -> Result<Launch> {
 /// Sends the request and returns once the first question has been asked.
 pub(super) fn ask_two_writes(page: &mut Page) -> Result {
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
     page.wait_visible(&css("article .ask").has_text("a.txt"))
 }
@@ -842,12 +841,11 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     launch.recording = Some(held);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
     // The title can arrive before the snapshot replaces the welcome composer with the conversation's composer.
     page.wait_visible(&css(".dock .composer textarea"))?;
-    page.wait_enabled(&model)?;
+    page.wait_enabled(&css(".composer .model-chip"))?;
     ensure(!page.is_visible(&css("article .ask"))?, || "the question arrived before typing setup was ready".to_string())?;
     ensure(!page.is_visible(&css(".runcol"))?, || "the column opened before typing setup was ready".to_string())?;
     let composer = page.labelled("composer.message")?;
@@ -919,8 +917,7 @@ fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
     let page = &mut app.page;
     system_motion(page, reduce)?;
     set_size(page, width, 900)?;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
     page.wait_for(
         "the conversation to open",
@@ -1005,8 +1002,7 @@ fn subagent_step(ctx: &mut Ctx) -> Result {
         ..Launch::default()
     })?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(
         page,
         "Use the Agent tool exactly once (subagent_type Explore) to find which file in this folder defines load_config. Then answer in one short sentence.",
@@ -1136,8 +1132,7 @@ fn compacts_now(ctx: &mut Ctx) -> Result {
         ..Launch::default()
     })?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "In one sentence: why is the sky blue?")?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
