@@ -447,7 +447,7 @@ async fn a_message_the_person_queued_goes_first_and_the_stop_line_still_counts()
     assert!(turns(&pipe)[1].contains("How is it going?"));
     echo(&mut pipe, 1).await;
     answers_at(&mut pipe, "Fine.", true, 0.1).await;
-    until(&engine, &id, |c| idle(c)).await;
+    until(&engine, &id, idle).await;
     assert_eq!(turns(&pipe).len(), 2, "no second-look turn after the person's message");
     assert_eq!(halts(&mut rx), vec!["reason.keepGoing.done".to_string()]);
     engine.shutdown();
