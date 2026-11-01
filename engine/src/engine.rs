@@ -41,6 +41,7 @@ mod closed;
 mod compact;
 mod copies;
 mod creative_judges;
+mod dry_run;
 mod ended;
 mod evict;
 pub use aside::Aside;
@@ -550,6 +551,9 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// When a Claude probe (`account::claude_probe`) last gave no clean reading: what it saw about extra usage may be lost, so
+    /// only word newer than this lets the next one run.
+    probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
@@ -716,6 +720,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
@@ -1022,6 +1027,23 @@ impl Engine {
             let opened = core.opened(id)?;
             core.shown(id);
             Some(opened.for_screen())
+        })
+    }
+    /// What a conversation delivered and what it cost, from its stored messages (`crate::results`).
+    pub fn results(&self, id: &str) -> Option<crate::results::Results> {
+        self.with(|c| c.load(id).map(|conversation| crate::results::tally(conversation)))
+    }
+    /// The same for every conversation of a project, with its total, most spent first. Read from the stored summaries, which
+    /// hold each conversation's numbers, so no conversation is opened for it.
+    pub fn project_results(&self, project: &str) -> crate::results::ProjectResults {
+        self.with(|c| {
+            crate::results::project(
+                c.store
+                    .list()
+                    .into_iter()
+                    .filter(|s| s.project_id.as_deref() == Some(project))
+                    .filter_map(|s| s.results.map(|r| (s.id, s.title, r))),
+            )
         })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
@@ -3099,6 +3121,8 @@ impl Core {
         } else {
             return;
         };
+        // A turn that delivered ends a stuck run, whether or not Keep going sends another.
+        self.clear_dry_delivery(conv);
         // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
         if !completed_ok {
             self.compacts.remove(conv);
@@ -4345,7 +4369,8 @@ impl Core {
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
-            Vendor::Claude => start_claude(
+            Vendor::Claude => start_conversation_claude(
+                conv,
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
@@ -4511,6 +4536,7 @@ impl Core {
             pinned_at: None,
             ended: None,
             plan: None,
+            stuck: None,
             context: None,
             fresh_after: None,
             messages: vec![],
@@ -5248,10 +5274,58 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
     Some(&mut messages[at])
 }
 
+fn start_conversation_claude(id: &str, opts: ClaudeOptions, sink: EventSink) -> Session {
+    crate::proc::as_conversation(id, || start_claude(opts, sink))
+}
+
 #[cfg(test)]
 mod tool_in_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn proc_conversation_session_starts_its_spawner_with_its_identity() {
+        crate::proc::set_token_minter(Arc::new(|id| format!("test-{id}")));
+        let seen = Arc::new(Mutex::new(None));
+        let record = seen.clone();
+        let spawn: crate::proc::Spawner = Arc::new(move |bin, args, cwd| {
+            let command = crate::proc::marked(bin, args, cwd);
+            let env = command
+                .as_std()
+                .get_envs()
+                .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned())))
+                .collect::<std::collections::HashMap<_, _>>();
+            *record.lock().unwrap() = Some(env);
+            Err(std::io::Error::other("test"))
+        });
+        let launch = ClaudeLaunch {
+            area: Area::Chat,
+            model: None,
+            effort: None,
+            resume: None,
+            user_hooks: false,
+            permissions: Permissions::Ask,
+            instructions: None,
+            research: None,
+            group_instructions: None,
+            user_name: None,
+            flags: Default::default(),
+            tuning: Default::default(),
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            leads: false,
+            verify: false,
+            progress: false,
+            tools: Default::default(),
+        };
+        let opts = ClaudeOptions { bin: "test".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None };
+        start_conversation_claude("session-one", opts, Arc::new(|_| {}));
+        let guard = seen.lock().unwrap();
+        let env = guard.as_ref().unwrap();
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).unwrap(), "test-session-one");
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "session-one");
+    }
 
     #[tokio::test]
     async fn streamed_reply_events_and_open_keep_captured_bytes_out_of_the_screen_store() {

@@ -58,8 +58,24 @@ impl Backend for Arc<Host> {
     }
 }
 
-/// Serves the channel of `data` over `host` until the process ends. Only one Faber per data folder may: a second one gets
-/// an error here.
+static SECRET: std::sync::OnceLock<Arc<crate::secret::Secret>> = std::sync::OnceLock::new();
+
+/// Prepares the run's identity before the engine can resume conversations.
+pub fn prepare() -> io::Result<()> {
+    let secret = match SECRET.get() {
+        Some(secret) => secret.clone(),
+        None => {
+            let fresh = Arc::new(crate::secret::Secret::fresh()?);
+            SECRET.get_or_init(|| fresh).clone()
+        }
+    };
+    faber_engine::proc::set_token_minter(Arc::new(move |id| secret.token(id)));
+    Ok(())
+}
+
+/// Serves the channel of `data` over `host` until the process ends.
 pub async fn serve(data: &Path, host: Arc<Host>) -> io::Result<()> {
-    crate::serve(data, Arc::new(host)).await
+    prepare()?;
+    let secret = SECRET.get().expect("prepared channel secret").clone();
+    crate::server::serve_with_secret(data, Arc::new(host), secret).await
 }

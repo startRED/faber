@@ -12,7 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-<<<<<<< HEAD
 pub const VERBS: &[(&str, &[&str])] = &[
     ("help", &[]),
     ("status", &["conversations"]),
@@ -32,31 +31,10 @@ pub const VERBS: &[(&str, &[&str])] = &[
     ("projects", &["projects"]),
     ("quota", &["quota"]),
     ("settings", &["settings"]),
+    ("asks", &["asks"]),
     ("watch", &["conversations", "conversation"]),
     ("wait", &["conversation"]),
     ("call", &[]),
-=======
-const VERBS: &[&str] = &[
-    "help",
-    "status",
-    "list",
-    "read",
-    "send",
-    "stop",
-    "continue",
-    "archive",
-    "unarchive",
-    "pin",
-    "unpin",
-    "rename",
-    "projects",
-    "quota",
-    "settings",
-    "asks",
-    "watch",
-    "wait",
-    "call",
->>>>>>> w4-s2-ask
 ];
 type ResultValue = Result<Value, i32>;
 async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultValue {

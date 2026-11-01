@@ -19,11 +19,11 @@ to the table is immediately callable through `faber call <command>` and listed i
 - **Per-run secret:** before listening, Faber writes 32 random bytes from the OS CSPRNG as 64 hex characters to
   `<data>/channel/secret` (readable only by the signed-in user). A client's first line (`hello`, within 5 s) must carry
   that secret; a missing or wrong one fails with `error.channel.secret` and closes.
-- **Conversation tokens:** a token `fa1.<id>.<64 hex>` (HMAC-SHA256 with this run's secret over `fa1.<id>`, checked in
+- **Conversation tokens:** a token `fa1.<base64url id>.<base64url HMAC>` (HMAC-SHA256 with this run's secret over `fa1.<id>`, checked in
   constant time) names the AI's conversation. `hello` passes it (from `FABER_AGENT_TOKEN`) with `FABER_AGENT_DEPTH`; a
-  tampered token or one from a previous run fails with `error.channel.token`. Faber does not put a token in the
-  environment of the CLIs it starts yet (slice 3, with the AI's own tools): until then every AI Faber starts is an AI with
-  no conversation, and asks the person for anything beyond reading and organizing.
+  tampered token or one from a previous run fails with `error.channel.token`. Faber gives Claude Code sessions their
+  conversation token at each start, including resumes and restarts. Codex sessions do not receive one yet, so they reach
+  Faber as an AI without a conversation.
 - **Starting Faber when closed:** if nothing answers on the channel, `faber` finds Faber's program (`FABER_APP`, or the app
   folder above its own `bin` folder), starts it hidden in the tray (`--autostart`, no console) and
   waits up to 10 s for the channel. `--no-start` and any process with `FABER_AGENT_DEPTH >= 1` never start Faber and exit
