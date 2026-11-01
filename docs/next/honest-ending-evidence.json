@@ -1,5 +1,14 @@
 {
+  "notes": {
+    "fixed": {
+      "en": "A plan step now turns done only when the AI says what it checked; a helper finishing no longer ticks it.",
+      "pt-BR": "Um passo do plano só vira concluído quando a IA diz o que conferiu; um ajudante que termina não o marca mais.",
+      "es": "Un paso del plan solo pasa a hecho cuando la IA dice qué comprobó; que termine un ayudante ya no lo marca.",
+      "fr": "Une étape du plan n’est faite que lorsque l’IA dit ce qu’elle a vérifié ; la fin d’un assistant ne la coche plus.",
+      "de": "Ein Planschritt gilt erst als erledigt, wenn die KI sagt, was sie geprüft hat; das Ende eines Helfers hakt ihn nicht mehr ab."
+    }
+  },
   "decisions": [
-    "| R-next | 2026-10-31 | A plan step is done only when the AI marks it with evidence; a helper or subagent ending never marks a step. | AI |"
+    "| R-next | 2026-10-31 | A plan step is done only when the AI marks it with evidence (what it ran or looked at); a helper or subagent ending never marks a step. | AI |"
   ]
 }

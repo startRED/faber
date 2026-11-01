@@ -649,7 +649,11 @@ mod tests {
             assert_eq!(core.convs[&parent].plan.as_ref().unwrap().steps[0].state, StepState::Active);
 
             let ok = core
-                .write_progress(&parent, crate::progress::PLAN_TOOL, &serde_json::json!({ "advance": true, "evidence": "Joined branch and ran cargo test." }))
+                .write_progress(
+                    &parent,
+                    crate::progress::PLAN_TOOL,
+                    &serde_json::json!({ "advance": true, "evidence": "Joined branch and ran cargo test." }),
+                )
                 .unwrap();
             assert!(ok.contains("1 of 2"), "{ok}");
             let step = &core.convs[&parent].plan.as_ref().unwrap().steps[0];
