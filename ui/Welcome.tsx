@@ -8,6 +8,7 @@ import { animateList } from './motion.ts';
 import { Peek } from './Mark.tsx';
 import { tail } from './ProjectSettings.tsx';
 import { ProjectGoals } from './ProjectGoals.tsx';
+import { ProjectResults } from './Results.tsx';
 import { ProjectMemory } from './ProjectMemory.tsx';
 import { pickUp } from './running.ts';
 
@@ -98,7 +99,7 @@ export function Welcome(props: {
             </For>
           </section>
         </Show>
-        <Show when={props.project}>{(project) => <><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show>
+        <Show when={props.project}>{(project) => <><ProjectResults projectId={project().id} summaries={props.recent} /><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show>
         {/* Keyed by the project, so another project's home never shows this one's sessions. */}
         <Show when={props.terminal && props.project?.id} keyed>
           {(id) => <FromTerminal list={() => props.terminal!.list(id)} onPick={(s) => props.terminal!.onPick(id, s)} />}
@@ -112,6 +113,7 @@ export function Welcome(props: {
  * asking starts the CLI for a moment. A row opens the session as a conversation that goes on where it was. */
 function FromTerminal(props: { list: () => Promise<CliSession[]>; onPick: (session: CliSession) => void }) {
   const [found, setFound] = createSignal<CliSession[] | 'looking'>();
+  const [open, setOpen] = createSignal(false);
   const look = async () => {
     setFound('looking');
     setFound(await props.list().catch(() => []));
@@ -122,16 +124,12 @@ function FromTerminal(props: { list: () => Promise<CliSession[]>; onPick: (sessi
   };
   return (
     <section class="resume terminal" aria-labelledby="terminal-title" aria-busy={found() === 'looking' || undefined}>
-      <Show
-        when={found()}
-        fallback={
-          <button type="button" class="from-terminal" id="terminal-title" title={t('s1.terminal.hint')} onClick={() => void look()}>
-            <Icon name="terminal" small />
-            {t('s1.terminal')}
-          </button>
-        }
-      >
-        <h2 id="terminal-title">{t('s1.terminal')}</h2>
+      <button type="button" class="from-terminal" id="terminal-title" title={t('s1.terminal.hint')} aria-describedby="terminal-summary" aria-expanded={open()} onClick={() => { const next = !open(); setOpen(next); if (next && !found()) void look(); }}>
+        <Icon name="terminal" small />
+        {t('s1.terminal')}
+      </button>
+      <p id="terminal-summary" class="project-summary">{t('s1.terminal.summary')}</p>
+      <Show when={open()}>
         <Switch>
           <Match when={found() === 'looking'}>
             <p class="s" role="status">

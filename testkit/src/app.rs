@@ -19,12 +19,30 @@ pub fn startup() -> Duration {
     Duration::from_secs(90)
 }
 
+/// The shell the screen tests drive (R459). Tauri's test build is the default; `FABER_TEST_SHELL=electron` runs the Electron
+/// shell with the Rust host beside it instead, through the same sandbox, containment and audits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shell {
+    Tauri,
+    Electron,
+}
+
+impl Shell {
+    pub fn chosen() -> Shell {
+        Shell::named(std::env::var("FABER_TEST_SHELL").ok().as_deref())
+    }
+
+    fn named(name: Option<&str>) -> Shell {
+        if name.is_some_and(|name| name.eq_ignore_ascii_case("electron")) { Shell::Electron } else { Shell::Tauri }
+    }
+}
+
 /// Where everything the runner needs lives.
 #[derive(Debug, Clone)]
 pub struct Paths {
     /// The repository.
     pub root: PathBuf,
-    /// The test build of Faber.
+    /// The program a run starts: the test build of Faber, or Electron's own program when the Electron shell is driven.
     pub app: PathBuf,
     /// The fake CLI, built next to the runner.
     pub fake_cli: PathBuf,
@@ -45,7 +63,39 @@ fn repository_root(start: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("cannot find the Faber repository from {}: run inside its workspace", start.display()))
 }
 
+/// Electron's own program, where the `electron` package keeps it (its `path.txt` names it, relative to `dist/`).
+fn electron_program(root: &Path) -> Result<PathBuf, String> {
+    let package = root.join("node_modules/electron");
+    let name = std::fs::read_to_string(package.join("path.txt"))
+        .map_err(|e| format!("{}: {e} (run npm ci)", package.join("path.txt").display()))?;
+    Ok(package.join("dist").join(name.trim()))
+}
+
 impl Paths {
+    /// What goes before a launch's own arguments: nothing for Tauri's program, the compiled shell for Electron's.
+    pub fn app_args(&self) -> Vec<String> {
+        match Shell::chosen() {
+            Shell::Tauri => Vec::new(),
+            Shell::Electron => vec![self.root.join("out/electron/main.js").to_string_lossy().into_owned()],
+        }
+    }
+
+    /// The Rust host the Electron shell starts, built with the test hooks next to the fake CLI's build.
+    pub fn sidecar(&self) -> PathBuf {
+        self.target.join(format!("debug/faber-sidecar{}", std::env::consts::EXE_SUFFIX))
+    }
+
+    /// The environment only the Electron shell needs: its host, and the test build of the screen to serve.
+    fn shell_env(&self) -> Vec<(&'static str, String)> {
+        match Shell::chosen() {
+            Shell::Tauri => Vec::new(),
+            Shell::Electron => vec![
+                ("FABER_SIDECAR", self.sidecar().to_string_lossy().into_owned()),
+                ("FABER_TEST_DIST", self.root.join(crate::testbuild::TEST_DIST).to_string_lossy().into_owned()),
+            ],
+        }
+    }
+
     pub fn discover() -> Result<Paths, String> {
         let cwd = std::env::current_dir().map_err(|e| format!("cannot read the runner's current folder: {e}"))?;
         let root = repository_root(&cwd)?;
@@ -53,8 +103,12 @@ impl Paths {
         let bin = exe.parent().ok_or("the runner has no folder")?.to_path_buf();
         let suffix = std::env::consts::EXE_SUFFIX;
         let target = test_target(&root, std::env::var_os("CARGO_TARGET_DIR").as_deref());
+        let app = match Shell::chosen() {
+            Shell::Tauri => target.join(format!("debug/faber{suffix}")),
+            Shell::Electron => electron_program(&root)?,
+        };
         Ok(Paths {
-            app: target.join(format!("debug/faber{suffix}")),
+            app,
             fake_cli: bin.join(format!("fake-cli{suffix}")),
             fixtures: root.join("tests/fixtures"),
             shots: target.join("shots"),
@@ -330,8 +384,10 @@ impl Ctx {
         if launch.setup_source.is_none() {
             launch.setup_source = self.server.as_ref().map(|s| s.origin.clone());
         }
-        let env = child_env(&env_pairs(), &self.sb, &launch, &self.paths.fake_cli);
-        let (owned, stdout, stderr) = Owned::start(&self.paths.app, &launch.args, &env, &self.sb.sandbox, &self.paths.fake_cli)
+        let mut env = child_env(&env_pairs(), &self.sb, &launch, &self.paths.fake_cli);
+        env.extend(self.paths.shell_env().into_iter().map(|(name, value)| (name.to_string(), value)));
+        let args: Vec<String> = self.paths.app_args().into_iter().chain(launch.args.iter().cloned()).collect();
+        let (owned, stdout, stderr) = Owned::start(&self.paths.app, &args, &env, &self.sb.sandbox, &self.paths.fake_cli)
             .map_err(|e| format!("cannot start {}: {e}", self.paths.app.display()))?;
         let owned = Arc::new(owned);
         registry().owned.push(owned.clone());
@@ -469,7 +525,12 @@ impl Ctx {
     pub fn memory_mb(&mut self, id: usize) -> Result<(f64, bool), String> {
         self.record(id)?;
         let live = &self.live[id];
-        let webview = live_tree(&snapshot()?, live.pid).iter().any(|r| r.name.to_lowercase().contains("msedgewebview2"));
+        // Electron's renderers are its own program again, started by the app.
+        let renderer = |r: &ProcRow| {
+            let name = r.name.to_lowercase();
+            name.contains("msedgewebview2") || (Shell::chosen() == Shell::Electron && r.pid != live.pid && name.starts_with("electron"))
+        };
+        let webview = live_tree(&snapshot()?, live.pid).iter().any(renderer);
         Ok((crate::proctree::private_mb(live.pid)?, webview))
     }
 
@@ -706,6 +767,14 @@ impl Drop for Ctx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_name_electron_picks_the_electron_shell_and_anything_else_stays_on_tauri() {
+        assert_eq!(Shell::named(None), Shell::Tauri);
+        assert_eq!(Shell::named(Some("tauri")), Shell::Tauri);
+        assert_eq!(Shell::named(Some("")), Shell::Tauri);
+        assert_eq!(Shell::named(Some("Electron")), Shell::Electron);
+    }
 
     #[test]
     fn repository_root_follows_the_invocation_workspace_and_its_descendants() {

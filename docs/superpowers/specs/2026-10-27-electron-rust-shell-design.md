@@ -46,19 +46,21 @@ Costs, stated before the decision:
 
 ```text
 Electron main process (TypeScript, thin: windows, menus, IPC relay)
-├── faber-native.node  (Rust, napi-rs: the engine + the shell's logic, one tokio runtime)
+├── faber-sidecar      (Rust child process: the engine + the shell's logic, one tokio runtime, newline JSON)
 ├── preload.ts         (contextBridge: the same fixed command list the screen has today)
 ├── BrowserWindow      (SolidJS screen from dist/, unchanged; sandbox on, no Node in the page)
 └── WebContentsView    (the agent's browser pane, driven by webContents.debugger)
 ```
 
-- **The engine runs in the main process as a napi-rs addon.** This saves the process and serialization of a sidecar,
-  and the engine already returns keys (`error.*`) and JSON-shaped models. napi-rs turns a Rust panic at the boundary
-  into a JS error, so the addon builds with `panic = "unwind"`; the rest of the release profile stays. Phase 1 measures
-  the addon against a sidecar process (the same engine behind stdio), and the sidecar wins if the addon costs more
-  memory or makes a crash take the window down.
+- **The engine runs in its own process, `faber-sidecar`** (phase 1 chose it over a napi-rs addon, below). The main
+  process writes requests to its stdin and reads replies, events and orders from its stdout, one JSON object per line.
+  A panic in the engine ends the sidecar, never the window.
+- **Rust decides, Electron carries out.** The tray (its words, number and badged picture), notices and their chime,
+  keeping the PC awake and starting with the system are decided in `faber-host` and leave as `{"order":{...}}` lines
+  (`wire::Order`); Electron only calls the matching API. What only the window sees (its focus) goes back as
+  `{"shell":{...}}` lines (`wire::ShellNote`).
 - **Node is a relay only.** `electron/main.ts` creates the window, the tray and the pane, and forwards each command to
-  the addon. A rule that decides anything lives in Rust and has a Rust test. The size target is under 800 lines of
+  the sidecar. A rule that decides anything lives in Rust and has a Rust test. The size target is under 800 lines of
   TypeScript in `electron/`.
 - **One command table for every front end.** The commands live in the `host/` crate (`faber-host`): one `table!`
   list builds each command, `Host::dispatch(name, args JSON)` and `Host::commands()` (name, camelCase arguments, and a
@@ -78,15 +80,15 @@ Electron main process (TypeScript, thin: windows, menus, IPC relay)
 
 | Today (`src-tauri/src/`) | Lines | In Electron |
 |---|---|---|
-| `main.rs` (window, commands) | 1799 | Commands become napi-rs exports in `native/`; window code goes to `electron/main.ts` |
-| `look.rs` (appearance to CSS variables) | 1126 | Unchanged Rust in the addon |
+| `main.rs` (window, commands) | 1799 | Commands moved to the `host/` table (done); window code goes to `electron/main.ts` |
+| `look.rs` (appearance to CSS variables) | 1126 | Unchanged Rust in the sidecar |
 | `tray/decide.rs`, `tray/badge.rs` | 1142 | Unchanged Rust; the badge is drawn in Rust as PNG bytes for `nativeImage` |
-| `tray.rs`, `tray/native.rs`, `tray/sound.rs` | 544 | Electron `Tray` and `Notification`; the windowless state queries stay in Rust |
+| `tray.rs`, `tray/native.rs`, `tray/sound.rs` | 544 | Electron `Tray` and `Notification` carry out orders; the decisions, the window-in-front queries and the chime are in `host/src/tray/` |
 | `awake.rs` (keep the PC awake) | 656 | Electron `powerSaveBlocker`; the Windows API file goes |
 | `autostart.rs` | 348 | `app.setLoginItemSettings`; the Windows API file goes |
 | `pane/mod.rs`, `pane/native.rs` | 672 | `WebContentsView` + `webContents.debugger`; the rules of `mod.rs` stay Rust |
 | `update.rs`, `local_update.rs`, `bin/faber-local.rs` | 3614 | Stay Rust; the signed download replaces `tauri-plugin-updater` (see below) |
-| `setup.rs`, `folder.rs`, `terminal.rs`, `project_commands.rs` | 618 | Unchanged Rust in the addon |
+| `setup.rs`, `folder.rs`, `terminal.rs`, `project_commands.rs` | 618 | Unchanged Rust in the sidecar |
 
 Two of the four files that may use unsafe code (`awake.rs`, `autostart.rs`) go, because Electron already wraps those
 calls. `winproc/` stays.
@@ -126,7 +128,7 @@ Each phase is its own pull request through `land.mjs`, with its measured memory 
    (many turns, conversations opened and closed, the pane opened and closed) and fails when private memory grows
    past a set slope. It runs on the Tauri build first, so the leak is fixed before the move and both shells are measured
    from the same baseline.
-1. **Skeleton and measurement.** `electron/` + `native/` (napi-rs) open the real screen with the engine, with no other
+1. **Skeleton and measurement.** `electron/` and the sidecar open the real screen with the engine, with no other
    feature. Measure private memory idle, with 1000 messages and in the tray, cold start and installer size on Windows
    and macOS, addon against sidecar. The numbers go in this spec and the pull request; no fixed number stops the move
    (owner, 2026-10-29), but every cost found is cut before phase 2 ends.
@@ -143,12 +145,33 @@ Each phase is its own pull request through `land.mjs`, with its measured memory 
 8. **Rust in place of the screen's logic and the scripts**, piece by piece: markdown and colours, the worklog,
    the sidebar grouping, then the scripts. Each piece can land on its own after phase 2.
 
+## Phase 1, measured
+
+2026-10-29 on the owner's PC (Windows 11, a real GPU), hidden window, release sidecar. Private bytes of the whole tree
+(main, GPU, renderer, network, sidecar):
+
+| State | Before tuning | After |
+|---|---|---|
+| Idle, home screen | 304 MB (GPU 149, renderer 87, main 43, utility 14, sidecar 10) | about 303 MB |
+| 1000 messages open | 325 MB | 325 to 370 MB |
+| The same, scrolled up (40 answers drawn) | 376 MB | about 395 MB |
+| Window closed, in the tray | 218 to 250 MB (the GPU process kept 153 to 173) | 54 to 58 MB |
+
+The tuning: the GPU process is ended when no window is left (Chromium starts a new one with the window, and its crash
+limit is lifted so the tray never drops the screen to software drawing), and the network service runs inside the main
+process. Bare Electron with no host is 125 to 128 MB; `--disable-gpu` would save about 130 MB idle but draws in software,
+so it stays off. For comparison, the installed Tauri Faber on the same PC held a WebView2 GPU process of 185 MB, a
+renderer of 286 MB and an engine of 978 MB (a leak phase 0 looks for); on CI, without a GPU, Tauri measures 85 MB with
+the guide open and 142 MB with 1000 messages.
+
+**Sidecar, not addon.** The host runs as `faber-sidecar`, a window-less Rust process spoken to in newline JSON
+(`host/src/wire.rs`). It costs about 10 MB and one pipe hop per call, too little to see on screen, and a panic in the
+engine ends only the sidecar, never the window. The addon is not built.
+
 ## Risks
 
-- **Memory.** The fixed Electron floor may not fit R125 together with the conversation. Phase 1 stops the move if it
-  does not.
-- **Panics in the addon.** A panic napi-rs does not catch, or one inside a tokio task, ends the main process and the
-  window. The sidecar fallback of phase 1 covers it.
+- **Memory.** Electron's fixed floor is about 125 MB above Tauri's on the same PC. No number stops the move (owner,
+  2026-10-29); every phase measures and cuts, and growth over time is a bug.
 - **Security surface.** Node in the main process is a new place for an attacker to aim. The fuses, the sandbox and the
   fixed bridge are reviewed twice.
 - **Signing and notarization on macOS** need the owner's Apple account. They are not a new cost, but they are asked for
