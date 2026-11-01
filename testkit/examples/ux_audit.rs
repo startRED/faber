@@ -2,14 +2,15 @@
 //! Operations: eval, click, fill, press, shot, call (any DevTools method), memory, cpu, quit.
 //!
 //! Options: `--lang <code>` (default pt-BR), `--first-run` (no settings but the language, so the first run shows),
-//! `--no-ai` (no CLI at all; the default is the fake Claude replaying `claude/chat.jsonl`), `--build` (builds the fake CLI
+//! `--codex` (fake Codex with the sandbox's synthetic sign-in), `--no-ai` (no CLI at all; the default is fake Claude),
+//! `--build` (builds the fake CLI
 //! and the test app first, at the build priority). `scripts/first-user.mjs` uses it for the first-user review.
 //! `--project-demo` seeds the existing isolated Demo repository and uses the fake chat replay, without first run.
 
 use faber_testkit::{
     app::{Ctx, Paths},
     page::css,
-    screen::{claude_chat, no_cli, projects_ui, start_settings},
+    screen::{projects_ui, start_settings, ux_audit},
     testbuild::build_for_run,
 };
 use serde_json::{Value, json};
@@ -18,6 +19,9 @@ use std::io::{self, BufRead, Write};
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--codex") && has("--no-ai") {
+        return Err("--codex cannot be combined with --no-ai".into());
+    }
     if has("--project-demo") && (has("--first-run") || has("--no-ai")) {
         return Err("--project-demo cannot be combined with --first-run or --no-ai".into());
     }
@@ -36,12 +40,15 @@ fn main() -> Result<(), String> {
         start_settings(&ctx, lang)?;
     }
     let project = if has("--project-demo") { Some(projects_ui::fixture(&mut ctx)?) } else { None };
-    let mut launch = if has("--no-ai") { no_cli() } else { claude_chat(&ctx) };
+    let mut launch = ux_audit::launch(&ctx, has("--codex"), has("--no-ai"))?;
     if let Some(project) = project {
         launch.git_bin = project.git_bin;
     }
     if let Some(name) = args.iter().position(|a| a == "--recording").and_then(|i| args.get(i + 1)) {
         launch.recording = Some(paths.fixtures.join(name));
+        if has("--codex") {
+            launch.codex_recording = launch.recording.clone();
+        }
     }
     let mut app = ctx.launch(launch)?;
     println!("READY");

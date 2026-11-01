@@ -3,6 +3,9 @@
 Decided on 2026-10-11. This is the direction that Phase 1 builds. It replaces the Mono design of 2026-10-10. The
 approved mock (six screens) is the visual reference, and each Phase 1 piece updates the page of its own part.
 
+The hidden `ux_audit` walkthrough can select fake Codex with `--codex`, using synthetic sandbox sign-in and the existing
+recordings; fake Claude remains the default. This test-only choice changes no screen, layout, motion or product words.
+
 ## Design and identity
 
 The visual direction lives in this folder, one page per part ([docs/README.md](../README.md) says which). In short:
