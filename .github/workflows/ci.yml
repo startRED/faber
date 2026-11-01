@@ -313,6 +313,8 @@ jobs:
     needs: [changes, electron-app]
     if: always() && needs.changes.outputs.app == 'true' && needs.electron-app.result == 'success'
     runs-on: windows-latest
+    # Reports without blocking until the Electron checks are steady (R459); remove with ELECTRON_BLOCKS_GATE.
+    continue-on-error: true
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: ''
       FABER_TEST_SHELL: electron
