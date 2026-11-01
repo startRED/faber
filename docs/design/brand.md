@@ -15,7 +15,7 @@ The mark, the app icon and the brand rules.
   screen has none. He moves only in the entrance of a new project session in Dark Room (below). He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
   show, eyes included (`Peek` in `ui/Mark.tsx`). He is in the one empty state (`ui/Empty.tsx`, R170): Curioso, a title in
   the heading size (`--fs-h2`, never the display size), one short line and at most one button, for no AI, no project and a
-  project with nothing in it. The line never names a path through Settings, whose sections change names; the button goes there.
+  project with nothing in it. A small [scene](scenes.md) rests beside him on the hairline in the Projects and Catalog empties. The line never names a path through Settings, whose sections change names; the button goes there.
 - **The wordmark** is "Faber" in Rubik Bold, converted to outlines. No font file ships.
 
 ## Brand

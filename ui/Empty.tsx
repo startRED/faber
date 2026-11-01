@@ -1,6 +1,7 @@
 import type { JSX } from 'solid-js';
 import { Show } from 'solid-js';
 import { Peek } from './Mark.tsx';
+import type { SceneName } from './illustrations/index.tsx';
 
 /**
  * The one empty state: the peeking mark, a title in the heading size, one short line and at most one button. It is used
@@ -9,6 +10,7 @@ import { Peek } from './Mark.tsx';
  */
 export function Empty(props: {
   title: string;
+  scene?: SceneName;
   line?: string;
   /** The one button. `restore` is the `data-restore` that gives focus back when the dialog it opens closes. */
   button?: { label: string; onClick: () => void; restore?: string };
@@ -18,7 +20,7 @@ export function Empty(props: {
 }) {
   return (
     <div class={`empty${props.class ? ` ${props.class}` : ''}`}>
-      <Peek />
+      <Peek scene={props.scene} />
       <h1 class="display">{props.title}</h1>
       <Show when={props.line}>{(line) => <p>{line()}</p>}</Show>
       <Show when={props.button}>

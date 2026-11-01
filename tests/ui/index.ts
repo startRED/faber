@@ -109,6 +109,7 @@ import './research.check.ts';
 import './calm.check.ts';
 import './homes.check.ts';
 import './update.check.ts';
+import './scenes.check.ts';
 import './icons.check.ts';
 
 type Vars = Record<string, string | number>;

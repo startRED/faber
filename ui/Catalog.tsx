@@ -328,7 +328,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <Show when={filter() !== 'installed' && visible().length}><button class="btn ghost" data-catalog-pick-shown onClick={pickShown}><Icon name="check" small />{t(allShown() ? 'catalog.unpickShown' : 'catalog.pickShown')}</button></Show>
           </div>
           <Show when={loading()}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
-          <Show when={filter() !== 'installed' && !loading() && !matching().length && !error()}><div class="catalog-empty" role="status"><Peek /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
+          <Show when={filter() !== 'installed' && !loading() && !matching().length && !error()}><div class="catalog-empty" role="status"><Peek scene={query().trim() ? 'noResults' : 'catalogEmpty'} /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
           <For each={groups()}>{(group) => <section class="catalog-group"><h2><Show when={glyphs[group.job]}>{(name) => <Icon name={name()} small />}</Show>{group.name}</h2><div class="catalog-grid"><For each={group.rows}>{(row) => <div class="catalog-tile" data-tone={tone(row)} classList={{ picked: picked().includes(row.id) }}>
             <button class="catalog-card" data-catalog-card={row.id} onClick={(e) => open(row, e.currentTarget)}>
               <span class="catalog-icon"><Icon name={glyph(row)} /></span>
