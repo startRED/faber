@@ -2413,6 +2413,7 @@ export const fr: Messages = {
   'notes.339.better': "Un gros projet est de nouveau découpé : l'IA ouvre jusqu'à trois conversations en parallèle et vérifie le travail de chacune. Une petite demande reste dans une seule conversation.",
   'notes.340.better': 'Dans la conversation, vous voyez quand le travail se termine sans conclusion ou est interrompu.',
   'notes.341.new': 'Dans un projet, chaque conversation se termine maintenant par ce qu’elle a livré et ce qu’elle a coûté. La page du projet les liste côte à côte.',
+  'notes.342.better': "La ligne en direct affiche l'état de l'agent ou le titre de sa dernière réflexion, et les étapes s'alignent sur le texte.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

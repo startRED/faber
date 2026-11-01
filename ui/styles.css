@@ -550,6 +550,7 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .queue-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: var(--read-lh); min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 240px; }
 .ai > .md > div > :is(p, ul, ol, .codeblock, pre, blockquote, table) { content-visibility: auto; contain-intrinsic-size: auto 3lh; }
+.ai > .md:has(+ .steps) > div > p:last-child { margin-bottom: 2px; }
 .you.queued form { display: grid; gap: 8px; min-width: 0; }
 .you.queued textarea { width: 100%; min-width: 0; color: inherit; font: inherit; }
 .you.queued textarea:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
@@ -615,6 +616,7 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .steps-list { display: grid; justify-items: start; gap: 1px; min-width: 0; max-width: 100%; padding-inline-start: 14px; }
 .step { display: grid; justify-items: start; min-width: 0; max-width: 100%; }
 .step-line, .steps-head { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin-inline-start: -6px; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--r-xs); background: transparent; color: var(--ink-3); font: inherit; text-align: start; cursor: default; transition: background-color var(--dur-fast) var(--ease); }
+.steps-head { margin-inline-start: -13px; }
 .step-line:hover, .steps-head:hover, .step-line[aria-expanded='true'], .steps-head[aria-expanded='true'] { background: var(--s1); }
 .step-line b, .steps-head b { flex: none; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
 .steps-head b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

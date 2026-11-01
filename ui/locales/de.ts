@@ -2413,6 +2413,7 @@ export const de: Messages = {
   'notes.339.better': 'Große Aufträge werden wieder aufgeteilt: Die KI startet bis zu drei Unterhaltungen parallel und prüft die Arbeit jeder einzelnen. Kleine Aufträge bleiben in einer Unterhaltung.',
   'notes.340.better': 'In der Unterhaltung siehst du, wenn die Arbeit ohne Abschluss endet oder unterbrochen wurde.',
   'notes.341.new': 'In einem Projekt zeigt jedes Gespräch jetzt am Ende, was es geliefert und was es gekostet hat. Die Projektseite listet alle nebeneinander auf.',
+  'notes.342.better': 'Die Live-Zeile zeigt den Status des Agenten oder die Überschrift seines letzten Gedankens; die Schritte sind am Text ausgerichtet.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

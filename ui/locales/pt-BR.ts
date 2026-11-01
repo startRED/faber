@@ -2400,6 +2400,7 @@ export const ptBR: Messages = {
   'notes.339.better': 'Um pedido grande volta a ser dividido: a IA abre até três conversas lado a lado e confere o trabalho de cada uma. Pedido pequeno continua em uma conversa só.',
   'notes.340.better': 'Você vê na conversa quando o trabalho terminou sem conclusão ou foi interrompido.',
   'notes.341.new': 'Num projeto, cada conversa agora termina mostrando o que entregou e quanto custou. A página inicial do projeto lista todas lado a lado.',
+  'notes.342.better': 'A linha ao vivo mostra o que o agente diz estar fazendo ou o título do pensamento mais recente, e os passos ficam alinhados ao texto.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

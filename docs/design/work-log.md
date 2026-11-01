@@ -31,7 +31,8 @@ and a useful file location is allowed when the person needs to find or open an a
   chevron (or the live dot while working), a summary by kind in the order they first came (`stepsSummary`:
   "Read 3 files · Ran 2 commands", "Thought", a file counted once however many steps touch it), the step or thinking it
   is on now while working, how many failed (`1 failed` in the error ink), and elapsed time past half a minute. A click
-  opens `div.steps-list` with every row in order. Nothing animates beyond the chevron's turn (none in reduced motion).
+  opens `div.steps-list` with every row in order. The folded line aligns with the prose edge, with equal space above and below.
+  Nothing animates beyond the chevron's turn (none in reduced motion).
 - At a catalog kit's session boundary, the reply shows one quiet `.kit.disclosure` fold above the reply ("Tools ready when
   the AI started"): the catalog localized names of task-picked items and selection reason. Names share Catalog's
   `catalog.name.*` entries in all five locales. Claude's available descriptions are not this selection.

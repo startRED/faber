@@ -58,7 +58,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   text change, never while a step runs). When nothing in the reply already shows the agent at work (no running step, live
   thought, running helper or arriving words, and no question or quota card waiting), one quiet live line
   (`div.activity-latest.live-line`) under the reply says what the agent is doing now (its `status` words, else
-  "Thinking…"). Older messages without decision rows keep the loop mark after the next reply's model (R241; the
+  "Thinking…" followed by the latest thinking headline when there is one). Older messages without decision rows keep the loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check

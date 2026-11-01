@@ -32,6 +32,7 @@ check('review 1: every block of a tool-free or legacy multi-block answer stays p
 });
 
 check('review 6: current activity is a polite atomic status outside any busy ancestor', () => {
+  useLanguage('en');
   const root = document.createElement('div');
   document.body.append(root);
   const [message, setMessage] = createSignal<Message>({ id: 'review', role: 'assistant', at: 0, status: 'streaming', text: '',
@@ -44,6 +45,12 @@ check('review 6: current activity is a polite atomic status outside any busy anc
     equal(status.getAttribute('aria-live'), 'polite');
     equal(status.getAttribute('aria-atomic'), 'true');
     equal(status.closest('[aria-busy="true"]'), null);
+    setMessage({ ...message(), thinking: '**First**\n\nDetails\n\n**Latest headline**', tools: [{ id: 'read', name: 'Read', input: { file_path: 'a.ts' }, ok: true }] });
+    equal(root.querySelector('.activity-latest')?.textContent, 'Thinking… Latest headline');
+    setMessage({ ...message(), now: 'Checking the result' });
+    equal(root.querySelector('.activity-latest')?.textContent, 'Checking the result');
+    setMessage({ ...message(), now: '   ', thinking: undefined });
+    equal(root.querySelector('.activity-latest')?.textContent, 'Thinking…');
     setMessage({ ...message(), tools: [{ id: 'second', name: 'Bash', input: { command: 'check two' } }] });
     equal(root.querySelector('.activity-latest'), null, 'the running step itself replaces the status');
     ok(root.querySelector('.step')?.textContent?.includes('check two'), 'the running step remains visible');

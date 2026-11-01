@@ -524,7 +524,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   };
   const liveLine = () => {
     if (!working() || waiting().length || m().waitUntil || shownLive()) return '';
-    return nowLine() || t('activity.thinkingNow');
+    const headline = thinking().findLast((part) => part.title)?.text;
+    return nowLine()?.trim() || [t('activity.thinkingNow'), headline && middle(headline)].filter(Boolean).join(' ');
   };
   const planNow = () => {
     if (!working()) return undefined;
