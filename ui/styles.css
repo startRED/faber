@@ -623,10 +623,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .step-line i { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; font-family: var(--font-mono); font-size: 0.92em; }
 .thought .step-line i { font-family: inherit; font-size: inherit; }
 .step-icon { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--ink-3); }
-.step-icon .live { width: 6px; height: 6px; }
-.step-icon .live::after { inset: -3px; }
-.steps-head .step-icon svg { transition: transform var(--dur-ui) var(--ease); }
-.steps-head[aria-expanded='true'] .step-icon svg { transform: rotate(90deg); }
+.steps-head .step-icon > svg { transition: transform var(--dur-ui) var(--ease); }
+.steps-head[aria-expanded='true'] .step-icon > svg { transform: rotate(90deg); }
 .step-failed { flex: none; font-style: normal; color: var(--danger); }
 .step[data-state='declined'] .step-line :is(b, i) { text-decoration: line-through; }
 .steps .long { flex: none; white-space: pre; font-variant-numeric: tabular-nums; }
@@ -641,8 +639,6 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .thought-text b { font-weight: 580; color: var(--ink-2); }
 /* Nothing above shows the agent at work: one quiet line says it is thinking, with the running mark. */
 .live-line { align-items: center; gap: 8px; }
-.live-line .live { flex: none; width: 6px; height: 6px; margin-inline-start: 4px; }
-.live-line .live::after { inset: -3px; }
 .kit.disclosure { align-self: start; }
 .kit.disclosure .pace { padding: 0 12px 10px; }
 /* An edit's line count: added in the accent's text ink, removed in the error ink, both in the data face. */
@@ -689,20 +685,14 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .agent-now { grid-column: 2 / 4; grid-row: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); }
 .btn.agent-handoff { min-width: 0; max-width: 100%; min-height: var(--h-sm); height: auto; white-space: normal; overflow-wrap: anywhere; text-align: start; }
 .agent-parent { overflow-wrap: anywhere; }
-/* A helper that works in the background is a ring, a live one a dot: never the square of a stop button. */
-.agent-mark .live { width: 6px; height: 6px; border-radius: 50%; }
-.agent-mark .live::after { inset: -3px; border-radius: 50%; }
-.agent[data-state='background'] .agent-mark .live { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .agent-report { color: var(--ink-2); }
 .agent-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 12px; }
 .runcol .toend { position: absolute; inset-inline-start: 50%; bottom: 0; translate: -50% 0; max-width: calc(100% - 24px); }
 .agent-output { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); font: var(--fs-sm) var(--font-mono); }
-/* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the dot, and for a stuck one
+/* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the mark, and for a stuck one
    the row's edge and one line under it with what the engine saw and two ways in. */
 .agent-item { display: grid; grid-template-columns: minmax(0, 1fr); }
 .agent-item[data-parent] { margin-inline-start: 12px; padding-inline-start: 8px; border-inline-start: 1px solid var(--line-2); }
-.agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live { background: var(--amber); }
-.agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live::after { border-color: var(--amber); }
 .agent[data-state='stuck'] { box-shadow: inset 0 0 0 1px var(--amber-line); }
 @media (forced-colors: active) {
   .agent[aria-current='true'] { border-color: Highlight; }
