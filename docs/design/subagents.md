@@ -1,5 +1,9 @@
 # Subagent steps
 
+A helper from the other AI whose process dies answers its caller immediately with a failed report and any words
+already received. It leaves the live-helper count even when a message was still on its way to it; its missing cost
+keeps the reply's existing approximate-cost mark. The caller can continue. No new control, animation or screen is added.
+
 ## Current activity
 
 A running helper row shows its latest unfinished tool under its task name, using the existing translated tool label

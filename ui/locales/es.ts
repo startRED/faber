@@ -2395,6 +2395,7 @@ export const es: Messages = {
   'notes.337.fixed': 'El trabajo ya no aparece como terminado si la IA no lo concluyó: indica que acabó sin conclusión y Faber le pide una vez a la IA que lo cierre.',
   'notes.338.better': 'Al abrir un paso para leerlo, la página se queda quieta mientras la respuesta sigue debajo, y los pasos muestran nombres cortos de archivo en lugar de rutas largas.',
   'notes.339.better': 'Un pedido grande vuelve a dividirse: la IA abre hasta tres conversaciones a la vez y revisa el trabajo de cada una. Un pedido pequeño sigue en una sola conversación.',
+  'notes.340.fixed': 'Si un ayudante se cierra de repente, la IA que lo esperaba puede continuar, y cerrar Faber no deja una IA recién iniciada en marcha.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
