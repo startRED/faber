@@ -34,7 +34,18 @@ fn state_of(busy: bool, c: &Conversation) -> State {
     if !busy && c.waiting_on.is_some() {
         return State::Waiting;
     }
-    ended::run_state(c, busy)
+    let state = ended::run_state(c, busy);
+    if matches!(state, State::Working | State::Stuck)
+        && !busy
+        && !c.compacting
+        && c.messages.last().is_some_and(|m| {
+            m.role == Role::Assistant && (m.status == Some(Status::Stopped) || (c.stopped && m.status != Some(Status::Streaming)))
+        })
+    {
+        if c.messages.last().is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped }
+    } else {
+        state
+    }
 }
 
 /// Where a plan step's conversation stands (task 040), in a subagent row's words.
@@ -463,7 +474,7 @@ impl Core {
         Ok(sibling::list(&folder, &rows))
     }
 
-    /// A conversation an agent started stopped working (its turn ended, nothing is queued, Keep going is off): its report
+    /// A conversation an agent started stopped working (its turn ended, or it was stopped with messages queued): its report
     /// goes to the agent that started it by itself, so no agent waits or polls. An archived or gone parent hears nothing.
     pub(super) fn tell_parent(&mut self, conv: &str) {
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
@@ -575,12 +586,20 @@ impl Core {
         let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
         self.sibling_allowed(&ai)?;
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some()) || state_of(false, target) == State::Working;
+        let stopped =
+            target.stopped || (!target.queued.is_empty() && matches!(state_of(false, target), State::Stopped | State::Interrupted));
         let wake = Wake::of("wake.asked");
         self.send_by_itself(id, sibling::ask_prompt(&from, conv, message), wake).map_err(|why| match why.as_str() {
             "error.queueFull" => "the conversation's inbox is full; it cannot take another message yet",
             _ => "it could not take the message now",
         })?;
-        Ok(sibling::asked(&title, id, busy))
+        if stopped {
+            Ok(format!(
+                "Sent to \"{title}\". It will read the message when it resumes. Call this tool with {{\"action\": \"read\", \"id\": \"{id}\"}} later to read its answer."
+            ))
+        } else {
+            Ok(sibling::asked(&title, id, busy))
+        }
     }
 }
 
@@ -670,7 +689,7 @@ impl Core {
             return Err("the message was empty".into());
         }
         let turn = new_id();
-        let stopped = self.convs.get(id).is_some_and(|c| c.stopped);
+        let stopped = self.convs[id].stopped || matches!(state_of(false, &self.convs[id]), State::Stopped | State::Interrupted);
         self.send_by_itself_with_id(id, text.into(), Wake::of("wake.asked"), turn.clone()).map_err(|why| match why.as_str() {
             "error.queueFull" => "the conversation's inbox is full; it cannot take another message yet".into(),
             _ => format!("the conversation could not take the message: {why}"),
@@ -767,6 +786,27 @@ impl Core {
 mod tests {
     use super::*;
     use crate::model::Permission;
+
+    #[test]
+    fn session_control_stopped_with_queued_messages_is_not_working() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id":"child","title":"Work","area":"project","createdAt":0,"updatedAt":0,"messages":[],
+            "queued":[{"id":"q","text":"Next","choice":{"vendor":"claude"},"at":0}]
+        }))
+        .unwrap();
+        let mut reply = Message::new("reply".into(), Role::Assistant, "Done".into(), 0);
+        reply.status = Some(Status::Done);
+        c.messages.push(reply);
+        c.stopped = true;
+        assert_eq!(state_of(false, &c), State::Stopped);
+        assert_eq!(state_of(true, &c), State::Working);
+        c.stopped = false;
+        c.messages[0].status = Some(Status::Stopped);
+        assert_eq!(state_of(false, &c), State::Stopped);
+        c.messages[0].permissions =
+            Some(vec![Permission { request_id: "q".into(), tool: "AskUserQuestion".into(), input: serde_json::Value::Null, epoch: None }]);
+        assert_eq!(state_of(false, &c), State::Waiting);
+    }
 
     #[test]
     fn a_saved_streaming_or_unconcluded_conversation_is_never_finished() {
