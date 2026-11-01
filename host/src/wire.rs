@@ -8,6 +8,12 @@
 //! notification, keeping the PC awake, starting with the system. An order is the whole decision (the shell draws it and
 //! decides nothing), and it answers nothing. The shell, in turn, tells the sidecar what only it can see with
 //! `{"shell":{"kind":"focus",...}}`, which answers nothing either.
+//!
+//! The browser pane's views live in the shell, so the pane's calls travel the same way: the host orders a view
+//! (`{"order":{"kind":"pane","id":n,"view":"main","op":"load","url":...}}`), the shell answers a call that has an `id` with
+//! `{"shell":{"kind":"paneAnswer","id":n,"ok":...}}` (or `"err":"..."`), and says what a view tells with
+//! `{"shell":{"kind":"paneEvent","view":"main","event":{"kind":"finished","url":...}}}`. An order with no `id` (`close`,
+//! `place`, `park`) answers nothing.
 
 use crate::Failure;
 use serde::{Deserialize, Serialize};
@@ -81,6 +87,66 @@ pub enum Order {
     },
     /// Show a file or folder in the file manager, selected and never opened. The host checked the path already.
     Reveal { path: String },
+    /// End the app at once, without waiting for the host: the update installer is about to replace it, and the host has
+    /// already stopped the engine. The host ends right after.
+    Quit,
+    /// One call on a view of the browser pane (`Driver` in `host/src/pane/driver.rs`). The shell does `op` on `view` in the
+    /// order the orders come, and answers a call that has an `id` with [`ShellNote::PaneAnswer`] under it; `close`, `place`
+    /// and `park` have none and answer nothing.
+    Pane {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<u64>,
+        view: PaneView,
+        #[serde(flatten)]
+        op: PaneOp,
+    },
+}
+
+/// The two views the browser pane has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PaneView {
+    /// The one the person sees.
+    Main,
+    /// The agent's tab behind.
+    Behind,
+}
+
+/// What the host asks of a view of the browser pane. Positions are in the screen's logical pixels, relative to the window's
+/// content.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum PaneOp {
+    /// Opens the view blank and parked, on the private in-memory profile `profile`. Answers `null`.
+    Open { profile: String },
+    /// Closes the view and everything its page holds, and forgets its profile once no view uses it.
+    Close,
+    /// Moves the view over this box.
+    Place { x: f64, y: f64, width: f64, height: f64 },
+    /// Moves the view out of the window, where it keeps drawing.
+    Park,
+    /// Starts loading `url`. Answers `null` once the load is started.
+    Load { url: String },
+    /// One DevTools Protocol command on the view's page; answers its result.
+    Call { method: String, params: Value },
+    /// Clears every cookie, storage and cache of the view's profile. Answers `null`.
+    Clear,
+}
+
+/// What a view of the browser pane tells the host (`ViewEvent` in `host/src/pane/driver.rs`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ViewNote {
+    /// A page started to load in the main frame, at this address.
+    Started { url: String, navigation: u64 },
+    /// A page finished loading, at the address it ended up.
+    Finished { url: String, navigation: u64 },
+    /// The main frame moved within the same document.
+    Moved { url: String },
+    /// The page's title changed.
+    Titled,
+    /// The view is gone: its window closed, or its page process died.
+    Gone,
 }
 
 /// What a dialog asks for.
@@ -113,6 +179,10 @@ pub struct TrayMenu {
 pub enum ShellNote {
     /// Faber's window gained (`true`) or lost the focus; a closed window has none.
     Focus { focused: bool },
+    /// Faber's window is on screen and not minimized (`true`), or is not (closed to the tray, minimized, never opened by a
+    /// start with the system). An update installs unattended only while it is not. Until the shell says, the window counts as
+    /// seen, so nothing closes it under the person.
+    Window { visible: bool },
     /// The answer to [`Order::Pick`]: the path picked, none when the person cancelled, or `no_window` when no dialog
     /// could be shown.
     Picked {
@@ -121,6 +191,17 @@ pub enum ShellNote {
         #[serde(default)]
         no_window: bool,
     },
+    /// The answer to an [`Order::Pane`] that has an `id`: the result (none when the call has none) or why it failed. A call
+    /// the shell never answers fails when the shell goes away.
+    PaneAnswer {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ok: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        err: Option<String>,
+    },
+    /// What a view of the browser pane tells, in the order it happens. Nothing comes after the view's `close`.
+    PaneEvent { view: PaneView, event: ViewNote },
 }
 
 /// A shell's note as it travels: `{"shell":{...}}`.
@@ -192,6 +273,11 @@ mod tests {
         assert_eq!(incoming(r#"{"id":3,"cmd":"state"}"#), Ok(Incoming::Request(Request { id: 3, cmd: "state".into(), args: Value::Null })));
         assert_eq!(incoming(r#"{"shell":{"kind":"nap"}}"#), Err("error.host.badRequest".into()));
         assert_eq!(
+            incoming(r#"{"shell":{"kind":"window","visible":false}}"#),
+            Ok(Incoming::Note(ShellNote::Window { visible: false })),
+            "the shell says whether its window is on screen"
+        );
+        assert_eq!(
             incoming(r#"{"shell":{"kind":"picked","id":4,"path":"C:\\a","noWindow":false}}"#),
             Ok(Incoming::Note(ShellNote::Picked { id: 4, path: Some("C:\\a".into()), no_window: false }))
         );
@@ -242,9 +328,91 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(Order::Awake { on: true }).unwrap(), json!({"kind":"awake","on":true}));
         assert_eq!(serde_json::to_value(Order::Autostart { on: false }).unwrap(), json!({"kind":"autostart","on":false}));
-        for order in [tray, notify, Order::Awake { on: false }, Order::Autostart { on: true }] {
+        assert_eq!(line(&Ordered { order: Order::Quit }), "{\"order\":{\"kind\":\"quit\"}}\n");
+        for order in [tray, notify, Order::Awake { on: false }, Order::Autostart { on: true }, Order::Quit] {
             assert_eq!(serde_json::from_str::<Ordered>(&line(&Ordered { order: order.clone() })).unwrap().order, order);
         }
+    }
+
+    #[test]
+    fn a_pane_order_names_its_op_beside_the_view_and_only_a_call_has_an_id() {
+        let order = |id, view, op| line(&Ordered { order: Order::Pane { id, view, op } });
+        assert_eq!(
+            order(Some(3), PaneView::Main, PaneOp::Open { profile: "faber-pane-x".into() }),
+            "{\"order\":{\"kind\":\"pane\",\"id\":3,\"view\":\"main\",\"op\":\"open\",\"profile\":\"faber-pane-x\"}}\n"
+        );
+        assert_eq!(
+            order(Some(4), PaneView::Behind, PaneOp::Call { method: "Page.reload".into(), params: json!({}) }),
+            "{\"order\":{\"kind\":\"pane\",\"id\":4,\"view\":\"behind\",\"op\":\"call\",\"method\":\"Page.reload\",\"params\":{}}}\n"
+        );
+        assert_eq!(
+            order(None, PaneView::Main, PaneOp::Place { x: 10.0, y: 20.5, width: 800.0, height: 600.0 }),
+            "{\"order\":{\"kind\":\"pane\",\"view\":\"main\",\"op\":\"place\",\"x\":10.0,\"y\":20.5,\"width\":800.0,\"height\":600.0}}\n"
+        );
+        assert_eq!(order(None, PaneView::Main, PaneOp::Park), "{\"order\":{\"kind\":\"pane\",\"view\":\"main\",\"op\":\"park\"}}\n");
+        assert_eq!(order(None, PaneView::Behind, PaneOp::Close), "{\"order\":{\"kind\":\"pane\",\"view\":\"behind\",\"op\":\"close\"}}\n");
+        let all = [
+            Order::Pane { id: Some(1), view: PaneView::Main, op: PaneOp::Open { profile: "p".into() } },
+            Order::Pane { id: Some(2), view: PaneView::Main, op: PaneOp::Load { url: "https://example.org/".into() } },
+            Order::Pane {
+                id: Some(3),
+                view: PaneView::Behind,
+                op: PaneOp::Call { method: "Runtime.evaluate".into(), params: json!({"a":[1,null]}) },
+            },
+            Order::Pane { id: Some(4), view: PaneView::Main, op: PaneOp::Clear },
+            Order::Pane { id: None, view: PaneView::Main, op: PaneOp::Place { x: -1.0, y: 0.0, width: 2.0, height: 3.0 } },
+            Order::Pane { id: None, view: PaneView::Main, op: PaneOp::Park },
+            Order::Pane { id: None, view: PaneView::Behind, op: PaneOp::Close },
+        ];
+        for order in all {
+            assert_eq!(serde_json::from_str::<Ordered>(&line(&Ordered { order: order.clone() })).unwrap().order, order);
+        }
+    }
+
+    #[test]
+    fn a_pane_answer_and_a_view_event_come_back_as_notes() {
+        let note = |text: &str| {
+            incoming(text).map(|incoming| match incoming {
+                Incoming::Note(note) => note,
+                Incoming::Request(request) => panic!("{request:?}"),
+            })
+        };
+        assert_eq!(
+            note(r#"{"shell":{"kind":"paneAnswer","id":3,"ok":{"result":{"value":1}}}}"#),
+            Ok(ShellNote::PaneAnswer { id: 3, ok: Some(json!({"result":{"value":1}})), err: None })
+        );
+        assert_eq!(
+            note(r#"{"shell":{"kind":"paneAnswer","id":4,"ok":null}}"#),
+            Ok(ShellNote::PaneAnswer { id: 4, ok: None, err: None }),
+            "an answer with no result is a null one"
+        );
+        assert_eq!(
+            note(r#"{"shell":{"kind":"paneAnswer","id":5,"err":"the page stopped"}}"#),
+            Ok(ShellNote::PaneAnswer { id: 5, ok: None, err: Some("the page stopped".into()) })
+        );
+        assert_eq!(
+            note(r#"{"shell":{"kind":"paneEvent","view":"behind","event":{"kind":"started","url":"https://a.example/","navigation":1}}}"#),
+            Ok(ShellNote::PaneEvent {
+                view: PaneView::Behind,
+                event: ViewNote::Started { url: "https://a.example/".into(), navigation: 1 }
+            })
+        );
+        assert_eq!(
+            note(r#"{"shell":{"kind":"paneEvent","view":"main","event":{"kind":"titled"}}}"#),
+            Ok(ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Titled })
+        );
+        assert_eq!(note(r#"{"shell":{"kind":"paneEvent","view":"side","event":{"kind":"gone"}}}"#), Err("error.host.badRequest".into()));
+        assert_eq!(note(r#"{"shell":{"kind":"paneEvent","view":"main","event":{"kind":"crashed"}}}"#), Err("error.host.badRequest".into()));
+        let finished =
+            ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Finished { url: "https://a.example/".into(), navigation: 1 } };
+        assert_eq!(
+            line(&Noted { shell: finished }),
+            "{\"shell\":{\"kind\":\"paneEvent\",\"view\":\"main\",\"event\":{\"kind\":\"finished\",\"url\":\"https://a.example/\",\"navigation\":1}}}\n"
+        );
+        assert_eq!(
+            line(&Noted { shell: ShellNote::PaneAnswer { id: 9, ok: Some(json!("done")), err: None } }),
+            "{\"shell\":{\"kind\":\"paneAnswer\",\"id\":9,\"ok\":\"done\"}}\n"
+        );
     }
 
     #[test]

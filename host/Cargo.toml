@@ -16,18 +16,29 @@ base64 = "0.23"
 # The config folder, for the data folder when `FABER_DATA_DIR` is not set; the shell reads the same call.
 dirs = "7"
 faber-engine = { path = "../engine" }
+# What the screen asks of the updater (Update ready, restart) and the installs it holds back; the shell of the sidecar owns one.
+faber-update = { path = "../update" }
 # What Windows says about the window in front, for the tray's rules (the unsafe calls live there).
 faber-winproc = { path = "../winproc" }
 # The tray's badge: the shipped picture is decoded, the badge drawn on it and the sidecar sends it as PNG.
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tempfile = "3"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
+# Reads Firefox cookies with the SQLite Windows supplies.
+rusqlite = { version = "0.30", default-features = false, features = ["winsqlite3"] }
 # Whether a drive letter is a network drive (folder.rs); the same version the shell uses.
 winsafe = { version = "0.0.29", features = ["kernel"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable; the Firefox reader's local-drive guard is tested with one.
+junction = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }
