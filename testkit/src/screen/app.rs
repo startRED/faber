@@ -195,7 +195,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg, .welcome-grid .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek > svg:not(.scene), .welcome-grid .peek > svg:not(.scene)')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
