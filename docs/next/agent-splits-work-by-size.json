@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-11-01 | The project agent splits big work the way the 2026-11-01 rework ran, inside its own conversation (R160, R161; never a missions screen). Small work it does itself, medium work goes to one to three helpers, and big work goes to one conversation per piece, with no file shared between pieces and each piece's goal kept in its plan step. Two levels only, the agent and its workers; lead conversations in between only for work too big for one agent. Faber owns the plumbing that failed that night: it wakes the agent when any piece ends or stops, each piece ends with proof or says it stopped, a piece that stopped twice without editing moves to the stronger model, and a restarted agent reads its pieces' goals back. Built after the rework, from `docs/tasks/later/023-the-agent-runs-its-team-to-the-end.md`. | Owner |"
+  ]
+}
