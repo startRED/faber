@@ -36,7 +36,7 @@ impl From<&str> for Error {
     fn from(key: &str) -> Self { key.to_string().into() }
 }
 impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.key.fmt(f) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { std::fmt::Display::fmt(&self.key, f) }
 }
 impl std::error::Error for Error {}
 
