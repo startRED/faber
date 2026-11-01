@@ -65,3 +65,45 @@ async fn faber_s_own_table_answers_with_the_screen_s_names_and_keeps_its_refusal
     let started = deep.call("new_group_chat", json!({ "groupId": "g" })).await.unwrap();
     assert_eq!(started, Err("error.channel.agentDepth".into()), "a turn the table marks as starting one is held");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn engine_token_is_accepted_by_the_running_host_channel() {
+    let data = tempfile::tempdir().unwrap();
+    let data_dir = data.path().join("data");
+    let wiring = Wiring::new(Arc::new(NoWindow));
+    let spawn: Spawner = Arc::new(|_, _, _| Err(std::io::Error::other("no CLI")));
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: data_dir.clone(),
+            chat_dir: data.path().join("work"),
+            clis: BTreeMap::new(),
+            spawn,
+            windows: cfg!(windows),
+            claude_env_billed: false,
+            max_warm: 1,
+            idle: Duration::from_secs(60),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        },
+        wiring.emitter(),
+    )
+    .unwrap();
+    let host = Arc::new(wiring.host(engine, data_dir.clone(), true, tokio::runtime::Handle::current()));
+    let server_data = data_dir.clone();
+    let server = tokio::spawn(async move { faber_channel::host::serve(&server_data, host).await });
+    let client = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(token) = faber_engine::proc::conversation_token("conversation-1") {
+                let hello = Hello { client: "test".into(), agent_depth: 1, token: Some(token), ..Default::default() };
+                if let Ok(client) = Client::connect(&data_dir, hello).await {
+                    break client;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(client.offer["caller"], json!({"kind":"agent", "conversation":"conversation-1"}));
+    server.abort();
+}

@@ -949,6 +949,7 @@ fn main() {
             // While a game is in front (R191) no new project check starts and a running one is held to a tenth of the processor.
             // The test build never waits for one, as the screen's own reading (`game_in_front`) never changes there.
             let game_guard: faber_engine::verify::Guard = Arc::new(|| !cfg!(feature = "test-hooks") && crate::tray::game_in_front());
+            faber_channel::host::prepare()?;
             let host = faber_host::start(
                 StartOptions {
                     data_dir: data_dir.clone(),

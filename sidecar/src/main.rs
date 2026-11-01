@@ -98,6 +98,10 @@ async fn run() -> ExitCode {
         game_guard: None,
         browser: None,
     };
+    if let Err(error) = faber_channel::host::prepare() {
+        eprintln!("Faber failed to prepare its channel: {error}");
+        return ExitCode::FAILURE;
+    }
     let host: Arc<Host> = match faber_host::start(options, shell.clone()) {
         Ok(host) => host,
         Err(error) => {
