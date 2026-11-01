@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, type JSX, Match, on, onCleanup, Show, Switch } from 'solid-js';
+import { createEffect, createSignal, For, type JSX, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
 import { AccountsSection } from './Accounts.tsx';
 import { AppearanceSection } from './Appearance.tsx';
@@ -105,6 +105,16 @@ export function Settings(props: Props) {
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
   const mode = () => props.saved.permissions ?? 'dontAsk';
   const title = () => t(SECTIONS.find(([id]) => id === section())![1]);
+  let back: HTMLButtonElement | undefined;
+  onMount(() => {
+    // Returning from account cards restores Manage accounts through the caller.
+    if (props.kept) return;
+    const previous = document.activeElement;
+    back?.focus();
+    onCleanup(() => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    });
+  });
   let main: HTMLDivElement | undefined;
   // A section opens at its top, whatever the one before was scrolled to.
   createEffect(
@@ -127,7 +137,7 @@ export function Settings(props: Props) {
   return (
     <div class="settings" data-screen="settings" data-surface="settings">
       <nav class="s-nav nav" aria-label={t('set.label')}>
-        <button class="item" onClick={() => props.onClose()}>
+        <button class="item" ref={(el) => { back = el; }} onClick={() => props.onClose()}>
           <span>{t('set.back')}</span>
           <kbd>{t('key.esc')}</kbd>
         </button>

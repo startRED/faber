@@ -27,6 +27,22 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
   ok(en['set.chatFolderHint'].length < 50, 'the row keeps one short line');
 });
 
+check('settings: plain words explain automatic actions, saved search results and incomplete limits in every language', () => {
+  equal(en['set.hooksBody'], 'Projects run my automatic actions');
+  equal(ptBR['set.hooksBody'], 'Os projetos rodam minhas ações automáticas');
+  equal(en['set.webSearch.cached'], 'Stored copy');
+  equal(ptBR['set.webSearch.cached'], 'Cópia salva');
+  equal(en['set.faberTrustHint'], 'The AI manages tools and web search without asking.');
+  equal(ptBR['set.faberTrustHint'], 'A IA gerencia ferramentas e busca na web sem perguntar.');
+  for (const [code, words] of Object.entries({ en, ptBR, es, fr, de })) {
+    ok(!/CLI|hooks/i.test(words['set.hooksBody']), `${code}: the label says what runs`);
+    ok(/hooks/i.test(words['set.hooksHint']) && /hooks/i.test(words['set.hooksMore']), `${code}: the tool's term is explained nearby`);
+    ok(!/cache|caché/i.test(words['set.webSearch.cached']), `${code}: saved results have a plain name`);
+    ok(!/[≥~+]/.test(words['quota.atLeast'] + words['quota.uncounted']), `${code}: uncertainty uses words`);
+    for (const key of ['set.hooksHint', 'set.hooksLocked'] as const) ok(words[key].length <= 70, `${code}: ${key} fits the row`);
+  }
+});
+
 check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
   ok(!Object.keys(en).some((key) => key.startsWith('project.permissions')), 'no permission sentence is kept for the top of a conversation');
   const body = en['set.permissionsDontAskBody'];
@@ -593,9 +609,17 @@ check('R140: the permission menu lists five modes with one plain line each, and 
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       await leave();
       equal(view.host.querySelector('[role="listbox"]'), null, 'Esc closes it');
+      equal(document.activeElement, pick(), 'Esc returns focus to the access choice');
       equal(escapes, 0, 'and stays inside the menu');
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       equal(escapes, 1, 'with the menu shut, Esc goes on to the page as before');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await tick();
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      pick().dispatchEvent(tab);
+      equal(tab.defaultPrevented, false, 'Tab keeps native traversal to the next control');
+      await leave();
+      equal(view.host.querySelector('[role="listbox"]'), null, 'Tab removes the open options from traversal');
     } finally { window.removeEventListener('keydown', seen); }
     // Web search: Cached and the Codex-only choices exist only where Codex is connected.
     const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} button`)].map((b) => b.textContent);
@@ -993,6 +1017,7 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
     await tick();
     await tick();
     equal(view.host.querySelectorAll('.acct').length, 2, 'one card for each AI');
+    ok(view.host.textContent!.includes(en['usage.apiValue']), 'the visible estimate explains that it is not a bill');
     const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
     ok(card.textContent!.includes('Plan: Max'), 'the plan is capitalised');
     const pill = card.querySelector('.acct-pill')!;
@@ -1032,16 +1057,24 @@ check('settings: a window still counting, or with an uncounted share, reads at l
       await tick();
       const cell = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .urow .share')!;
       ok(cell.scrollWidth <= cell.clientWidth + 1, `the share fits its cell (${cell.scrollWidth} > ${cell.clientWidth})`);
+      const label = cell.parentElement!.querySelector<HTMLElement>('.uname')!;
+      ok(label.getBoundingClientRect().right <= cell.getBoundingClientRect().left, 'the limit name and amount do not overlap');
       return cell.textContent!.trim();
     } finally { view.stop(); }
   };
   const counting = await share(usage(true, null));
-  ok(counting.startsWith('≥ 44%'), `"${counting}" does not read at least 44%`);
+  ok(counting.startsWith('at least 44%'), `"${counting}" does not read at least 44%`);
   ok(counting.includes(en['quota.counting']), 'screen readers still hear that it is counting');
   const extra = await share(usage(false, 0.12));
-  ok(extra.startsWith('≥ 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
+  ok(extra.startsWith('at least 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
   const calm = await share(usage(false, null));
   equal(calm, '44%', 'a settled reading shows the number alone');
+  try {
+    for (const language of ['pt-BR', 'de', 'fr', 'es'] as const) {
+      useLanguage(language);
+      await share(usage(true, null));
+    }
+  } finally { useLanguage('en'); }
 }));
 
 check('settings: a billed-per-use or unconfirmed account says so calmly and is never amber; a really low one stays amber (C002)', () => signedIn(async () => {
@@ -1216,6 +1249,87 @@ check('reply_style: Escape saves the focused words before Settings closes and re
     if (place === null) localStorage.removeItem('faber.place');
     else localStorage.setItem('faber.place', place);
   }
+});
+
+check('settings keyboard traversal: entry, reading order, hidden controls and visible rings at 720 px', () => signedIn(async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  const original = { projectProof: api.projectProof, projectGoals: api.projectGoals };
+  api.projectProof = async () => ({ commands: ['npm test'], setup: [], declared: [], source: 'none', confirmed: true, changed: false });
+  api.projectGoals = async () => ({ auto: false, capUsd: 2, spentUsd: 0, goals: [], capSeen: true, checks: [], canWatchCrashes: false });
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  const selector = 'button, input, select, textarea, a[href], [tabindex]';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      opener.focus();
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: { permissions: 'ask', replyStyle: 'own' }, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+        projects: [{ id: 'p1', name: 'Demo', path: 'C:/fixture/demo' }],
+        start: 'general', onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        const settings = view.host.querySelector<HTMLElement>('.settings')!;
+        settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const nav = [...settings.querySelectorAll<HTMLButtonElement>('.s-nav button')];
+        equal(document.activeElement, nav[0], 'opening puts focus on Back before the five sections');
+        for (const section of nav.slice(1)) {
+          section.click();
+          await tick();
+          const controls = () => [...settings.querySelectorAll<HTMLElement>(selector)].filter((el) => !el.matches(':disabled') && !el.closest('[inert]') && el.getClientRects().length > 0);
+          const inspect = () => {
+            const all = controls();
+            deepEqual(all.slice(0, 6), nav, 'navigation precedes the section controls in reading order');
+            for (const el of all) {
+              equal(el.tabIndex, 0, `native Tab order: ${el.outerHTML}`);
+              el.focus();
+              equal(document.activeElement, el, `reachable control: ${el.outerHTML}`);
+              const ring = getComputedStyle(el.matches('input[type=color]') ? el.parentElement! : el);
+              if (el.matches(':focus-visible') || el.matches('input[type=color]')) ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+            }
+          };
+          inspect();
+          // A closed fold contributes no stops; opening it exposes native controls in the same order.
+          for (const fold of settings.querySelectorAll<HTMLButtonElement>('.st-fold-head, .pset-head, .st-q, .more')) {
+            fold.click();
+            await tick();
+            if (fold.matches('.pset-head')) {
+              ok(settings.querySelector('[data-testid="proof-edit"]'), 'the seeded project exposes its check controls');
+              equal(settings.querySelector<HTMLInputElement>('#pset-p1-goals-switch')!.disabled, false, 'goal control is enabled');
+            }
+            inspect();
+            fold.click();
+            await tick();
+            const bodyId = fold.getAttribute('aria-controls');
+            const body = bodyId ? settings.querySelector(`#${bodyId}`) : null;
+            for (const el of body?.querySelectorAll<HTMLElement>(selector) ?? []) ok(el.closest('[inert]'), 'departing controls cannot receive Tab');
+          }
+        }
+      } finally { view.stop(); }
+      equal(document.activeElement, opener, 'closing returns focus to the connected opener');
+    }
+  } finally {
+    Object.assign(api, original);
+    opener.remove();
+    useLanguage('en');
+    forgetSection();
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+  }
+}));
+
+check('settings keyboard traversal: returning from account cards leaves focus restoration to the caller', async () => {
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  opener.focus();
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, start: 'accounts', kept: factory(),
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try { await tick(); equal(document.activeElement, opener, 'kept Settings does not steal restored focus'); }
+  finally { view.stop(); opener.remove(); forgetSection(); }
 });
 
 check('settings: opening again lands on the section that was open', () => {

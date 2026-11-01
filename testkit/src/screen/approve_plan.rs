@@ -81,21 +81,21 @@ fn run(ctx: &mut Ctx, codex: bool, stop: bool) -> Result {
         page.wait_visible(&css("article .plan-approval .md li").has_text("Add the check."))?;
     }
     let mode = page.labelled("composer.mode")?;
-    same(page.eval("document.querySelector('.composer .mode select').value")?.as_str(), Some("plan"), "still planning")?;
+    same(page.eval("document.querySelector('.composer .mode').textContent.trim()")?.as_str(), Some("Plan"), "still planning")?;
     ensure(
         !page.eval("document.querySelector('article').textContent.includes('Started the approved work.')")?.as_bool().unwrap_or(true),
         || "work started before approval".into(),
     )?;
     same(
-        page.eval("document.querySelector('article .plan-approval select').value")?.as_str(),
-        Some("ask"),
+        page.eval("document.querySelector('article .plan-approval [role=combobox]').textContent.trim()")?.as_str(),
+        Some("Ask"),
         "a conversation with unknown prior mode defaults to Ask",
     )?;
     // The replacement process reads this recording; the Plan process has already loaded its own turn.
     std::fs::copy(ctx.paths.fixtures.join(vendor).join("approve-plan-run.jsonl"), &recorded).map_err(|e| e.to_string())?;
     let approve = page.text_of("ask.plan.approve")?;
     page.click(&card.clone().role("button", &approve).exact())?;
-    page.wait_for("the composer mode to change", "document.querySelector('.composer .mode select').value === 'ask'")?;
+    page.wait_for("the composer mode to change", "document.querySelector('.composer .mode').textContent.trim() === 'Ask'")?;
     if stop {
         page.wait_gone(&card)?;
         let cancel = css(".composer button.stop");
@@ -130,5 +130,5 @@ fn run(ctx: &mut Ctx, codex: bool, stop: bool) -> Result {
     // The composer still offers the same value after a reload of the saved conversation.
     page.cdp.call("Page.reload", json!({}))?;
     page.wait_visible(&mode)?;
-    page.wait_for("the saved mode", "document.querySelector('.composer .mode select').value === 'ask'")
+    page.wait_for("the saved mode", "document.querySelector('.composer .mode').textContent.trim() === 'Ask'")
 }

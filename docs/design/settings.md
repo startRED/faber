@@ -4,6 +4,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 ## Settings
 
+- Keyboard: focus starts on Back and returns to the connected opener on closing. Native Tab order and existing rings cover enabled controls; hidden folds add no stops. Checks cover 720 px.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
   the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. With a native options
@@ -22,8 +23,13 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   the two control-height tokens, without native margins. Forced colours uses the native checkbox so its checked state remains visible. The
   mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
   `.field`. Under 960 px the control slot moves under the name.
+- Settings uses plain names in all five languages: automatic actions (with "hooks" explained beside the switch),
+  Stored copy for saved web results, and named limit periods. Incomplete readings say "at least" instead of a symbol.
+  The account total keeps the shared "in API value" wording and immediately explains the estimate and that it is not a bill.
+  Both access menus show every choice's description, with Ask's existing approvals and Full access's file, command and
+  internet access stated in plain words. Long security warnings and all five existing modes, including Plan, remain.
 - General has, in groups: *You* (language, name); *How the AI works* (Permissions as a menu of the five modes, Web search,
-  CLI hooks, "Full trust for Faber’s own setup" (one switch with one short line and a "?": off by default; it only skips the cards for the agent’s catalog installs, installed-tool switches, reversible removals and bounded web-search preference changes, and never covers sending, publishing, paying or deleting; it is written only here, and it is not a wall against an agent in Full access, which can edit the settings file as it can edit any file), Chat working folder with the recent folders where its control exists, Reply style for both AIs, and a closed "Codex" fold with
+  automatic actions (hooks), "Full trust for Faber’s own setup" (one switch with one short line and a "?": off by default; it only skips the cards for the agent’s catalog installs, installed-tool switches, reversible removals and bounded web-search preference changes, and never covers sending, publishing, paying or deleting; it is written only here, and it is not a wall against an agent in Full access, which can edit the settings file as it can edit any file), Chat working folder with the recent folders where its control exists, Reply style for both AIs, and a closed "Codex" fold with
   reasoning summary only); *Notifications and system* (Notify me, Play a sound, and on Windows keep the
   computer awake while Faber works and start Faber at sign-in); *Updates* (one switch, "Receive previews", off by default,
   with one short line; it acts at the next update check and turning it off never installs an older version). "Don't ask" is the default for new and
