@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "better": {
+      "en": "Opening Settings moves keyboard focus inside, and closing returns it to where you were.",
+      "pt-BR": "Ao abrir as Configurações, o foco do teclado vai pra dentro da tela e, ao fechar, volta pra onde você estava.",
+      "es": "Al abrir Ajustes, el foco del teclado entra en la pantalla y, al cerrarlos, vuelve a donde estabas.",
+      "fr": "À l’ouverture des réglages, le clavier prend le contrôle de cette page et revient à votre point de départ à la fermeture.",
+      "de": "Beim Öffnen der Einstellungen wechselt der Tastaturfokus hinein und beim Schließen zurück zur vorherigen Stelle."
+    }
+  },
+  "decisions": []
+}

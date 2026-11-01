@@ -13,6 +13,7 @@ const QUESTION: &str = "In one sentence: why is the sky blue?";
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "settings keyboard traversal reaches every control with a visible ring at 720 px", run: keyboard_traversal },
         Scenario { name: "control journey: project preferences and edited checks survive reopening and restart", run: project_preferences },
         Scenario {
             name: "control journey: Catalog search, keyboard details and selection return without installation",
@@ -70,6 +71,93 @@ fn open_settings(page: &mut Page) -> Result {
     page.click(&settings)?;
     let heading = page.named("heading", "set.general")?;
     page.wait_visible(&heading)
+}
+
+fn keyboard_traversal(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "de")?;
+    super::shell::seed_project(ctx, "Keyboard fixture")?;
+    std::fs::write(ctx.sb.data.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+        .map_err(|e| e.to_string())?;
+    let launch = chat_with_cli(ctx, true)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    page.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 720, "height": 700, "deviceScaleFactor": 1, "mobile": false }))?;
+    page.wait_visible(&css(".composer textarea"))?;
+    page.eval("document.querySelector('.composer textarea').focus()")?;
+    page.press("Control+,")?;
+    page.wait_visible(&css(".settings"))?;
+    page.wait_for("Settings takes keyboard focus", "document.activeElement === document.querySelector('.s-nav button')")?;
+    // All native Tab stops are checked in DOM order; closed/disabled controls must never enter the walk.
+    for section in 2..=6 {
+        page.press_on(&css(&format!(".s-nav button:nth-child({section})")), "Enter")?;
+        for expanded in [false, true] {
+            if expanded {
+                let folds = page.eval("[...document.querySelectorAll('.st-fold-head, .pset-head, .st-q, .more')].filter(el => !el.closest('[inert]')).map((el, i) => { el.dataset.keyboardFold = String(i); return i; }).length")?.as_u64().ok_or("missing fold count")?;
+                for index in 0..folds {
+                    page.press_on(&css(&format!("[data-keyboard-fold='{index}']")), "Space")?;
+                }
+                if section == 3 {
+                    page.wait_visible(&css("[data-testid=proof-edit]"))?;
+                    page.wait_visible(&css("#pset-demo-goals-switch:not(:disabled)"))?;
+                    page.press_on(&css("[data-testid=proof-edit]"), "Enter")?;
+                    page.wait_visible(&css("[data-testid=proof-draft]"))?;
+                }
+            }
+            let count = page.eval(r#"(() => {
+                const controls = [...document.querySelectorAll('.settings button, .settings input, .settings select, .settings textarea, .settings a[href], .settings [tabindex]')]
+                    .filter(el => !el.matches(':disabled') && !el.closest('[inert]') && el.getClientRects().length);
+                controls.forEach((el, i) => el.dataset.keyboardStep = String(i));
+                return controls.length;
+            })()"#)?.as_u64().ok_or("missing control count")?;
+            page.press_on(&css(".s-nav button:nth-child(2)"), "Shift+Tab")?;
+            for index in 0..count {
+                let result = page.eval(&format!(r#"(() => {{
+                    const el = document.activeElement;
+                    const target = el?.matches('input[type=color]') ? el.parentElement : el;
+                    if (!target || el.dataset.keyboardStep !== '{index}' || el.tabIndex !== 0 || !target.matches(':focus-visible, :focus-within')) return false;
+                    const ring = getComputedStyle(target), rect = target.getBoundingClientRect();
+                    return parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)' && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+                }})()"#))?;
+                same(result.as_bool(), Some(true), &format!("section {section}, expanded {expanded}, Tab stop {index}: order and visible ring"))?;
+                let switch = page.eval("document.activeElement.matches('input[role=switch]')")?.as_bool() == Some(true);
+                if switch && section != 3 {
+                    let checked = page.eval("document.activeElement.checked")?;
+                    page.press("Space")?;
+                    page.wait_for("switch saves its keyboard choice", &format!("document.activeElement.checked !== {checked}"))?;
+                    page.press("Space")?;
+                    page.wait_for("switch restores its keyboard choice", &format!("document.activeElement.checked === {checked}"))?;
+                }
+                let range = page.eval("document.activeElement.matches('input[type=range]')")?.as_bool() == Some(true);
+                if range {
+                    page.press("ArrowRight")?;
+                    page.press("ArrowLeft")?;
+                }
+                let select = page.eval("document.activeElement.matches('select')")?.as_bool() == Some(true);
+                if select {
+                    page.press("Space")?;
+                    page.press("Escape")?;
+                    page.wait_for("native picker Escape keeps its Settings select", "document.querySelector('.settings') && document.activeElement?.matches('select')")?;
+                }
+                let text = page.eval("document.activeElement.matches('input[type=text], textarea')")?.as_bool() == Some(true);
+                if text {
+                    page.press("Home")?;
+                    page.press("End")?;
+                }
+                let access = page.eval("document.activeElement.matches('#set-permissions-pick')")?.as_bool() == Some(true);
+                if access {
+                    page.press("Enter")?;
+                    page.press("ArrowUp")?;
+                    page.press("Escape")?;
+                    page.wait_for("access menu Escape keeps Settings and its trigger focus", "document.querySelector('.settings') && document.activeElement?.id === 'set-permissions-pick' && document.activeElement.getAttribute('aria-expanded') === 'false'")?;
+                }
+                if index + 1 < count {
+                    page.press("Tab")?;
+                }
+            }
+        }
+    }
+    page.press("Escape")?;
+    page.wait_for("Escape returns focus to Chat", "!document.querySelector('.settings') && document.activeElement === document.querySelector('.composer textarea')")
 }
 
 /// Opens a section from the list on the left and waits for its heading.

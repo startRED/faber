@@ -613,6 +613,13 @@ check('R140: the permission menu lists five modes with one plain line each, and 
       equal(escapes, 0, 'and stays inside the menu');
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       equal(escapes, 1, 'with the menu shut, Esc goes on to the page as before');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await tick();
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      pick().dispatchEvent(tab);
+      equal(tab.defaultPrevented, false, 'Tab keeps native traversal to the next control');
+      await leave();
+      equal(view.host.querySelector('[role="listbox"]'), null, 'Tab removes the open options from traversal');
     } finally { window.removeEventListener('keydown', seen); }
     // Web search: Cached and the Codex-only choices exist only where Codex is connected.
     const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} button`)].map((b) => b.textContent);
@@ -1242,6 +1249,87 @@ check('reply_style: Escape saves the focused words before Settings closes and re
     if (place === null) localStorage.removeItem('faber.place');
     else localStorage.setItem('faber.place', place);
   }
+});
+
+check('settings keyboard traversal: entry, reading order, hidden controls and visible rings at 720 px', () => signedIn(async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  const original = { projectProof: api.projectProof, projectGoals: api.projectGoals };
+  api.projectProof = async () => ({ commands: ['npm test'], setup: [], declared: [], source: 'none', confirmed: true, changed: false });
+  api.projectGoals = async () => ({ auto: false, capUsd: 2, spentUsd: 0, goals: [], capSeen: true, checks: [], canWatchCrashes: false });
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  const selector = 'button, input, select, textarea, a[href], [tabindex]';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      opener.focus();
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: { permissions: 'ask', replyStyle: 'own' }, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+        projects: [{ id: 'p1', name: 'Demo', path: 'C:/fixture/demo' }],
+        start: 'general', onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        const settings = view.host.querySelector<HTMLElement>('.settings')!;
+        settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const nav = [...settings.querySelectorAll<HTMLButtonElement>('.s-nav button')];
+        equal(document.activeElement, nav[0], 'opening puts focus on Back before the five sections');
+        for (const section of nav.slice(1)) {
+          section.click();
+          await tick();
+          const controls = () => [...settings.querySelectorAll<HTMLElement>(selector)].filter((el) => !el.matches(':disabled') && !el.closest('[inert]') && el.getClientRects().length > 0);
+          const inspect = () => {
+            const all = controls();
+            deepEqual(all.slice(0, 6), nav, 'navigation precedes the section controls in reading order');
+            for (const el of all) {
+              equal(el.tabIndex, 0, `native Tab order: ${el.outerHTML}`);
+              el.focus();
+              equal(document.activeElement, el, `reachable control: ${el.outerHTML}`);
+              const ring = getComputedStyle(el.matches('input[type=color]') ? el.parentElement! : el);
+              ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+            }
+          };
+          inspect();
+          // A closed fold contributes no stops; opening it exposes native controls in the same order.
+          for (const fold of settings.querySelectorAll<HTMLButtonElement>('.st-fold-head, .pset-head, .st-q, .more')) {
+            fold.click();
+            await tick();
+            if (fold.matches('.pset-head')) {
+              ok(settings.querySelector('[data-testid="proof-edit"]'), 'the seeded project exposes its check controls');
+              equal(settings.querySelector<HTMLInputElement>('#pset-p1-goals-switch')!.disabled, false, 'goal control is enabled');
+            }
+            inspect();
+            fold.click();
+            await tick();
+            const bodyId = fold.getAttribute('aria-controls');
+            const body = bodyId ? settings.querySelector(`#${bodyId}`) : null;
+            for (const el of body?.querySelectorAll<HTMLElement>(selector) ?? []) ok(el.closest('[inert]'), 'departing controls cannot receive Tab');
+          }
+        }
+      } finally { view.stop(); }
+      equal(document.activeElement, opener, 'closing returns focus to the connected opener');
+    }
+  } finally {
+    Object.assign(api, original);
+    opener.remove();
+    useLanguage('en');
+    forgetSection();
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+  }
+}));
+
+check('settings keyboard traversal: returning from account cards leaves focus restoration to the caller', async () => {
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  opener.focus();
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, start: 'accounts', kept: factory(),
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try { await tick(); equal(document.activeElement, opener, 'kept Settings does not steal restored focus'); }
+  finally { view.stop(); opener.remove(); forgetSection(); }
 });
 
 check('settings: opening again lands on the section that was open', () => {

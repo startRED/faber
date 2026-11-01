@@ -4,6 +4,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 ## Settings
 
+- Keyboard: focus starts on Back and returns to the connected opener on closing. Native Tab order and existing rings cover enabled controls; hidden folds add no stops. Checks cover 720 px.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
   the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. With a native options

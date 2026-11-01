@@ -189,7 +189,7 @@ A project's checks are confirmed in Settings > Projects, not in the first run.
 Five sections, in this order, all at one width (720 px in a small window, up to 820 px in a wide one, centred; the active section is named once, in the list). Nothing else is a Settings section. Every section speaks one grammar: a
 group is a card, an option is one row (its name and one short line at the left, its control at the right), and a longer
 text unfolds under the row from a small "?" beside the name (keyboard reachable, closed by default, not in the page while
-closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
+closed). Opening Settings focuses Back; native Tab order reaches the five sections then their enabled controls with the existing visible outline (the custom colour wheel carries its input's ring). Hidden folds and disabled controls add no stop; closing restores the connected opener. `tests/ui/settings.check.ts` (`settings keyboard traversal`, all five languages at 720 px) and `testkit/src/screen/settings.rs` (`settings keyboard traversal`, real Tab, switches and Escape in German at 720 px) cover this. There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
 
 - **General**, in groups. *You*: Language (follow the system, or one of five), Your name, "Do you already use AI?" (the first run's
   answer), "Watch again" for the tutorial (opens a fresh chat and plays it again), Keyboard shortcuts ("Show" opens the list). *How the AI works*: Permissions
