@@ -36,10 +36,89 @@ impl Core {
         let spent = c.spent_cents();
         let Some(e) = c.estimate.as_mut().filter(|e| !e.economy && progress::passed(e, spent)) else { return };
         e.economy = true;
-        let plan = c.shown_plan();
         self.save(conv);
+        let plan = self.shown_plan(conv);
         (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
         self.refresh_running();
+    }
+
+    /// The plan as the screen draws it: the estimate in it, and for each step a conversation this one started does, where that
+    /// conversation stands (task 040), including the saved state of a conversation not in memory.
+    pub(super) fn shown_plan(&self, conv: &str) -> Option<Plan> {
+        let mut plan = self.convs.get(conv)?.shown_plan()?;
+        for step in &mut plan.steps {
+            if let Some(worker) = &step.worker {
+                step.conversation = Some(worker.conversation.clone());
+            }
+            step.member = step.conversation.as_deref().map(|id| self.plan_member_state(id));
+            if step.state == StepState::Done && matches!(step.member, Some(MemberState::Running | MemberState::Waiting)) {
+                step.state = StepState::Active;
+            }
+        }
+        Some(plan)
+    }
+
+    fn plan_member_state(&self, id: &str) -> MemberState {
+        match self.convs.get(id) {
+            Some(c) => siblings::member_state(self.live.get(id).is_some_and(|l| l.turn.is_some()), c),
+            None => self.store.get(id).map_or(MemberState::Stopped, |mut c| {
+                for message in &mut c.messages {
+                    message.closed |= message.status == Some(Status::Streaming);
+                    settle(message);
+                }
+                siblings::member_state(false, &c)
+            }),
+        }
+    }
+
+    /// Work resumed after a step was marked done: the agent must confirm it again after this turn ends.
+    pub(super) fn reopen_busy_plan_steps(&mut self, lead: &str, cached_only: bool) {
+        let Some(plan) = self.convs.get(lead).and_then(|c| c.plan.as_ref()) else { return };
+        let busy: Vec<_> = plan
+            .steps
+            .iter()
+            .enumerate()
+            .filter_map(|(i, step)| {
+                let id = step.worker.as_ref().map(|w| w.conversation.as_str()).or(step.conversation.as_deref())?;
+                (step.state == StepState::Done
+                    && (!cached_only || self.convs.contains_key(id))
+                    && matches!(self.plan_member_state(id), MemberState::Running | MemberState::Waiting))
+                .then_some(i)
+            })
+            .collect();
+        if busy.is_empty() {
+            return;
+        }
+        if let Some(plan) = self.convs.get_mut(lead).and_then(|c| c.plan.as_mut()) {
+            for i in busy {
+                plan.steps[i].state = StepState::Active;
+            }
+        }
+        self.save(lead);
+    }
+
+    /// The plans of conversations whose steps name one of `changed`, sent again: a step's state follows its conversation.
+    pub(super) fn plans_naming(&mut self, changed: &HashSet<String>) {
+        let leaders: Vec<String> = self
+            .convs
+            .iter()
+            .filter(|(_, c)| {
+                c.plan.as_ref().is_some_and(|p| {
+                    p.steps.iter().any(|s| {
+                        s.worker
+                            .as_ref()
+                            .map(|w| w.conversation.as_str())
+                            .or(s.conversation.as_deref())
+                            .is_some_and(|id| changed.contains(id))
+                    })
+                })
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in leaders {
+            let plan = self.shown_plan(&id);
+            (self.emit)(AppEvent::Plan { conversation_id: id, plan });
+        }
     }
 
     pub(super) fn progress_call(&mut self, conv: &str, call: String, tool: &'static str, input: serde_json::Value) {
@@ -91,13 +170,33 @@ impl Core {
             progress::PLAN_TOOL => {
                 // A conversation of a step that was deleted frees its step before the list is compared with it.
                 self.free_dead_workers(conv);
-                let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
+                let c = self.convs.get(conv).ok_or("The conversation is gone.")?;
                 let leads = siblings::offers(c.area) && c.started_by.is_none();
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
                 let mut plan = progress::plan(c.plan.as_ref(), input, now())?;
                 if let Some(had) = &c.plan {
                     progress::keep_workers(had, &mut plan)?;
                 }
+                if let Some(plan) = &plan {
+                    for step in plan.steps.iter().filter(|s| s.state == StepState::Done) {
+                        let id = step.worker.as_ref().map(|w| w.conversation.as_str()).or(step.conversation.as_deref());
+                        if id.is_some_and(|id| matches!(self.plan_member_state(id), MemberState::Running | MemberState::Waiting)) {
+                            return Err(format!("{}: {} still has a conversation working or waiting", progress::RUNNING, step.id));
+                        }
+                    }
+                    progress::check_linked(plan)?;
+                }
+                // A step may only name a conversation this one started, so the plan never opens someone else's work.
+                let started = |id: &str| match self.convs.get(id) {
+                    Some(m) => m.started_by.as_deref() == Some(conv),
+                    None => self.store.get(id).is_some_and(|m| m.started_by.as_deref() == Some(conv)),
+                };
+                if let Some(id) = plan.iter().flat_map(|p| &p.steps).filter_map(|s| s.conversation.as_deref()).find(|id| !started(id)) {
+                    return Err(format!(
+                        "No step was changed: {id} is not a conversation you started. Give a step only the id that start answered."
+                    ));
+                }
+                let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
                 let mut shown = plan.as_ref().map(|p| p.count()).map_or("The plan is cleared.".to_string(), |n| {
                     format!("The person sees the plan: {} of {} steps done.", n.done, n.total)
                 });
@@ -111,8 +210,8 @@ impl Core {
                     shown = format!("{shown} {}", progress::ECONOMY_LINE);
                 }
                 (c.plan, c.estimate) = (plan, estimate);
-                let plan = c.shown_plan();
                 self.save(conv);
+                let plan = self.shown_plan(conv);
                 (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 self.refresh_running();
                 Ok(shown)
@@ -130,6 +229,7 @@ impl Core {
                 let box_ = progress::wrap_up(input)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
+                let concluded = box_.outcome.is_some();
                 m.wrap_up = Some(box_);
                 let id = m.id.clone();
                 if done {
@@ -140,11 +240,33 @@ impl Core {
                 let ended = done && self.convs.get_mut(conv).and_then(|c| c.estimate.take()).is_some();
                 self.save(conv);
                 if ended {
-                    let plan = self.convs.get(conv).and_then(Conversation::shown_plan);
+                    let plan = self.shown_plan(conv);
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 }
                 self.push(conv, Some(&id), true);
-                Ok("The person sees the box. End your turn now, without repeating the recap.".into())
+                let lead = if concluded {
+                    "Concluded. Now write your closing message to the person in your own words: what you did, the result, what is not                      done and what you checked. Then end your turn."
+                } else {
+                    "The person sees the box. End your turn now, without repeating the recap."
+                };
+                let r = crate::results::tally(self.convs.get(conv).ok_or("The conversation is gone.")?);
+                let (d, c) = (r.delivered, r.cost);
+                Ok(format!(
+                    "{lead}\nResults: {} files, {}/{} checks passed, {} commits, {} pull requests, {} artifacts, {} answers; cost: {}${} API value, {} input and {} output tokens, {} ms work (current turn may be incomplete).",
+                    d.files,
+                    d.checks_passed,
+                    d.checks_run,
+                    d.commits,
+                    d.prs,
+                    d.artifacts,
+                    d.answers,
+                    if c.unpriced > 0 { "at least " } else { "" },
+                    c.usd,
+                    c.input_tokens,
+                    c.output_tokens,
+                    c.work_ms,
+                    lead = lead
+                ))
             }
             _ => Err("Faber has no such tool.".into()),
         }

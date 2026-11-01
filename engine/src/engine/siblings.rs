@@ -34,20 +34,22 @@ pub(super) fn state_of(busy: bool, c: &Conversation) -> State {
     if !busy && c.waiting_on.is_some() {
         return State::Waiting;
     }
-    let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-    let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
-    match last.and_then(|m| m.status.as_ref()) {
-        _ if asking => State::Waiting,
-        // Its copy is still being made: the brief follows it.
-        _ if c.messages.is_empty() => State::Working,
-        Some(Status::Streaming) => State::Working,
-        Some(Status::Stopped) if !busy && c.stopped && last.is_some_and(|m| m.closed) => State::Interrupted,
-        Some(Status::Stopped) if !busy && c.stopped => State::Stopped,
-        _ if busy || c.compacting || !c.queued.is_empty() => State::Working,
-        Some(Status::Error) => State::Failed,
-        Some(Status::Stopped) if last.is_some_and(|m| m.closed) => State::Interrupted,
-        Some(Status::Stopped) => State::Stopped,
-        _ => State::Finished,
+    ended::run_state(c, busy)
+}
+
+/// Where a plan step's conversation stands (task 040), in a subagent row's words.
+pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
+    match state_of(busy, c) {
+        State::Working => MemberState::Running,
+        State::Waiting => MemberState::Waiting,
+        State::Concluded => MemberState::Done,
+        // A turn that ended with no conclusion does not finish its step; a stuck run is still spending.
+        State::Unconcluded => MemberState::Stopped,
+        State::Stuck => MemberState::Running,
+        State::Failed => MemberState::Failed,
+        State::Stopped => MemberState::Stopped,
+        // Cut off when Faber closed: not running, and a resume picks it up; the plan says stopped.
+        State::Interrupted => MemberState::Stopped,
     }
 }
 
@@ -166,17 +168,8 @@ impl Core {
         }
     }
 
-    fn start_sibling(
-        &mut self,
-        conv: &str,
-        title: &str,
-        brief: &str,
-        ai: Ai,
-        keep_going: bool,
-        step: Option<String>,
-        model: Option<String>,
-        effort: Option<String>,
-    ) -> Result<(String, bool), &'static str> {
+    fn start_sibling(&mut self, conv: &str, new: NewSession) -> Result<(String, bool), &'static str> {
+        let NewSession { title, brief, ai, keep_going, step, model, effort } = new;
         if self.goal_out_of_money(conv) {
             return Err(GOAL_CAP);
         }
@@ -267,7 +260,7 @@ impl Core {
             conversation_id: Some(id.clone()),
             area: Area::Project,
             project_id: Some(project),
-            text: sibling::prompt(title, brief),
+            text: sibling::prompt(&title, &brief),
             images: vec![],
             files: vec![],
             choice,
@@ -304,8 +297,8 @@ impl Core {
         if *step == before {
             return false;
         }
-        let plan = c.shown_plan();
         self.save(lead);
+        let plan = self.shown_plan(lead);
         (self.emit)(AppEvent::Plan { conversation_id: lead.to_string(), plan });
         true
     }
@@ -458,9 +451,10 @@ impl Core {
             .take(MAX_LISTED)
             .map(|s| {
                 let busy = self.live.get(&s.id).is_some_and(|l| l.turn.is_some());
-                let open = self.convs.get(&s.id);
+                let stored = self.store.get(&s.id);
+                let open = self.convs.get(&s.id).or(stored.as_ref());
                 sibling::Listed {
-                    state: open.map_or(if busy { State::Working } else { State::Finished }, |c| state_of(busy, c)),
+                    state: open.map_or(State::Unconcluded, |c| state_of(busy, c)),
                     folder: match open {
                         Some(c) => c.copy.as_ref().map(|copy| copy.path.clone()),
                         None => Some(copies.join(&s.id)).filter(|p| p.is_dir()).map(|p| p.to_string_lossy().into_owned()),
@@ -486,7 +480,10 @@ impl Core {
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
         let report_id = format!("report-{conv}-{}", reply.map_or("empty", |m| m.id.as_str()));
-        let last = reply.map(Message::said).unwrap_or_default();
+        let last = ended::conclusion_line(c).unwrap_or_else(|| {
+            let text = reply.map(Message::said).unwrap_or_default();
+            format!("No confirmed conclusion. Latest output: {text}")
+        });
         let text = sibling::finished(&c.title, conv, state, &last);
         // Stopped working: the plan step waits for its work to be joined.
         self.edit_worker(conv, |w| w.joining = true);
@@ -622,10 +619,9 @@ impl Core {
                 }
             }
         }
-        let (id, started) = self
-            .start_sibling(by, &new.title, &new.brief, new.ai, new.keep_going, new.step, new.model, new.effort)
-            .map_err(str::to_string)?;
-        if started { Ok(id) } else { Err(sibling::failed(&new.title, &id)) }
+        let title = new.title.clone();
+        let (id, started) = self.start_sibling(by, new).map_err(str::to_string)?;
+        if started { Ok(id) } else { Err(sibling::failed(&title, &id)) }
     }
     pub(super) fn session_message(&mut self, by: &str, id: &str, message: &str) -> Result<String, String> {
         if message.trim().is_empty() {
@@ -776,6 +772,47 @@ impl Core {
 mod tests {
     use super::*;
     use crate::model::Permission;
+
+    #[test]
+    fn a_saved_streaming_or_unconcluded_conversation_is_never_finished() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id":"child","title":"Work","area":"project","createdAt":0,"updatedAt":0,"messages":[]
+        }))
+        .unwrap();
+        let mut m = Message::new("reply".into(), Role::Assistant, "Still working".into(), 0);
+        m.status = Some(Status::Streaming);
+        c.messages.push(m);
+        assert_eq!(state_of(false, &c), State::Working);
+        settle(c.messages.last_mut().unwrap());
+        assert_ne!(state_of(false, &c), State::Concluded);
+        c.messages.last_mut().unwrap().status = Some(Status::Done);
+        c.messages.last_mut().unwrap().closed = false;
+        c.messages.last_mut().unwrap().wrap_up = Some(crate::model::WrapUp { recap: "Unfinished.".into(), ..Default::default() });
+        assert_eq!(state_of(false, &c), State::Unconcluded);
+    }
+
+    #[tokio::test]
+    async fn list_and_read_do_not_finish_a_streaming_conversation_on_disk() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|core| {
+            let parent = core.blank(Area::Project, Some("p".into()));
+            let child = core.blank(Area::Project, Some("p".into()));
+            let c = core.convs.get_mut(&child).unwrap();
+            c.title = "Unfinished member".into();
+            let mut m = Message::new("reply".into(), Role::Assistant, "Still working".into(), 0);
+            m.status = Some(Status::Streaming);
+            c.messages.push(m);
+            core.save(&child);
+            core.convs.remove(&child);
+            let list = core.list_siblings(&parent).unwrap();
+            assert!(list.contains("Unfinished member") && list.contains("still working"), "{list}");
+            assert!(!list.contains("concluded its task"), "{list}");
+            let read = core.read_sibling(&parent, &child).unwrap();
+            assert!(!read.contains("concluded its task"), "{read}");
+        });
+        engine.shutdown();
+    }
 
     /// `count` conversations the lead started in project `p`, each mid-reply; `asking` ones hold a question for the person.
     fn started(core: &mut Core, count: usize, asking: bool) {

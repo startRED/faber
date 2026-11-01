@@ -6,6 +6,7 @@
 //! overlap), and archives its own conversation once the person's request is done.
 
 use crate::model::Vendor;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// The name both drivers give the call, whatever the CLI calls it.
@@ -223,15 +224,25 @@ pub fn failed(title: &str, id: &str) -> String {
     )
 }
 
-/// Where a conversation stands, as a read answers it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where a conversation stands: the one set of states the sidebar, the running list, a read by another agent and the command
+/// line all use (`ended::run_state`). Stored in the list as `working`, `waiting`, `concluded`, `unconcluded`, `stuck`,
+/// `interrupted`, `stopped` and `failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum State {
     Working,
+    /// Waiting for the person: a question, a permission, or a conclusion that is blocked or needs them.
     Waiting,
-    Finished,
+    /// The agent concluded it (a closing call with the outcome done), or answered a plain question.
+    Concluded,
+    /// The turn ended and the agent never concluded.
+    Unconcluded,
+    /// It spends time or quota and shows no new result (`Conversation::stuck`).
+    Stuck,
     Failed,
+    /// The person stopped it.
     Stopped,
-    /// Its turn was cut off by Faber closing (`Message::closed`).
+    /// Its turn was cut off by Faber closing or crashing (`Message::closed`).
     Interrupted,
 }
 
@@ -239,7 +250,9 @@ fn said(state: State) -> &'static str {
     match state {
         State::Working => "is still working",
         State::Waiting => "is waiting for the person to answer it",
-        State::Finished => "finished its latest turn",
+        State::Concluded => "concluded its task",
+        State::Unconcluded => "ended without a conclusion; the task is not confirmed complete",
+        State::Stuck => "seems stuck: it is spending time and shows no new result",
         State::Failed => "stopped with an error in its latest turn",
         State::Stopped => "was stopped by the person",
         State::Interrupted => "was cut off when Faber closed, nothing was lost that is on disk",
@@ -505,8 +518,8 @@ mod tests {
         assert_eq!(link["childId"], "c1");
         assert!(prompt("Docs", "Write it.").ends_with("Task: Docs\n\nWrite it."));
         assert_eq!(read("Docs", State::Working, ""), "The conversation \"Docs\" is still working.");
-        let long = read("Docs", State::Finished, &"x".repeat(5000));
-        assert!(long.contains("finished its latest turn") && long.contains("(cut short)"), "{long}");
+        let long = read("Docs", State::Concluded, &"x".repeat(5000));
+        assert!(long.contains("concluded its task") && long.contains("(cut short)"), "{long}");
         assert!(!read("Docs", State::Failed, "short").contains("cut short"));
     }
 
@@ -547,11 +560,11 @@ Then write the docs."
         assert!(list("/p", &[]).starts_with("No other conversation"));
         let rows = [
             Listed { id: "c2".into(), title: "Docs".into(), state: State::Working, minutes: 3, folder: Some("/copies/c2".into()) },
-            Listed { id: "c3".into(), title: "Fix".into(), state: State::Finished, minutes: 90, folder: None },
+            Listed { id: "c3".into(), title: "Fix".into(), state: State::Concluded, minutes: 90, folder: None },
         ];
         let out = list("/p", &rows);
         assert!(out.contains("\"Docs\" (id c2) is still working, last active 3 min ago, works in /copies/c2"), "{out}");
-        assert!(out.contains("\"Fix\" (id c3) finished its latest turn, last active 90 min ago, works in /p"), "{out}");
+        assert!(out.contains("\"Fix\" (id c3) concluded its task, last active 90 min ago, works in /p"), "{out}");
         assert!(ask_prompt("Main", "c1", "Did you change a.rs?").contains("(\"Main\", id c1)"));
         assert!(asked("Docs", "c2", true).contains("{\"action\": \"read\", \"id\": \"c2\"}"));
     }

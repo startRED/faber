@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, landCancelled, insertions, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, half, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -210,4 +210,81 @@ test('a green batch lands on a base moved by words only, and anything else sends
   assert.equal(wordsOnly(['docs/decisions.md'], ['docs/decisions.md'], isWords), false);
   assert.equal(wordsOnly(['docs/next/other-lane.json'], [], isWords), false);
   assert.equal(wordsOnly([], [], isWords), false);
+});
+
+test('a green batch lands as checked when the base moved in independent files', () => {
+  const check = (moved, changed, differs) => landsAsChecked(moved, changed, differs, isWords);
+  const a = 'engine/src/a.rs';
+  const b = 'ui/App.tsx';
+  const flow = '.github/workflows/ci.yml';
+  assert.equal(check(['docs/tasks/a.md'], [b], ['docs/tasks/a.md']), 'words');
+  assert.equal(check([a], [b], [a]), 'disjoint');
+  assert.equal(check([a], [a], [a]), null);
+  assert.equal(check([a], [b], [a, 'other.ts']), null);
+  assert.equal(check([flow], [b], [flow]), null);
+  assert.equal(check([a], [flow], [a]), null);
+  for (const numbered of ['docs/decisions.md', 'docs/next/a.json', 'ui/locales/en.ts']) {
+    assert.equal(check([numbered], ['ui/locales/fr.ts'], [numbered]), null);
+    assert.equal(check([numbered], [b], [numbered]), 'disjoint');
+  }
+  assert.equal(check([], [b], []), null);
+});
+
+test('main accepts a full phase-1-base dispatch after its gate passes', () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const main = ci.split('\n  main:\n')[1].split('\n  land:\n')[0];
+  assert.match(main, /github\.event_name == 'workflow_dispatch' && !inputs\.warm/);
+  assert.match(main, /github\.ref == 'refs\/heads\/phase-1-base'/);
+  assert.match(main, /needs\.gate\.result == 'success'/);
+  assert.match(main, /gh workflow run auto-release\.yml --ref phase-1-base -f sha="\$GITHUB_SHA"/);
+});
+
+test('a train takes the oldest queued riders that still stand, never a workflow change or one red alone (R-next)', () => {
+  const view = (oid) => ({ state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false, headRefOid: oid });
+  const rider = (pr, time, more = {}) => ({ pr, oid: `h${pr}`, files: ['ui/App.tsx'], time, red: false, view: view(`h${pr}`), ...more });
+  const entries = [
+    rider('9', 30),
+    rider('4', 10),
+    rider('5', 20, { files: ['.github/workflows/ci.yml'] }),
+    rider('6', 15, { red: true }),
+    rider('7', 12, { view: view('pushed-again') }),
+    rider('8', 11, { view: { ...view('h8'), state: 'CLOSED' } }),
+    rider('3', 10, { oid: '' }),
+    rider('2', 10, { view: null }),
+  ];
+  assert.deepEqual(riders(entries).map((e) => e.pr), ['4', '9']);
+  assert.deepEqual(riders(entries, ['9']).map((e) => e.pr), ['9']);
+  const many = Array.from({ length: TRAIN + 3 }, (_, i) => rider(String(i + 10), i));
+  assert.equal(riders(many).length, TRAIN);
+  assert.equal(riders(many).at(-1).pr, String(TRAIN + 9), 'the newest ones wait for the next train');
+});
+
+test('a red train rides again with its first half, down to one rider who answers alone', () => {
+  assert.deepEqual(half(['1', '2', '3', '4', '5']), ['1', '2', '3']);
+  assert.deepEqual(half(['1', '2']), ['1']);
+  assert.deepEqual(half(['1']), ['1']);
+});
+
+test('a train runs while a run of its commit has not ended, other than the job asking, or was just sent', () => {
+  assert.equal(running([{ id: 1, status: 'in_progress' }], '2', 9999), true);
+  assert.equal(running([{ id: 1, status: 'queued' }], '1', 9999), false, 'its own landing does not hold the next train');
+  assert.equal(running([{ id: 1, status: 'completed' }], '', 30), false, 'a run that ended without landing holds nothing');
+  assert.equal(running([], '', 30), true, 'GitHub may not list a run started seconds ago');
+  assert.equal(running([], '', 900), false);
+});
+
+test('only a red report of the very queue commit keeps a pull request off trains', () => {
+  const commit = 'abcdef1234567890';
+  assert.equal(redAt([{ state: 'failure', description: 'Queued as abcdef123, but its checks failed.' }], commit), true);
+  assert.equal(redAt([{ state: 'failure', description: 'Queued as 999999999, but its checks failed.' }], commit), false, 'a late report of an older queueing');
+  assert.equal(redAt([{ state: 'pending', description: 'Queued as abcdef123' }, { state: 'failure', description: 'abcdef123' }], commit), false);
+  assert.equal(redAt([], commit), false);
+});
+
+test('a workflow change of its own lands as checked on a moved base only from a PC (--finish)', () => {
+  const flow = '.github/workflows/release.yml';
+  assert.equal(landsAsChecked(['docs/tasks/a.md'], [flow], ['docs/tasks/a.md'], isWords), null);
+  assert.equal(landsAsChecked(['docs/tasks/a.md'], [flow], ['docs/tasks/a.md'], isWords, { ownWorkflow: true }), 'words');
+  assert.equal(landsAsChecked(['engine/src/a.rs'], [flow], ['engine/src/a.rs'], isWords, { ownWorkflow: true }), 'disjoint');
+  assert.equal(landsAsChecked([flow], ['ui/App.tsx'], [flow], isWords, { ownWorkflow: true }), null, 'a base that changed a workflow changed what checked it');
 });

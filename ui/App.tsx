@@ -1126,6 +1126,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }),
   );
 
+  // Opening or closing a step is reading: the thread stops following the reply, so the row stays under the pointer while
+  // the reply grows below it (W1). Scrolling back to the end follows again.
+  const openedHere = (e: MouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.closest('article [aria-expanded]')) return;
+    stick = false;
+    keepReading();
+  };
+
   const onScroll = (el: HTMLDivElement) => {
     if (restoringReading) return;
     const below = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -1910,7 +1918,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           el.addEventListener('scrollend', saveReading);
                           onCleanup(() => { tailWatch().unobserve(el); el.removeEventListener('scrollend', saveReading); });
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} onClick={openedHere} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
@@ -1929,7 +1937,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                   <Thread
                                     conversations={linkedConversations()}
                                     running={items()}
-                                    onOpenConversation={openSummary}
+                                    onOpenChild={openSummary}
+                                    workingFolder={c().workingFolder}
                                     messages={c().messages}
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}
@@ -1957,7 +1966,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
+                                    onOpenConversation={(id) => {
+                                      const to = state().conversations.find((conversation) => conversation.id === id);
+                                      if (to) openSummary(to);
+                                    }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
+                                    onActChange={(target) => {
+                                      if (target === 'composerModel') document.querySelector<HTMLSelectElement>('.composer .choose select')?.focus();
+                                      else if (target === 'keepGoing') document.querySelector<HTMLButtonElement>('.composer .keep')?.focus();
+                                      else if (target === 'toolKit') { closeSide(false); setFocus(false); setCatalogOpen(true); }
+                                      else openSettings(target === 'checks' ? 'projects' : 'general');
+                                    }}
                                   />
                                 )}
                               </Show>

@@ -67,7 +67,7 @@ remain usable from the keyboard in both areas.
   small size. Nothing on the line wraps: the bar gives way. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is and the not-yet-counted estimate are its tooltip. While
   use is still being counted the share reads "≥ 44% used" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
-  A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
+  A vendor with no current reading shows no bar: under its name, on a second line (the one place the line wraps), "Usage shows once the subscription reports it", and its tooltip says to check the limits with the provider. The version is not on the sidebar: it is the
   tooltip of the Settings button.
 - Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
   come with the progress view in Phase 3.

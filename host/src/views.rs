@@ -286,7 +286,15 @@ mod tests {
         assert_eq!(state(None, None), "new");
         assert_eq!(state(None, Some(&reply(Status::Done))), "ended", "no conclusion");
         let mut concluded = reply(Status::Done);
-        concluded.wrap_up = Some(WrapUp { recap: "All done.".into(), ask: None, actions: vec![], done: true, answered: None });
+        concluded.wrap_up = Some(WrapUp {
+            recap: "All done.".into(),
+            ask: None,
+            actions: vec![],
+            done: true,
+            answered: None,
+            outcome: None,
+            summary: None,
+        });
         assert_eq!(state(None, Some(&concluded)), "concluded");
         concluded.wrap_up.as_mut().unwrap().done = false;
         assert_eq!(state(None, Some(&concluded)), "ended", "a box that is not done concludes nothing");
