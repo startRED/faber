@@ -663,3 +663,37 @@ check('running column: a stuck helper says so and opens its conversation', () =>
     root.remove();
   }
 });
+
+// The running list arrives again with every change of any conversation, as new objects. What the person is writing in a
+// card of the column survives it: the same field, the same text, its focus.
+check('question card in the running column: a new list with the same question keeps the field and what is written in it', async () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const row = (title: string): RunningItem => ({
+    conversationId: 'c1', turnId: 't1', title, area: 'chat', vendor: 'claude', state: 'needsYou', since: 0,
+    permissions: [{ requestId: 'r1', tool: 'AskUserQuestion', input: INPUT }],
+  });
+  const [items, setItems] = createSignal<RunningItem[]>([row('Plan')]);
+  const dispose = render(() => createComponent(Running, {
+    get items() { return items(); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+  }), root);
+  try {
+    await settle();
+    click(panel(root, 0).querySelector('.q-more'));
+    await settle();
+    const field = panel(root, 0).querySelector<HTMLInputElement>('.fold input')!;
+    equal(document.activeElement, field, 'the field takes the focus');
+    write(field, 'Zig and more');
+    await settle();
+    setItems([row('Plan, renamed')]);
+    await settle();
+    ok(root.querySelector('li.ri')!.textContent!.includes('Plan, renamed'), 'the new list was drawn');
+    ok(root.contains(field), 'the field the person was writing in is still on screen');
+    equal(field.value, 'Zig and more');
+    equal(document.activeElement, field, 'and it still has the focus');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

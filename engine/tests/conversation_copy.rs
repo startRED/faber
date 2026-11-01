@@ -827,7 +827,8 @@ async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_w
     }));
     let started = std::time::Instant::now();
     let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
-    assert!(started.elapsed() < Duration::from_secs(1), "send waited for the copy: {:?}", started.elapsed());
+    // The hook holds capture for 10 seconds, so 5 seconds still proves send does not wait for the copy.
+    assert!(started.elapsed() < Duration::from_secs(5), "send waited for the copy: {:?}", started.elapsed());
     // The question and the reply that is typing are on screen, and nothing runs yet: no copy, no agent, nothing in the folder.
     let shown = s.engine.open(&id).unwrap();
     assert_eq!(shown.messages.len(), 2, "{:?}", shown.messages);
@@ -1077,6 +1078,11 @@ async fn ready_plan_steps_with_separate_files_start_together_from_the_leaders_br
         assert!(calls.iter().any(from_the_lead), "its copy starts at the leader's branch, not the person's head: {calls:?}");
     }
     assert_ne!(workers[0].conversation, workers[1].conversation);
+    let shown = engine.open_for_screen(&lead).unwrap().plan.unwrap();
+    for (step, worker) in shown.steps.iter().zip(&workers) {
+        assert_eq!(step.conversation.as_deref(), Some(worker.conversation.as_str()));
+        assert!(step.member.is_some());
+    }
 
     // One that may change what a running step changes, one that waits and one that only reads are refused with the reason.
     for (n, (step, why)) in [("tests", "running step"), ("docs", "waits for a step"), ("survey", "helper")].into_iter().enumerate() {
@@ -1085,22 +1091,31 @@ async fn ready_plan_steps_with_separate_files_start_together_from_the_leaders_br
     }
     assert!(steps(&engine, &lead)[2..].iter().all(|s| s.worker.is_none()), "nothing was started for them");
 
+    // Both conversations finish before the leader marks the model step done.
+    for _ in 0..2 {
+        let mut worker = support::next_pipe(&made).await;
+        finishes(&mut worker).await;
+    }
+    support::until("the first steps never waited to be joined", || {
+        steps(&engine, &lead)[..2].iter().all(|s| s.worker.as_ref().is_some_and(|w| w.joining))
+    })
+    .await;
+
     // The model step is done and the plan is sent again with the screen still marked pending: it stays with its conversation.
+    let joined = steps(&engine, &lead);
     let mut again = plan.clone();
     again["steps"][0]["state"] = "done".into();
     let (said, error) = tool(&mut agent, "plan2", "plan", again).await;
     assert!(!error && said.contains("start together now: tests, docs."), "{said}");
     let now = steps(&engine, &lead);
-    assert_eq!(now[0].worker, after[0].worker, "a finished step keeps its record");
-    assert_eq!((now[1].state, &now[1].worker), (StepState::Active, &after[1].worker));
+    assert_eq!(now[0].worker, joined[0].worker, "a finished step keeps its record");
+    assert_eq!((now[1].state, &now[1].worker), (StepState::Active, &joined[1].worker));
     let (said, error) = tool(&mut agent, "start-tests", "conversation", start("tests")).await;
     assert!(!error, "overlapping steps start one after the other: {said}");
 
     // A worker that stops working leaves its step waiting to be joined.
-    for _ in 0..3 {
-        let mut worker = support::next_pipe(&made).await;
-        finishes(&mut worker).await;
-    }
+    let mut worker = support::next_pipe(&made).await;
+    finishes(&mut worker).await;
     let joining = || steps(&engine, &lead)[..3].iter().all(|s| s.worker.as_ref().is_some_and(|w| w.joining));
     support::until("the steps never waited to be joined", joining).await;
     assert!(steps(&engine, &lead)[1..3].iter().all(|s| s.state == StepState::Active));

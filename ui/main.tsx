@@ -6,6 +6,7 @@ import { App } from './App.tsx';
 import { ContextMenuHost } from './ContextMenu.tsx';
 import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
+import { createFrameFeed } from './frame.ts';
 import { createInbox } from './inbox.ts';
 import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
@@ -22,11 +23,13 @@ if (import.meta.env.MODE === 'test') {
 // a newer event. Every other event waits in the inbox until the app is drawn and takes them in order, so the end of a
 // turn that lands before then still reaches the conversation.
 const inbox = createInbox<AppEvent>();
-// While a game is in front (ui/quiet.ts), events wait folded into one and land together when the person comes back.
-const hold = createHold((e) => {
+// Events reach the screen once per frame, together (ui/frame.ts), and while a game is in front (ui/quiet.ts) they wait folded
+// into one and land together when the person comes back.
+const frame = createFrameFeed<AppEvent>((e) => {
   if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
   else inbox.push(e);
 });
+const hold = createHold(frame.push);
 onQuiet(hold.hold);
 await api.on(hold.push);
 await api.setClock(-new Date().getTimezoneOffset() * 60);

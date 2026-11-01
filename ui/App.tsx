@@ -1544,7 +1544,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }}
       onDismiss={(c) => void api.seen(c.id).catch(() => {})}
       onClose={closeColumn}
-      details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages,
+      details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages, copy: current()?.id === place().id ? sideDetails()!.copy : undefined,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,
           incomplete: changeList()?.incomplete, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } } : undefined}
       agent={sideAgent()}
@@ -1799,20 +1799,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                         {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
-                      {/* A project conversation in a copy of its own says which branch, quietly; the path is the tooltip. */}
-                      <Show when={current()?.id === place().id && current()?.copy}>
-                        {(copy) => (
-                          <>
-                            <span class="sep" aria-hidden="true">
-                              {t('crumb.separator')}
-                            </span>
-                            <span class="copy" data-testid="crumb-copy" title={`${t('crumb.copy')}
-${copy().path}`}>
-                              {copy().branch}
-                            </span>
-                          </>
-                        )}
-                      </Show>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
@@ -1957,7 +1943,17 @@ ${copy().path}`}>
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
+                                    onOpenConversation={(id) => {
+                                      const to = state().conversations.find((conversation) => conversation.id === id);
+                                      if (to) openSummary(to);
+                                    }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
+                                    onActChange={(target) => {
+                                      if (target === 'composerModel') document.querySelector<HTMLSelectElement>('.composer .choose select')?.focus();
+                                      else if (target === 'keepGoing') document.querySelector<HTMLButtonElement>('.composer .keep')?.focus();
+                                      else if (target === 'toolKit') { closeSide(false); setFocus(false); setCatalogOpen(true); }
+                                      else openSettings(target === 'checks' ? 'projects' : 'general');
+                                    }}
                                   />
                                 )}
                               </Show>
@@ -2088,13 +2084,14 @@ function NoAiOrProject(props: {
     <Switch>
       <Match when={props.vendors === 0}>
         <Empty
+          scene="noAi"
           title={t('empty.noAiTitle')}
           line={t(props.area === 'project' ? 'empty.noAiProjectsBody' : 'empty.noAiBody')}
           button={{ label: t('empty.noAiButton'), onClick: props.onConnect, restore: 'connect' }}
         />
       </Match>
       <Match when={props.area === 'project'}>
-        <Empty title={props.project?.name ?? ''} line={t('empty.projectBody', { path: props.project?.path ?? '' })} />
+        <Empty scene="emptyProject" title={props.project?.name ?? ''} line={t('empty.projectBody', { path: props.project?.path ?? '' })} />
       </Match>
     </Switch>
   );

@@ -243,6 +243,7 @@ check('details: the project thread opens the real column, sharing changes, check
   c.messages = structuredClone(messages);
   c.messages[0]!.checks = { state: 'failed', passed: 0, failed: [{ command: 'cargo test', lines: [] }] };
   c.messages[0]!.follow = { repo: 'acme/app', number: 93, url: 'https://github.com/acme/app/pull/93', state: 'pending', since: 1 };
+  c.copy = { branch: 'faber/fix-the-greeting-ab12', path: 'E:/faber-data/copies/ab12' };
   const initial = {
     conversations: [{ id: c.id, title: c.title, area: 'project', projectId: 'p1', updatedAt: c.updatedAt }],
     projects: [{ id: 'p1', name: 'Greeting', path: 'E:/greeting' }], vendors: ['claude'],
@@ -274,6 +275,10 @@ check('details: the project thread opens the real column, sharing changes, check
     await settle();
     equal(openedDetails(), c.id);
     equal(host.querySelector('#running-title')!.textContent, t('details.title'));
+    equal(host.querySelector('.crumb')!.textContent!.includes('faber/'), false, 'the topbar keeps the title only');
+    const copy = host.querySelector('[data-testid=details-copy]')!;
+    equal(copy.firstChild!.textContent, t('details.copy', { branch: 'faber/fix-the-greeting-ab12' }), 'the separate copy is named in the details');
+    equal(copy.querySelector('span')!.textContent, 'E:/faber-data/copies/ab12', 'with its folder');
     ok(host.querySelector('.details-view')!.textContent!.includes('git commit -m "Fix greeting"'));
     ok(host.querySelector('.details-view')!.textContent!.includes('npm run lint'));
     ok(host.querySelector('.det-facts li[data-state="failed"]'));

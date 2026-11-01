@@ -257,3 +257,13 @@ check('setup: each install failure shows its message and retry starts again in b
     }
   } finally { api.setupCheck = oldCheck; api.setupInstall = oldInstall; }
 });
+
+check('setup: the accounts drawing belongs only to the first run', () => {
+  for (const mode of ['firstRun', 'manage'] as const) {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const dispose = render(() => createComponent(Setup, { mode, onFinish: () => {} }), host);
+    try { equal(host.querySelectorAll('[data-scene="accounts"]').length, mode === 'firstRun' ? 1 : 0); }
+    finally { dispose(); host.remove(); }
+  }
+});
