@@ -333,14 +333,29 @@ fn unix_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+/// Test builds only: where the pane last closed and which of its page processes failed, the latest eight, for a probe's
+/// failure text: a getter that lost its page says why.
+#[cfg(feature = "test-hooks")]
+static TEST_ENDINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+#[cfg(feature = "test-hooks")]
+fn test_ending(what: String) {
+    let mut endings = crate::lock(&TEST_ENDINGS);
+    if endings.len() == 8 {
+        endings.remove(0);
+    }
+    endings.push(what);
+}
+
 #[cfg(feature = "test-hooks")]
 fn test_probe_error(error: impl std::fmt::Display, field: &str, before: (u64, u64, Option<&str>), now: (u64, u64, Option<&str>)) -> String {
     // The native getter ran outside the state lock; a close or replacement invalidates its captured handle.
+    let endings = crate::lock(&TEST_ENDINGS).join("; ");
     if before != now {
-        return "the test browser closed".into();
+        return format!("the test browser closed ({endings})");
     }
     let (era, made, owner) = before;
-    format!("{error}; test_site_probe {field}: era {era}->{}, made {made}->{}, owner {owner:?}->{:?}", now.0, now.1, now.2)
+    format!("{error}; test_site_probe {field}: era {era}->{}, made {made}->{}, owner {owner:?}->{:?} ({endings})", now.0, now.1, now.2)
 }
 
 impl Pane {
@@ -473,6 +488,8 @@ impl Pane {
             .map_err(|_| "Faber's browser environment did not answer")?
             .map_err(|_| "Faber's screen closed before the browser opened")?;
         let webview = window.add_child(builder, PARKED, SIZE).map_err(|e| e.to_string())?;
+        #[cfg(feature = "test-hooks")]
+        native::test_process_failed(&webview, test_ending);
         // The browser's keys pressed on the page are the screen's: the page is a native view, so they never reach it there.
         if front {
             let app = self.app.clone();
@@ -617,6 +634,8 @@ impl Pane {
                         (s.keeps_for, s.tab) = (None, None);
                         s.era += 1;
                         s.bound = None;
+                        #[cfg(feature = "test-hooks")]
+                        test_ending("closed when idle".into());
                         Err(s.webview.take())
                     } else {
                         Ok(left.max(Duration::from_secs(1)))
@@ -639,7 +658,10 @@ impl Pane {
         });
     }
 
+    #[track_caller]
     pub fn close(&self) {
+        #[cfg(feature = "test-hooks")]
+        test_ending(format!("closed at {}", std::panic::Location::caller()));
         let webview = {
             let mut s = crate::lock(&self.state);
             s.shown = false;
@@ -1774,9 +1796,13 @@ mod tests {
     #[cfg(feature = "test-hooks")]
     #[test]
     fn test_probe_preserves_a_native_failure_from_the_current_generation() {
-        assert_eq!(
-            test_probe_error("failed to receive message from webview", "size", (0, 1, Some("a")), (0, 1, Some("a"))),
-            r#"failed to receive message from webview; test_site_probe size: era 0->0, made 1->1, owner Some("a")->Some("a")"#
+        // The endings are the whole test process's: only their place is fixed here.
+        let text = test_probe_error("failed to receive message from webview", "size", (0, 1, Some("a")), (0, 1, Some("a")));
+        assert!(
+            text.starts_with(
+                r#"failed to receive message from webview; test_site_probe size: era 0->0, made 1->1, owner Some("a")->Some("a") ("#
+            ),
+            "{text}"
         );
     }
 
@@ -1786,11 +1812,8 @@ mod tests {
         let owner = Some("5f1c0000-0000-4000-8000-0000000000b1");
         for field in ["position", "size", "scale_factor", "private", "url", "is_minimized"] {
             for now in [(1, 1, owner), (0, 2, owner), (0, 1, Some("other")), (0, 1, None)] {
-                assert_eq!(
-                    test_probe_error("failed to receive message from webview", field, (0, 1, owner), now),
-                    "the test browser closed",
-                    "{field}, generation {now:?}"
-                );
+                let text = test_probe_error("failed to receive message from webview", field, (0, 1, owner), now);
+                assert!(text.starts_with("the test browser closed ("), "{field}, generation {now:?}: {text}");
             }
         }
     }

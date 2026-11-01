@@ -47,6 +47,38 @@ pub fn test_private(webview: &tauri::Webview) -> oneshot::Receiver<Result<bool, 
     rx
 }
 
+/// Test builds only: tells `on` each time a process of the pane's page fails, with its kind, reason and exit code.
+#[cfg(all(windows, feature = "test-hooks"))]
+pub fn test_process_failed(webview: &tauri::Webview, on: impl Fn(String) + Send + 'static) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_REASON, ICoreWebView2ProcessFailedEventArgs2,
+    };
+    use webview2_com::ProcessFailedEventHandler;
+    use windows_core::Interface;
+    let _ = webview.with_webview(move |platform| {
+        let handler = ProcessFailedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let (mut kind, mut reason, mut exit) =
+                (COREWEBVIEW2_PROCESS_FAILED_KIND::default(), COREWEBVIEW2_PROCESS_FAILED_REASON::default(), 0i32);
+            // SAFETY: the arguments are a live COM object for the length of this call, and the outputs are plain locals.
+            unsafe { args.ProcessFailedKind(&mut kind)? };
+            if let Ok(more) = args.cast::<ICoreWebView2ProcessFailedEventArgs2>() {
+                // SAFETY: as above.
+                unsafe {
+                    more.Reason(&mut reason)?;
+                    more.ExitCode(&mut exit)?;
+                }
+            }
+            on(format!("page process failed: kind {}, reason {}, exit code {exit}", kind.0, reason.0));
+            Ok(())
+        }));
+        let mut token = 0i64;
+        // SAFETY: the controller and its core are live COM objects on the thread that owns them, and WebView2 keeps its own
+        // reference to the handler while the pane lives.
+        let _ = unsafe { platform.controller().CoreWebView2().and_then(|core| core.add_ProcessFailed(&handler, &mut token)) };
+    });
+}
+
 /// Sends `method` with its JSON `params` to the pane's page and answers with the result's JSON, or why it failed.
 #[cfg(windows)]
 pub fn devtools(webview: &tauri::Webview, method: &str, params: String) -> oneshot::Receiver<Result<String, String>> {

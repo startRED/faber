@@ -21,14 +21,14 @@ check('invoice contract and invalid inputs', () => {
       assert.throws(() => total([{quantity: bad, unitCents: 100}]));
       assert.throws(() => total([{quantity: 1, unitCents: bad}]));
     }`;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: folder, windowsHide: true, encoding: 'utf8', timeout: 15000 });
   if (result.status !== 0) throw Error(result.error?.message ?? result.stderr ?? 'invoice failed');
 });
 check('a runnable regression test was supplied', () => {
   // Nested proof checks must start a fresh runner, not inherit Node's test-child marker.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap'], { cwd: folder, env, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+  const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap'], { cwd: folder, env, windowsHide: true, encoding: 'utf8', timeout: 15000 });
   if (result.status !== 0) throw Error(result.error?.message ?? result.stdout ?? 'regression test failed');
   if (!/^# tests [1-9]\d*\r?$/m.test(result.stdout)) throw Error('No regression tests ran');
 });

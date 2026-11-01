@@ -41,6 +41,7 @@ mod closed;
 mod compact;
 mod copies;
 mod creative_judges;
+mod dry_run;
 mod ended;
 mod evict;
 pub use aside::Aside;
@@ -450,6 +451,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
+    /// (`resume_cut_leaders`, which takes them once).
+    quiet_teams: HashMap<String, Vec<String>>,
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
     /// answers briefly. Never saved.
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
@@ -547,6 +551,9 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// When a Claude probe (`account::claude_probe`) last gave no clean reading: what it saw about extra usage may be lost, so
+    /// only word newer than this lets the next one run.
+    probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
@@ -653,7 +660,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
-        let parent_reports = Core::restore_parent_reports(&store);
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -675,6 +682,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
@@ -712,6 +720,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
@@ -1017,7 +1026,25 @@ impl Engine {
         self.with(|core| {
             let opened = core.opened(id)?;
             core.shown(id);
-            Some(opened.for_screen())
+            let plan = core.shown_plan(id);
+            Some(Conversation { plan, ..opened.for_screen() })
+        })
+    }
+    /// What a conversation delivered and what it cost, from its stored messages (`crate::results`).
+    pub fn results(&self, id: &str) -> Option<crate::results::Results> {
+        self.with(|c| c.load(id).map(|conversation| crate::results::tally(conversation)))
+    }
+    /// The same for every conversation of a project, with its total, most spent first. Read from the stored summaries, which
+    /// hold each conversation's numbers, so no conversation is opened for it.
+    pub fn project_results(&self, project: &str) -> crate::results::ProjectResults {
+        self.with(|c| {
+            crate::results::project(
+                c.store
+                    .list()
+                    .into_iter()
+                    .filter(|s| s.project_id.as_deref() == Some(project))
+                    .filter_map(|s| s.results.map(|r| (s.id, s.title, r))),
+            )
         })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
@@ -1309,7 +1336,24 @@ impl Engine {
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
         let project = self.project(id)?;
-        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16).
+        // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16). Words an
+        // edit takes away lose their review first: a failed revocation keeps the text, and one whose write then fails only
+        // leaves the words "not reviewed". Not under the memory write lock, which the engine lock is held around.
+        if let Some(gone) = crate::project::memory::removes(Path::new(&project.path), edit).map_err(str::to_string)? {
+            self.with(|c| {
+                let kept = c.store.kept_decisions_now(id).map_err(|e| e.key().to_string())?;
+                let left: Vec<_> = kept.iter().filter(|older| !older.matches(&gone)).cloned().collect();
+                // Legacy records included; nothing is written when none matches.
+                if left.len() == kept.len() {
+                    return Ok(());
+                }
+                match c.store.migrate_kept_decisions(id, &kept, &left) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => Err("error.memory.write".to_string()),
+                    Err(e) => Err(e.key().to_string()),
+                }
+            })?;
+        }
         if let Some(hash) = crate::project::memory::apply(Path::new(&project.path), edit).map_err(str::to_string)? {
             self.with(|c| {
                 let live: Vec<_> = c.store.projects_checked().map_err(|e| e.key().to_string())?.into_iter().map(|p| p.id).collect();
@@ -1933,6 +1977,7 @@ impl Core {
             self.restore_recovery(&mut c);
             self.restore_evicted(&mut c);
             self.convs.insert(id.to_string(), c);
+            self.reopen_busy_plan_steps(id, false);
         }
         let c = self.convs.get_mut(id)?;
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
@@ -2598,6 +2643,7 @@ impl Core {
                         words_cut: false,
                         words_chars: None,
                         transcript: None,
+                        change: None,
                         check: false,
                         started: Some(now()),
                         ended: None,
@@ -2606,6 +2652,7 @@ impl Core {
                         tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
                     }
                     tool.check = crate::nudge::is_check(&tool);
+                    tool.change = crate::change::of(&tool.name, &tool.input);
                     step = tool.parent.is_none() && !crate::model::runs_in_background(&tool);
                     m.tools.get_or_insert_default().push(tool);
                 }
@@ -3095,6 +3142,8 @@ impl Core {
         } else {
             return;
         };
+        // A turn that delivered ends a stuck run, whether or not Keep going sends another.
+        self.clear_dry_delivery(conv);
         // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
         if !completed_ok {
             self.compacts.remove(conv);
@@ -3810,9 +3859,39 @@ impl Core {
         if items == self.running.items {
             return;
         }
+        // Load an evicted leader only when its resumed child reopens a completed step.
+        let parents: Vec<_> = items
+            .iter()
+            .filter(|item| !self.running.items.iter().any(|old| old.conversation_id == item.conversation_id))
+            .filter_map(|item| {
+                let parent = self.convs.get(&item.conversation_id)?.started_by.as_ref()?;
+                if self.convs.contains_key(parent) {
+                    return None;
+                }
+                let has_step = self.store.get(parent).and_then(|c| c.plan).is_some_and(|plan| {
+                    plan.steps.iter().any(|step| {
+                        step.state == StepState::Done
+                            && (step.conversation.as_deref() == Some(item.conversation_id.as_str())
+                                || step.worker.as_ref().is_some_and(|worker| worker.conversation == item.conversation_id))
+                    })
+                });
+                has_step.then(|| parent.clone())
+            })
+            .collect();
+        for parent in parents {
+            self.load(&parent);
+        }
+        let leads: Vec<_> = self.convs.iter().filter(|(_, c)| c.plan.is_some()).map(|(id, _)| id.clone()).collect();
+        for lead in leads {
+            self.reopen_busy_plan_steps(&lead, true);
+        }
+        let items = self.running_items();
         self.mark_ended(&items);
+        // A conversation that started, ended or now waits for the person moves a step of the plan that names it.
+        let moved: HashSet<String> = self.running.items.iter().chain(&items).map(|i| i.conversation_id.clone()).collect();
         self.running = Running { revision: self.running.revision + 1, items: items.clone() };
         (self.emit)(AppEvent::Running { revision: self.running.revision, items });
+        self.plans_naming(&moved);
     }
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.
@@ -3918,6 +3997,8 @@ impl Core {
         if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
             return Ok(());
         }
+        // A step's conversation that works again, whoever wrote to it, is no longer waiting to be joined.
+        self.edit_worker(id, |w| w.joining = false);
         if let Some(held) = self.copying.get_mut(id) {
             held.reply = reply_id.to_string();
             held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
@@ -4333,6 +4414,8 @@ impl Core {
         let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
         let browse = self.offers_browser(area, tool_mode);
         let conversations = siblings::offers(area);
+        // Only the person's own project conversation leads a team: a team member or a goal's fix never starts one of its own.
+        let leads = conversations && self.convs.get(conv).is_some_and(|c| c.started_by.is_none() && c.goal_fix.is_none());
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
@@ -4345,6 +4428,7 @@ impl Core {
                         helper,
                         browse,
                         conversations,
+                        leads,
                         verify,
                         progress,
                         area,
@@ -4371,6 +4455,7 @@ impl Core {
                     helper,
                     browse,
                     conversations,
+                    leads,
                     verify,
                     progress,
                     cwd,
@@ -4501,6 +4586,7 @@ impl Core {
             pinned_at: None,
             ended: None,
             plan: None,
+            stuck: None,
             context: None,
             fresh_after: None,
             messages: vec![],

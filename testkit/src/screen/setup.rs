@@ -15,6 +15,7 @@ const BUDGET_MB: f64 = 400.0;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "setup: picked actions remain visible at 720x480", run: picked_actions_visible },
         Scenario { name: "C5.1: installed signed-in Claude connects without reinstalling and answers the first question", run: c5_1 },
         Scenario { name: "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening", run: c5_2 },
         Scenario { name: "C5.3: None persists, shows connection guidance and never reopens setup automatically", run: c5_3_none },
@@ -30,6 +31,34 @@ pub fn scenarios() -> Vec<Scenario> {
             run: reconnect_keeps_the_first_run,
         },
     ]
+}
+
+fn picked_actions_visible(ctx: &mut Ctx) -> Result {
+    start(ctx, false)?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        codex: CliSlot::Absent,
+        recording: recording(ctx, "claude.setup.json"),
+        ..Launch::default()
+    })?;
+    wait_for_guide(&mut app)?;
+    app.page.cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        serde_json::json!({ "width": 720, "height": 480, "deviceScaleFactor": 1, "mobile": false }),
+    )?;
+    for (choice, action) in [("setup.claude", "setup.signIn"), ("setup.chatgpt", "setup.install")] {
+        let label = serde_json::to_string(&app.page.text_of(choice)?).unwrap();
+        app.page.eval(&format!("[...document.querySelectorAll('.pick')].find(b => b.textContent.trim() === {label}).click()"))?;
+        let button = guide(&mut app)?.role("button", &app.page.text_of(action)?).exact();
+        app.page.wait_visible(&button)?;
+        let text = serde_json::to_string(&app.page.text_of(action)?).unwrap();
+        let above = format!(
+            "(() => {{ const b = [...document.querySelectorAll('.setup-card-actions button')].find(x => x.textContent.trim() === {text}); const r = b.getBoundingClientRect(), f = document.querySelector('.first-foot').getBoundingClientRect(); return r.top >= 0 && r.bottom <= f.top && r.right <= innerWidth; }})()"
+        );
+        app.page.wait_for(&format!("{action} visible above the footer"), &above)?;
+        app.page.eval(&format!("[...document.querySelectorAll('.pick')].find(b => b.textContent.trim() === {label}).click()"))?;
+    }
+    ctx.close(app.id)
 }
 
 /// The state every setup scenario starts from: the guide is due, a loopback release server is up, and Claude is

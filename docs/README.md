@@ -56,6 +56,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/antigravity-cli.md](dev/antigravity-cli.md) | How the Antigravity CLI (Gemini) behaves, recorded: output events, approval, resume, isolation, MCP, quota |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
+| [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
 | [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
@@ -63,6 +64,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/self-development.md](dev/self-development.md) | Faber building Faber from its own project conversation: how to start it and which part does what |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
 | [tasks/README.md](tasks/README.md) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
+| [Antigravity driver](tasks/later/010-antigravity-driver.md), [Antigravity in the app](tasks/later/020-antigravity-in-the-app.md), [several models at once](tasks/later/060-several-models-at-once.md), [switch vendor mid-conversation](tasks/later/070-switch-vendor-mid-conversation.md) | The T3 Code study tasks, waiting until after 1.0; its needs-you-first list, readable turns and palette ideas went to the rework of the thread, endings and command layer |
 | [brand/](brand/) | Logo sources |
 
 ## Dated pages
@@ -96,7 +98,8 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-19-legible-agent-runs-design.md | Approved (Erick, 2026-10-19), tasks 019 and 020 landed (#224, #226). Design: a finished reply looks finished, a done card, the plan, status and closing-box tools, one block per Keep going run, plain words with a technical tab |
 | superpowers/specs/2026-10-20-rewind-design.md | Approved (Erick's three answers, 2026-10-20; seventh fresh review), task 090 landed (#191): go back to before a message, files, conversation or both, with redo |
 | superpowers/specs/2026-10-21-look-around.md | In progress, steps 1 and 2 landed (R369), step 3 landed (R386), step 4 counting built (R403), the week of use and the decision still to come: after a fix, the same mistake looked for elsewhere and asked about, scoped to the close of a fix and a red-to-green sign, never a rule for every turn |
-| superpowers/specs/2026-10-22-own-work-method.md | Approved (R435), slices queued as tasks 991 to 994, nothing built yet: one work method Faber keeps in a project's `.faber/` (rules, decisions, taste, lessons, follow-ups), sized by risk, and the same one for Faber's own repo |
+| superpowers/specs/2026-10-22-own-work-method.md | Replaced by Faber Method 2 (R484); its queued tasks 900 to 935 go on under the new spec |
+| superpowers/specs/2026-10-30-faber-method-2.md | Approved (R484), tasks 041 to 049 plus the kept tasks 900 to 935, nothing built yet: one method for Faber and every project, replacing R435 and Faber Flow; work as a graph run in waves with a join, packets instead of histories, progress derived and never written, hard read limits, every part switched on the bench |
 | research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
 | research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
 | research/settings-exit-snapshot-2026-10-24.md | Locally reproduced and corrected native-select exit snapshot; focused RED/GREEN and paired visual evidence, with integration and resource limits retained |

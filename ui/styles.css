@@ -202,7 +202,6 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crumb { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; }
 .crumb b { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
 .crumb .sep { flex: none; }
-.crumb .copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-data); font-size: var(--fs-xs); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
 .thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) clamp(16px, 4vw, 40px) var(--thread-tail); contain: strict; }
@@ -1618,6 +1617,11 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .plan li.active { color: var(--ink); }
 .plan li.active .mark { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .plan li .now { color: var(--ink-3); }
+/* A step another conversation does: its title as a quiet link under the step's text, then where it stands. */
+.plan li { flex-wrap: wrap; }
+.plan li .member { flex-basis: 100%; min-width: 0; padding-left: 22px; color: var(--ink-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.plan li .member .link { font-size: inherit; }
+.plan li .member-state[data-state='waiting'] { color: var(--amber-ink); }
 .plan .note { margin: 6px 0 0; overflow-wrap: anywhere; }
 .wrap-up { margin: 12px 0 4px; padding: 10px 12px; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; gap: 8px; }
 .wrap-up .recap { margin: 0; }
@@ -1839,15 +1843,16 @@ html.away-win .catalog-empty .peek svg { animation-play-state: paused !important
 .det-state { color: var(--ink-3); font-size: var(--fs-xs); }
 .det-facts > li[data-state='failed'] > .det-state { color: var(--amber-ink); }
 .details-view .follow, .details-view .checks { margin: 0; }
-.work-chip { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; max-width: 100%; min-height: var(--h-sm); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.work-chip { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; max-width: 100%; min-height: var(--h-sm); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm); overflow-wrap: anywhere; cursor: default; }
 .work-chip > span { min-width: 0; }
-button.work-chip, a.work-chip { cursor: pointer; }
 button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .work-state { color: var(--ink-3); font-size: var(--fs-xs); }
 .background-work > li[data-need='true'] .work-state, .live-reference[data-need='true'] .work-state { color: var(--amber-ink); }
 .work-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
 .work-reason { margin: 0; color: var(--amber-ink); font-size: var(--fs-sm); }
 .technical-reference { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.det-copy { margin: 0; display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.det-copy span { font-family: var(--font-data); font-size: var(--fs-xs); }
 .live-reference { vertical-align: baseline; text-decoration: none; white-space: normal; }
 .project-goals { margin-top: 12px; }
 .goal-state.ask { color: var(--ink); font-weight: 580; }

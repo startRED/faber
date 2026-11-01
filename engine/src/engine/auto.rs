@@ -424,6 +424,7 @@ impl Core {
                     helper: Default::default(),
                     browse: false,
                     conversations: false,
+                    leads: false,
                     progress: false,
                     verify: false,
                     cwd,
@@ -447,6 +448,7 @@ impl Core {
                         helper: Default::default(),
                         browse: false,
                         conversations: false,
+                        leads: false,
                         progress: false,
                         verify: false,
                         area: Area::Chat,
@@ -511,6 +513,7 @@ impl Core {
         self.save(id);
         if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {
             self.fail_reply(id, reply_id, error);
+            self.step_not_started(id);
         }
     }
 
