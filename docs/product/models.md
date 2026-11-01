@@ -37,8 +37,8 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
 - Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
-  needed more, the conversation stays with that model. A sent message waits at most 30 s for its route; past it, the
-  turn starts with the everyday default. The answer shows the chosen model and the reason. While the person types, the
+  needed more, the conversation stays with that model. A sent message waits at most 2.5 s for its route; if it fails or
+  takes longer, the turn starts with the previous choice or the everyday default. The answer shows the chosen model and why. While the person types, the
   draft is routed at most twice per message, and sending it starts the count again (done, `engine/src/engine/auto.rs`).
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or

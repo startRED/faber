@@ -3878,12 +3878,14 @@ impl Core {
             self.push(id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.to_string(), images);
             tokio::spawn(async move {
-                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                let result = tokio::time::timeout(auto::ROUTE_BUDGET, route).await;
+                let failed = !matches!(&result, Ok(Ok(None)) | Ok(Ok(Some((Some(_), _)))));
+                let verdict = result.ok().and_then(|r| r.ok()).flatten().and_then(|(v, actor)| v.map(|v| (v, actor)));
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
                     let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
+                    core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });
             return Ok(());
@@ -4863,14 +4865,16 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                let result = tokio::time::timeout(auto::ROUTE_BUDGET, route).await;
+                let failed = !matches!(&result, Ok(Ok(None)) | Ok(Ok(Some((Some(_), _)))));
+                let verdict = result.ok().and_then(|r| r.ok()).flatten().and_then(|(v, actor)| v.map(|v| (v, actor)));
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
                     let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
+                    core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });
             return Ok(id);

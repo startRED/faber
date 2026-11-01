@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Your message starts even when Auto cannot get a routing answer in time.",
+      "pt-BR": "Sua mensagem começa mesmo quando o Auto não recebe uma resposta do roteador a tempo.",
+      "es": "Tu mensaje empieza aunque Auto no reciba a tiempo la respuesta del enrutador.",
+      "fr": "Votre message démarre même si Auto ne reçoit pas à temps la réponse du routeur.",
+      "de": "Deine Nachricht startet auch dann, wenn Auto nicht rechtzeitig eine Antwort vom Router erhält."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-11-01 | Auto waits at most 2.5 seconds for the router after a message is sent; when the router fails or is late, Faber uses the previous choice or the default and says why in its decision row. Agent questions and child results also carry their reasons. | Erick (W2 rework) |"
+  ]
+}
