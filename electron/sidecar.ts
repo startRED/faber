@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { app } from 'electron';
 import { LOGIN_ITEM } from './orders.ts';
+import type { PaneNote } from './pane.ts';
 
 /** What the host says on its own: events for the screen, and orders for the shell (`Order` in `host/src/wire.rs`). */
 export type Listeners = { event: (event: unknown) => void; order: (order: unknown) => void };
@@ -55,8 +56,14 @@ export class Sidecar {
       FABER_VERSION: app.getVersion(),
       FABER_SHELL_PID: String(process.pid),
       FABER_AUTOSTART: app.isPackaged && startsWithSystem() ? '1' : '0',
+      // Faber's own browser pane: the shell has views for it, except in a test or automated run (hidden), which shows none.
+      ...(process.env.FABER_HIDDEN === '1' ? {} : { FABER_PANE: '1' }),
+      // Self-updates (`faber-update`) run only in the installed app, which says where its program is for the installer.
+      ...(app.isPackaged ? { FABER_UPDATES: '1', FABER_INSTALL_DIR: path.dirname(process.execPath) } : {}),
     };
     // No shell, no console window: the host is a plain child of the app.
+    // A hidden run never has a pane, whatever the environment it was started in says.
+    if (process.env.FABER_HIDDEN === '1') delete env.FABER_PANE;
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
     let ended: () => void = () => {};
     const sidecar = new Sidecar(
@@ -104,7 +111,13 @@ export class Sidecar {
   }
 
   /** Tells the host what only the app sees (`ShellNote` in `host/src/wire.rs`); it answers nothing. */
-  note(note: { kind: 'focus'; focused: boolean } | { kind: 'picked'; id: number; path: string | null; noWindow: boolean }): void {
+  note(
+    note:
+      | { kind: 'focus'; focused: boolean }
+      | { kind: 'window'; visible: boolean }
+      | { kind: 'picked'; id: number; path: string | null; noWindow: boolean }
+      | PaneNote,
+  ): void {
     if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 

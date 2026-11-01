@@ -25,5 +25,6 @@ module.exports = {
   win: { icon: path.join(root, 'src-tauri/icons/icon.ico'), target: [{ target: 'nsis', arch: ['x64'] }], extraFiles: require('node:fs').existsSync(cli) ? [{ from: cli, to: 'bin/faber.exe' }] : [] },
   nsis: { oneClick: true, perMachine: false, allowElevation: false, deleteAppDataOnUninstall: false, artifactName: 'Faber_${version}_x64-setup.exe', shortcutName: 'Faber', include: path.join(root, 'installer/windows/faber.nsh') },
   mac: { icon: path.join(root, 'src-tauri/icons/icon.icns'), category: 'public.app-category.productivity', identity: null, target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, { target: 'zip', arch: ['arm64', 'x64'] }] },
-  linux: { icon: path.join(root, 'src-tauri/icons/icon.png'), target: ['AppImage', 'deb'] },
+  // The updater binds a release to its signed file name (`_<version>_`), so Linux files carry the version in that shape too.
+  linux: { icon: path.join(root, 'src-tauri/icons/icon.png'), target: ['AppImage', 'deb'], artifactName: 'Faber_${version}_${arch}.${ext}' },
 };

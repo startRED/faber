@@ -16,6 +16,7 @@ mod failure;
 mod feed;
 pub mod folder;
 pub mod look;
+pub mod pane;
 mod project_commands;
 mod queues;
 pub mod reach;
@@ -26,6 +27,7 @@ pub mod terminal;
 mod tools;
 pub mod tray;
 pub mod views;
+pub mod visual;
 pub mod wire;
 
 pub use failure::Failure;
@@ -185,6 +187,27 @@ pub trait Shell: Send + Sync + 'static {
     fn game_in_front(&self) -> bool {
         false
     }
+    /// Opens a lease in the window's page server for a visual answer.
+    fn visual_open(&self) -> Res<String> {
+        Err(NO_WINDOW.into())
+    }
+    /// Prepares one single-use visual page under lease `id`.
+    fn visual_page(&self, _id: &str, _revision: u64, _document: String, _live: bool) -> Res<visual::Prepared> {
+        Err(NO_WINDOW.into())
+    }
+    /// Closes lease `id` and drops any unconsumed visual page.
+    fn visual_close(&self, _id: &str) -> Res<()> {
+        Err(NO_WINDOW.into())
+    }
+    /// Consumes a prepared visual page by its URL.
+    fn visual_document(&self, _path: &str) -> Res<visual::Document> {
+        Err(NO_WINDOW.into())
+    }
+    /// Whether the shell's native network filter for live visual pages is active.
+    #[cfg(feature = "test-hooks")]
+    fn visual_policy(&self, _live: bool) -> Res<bool> {
+        Err(NO_WINDOW.into())
+    }
     /// The program is closing: release what the shell holds, such as the request to keep the PC awake.
     fn shut_down(&self) {}
 }
@@ -283,6 +306,7 @@ impl Wiring {
             runtime,
             models: Arc::default(),
             loading_models: Arc::default(),
+            pane: OnceLock::new(),
         }
     }
 }
@@ -304,9 +328,22 @@ pub struct Host {
     /// enough.
     loading_models: Arc<AtomicBool>,
     voice: Voice,
+    /// Faber's own browser pane, when the front end has views for it and answers the window commands of the pane through
+    /// the host (the Electron shell); none in the Tauri shell, which answers them itself, and in the command line.
+    pane: OnceLock<Arc<pane::Pane>>,
 }
 
 impl Host {
+    /// Gives the host the pane the window commands `site_*` and `cookie_*` ask. Set once; a second call changes nothing.
+    pub fn set_pane(&self, pane: Arc<pane::Pane>) {
+        let _ = self.pane.set(pane);
+    }
+
+    /// The pane, or `error.host.noWindow` where the front end has none.
+    pub(crate) fn pane(&self) -> Result<&Arc<pane::Pane>, String> {
+        self.pane.get().ok_or_else(|| NO_WINDOW.to_string())
+    }
+
     /// Every event from now on, as the screen receives it. A reply already streaming arrives as its changed steps only
     /// (`feed.rs`), so a subscriber reads `open` (or `state`) first, and again after it lags.
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {

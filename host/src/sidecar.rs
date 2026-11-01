@@ -7,13 +7,14 @@
 //! registered to start with the system now. A setting saved later updates this copy and sends an `autostart` order, since
 //! this process cannot register the shell's own program.
 
+use crate::pane::{Driver, Pane, Relay, relay};
 use crate::tray::decide::{Attention, ShellTexts};
 use crate::tray::{self, Deck, Moment};
 use crate::wire::{Order, PickFilter, PickMode, ShellNote};
 use crate::{BoxFuture, Filter, PickError, Picked, Res, Shell, lock};
 use faber_engine::AppEvent;
 use faber_engine::model::{RunningItem, Settings, Vendor};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -58,6 +59,11 @@ struct Inner {
     attention: fn(u32) -> Attention,
     shell_process: u32,
     chime: fn(&std::path::Path),
+    /// Whether Faber's window is on screen and not minimized, as the shell last said; true until it says (an update never
+    /// installs under a window that may be looked at).
+    visible: AtomicBool,
+    /// The updater, when updates are on for this app (`attach_updater`): the screen asks it, and it holds installs back.
+    updater: OnceLock<faber_update::Updater>,
     /// Whether Faber's window has the focus, as the shell last said: a question seen there is never notified.
     focused: AtomicBool,
     /// Dialogs the shell was asked for and has not answered, by id; None once the program closes, so no dialog is asked
@@ -72,6 +78,13 @@ struct Inner {
     state: Mutex<State>,
     /// Saves of the settings go one at a time, so the stored switch and the order for it never disagree.
     saving: Mutex<()>,
+    /// Single-use pages for the Electron shell's `faber-visual` scheme.
+    visual: crate::visual::Pages,
+    /// The browser pane's views, which live in the shell: the pane's calls leave as orders and the shell's answers come back as
+    /// notes.
+    views: Arc<Relay>,
+    /// The pane made over `views` ([`SidecarShell::attach_pane`]); what the views tell reaches it.
+    pane: OnceLock<Arc<Pane>>,
 }
 
 struct State {
@@ -95,6 +108,7 @@ impl SidecarShell {
             awake_on: false,
             autostart,
         };
+        let views = Relay::new(send.clone());
         Self(Arc::new(Inner {
             version: version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
             hidden,
@@ -104,6 +118,8 @@ impl SidecarShell {
             attention,
             shell_process: shell_process.unwrap_or_else(std::process::id),
             chime,
+            visible: AtomicBool::new(true),
+            updater: OnceLock::new(),
             focused: AtomicBool::new(false),
             early: Mutex::new(None),
             asks: Mutex::new(Some(HashMap::new())),
@@ -111,6 +127,9 @@ impl SidecarShell {
             settings: OnceLock::new(),
             state: Mutex::new(state),
             saving: Mutex::new(()),
+            visual: crate::visual::Pages::electron(),
+            views,
+            pane: OnceLock::new(),
         }))
     }
 
@@ -130,14 +149,48 @@ impl SidecarShell {
         }
     }
 
+    /// Updates are on: the screen reads where the update is, presses "Update ready, restart", and every install of a CLI or a
+    /// tool counts as work the update waits for. Set once; a second call changes nothing.
+    pub fn attach_updater(&self, updater: faber_update::Updater) {
+        let _ = self.0.updater.set(updater);
+    }
+
+    /// The views of the browser pane, which the shell makes: the driver a [`Pane`] is made over. Calls on it leave as orders.
+    pub fn pane_driver(&self) -> Arc<dyn Driver> {
+        self.0.views.clone()
+    }
+
+    /// The pane made over [`pane_driver`](Self::pane_driver): from now on what the shell's views tell reaches it. Set once.
+    pub fn attach_pane(&self, pane: Arc<Pane>) {
+        let _ = self.0.pane.set(pane);
+    }
+
+    /// Whether Faber's window is on screen and not minimized, as the shell last said (true until it says).
+    pub fn window_visible(&self) -> bool {
+        self.0.visible.load(Ordering::SeqCst)
+    }
+
     /// What the shell says about itself.
     pub fn note(&self, note: ShellNote) {
         match note {
             ShellNote::Focus { focused } => self.0.focused.store(focused, Ordering::SeqCst),
+            ShellNote::Window { visible } => self.0.visible.store(visible, Ordering::SeqCst),
             ShellNote::Picked { id, path, no_window } => {
                 // An answer nobody waits for (an id never asked, or asked by a closing program) changes nothing.
                 if let Some(waiting) = lock(&self.0.asks).as_mut().and_then(|asks| asks.remove(&id)) {
                     let _ = waiting.send(answer(path, no_window));
+                }
+            }
+            ShellNote::PaneAnswer { id, ok, err } => {
+                self.0.views.answer(id, err.map_or_else(|| Ok(ok.unwrap_or(Value::Null)), Err));
+            }
+            ShellNote::PaneEvent { view, event } => {
+                // A report that comes before the pane exists (or from a shell that has none) changes nothing.
+                if let Some(pane) = self.0.pane.get() {
+                    let view = relay::view_named(view);
+                    if let Some(event) = self.0.views.event(view, event) {
+                        pane.event(view, event);
+                    }
                 }
             }
         }
@@ -280,6 +333,41 @@ impl Shell for SidecarShell {
         self.0.version.clone()
     }
 
+    fn update_status(&self) -> Value {
+        match self.0.updater.get() {
+            Some(updater) => serde_json::to_value(updater.status()).unwrap_or_default(),
+            None => json!({ "phase": "none" }),
+        }
+    }
+
+    fn update_restart(&self) -> BoxFuture<'_, Res<()>> {
+        Box::pin(async move {
+            match self.0.updater.get() {
+                Some(updater) => updater.restart_now().await,
+                None => Err("error.update.none".into()),
+            }
+        })
+    }
+
+    fn hold_install(&self) -> Res<Box<dyn Send>> {
+        match self.0.updater.get() {
+            Some(_) => faber_update::SetupRunning::begin().map(|running| Box::new(running) as Box<dyn Send>),
+            None => Ok(Box::new(())),
+        }
+    }
+
+    fn input_seen(&self) {
+        if let Some(updater) = self.0.updater.get() {
+            updater.input_seen();
+        }
+    }
+
+    fn draft_dirty(&self, dirty: bool) {
+        if let Some(updater) = self.0.updater.get() {
+            updater.draft_dirty(dirty);
+        }
+    }
+
     fn persist_settings(&self, autostart: Option<bool>, persist: &mut dyn FnMut() -> Res<Settings>) -> Res<Settings> {
         let _saving = lock(&self.0.saving);
         let saved = persist()?;
@@ -333,9 +421,33 @@ impl Shell for SidecarShell {
         Ok(())
     }
 
+    fn visual_open(&self) -> Res<String> {
+        Ok(self.0.visual.open())
+    }
+
+    fn visual_page(&self, id: &str, revision: u64, document: String, live: bool) -> Res<crate::visual::Prepared> {
+        self.0.visual.prepare(id, revision, document, live && crate::visual::NETWORK_READY).map_err(Into::into)
+    }
+
+    fn visual_close(&self, id: &str) -> Res<()> {
+        self.0.visual.close(id);
+        Ok(())
+    }
+
+    fn visual_document(&self, path: &str) -> Res<crate::visual::Document> {
+        self.0.visual.document(path).map_err(Into::into)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn visual_policy(&self, live: bool) -> Res<bool> {
+        Ok(live && crate::visual::NETWORK_READY)
+    }
+
     fn shut_down(&self) {
         // Dialogs still open are answered "no window": their commands end instead of waiting for a shell that is gone.
         lock(&self.0.asks).take();
+        // And the pane's calls fail, so nothing waits on a view that is gone.
+        self.0.views.lost();
         let mut state = lock(&self.0.state);
         state.awake.shutdown();
         self.0.sync_awake(&mut state);
@@ -347,7 +459,6 @@ mod tests {
     use super::*;
     use crate::tray::decide::Attention::{Normal, Silent};
     use faber_engine::model::{Area, Permission, RunState};
-    use serde_json::json;
     use std::time::Duration;
 
     type Sink = Arc<Mutex<Vec<Order>>>;
@@ -425,6 +536,67 @@ mod tests {
 
     fn running(revision: u64, items: Vec<RunningItem>) -> AppEvent {
         AppEvent::Running { revision, items }
+    }
+
+    #[tokio::test]
+    async fn restart_without_an_update_reports_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert_eq!(shell.update_restart().await, Err("error.update.none".into()));
+    }
+
+    #[tokio::test]
+    async fn the_window_counts_as_seen_until_the_shell_says_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert!(shell.window_visible(), "nothing closes a window the shell never reported");
+        shell.note(ShellNote::Window { visible: false });
+        assert!(!shell.window_visible());
+        shell.note(ShellNote::Window { visible: true });
+        assert!(shell.window_visible());
+    }
+
+    #[tokio::test]
+    async fn without_an_updater_the_screen_sees_no_update_and_a_cli_install_is_never_held_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert_eq!(shell.update_status(), json!({ "phase": "none" }));
+        assert!(shell.hold_install().is_ok());
+        shell.input_seen();
+        shell.draft_dirty(true);
+    }
+
+    /// An app with nothing real behind it, for an updater that must never start anything.
+    struct NoApp;
+
+    impl faber_update::App for NoApp {
+        fn previews(&self) -> bool {
+            false
+        }
+        fn window_visible(&self) -> bool {
+            true
+        }
+        fn close_engine(&self, _: faber_update::Who) -> Option<Box<dyn std::any::Any + Send>> {
+            None
+        }
+        fn shut_down(&self, _: bool) {}
+        fn quit(&self) {}
+        fn emit(&self, _: faber_update::Status) {}
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn with_an_updater_the_screen_reads_it_and_a_restart_without_a_kept_update_says_none() {
+        let (dir, program) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        let updater = faber_update::Updater::new(Arc::new(NoApp), "0.4.0", dir.path().to_path_buf(), program.path()).unwrap();
+        shell.attach_updater(updater);
+        assert_eq!(shell.update_status(), json!({ "phase": "none" }), "no update is kept yet");
+        assert_eq!(shell.update_restart().await, Err("error.update.none".into()));
+        shell.input_seen();
+        shell.draft_dirty(true);
+        let held = shell.hold_install().expect("a CLI install may begin while no update is decided");
+        drop(held);
     }
 
     /// Waits for the work `heard` hands to another thread.
@@ -668,5 +840,65 @@ mod tests {
             chime: quiet,
         });
         assert_eq!(shell.version(), "9.8.7");
+    }
+
+    #[tokio::test]
+    async fn the_panes_views_are_ordered_through_the_shell_and_answered_by_its_notes() {
+        use crate::pane::View;
+        use crate::wire::{PaneOp, PaneView, ViewNote};
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, sink) = shell_in(dir.path(), false, false, normal);
+        let shell = Arc::new(shell);
+        let driver = shell.pane_driver();
+        let opening = tokio::spawn({
+            let driver = driver.clone();
+            async move { driver.open(View::Main, "faber-pane-1".into()).await }
+        });
+        let asked = until(&sink, 1).await;
+        let [Order::Pane { id: Some(id), view: PaneView::Main, op: PaneOp::Open { profile } }] = asked.as_slice() else {
+            panic!("{asked:?}")
+        };
+        assert_eq!(profile, "faber-pane-1");
+        shell.note(ShellNote::PaneAnswer { id: *id, ok: None, err: None });
+        assert_eq!(opening.await.unwrap(), Ok(()));
+        // A failure of the shell is the call's failure; a result is its result.
+        let calling = tokio::spawn({
+            let driver = driver.clone();
+            async move { tokio::join!(driver.call(View::Main, "Page.reload", json!({})), driver.call(View::Main, "Page.reload", json!({}))) }
+        });
+        let asked = until(&sink, 2).await;
+        let ids: Vec<u64> =
+            asked.iter().map(|order| if let Order::Pane { id: Some(id), .. } = order { *id } else { panic!("{order:?}") }).collect();
+        shell.note(ShellNote::PaneAnswer { id: ids[0], ok: Some(json!({ "done": true })), err: None });
+        shell.note(ShellNote::PaneAnswer { id: ids[1], ok: None, err: Some("the page stopped answering".into()) });
+        assert_eq!(calling.await.unwrap(), (Ok(json!({ "done": true })), Err("the page stopped answering".into())));
+        // What a view tells before there is a pane changes nothing.
+        shell.note(ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Gone });
+        // A shell that goes away fails the calls still waiting, and no later one is ordered.
+        let waiting = tokio::spawn({
+            let driver = driver.clone();
+            async move { driver.call(View::Main, "Page.reload", json!({})).await }
+        });
+        until(&sink, 1).await;
+        shell.shut_down();
+        assert_eq!(waiting.await.unwrap(), Err("Faber's window is closed".into()));
+        assert_eq!(driver.load(View::Main, "https://example.org/".into()).await, Err("Faber's window is closed".into()));
+        assert!(taken(&sink).iter().all(|order| !matches!(order, Order::Pane { .. })));
+    }
+
+    #[tokio::test]
+    async fn visual_pages_are_served_once_from_the_sidecar_and_cleared_when_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), true, false, normal);
+        let id = shell.visual_open().unwrap();
+        let page = shell.visual_page(&id, 1, "<p>chart</p>".into(), true).unwrap();
+        assert!(page.url.starts_with("faber-visual://app/"));
+        assert_eq!(page.live, crate::visual::NETWORK_READY);
+        let doc = shell.visual_document(&page.url).unwrap();
+        assert!(doc.csp.contains("sandbox allow-scripts"));
+        assert_eq!(shell.visual_document(&page.url), Err("error.messageGone".into()));
+        let second = shell.visual_page(&id, 2, "<p>next</p>".into(), false).unwrap();
+        shell.visual_close(&id).unwrap();
+        assert_eq!(shell.visual_document(&second.url), Err("error.messageGone".into()));
     }
 }
