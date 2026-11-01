@@ -209,7 +209,7 @@ fn extract_zip(archive: std::fs::File, dest_dir: &Path) -> Result<(), String> {
         let mut file = zip.by_index(i).map_err(|e| format!("Failed to read ZIP entry: {e}"))?;
         let enclosed = match file.enclosed_name() {
             Some(p) => sanitize_archive_path(&p)?,
-            None => return Err(format!("Unsafe path in ZIP entry: {}", file.name())),
+            None => return Err(format!("Unsafe path in ZIP entry: {}", String::from_utf8_lossy(file.name_raw()))),
         };
         let out_path = dest_dir.join(enclosed);
         if file.is_dir() {

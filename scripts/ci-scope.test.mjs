@@ -63,6 +63,6 @@ test('main warms every Rust cache the checks read, under the same names, and onl
   ];
   assert.equal(read.length, 5, read.join(', '));
   assert.deepEqual([...new Set(warmed)].sort(), [...new Set(read)].sort());
-  assert.equal(ci.match(/uses: Swatinem\/rust-cache@v2/g).length, 3, 'check, app and warm');
+  assert.equal(ci.match(/uses: Swatinem\/rust-cache@[0-9a-f]{40} # v2/g).length, 3, 'check, app and warm');
   assert.equal(ci.match(/save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/g).length, 2, 'check and app save only on main');
 });

@@ -162,7 +162,7 @@ mod tests {
         let archive = zip_of("codex-x86_64-pc-windows-msvc.exe", b"payload").unwrap();
         let mut zip = zip::ZipArchive::new(io::Cursor::new(archive)).unwrap();
         let mut file = zip.by_index(0).unwrap();
-        assert_eq!(file.name(), "codex-x86_64-pc-windows-msvc.exe");
+        assert_eq!(file.name().unwrap(), "codex-x86_64-pc-windows-msvc.exe");
         let mut text = String::new();
         file.read_to_string(&mut text).unwrap();
         assert_eq!(text, "payload");
