@@ -27,6 +27,10 @@ const dist = realpathSync(testmode.screenFolder(path.join(root, 'dist')));
 const hidden = process.env.FABER_HIDDEN === '1';
 const autostart = process.argv.includes('--autostart');
 
+// Chromium's remote debugging would let any process of the account run script in the screen and call the host; only the
+// screen test runner (which sets its own switch in `testmode.prepare`) may open it.
+if (!testmode.testing && process.argv.some((arg) => /^--remote-debugging-(port|pipe|address)/.test(arg))) app.exit(1);
+
 // Every renderer runs in the system sandbox, not only the ones that ask for it.
 app.enableSandbox();
 // The screen loads only from Faber's own scheme: never file:// and never a remote page.
