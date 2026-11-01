@@ -54,15 +54,16 @@ export const placement: Partial<Electron.BrowserWindowConstructorOptions> = test
  * runner's name filter. Both are run by Chromium before any script of the page, as an initialization script is.
  * Returns once they are registered.
  */
-export async function beforeLoad(contents: WebContents, root: string): Promise<void> {
+export async function beforeLoad(contents: WebContents, root: string, origin: string): Promise<void> {
   if (!checksOut) return;
   const filter = env('FABER_CHECKS_FILTER');
   const source =
     readFileSync(path.join(root, 'tests', 'ui', 'system-motion.js'), 'utf8') +
     (filter === undefined ? '' : `\nwindow.__faberChecksFilter = ${JSON.stringify(filter)};`);
-  // Chromium has no page to take a Page command before the first navigation, so a blank one comes first.
-  await contents.loadURL('about:blank');
+  // Stay on the same origin so navigation cannot replace the renderer that owns the debugger's initialization script.
+  await contents.loadURL(`${origin}/__test_blank__`);
   contents.debugger.attach('1.3');
+  await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
 }
 

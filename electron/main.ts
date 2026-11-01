@@ -104,6 +104,9 @@ function screenFile(address: string): string | null {
 /** Serves dist/ under faber://app/. Every answer carries the policy, so no file there can become a page without it. */
 function serveScreen(): void {
   protocol.handle(SCHEME, async (request) => {
+    if (testmode.testing && request.url === `${ORIGIN}/__test_blank__`) {
+      return new Response('', { headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP } });
+    }
     const file = screenFile(request.url);
     if (!file) return new Response(null, { status: 404 });
     const response = await net.fetch(pathToFileURL(file).toString());
@@ -181,7 +184,7 @@ function createWindow(): BrowserWindow {
     // A test run shows its window at once (offscreen, unfocused), as the Tauri test build does: a window never shown
     // can be left unpainted by Chromium, and the screen would wait for its first frame.
     window.showInactive();
-    void testmode.beforeLoad(window.webContents, root).then(load);
+    void testmode.beforeLoad(window.webContents, root, ORIGIN).then(load);
   } else void load();
   return window;
 }
