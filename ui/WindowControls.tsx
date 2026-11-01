@@ -1,4 +1,4 @@
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { currentWindow } from './shell.ts';
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { t } from './i18n.ts';
 
@@ -13,7 +13,7 @@ const icon = (d: string) => (
 );
 
 export function WindowControls() {
-  const win = getCurrentWindow();
+  const win = currentWindow();
   const [maximized, setMaximized] = createSignal(false);
   onMount(() => {
     const sync = async () => setMaximized(await win.isMaximized());
