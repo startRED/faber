@@ -1648,7 +1648,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .plan li.done .mark { box-shadow: none; color: var(--ink-3); }
 .plan li.active { color: var(--ink); }
 .plan li.active .mark { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.plan li .now { color: var(--ink-3); }
+.plan li .now { color: var(--ink-3); min-width: 0; overflow-wrap: anywhere; }
 /* A step another conversation does: its title as a quiet link under the step's text, then where it stands. */
 .plan li { flex-wrap: wrap; }
 .plan li .member { flex-basis: 100%; min-width: 0; padding-left: 22px; color: var(--ink-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }

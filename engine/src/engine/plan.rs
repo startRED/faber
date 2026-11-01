@@ -165,7 +165,7 @@ impl Core {
         Some((c.project_id.clone()?, c))
     }
 
-    fn write_progress(&mut self, conv: &str, tool: &str, input: &serde_json::Value) -> Result<String, String> {
+    pub(super) fn write_progress(&mut self, conv: &str, tool: &str, input: &serde_json::Value) -> Result<String, String> {
         match tool {
             progress::PLAN_TOOL => {
                 // A conversation of a step that was deleted frees its step before the list is compared with it.

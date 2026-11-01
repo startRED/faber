@@ -20,7 +20,10 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
       <ol>
         <For each={props.plan.steps}>
           {(step) => (
-            <li class={step.state} aria-current={step.state === 'active' ? 'step' : undefined}>
+            <li
+              class={step.state}
+              aria-current={step.state === 'active' ? 'step' : undefined}
+            >
               <span class="mark" aria-hidden="true">
                 <Show when={step.state === 'done'}>
                   <Icon name="check" small />
@@ -31,6 +34,7 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
                 <span class="now"> · {props.now}</span>
               </Show>
               <span class="sr">{t(`plan.state.${step.state}`)}</span>
+              <Show when={step.state === 'done' && step.evidence}>{(evidence) => <span class="now"> · {evidence()}</span>}</Show>
               <Show when={step.conversation}>
                 {(id) => (
                   <span class="member">

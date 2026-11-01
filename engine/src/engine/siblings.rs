@@ -590,4 +590,77 @@ mod tests {
         });
         engine.shutdown();
     }
+
+    #[tokio::test]
+    async fn a_worker_conversation_ending_never_marks_its_plan_step_done() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|core| {
+            let parent = core.blank(Area::Project, Some("p".into()));
+            let child = core.blank(Area::Project, Some("p".into()));
+            let plan = crate::progress::plan(
+                None,
+                &serde_json::json!({
+                    "steps": [
+                        { "id": "model", "text": "Update model", "state": "in_progress" },
+                        { "id": "screen", "text": "Update screen", "state": "pending" }
+                    ]
+                }),
+                1,
+            )
+            .unwrap()
+            .unwrap();
+            let mut p = plan;
+            p.steps[0].worker =
+                Some(StepWorker { conversation: child.clone(), branch: "faber/model".into(), base: String::new(), joining: false });
+            core.convs.get_mut(&parent).unwrap().plan = Some(p);
+
+            let c = core.convs.get_mut(&child).unwrap();
+            c.started_by = Some(parent.clone());
+            c.title = "Update model".into();
+            let mut reply = Message::new("r1".into(), Role::Assistant, "Model updated.".into(), 2);
+            reply.status = Some(Status::Done);
+            reply.closed = true;
+            reply.wrap_up = Some(
+                crate::progress::wrap_up(&serde_json::json!({
+                    "outcome": "done",
+                    "did": "Added evidence field to PlanStep.",
+                    "result": "PlanStep stores optional evidence.",
+                    "verified": "cargo test -p faber-engine --lib -- progress passed."
+                }))
+                .unwrap(),
+            );
+            c.messages.push(reply);
+
+            core.tell_parent(&child);
+
+            let step = &core.convs[&parent].plan.as_ref().unwrap().steps[0];
+            assert_eq!(step.state, StepState::Active, "the worker ending never marks the parent's step done");
+            assert_eq!(step.evidence, None);
+            assert_eq!(
+                step.worker.as_ref(),
+                Some(&StepWorker { conversation: child.clone(), branch: "faber/model".into(), base: String::new(), joining: true }),
+                "the worker stays attached and waits to be joined"
+            );
+
+            let refused = core.write_progress(&parent, crate::progress::PLAN_TOOL, &serde_json::json!({ "advance": true }));
+            let refused = refused.unwrap_err();
+            assert!(refused.contains(crate::progress::NO_EVIDENCE), "{refused}");
+            assert_eq!(core.convs[&parent].plan.as_ref().unwrap().steps[0].state, StepState::Active);
+
+            let ok = core
+                .write_progress(
+                    &parent,
+                    crate::progress::PLAN_TOOL,
+                    &serde_json::json!({ "advance": true, "evidence": "Joined branch and ran cargo test." }),
+                )
+                .unwrap();
+            assert!(ok.contains("1 of 2"), "{ok}");
+            let step = &core.convs[&parent].plan.as_ref().unwrap().steps[0];
+            assert_eq!(step.state, StepState::Done);
+            assert_eq!(step.evidence.as_deref(), Some("Joined branch and ran cargo test."));
+            assert!(step.worker.is_some());
+        });
+        engine.shutdown();
+    }
 }

@@ -224,10 +224,17 @@ export interface Message {
   /** On a reply: the closing box of the task it ended. */
   wrapUp?: WrapUp;
 }
+/** One step of a project agent's [`Plan`] (engine `PlanStep`). */
+export interface PlanStep {
+  text: string;
+  state: 'pending' | 'active' | 'done';
+  evidence?: string;
+  conversation?: string;
+  member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
+}
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
-  /** `conversation`: one the agent started that does the step (task 040); `member`: where it stands, put here by the engine. */
-  steps: { text: string; state: 'pending' | 'active' | 'done'; conversation?: string; member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped' }[];
+  steps: PlanStep[];
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };
