@@ -22,6 +22,10 @@ export const ptBR: Messages = {
   "cli.help.list": "Listar conversas",
   "cli.help.read": "Ler uma conversa",
   "cli.help.send": "Enviar uma mensagem",
+  'cli.help.start': "Abrir uma conversa",
+  'cli.help.message': "Enviar mensagem a uma conversa",
+  'cli.help.resume': "Retomar uma conversa",
+  'cli.help.mark-waiting': "Marcar esta conversa como aguardando",
   "cli.help.stop": "Parar uma conversa",
   "cli.help.continue": "Continuar uma conversa interrompida",
   "cli.help.archive": "Arquivar uma conversa",
@@ -2427,5 +2431,8 @@ export const ptBR: Messages = {
   'piece.discard': "Descartar alteração",
   'piece.retry': "Tentar de novo",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "O Faber recusou este pedido. O motivo vem no detalhe.",
+  'error.session.agentOnly': "Este comando é só para uma IA dentro de uma conversa do Faber. Para enviar uma mensagem, use send.",
+  'error.session.useSession': "Uma IA abre uma conversa com start_conversation e escreve para outra com message_conversation, nunca com send.",
 
 };

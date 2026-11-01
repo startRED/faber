@@ -19,8 +19,25 @@ pub struct Request {
 /// What a client reads: a reply to one of its requests, or an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromFaber {
-    Reply { id: u64, result: Result<Value, String> },
+    Reply { id: u64, result: Result<Value, Error> },
     Event(Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Error {
+    pub key: String,
+    pub detail: Option<String>,
+}
+
+impl From<String> for Error {
+    fn from(key: String) -> Self {
+        Self { key, detail: None }
+    }
+}
+impl From<&str> for Error {
+    fn from(key: &str) -> Self {
+        key.to_owned().into()
+    }
 }
 
 pub fn request(id: u64, cmd: &str, args: Value) -> String {
@@ -39,6 +56,20 @@ pub fn event(event: &Value) -> String {
     json!({ "event": event }).to_string()
 }
 
+pub fn reply_detailed(id: u64, result: &Result<Value, Error>) -> String {
+    match result {
+        Ok(ok) => json!({ "id": id, "ok": ok }),
+        Err(error) => {
+            let mut value = json!({ "id": id, "err": error.key });
+            if let Some(detail) = &error.detail {
+                value["detail"] = json!(detail);
+            }
+            value
+        }
+    }
+    .to_string()
+}
+
 /// A line from Faber, or None when it is none of the three shapes.
 pub fn parse_from_faber(line: &str) -> Option<FromFaber> {
     let mut value: Value = serde_json::from_str(line).ok()?;
@@ -50,7 +81,7 @@ pub fn parse_from_faber(line: &str) -> Option<FromFaber> {
         return Some(FromFaber::Reply { id, result: Ok(ok.take()) });
     }
     let err = value.get("err")?.as_str()?.to_string();
-    Some(FromFaber::Reply { id, result: Err(err) })
+    Some(FromFaber::Reply { id, result: Err(Error { key: err, detail: value.get("detail").and_then(Value::as_str).map(str::to_owned) }) })
 }
 
 /// Reads one line without its end. None at the end of the stream; an error for a line past `limit` or not UTF-8.

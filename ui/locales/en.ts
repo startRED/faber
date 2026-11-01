@@ -32,6 +32,10 @@ export const en = {
   "cli.help.list": "List conversations",
   "cli.help.read": "Read a conversation",
   "cli.help.send": "Send a message",
+  'cli.help.start': "Start a conversation",
+  'cli.help.message': "Message a conversation",
+  'cli.help.resume': "Resume a conversation",
+  'cli.help.mark-waiting': "Mark this conversation as waiting",
   "cli.help.stop": "Stop a conversation",
   "cli.help.continue": "Continue an interrupted conversation",
   "cli.help.archive": "Archive a conversation",
@@ -2320,6 +2324,9 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.session.refused': "Faber refused this action. The detail explains why.",
+  'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
+  'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
 } as const;
 

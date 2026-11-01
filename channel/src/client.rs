@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 /// The requests waiting for their answer; `None` once Faber closed the channel, so a later request fails at once.
-type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>>;
+type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, wire::Error>>>>>>;
 
 /// Events kept for a slow reader, such as `faber mcp` between two chats. Past this many, newer ones are dropped and the
 /// reader is told it lagged, as Faber tells a slow connection.
@@ -103,6 +103,10 @@ impl Client {
 
     /// Sends one command and waits for its answer: `Err` for the channel, `Ok(Err(key))` for a refusal.
     pub async fn call(&self, cmd: &str, args: Value) -> io::Result<Result<Value, String>> {
+        Ok(self.call_detailed(cmd, args).await?.map_err(|error| error.key))
+    }
+
+    pub async fn call_detailed(&self, cmd: &str, args: Value) -> io::Result<Result<Value, wire::Error>> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (asker, answer) = oneshot::channel();
         self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut().ok_or_else(closed)?.insert(id, asker);

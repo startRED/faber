@@ -22,6 +22,10 @@ export const es: Messages = {
   "cli.help.list": "Listar conversaciones",
   "cli.help.read": "Leer una conversación",
   "cli.help.send": "Enviar un mensaje",
+  'cli.help.start': "Abrir una conversación",
+  'cli.help.message': "Enviar un mensaje a una conversación",
+  'cli.help.resume': "Retomar una conversación",
+  'cli.help.mark-waiting': "Marcar esta conversación como pendiente",
   "cli.help.stop": "Detener una conversación",
   "cli.help.continue": "Continuar una conversación interrumpida",
   "cli.help.archive": "Archivar una conversación",
@@ -2440,5 +2444,8 @@ export const es: Messages = {
   'piece.discard': "Descartar cambio",
   'piece.retry': "Volver a intentar",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "Faber rechazó esta acción. El detalle explica por qué.",
+  'error.session.agentOnly': "Este comando es solo para una IA dentro de una conversación de Faber. Para escribir, usa send.",
+  'error.session.useSession': "Una IA empieza una conversación con start_conversation y escribe en otra con message_conversation, nunca con send.",
 
 };

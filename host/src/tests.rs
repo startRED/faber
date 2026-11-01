@@ -197,3 +197,150 @@ fn quitting_ends_the_crash_marker_before_anything_else_closes() {
         .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
 }
+
+fn seed_conversation(host: &Host, id: &str, started_by: Option<&str>, waiting_on: Option<faber_engine::model::WaitingOn>) {
+    let mut conv: faber_engine::model::Conversation =
+        serde_json::from_value(json!({ "id": id, "title": id, "area": "chat", "createdAt": 1, "updatedAt": 2, "messages": [] })).unwrap();
+    conv.started_by = started_by.map(String::from);
+    conv.waiting_on = waiting_on;
+    faber_engine::store::Store::new(&host.data_dir).save(&conv);
+}
+
+#[tokio::test]
+async fn dispatch_as_sets_by_from_a_conversation_agent_and_strips_it_for_everyone_else() {
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", Some("c2"), None);
+    seed_conversation(&host, "c2", None, None);
+
+    for caller in [Caller::Agent { conversation: None }, Caller::Person, Caller::Screen] {
+        assert_eq!(
+            key(host.dispatch_as(&caller, "mark_waiting", json!({ "by": "c1", "note": "checks" })).await),
+            "error.session.agentOnly",
+            "{caller:?} must not pass `by` through"
+        );
+    }
+
+    // Even when `args` claims `by: "c2"` (the parent of `c1`), `Caller::Agent { conversation: Some("c1") }` overwrites `by`
+    // with `"c1"`, so `archive` and `interrupt` act as `c1` on itself and are refused by the engine (`error.session.refused`).
+    let agent = Caller::Agent { conversation: Some("c1".into()) };
+    let archived = host.dispatch_as(&agent, "archive", json!({ "id": "c1", "on": true, "by": "c2" })).await.unwrap_err();
+    assert_eq!(archived.key, "error.session.refused");
+    assert!(archived.detail.is_some());
+    let stopped = host.dispatch_as(&agent, "interrupt", json!({ "id": "c1", "by": "c2" })).await.unwrap_err();
+    assert_eq!(stopped.key, "error.session.refused");
+    assert!(stopped.detail.is_some());
+}
+
+#[tokio::test]
+async fn send_is_refused_for_agents_and_kept_for_the_person_and_the_screen() {
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", None, None);
+    let args = json!({ "req": { "conversationId": "c1", "text": "hello", "area": "chat", "choice": { "vendor": "auto" } } });
+    for agent in [Caller::Agent { conversation: Some("c1".into()) }, Caller::Agent { conversation: None }] {
+        assert_eq!(key(host.dispatch_as(&agent, "send", args.clone()).await), "error.session.useSession");
+    }
+    for caller in [Caller::Person, Caller::Screen] {
+        let result = host.dispatch_as(&caller, "send", args.clone()).await;
+        let err = result.err().map(|f| f.key);
+        assert_ne!(err.as_deref(), Some("error.session.useSession"), "{caller:?}");
+        assert_ne!(err.as_deref(), Some("error.host.badArgs"), "{caller:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_four_session_commands_need_an_agent_conversation() {
+    let (host, _dir) = host().await;
+    let commands_json = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../cli/commands.json")).unwrap();
+    for (cmd, args) in [
+        ("start_conversation", json!({ "title": "Fix", "brief": "Run tests" })),
+        ("message_conversation", json!({ "id": "c2", "message": "Status?" })),
+        ("resume_conversation", json!({ "id": "c2" })),
+        ("mark_waiting", json!({ "note": "waiting for build" })),
+    ] {
+        assert!(Host::exported().any(|c| c.name == cmd), "`{cmd}` is exported");
+        assert!(commands_json.contains(&format!("\"name\": \"{cmd}\"")), "`{cmd}` is in cli/commands.json");
+        assert_eq!(key(host.dispatch(cmd, args.clone()).await), "error.session.agentOnly", "{cmd}");
+        for caller in [Caller::Agent { conversation: None }, Caller::Person, Caller::Screen] {
+            let mut with_spoofed_by = args.clone();
+            with_spoofed_by["by"] = json!("c1");
+            assert_eq!(key(host.dispatch_as(&caller, cmd, with_spoofed_by).await), "error.session.agentOnly", "{cmd} for {caller:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn archive_and_interrupt_belong_to_an_agents_own_family_and_leave_the_person_and_screen_unchanged() {
+    assert_eq!(Host::reach("archive"), Some(Reach::Own("/id")));
+    assert_eq!(Host::reach("interrupt"), Some(Reach::Own("/id")));
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", None, None);
+    seed_conversation(&host, "c2", Some("c1"), None);
+    seed_conversation(&host, "c9", None, None);
+
+    let agent = Caller::Agent { conversation: Some("c1".into()) };
+    assert_eq!(key(host.dispatch_as(&agent, "archive", json!({ "id": "c9", "on": true })).await), "error.reach.ask");
+    assert_eq!(key(host.dispatch_as(&agent, "interrupt", json!({ "id": "c9" })).await), "error.reach.ask");
+    // Within its own family, reach allows the call and the engine's session verb runs.
+    assert_ne!(key(host.dispatch_as(&agent, "archive", json!({ "id": "c2", "on": true })).await), "error.reach.ask");
+
+    // Person and screen archive and unarchive any conversation as before, even if `by` was sent.
+    host.dispatch_as(&Caller::Person, "archive", json!({ "id": "c9", "on": true, "by": "c1" })).await.unwrap();
+    let c9 = host.dispatch("open", json!({ "id": "c9" })).await.unwrap();
+    assert!(c9["archivedAt"].is_number(), "{c9}");
+    host.dispatch_as(&Caller::Screen, "archive", json!({ "id": "c9", "on": false, "by": "c1" })).await.unwrap();
+    let c9 = host.dispatch("open", json!({ "id": "c9" })).await.unwrap();
+    assert!(c9["archivedAt"].is_null(), "{c9}");
+    host.dispatch_as(&Caller::Person, "interrupt", json!({ "id": "c9", "by": "c1" })).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_conversation() {
+    let (host, _dir) = host().await;
+    seed_conversation(
+        &host,
+        "c1",
+        None,
+        Some(faber_engine::model::WaitingOn { ids: vec!["c2".into()], note: "waiting for child".into(), since: 5 }),
+    );
+    seed_conversation(&host, "c2", Some("c1"), None);
+
+    let rows = host.dispatch("conversations", Value::Null).await.unwrap();
+    let list = rows.as_array().unwrap();
+    let r1 = list.iter().find(|r| r["id"] == "c1").unwrap();
+    assert_eq!(r1["state"], "waiting");
+    assert_eq!(r1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child" }));
+    let r2 = list.iter().find(|r| r["id"] == "c2").unwrap();
+    assert_eq!(r2["state"], "idle");
+    assert!(r2.get("waitingOn").is_none(), "{r2}");
+
+    let c1 = host.dispatch("conversation", json!({ "id": "c1" })).await.unwrap();
+    assert_eq!(c1["state"], "waiting");
+    assert_eq!(c1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child" }));
+    let c2 = host.dispatch("conversation", json!({ "id": "c2" })).await.unwrap();
+    assert_eq!(c2["state"], "new");
+    assert!(c2.get("waitingOn").is_none(), "{c2}");
+}
+
+#[test]
+fn by_is_the_askers_own_conversation_or_nothing() {
+    let c1 = Caller::Agent { conversation: Some("c1".into()) };
+    assert_eq!(with_by(&c1, json!({ "id": "x", "by": "c2" })), json!({ "id": "x", "by": "c1" }));
+    assert_eq!(with_by(&c1, Value::Null), json!({ "by": "c1" }));
+    for caller in [Caller::Agent { conversation: None }, Caller::Person, Caller::Screen] {
+        assert_eq!(with_by(&caller, json!({ "id": "x", "by": "c2" })), json!({ "id": "x" }), "{caller:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_ai_pins_but_never_unpins() {
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", None, None);
+    host.dispatch_as(&Caller::Screen, "pin", json!({ "id": "c1", "on": true })).await.unwrap();
+    let agent = Caller::Agent { conversation: Some("c9".into()) };
+    assert_eq!(host.dispatch_as(&agent, "pin", json!({ "id": "c1", "on": false })).await.unwrap_err().key, "error.session.refused");
+    let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
+    assert!(c1["pinnedAt"].is_number(), "{c1}");
+    host.dispatch_as(&Caller::Person, "pin", json!({ "id": "c1", "on": false, "by": "c9" })).await.unwrap();
+    let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
+    assert!(c1["pinnedAt"].is_null(), "{c1}");
+}

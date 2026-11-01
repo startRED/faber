@@ -171,6 +171,7 @@ fn summary(c: &Conversation) -> Summary {
         archived: c.archived_at.is_some(),
         pinned_at: c.pinned_at,
         started_by: c.started_by.clone(),
+        waiting_on: c.waiting_on.clone(),
         ended: c.ended.clone(),
         state: (!c.messages.is_empty()).then(|| crate::engine::run_state(c)),
         plan: c.plan.as_ref().map(crate::model::Plan::count),

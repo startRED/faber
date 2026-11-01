@@ -22,6 +22,10 @@ export const de: Messages = {
   "cli.help.list": "Unterhaltungen auflisten",
   "cli.help.read": "Unterhaltung lesen",
   "cli.help.send": "Nachricht senden",
+  'cli.help.start': "Ein Gespräch beginnen",
+  'cli.help.message': "Eine Nachricht an ein Gespräch senden",
+  'cli.help.resume': "Ein Gespräch fortsetzen",
+  'cli.help.mark-waiting': "Dieses Gespräch als wartend markieren",
   "cli.help.stop": "Unterhaltung stoppen",
   "cli.help.continue": "Unterbrochene Unterhaltung fortsetzen",
   "cli.help.archive": "Unterhaltung archivieren",
@@ -2440,5 +2444,8 @@ export const de: Messages = {
   'piece.discard': "Änderung verwerfen",
   'piece.retry': "Erneut versuchen",
   'piece.show': "{title} anzeigen",
+  'error.session.refused': "Faber hat das abgelehnt. Der Grund steht im Detail.",
+  'error.session.agentOnly': "Dieser Befehl ist nur für eine KI in einem Faber-Gespräch. Nutze stattdessen send.",
+  'error.session.useSession': "Eine KI startet ein Gespräch mit start_conversation und schreibt an eines mit message_conversation, nie mit send.",
 
 };

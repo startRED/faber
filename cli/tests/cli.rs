@@ -58,9 +58,29 @@ impl Backend for Fake {
             }
         })
     }
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> faber_channel::server::DetailedAnswer {
+        if cmd == "detailed_refusal" {
+            return Box::pin(async {
+                Err(faber_channel::wire::Error { key: "error.test.refused".into(), detail: Some("The request cannot go ahead.".into()) })
+            });
+        }
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refusal_detail_reaches_json_and_human_output() {
+    let (json, _) = faber(false, &["call", "detailed_refusal", "--json"], "", &[]).await;
+    assert_eq!(json.code, 1);
+    assert_eq!(lines(&json.stdout)[0]["error"], "error.test.refused");
+    assert_eq!(lines(&json.stdout)[0]["detail"], "The request cannot go ahead.");
+    let (human, _) = faber(false, &["call", "detailed_refusal", "--human"], "", &[]).await;
+    assert_eq!(human.code, 1);
+    assert!(human.stderr.contains("The request cannot go ahead."));
 }
 
 struct Run {
@@ -141,6 +161,26 @@ async fn piped_output_and_list_arguments() {
         calls.iter().find(|(c, _)| c == "conversations").unwrap().1,
         json!({"state":["working","waiting"],"archived":false,"projectId":"p1","family":"c1","query":"site","limit":3})
     );
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn session_verbs_send_the_host_their_arguments() {
+    for (args, stdin, command, expected) in [
+        (
+            vec!["start", "Work", "-", "--ai", "codex", "--effort", "high", "--keep-going"],
+            "brief",
+            "start_conversation",
+            json!({"title":"Work","brief":"brief","ai":"codex","model":null,"effort":"high","step":null,"keepGoing":true}),
+        ),
+        (vec!["message", "c1", "hello"], "", "message_conversation", json!({"id":"c1","message":"hello"})),
+        (vec!["resume", "c1"], "", "resume_conversation", json!({"id":"c1","message":null})),
+        (vec!["mark-waiting", "--on", "c1,c2", "--note", "checks"], "", "mark_waiting", json!({"on":["c1","c2"],"note":"checks"})),
+        (vec!["stop", "c1"], "", "interrupt", json!({"id":"c1"})),
+        (vec!["archive", "c1"], "", "archive", json!({"id":"c1","on":true})),
+    ] {
+        let (result, fake) = faber(false, &args, stdin, &[]).await;
+        assert_eq!(result.code, 0, "{}", result.stdout);
+        assert!(fake.calls.lock().unwrap().iter().any(|(name, value)| name == command && value == &expected));
+    }
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn errors_use_the_contract_exit_codes() {

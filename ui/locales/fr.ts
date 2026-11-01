@@ -22,6 +22,10 @@ export const fr: Messages = {
   "cli.help.list": "Lister les conversations",
   "cli.help.read": "Lire une conversation",
   "cli.help.send": "Envoyer un message",
+  'cli.help.start': "Ouvrir une conversation",
+  'cli.help.message': "Envoyer un message à une conversation",
+  'cli.help.resume': "Reprendre une conversation",
+  'cli.help.mark-waiting': "Indiquer que cette conversation attend",
   "cli.help.stop": "Arrêter une conversation",
   "cli.help.continue": "Reprendre une conversation interrompue",
   "cli.help.archive": "Archiver une conversation",
@@ -2440,5 +2444,8 @@ export const fr: Messages = {
   'piece.discard': "Abandonner la modification",
   'piece.retry': "Réessayer",
   'piece.show': "Afficher {title}",
+  'error.session.refused': "Faber a refusé cette demande. Le détail explique pourquoi.",
+  'error.session.agentOnly': "Cette commande est réservée à une IA dans une conversation Faber. Utilisez send pour envoyer un message.",
+  'error.session.useSession': "Une IA ouvre une conversation avec start_conversation et écrit à une autre avec message_conversation, jamais avec send.",
 
 };
