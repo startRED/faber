@@ -214,6 +214,154 @@ pub fn unsaved(exec: &mut dyn Executor, copy: &WorkCopy) -> bool {
     !tips.iter().all(|tip| held(exec, root, tip, &own))
 }
 
+/// Reclaims only ignored, untracked build folders in an old, stopped copy. Returns freed bytes and entries inspected.
+pub fn cleanup(
+    exec: &mut dyn Executor,
+    data: &Path,
+    id: &str,
+    copy: &WorkCopy,
+    idle: std::time::Duration,
+    running: bool,
+    mut while_idle: impl FnMut(&mut dyn FnMut()),
+) -> (u64, u64) {
+    if running || idle < std::time::Duration::from_secs(7 * 24 * 60 * 60) {
+        return (0, 0);
+    }
+    let path = home(data).join(id);
+    if !valid_conversation(id) || Path::new(&copy.path) != path || !own_branch(&copy.branch) || !plain_path(&path) {
+        return (0, 0);
+    }
+    let Ok(root) = path.canonicalize() else { return (0, 0) };
+    let Ok(source) = Path::new(&copy.root).canonicalize() else { return (0, 0) };
+    if root == source || source.starts_with(&root) {
+        return (0, 0);
+    }
+    let Some(tracked) = git(exec, &path, &["ls-files", "--cached", "-z"]) else { return (0, 0) };
+    let files: Vec<_> = tracked.split('\0').filter(|p| !p.is_empty()).collect();
+    let mut projects = vec![PathBuf::new()];
+    for file in &files {
+        let file = Path::new(file);
+        if matches!(
+            file.file_name().and_then(|n| n.to_str()),
+            Some("Cargo.toml" | "package.json" | "pyproject.toml" | "setup.py" | "requirements.txt")
+        ) && let Some(parent) = file.parent()
+            && (1..=2).contains(&parent.components().count())
+            && parent.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+            && !projects.iter().any(|p| p == parent)
+        {
+            projects.push(parent.to_path_buf());
+        }
+    }
+    let (mut freed, mut inspected) = (0, 0);
+    for project in projects {
+        for name in ["target", "node_modules", ".next", "dist", "__pycache__"] {
+            let relative = project.join(name);
+            let candidate = path.join(&relative);
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            let prefix = format!("{relative}/");
+            if files
+                .iter()
+                .any(|f| f.eq_ignore_ascii_case(&relative) || f.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(&prefix)))
+                || safe_metadata(&candidate, &root).is_none_or(|m| !m.is_dir())
+                || git(exec, &path, &["check-ignore", "--quiet", "--", &prefix]).is_none()
+            {
+                continue;
+            }
+            let trash = candidate.with_file_name(format!(".faber-clean-{name}"));
+            let aside = trash.join(name);
+            let mut moved = false;
+            // The private scratch folder ignores itself, so a new reply cannot commit build output during deletion.
+            while_idle(&mut || {
+                if safe_metadata(&candidate, &root).is_some_and(|m| m.is_dir()) && std::fs::create_dir(&trash).is_ok() {
+                    use std::io::Write;
+                    if safe_metadata(&trash, &root).is_some()
+                        && std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(trash.join(".gitignore"))
+                            .and_then(|mut file| file.write_all(b"*\n"))
+                            .is_ok()
+                    {
+                        moved = std::fs::rename(&candidate, &aside).is_ok();
+                    }
+                    if !moved {
+                        if safe_metadata(&trash.join(".gitignore"), &root).is_some_and(|m| m.is_file()) {
+                            let _ = std::fs::remove_file(trash.join(".gitignore"));
+                        }
+                        if safe_metadata(&trash, &root).is_some_and(|m| m.is_dir()) {
+                            let _ = std::fs::remove_dir(&trash);
+                        }
+                    }
+                }
+            });
+            if moved {
+                freed += cleanup_entries(&aside, &root, &mut inspected);
+                if std::fs::symlink_metadata(&aside).is_ok() {
+                    // Skipped links and unreadable files stay ignored; never restore a partially cleaned build folder.
+                    eprintln!("faber: copy {id} cleanup retained {}", aside.display());
+                } else {
+                    if safe_metadata(&trash.join(".gitignore"), &root).is_some_and(|m| m.is_file()) {
+                        let _ = std::fs::remove_file(trash.join(".gitignore"));
+                    }
+                    if safe_metadata(&trash, &root).is_some_and(|m| m.is_dir()) {
+                        let _ = std::fs::remove_dir(&trash);
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("faber: copy {id} cleanup freed {freed} logical bytes, inspected {inspected} entries");
+    (freed, inspected)
+}
+
+fn safe_metadata(path: &Path, root: &Path) -> Option<std::fs::Metadata> {
+    if !plain_path(path) {
+        return None;
+    }
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let canonical = path.canonicalize().ok()?;
+    (canonical != root && canonical.starts_with(root)).then_some(meta)
+}
+
+fn plain_path(path: &Path) -> bool {
+    path.ancestors().all(|ancestor| {
+        let Ok(meta) = std::fs::symlink_metadata(ancestor) else { return false };
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if meta.file_attributes() & 0x400 != 0 {
+                return false;
+            }
+        }
+        !meta.file_type().is_symlink()
+    })
+}
+
+fn cleanup_entries(path: &Path, root: &Path, inspected: &mut u64) -> u64 {
+    *inspected += 1;
+    let Some(meta) = safe_metadata(path, root) else { return 0 };
+    let mut freed = 0;
+    if meta.is_dir() {
+        let Ok(children) = std::fs::read_dir(path) else { return 0 };
+        for child in children {
+            let Ok(child) = child else { return freed };
+            freed += cleanup_entries(&child.path(), root, inspected);
+        }
+    } else if !meta.is_file() {
+        return 0;
+    }
+    let Some(current) = safe_metadata(path, root) else { return freed };
+    if current.is_dir() != meta.is_dir() {
+        return freed;
+    }
+    if current.is_dir() {
+        let _ = std::fs::remove_dir(path);
+    } else if std::fs::remove_file(path).is_ok() {
+        freed += current.len();
+    }
+    freed
+}
+
 /// The copy can go by itself: nothing uncommitted, its HEAD still on its own branch, and every file that branch changed is
 /// the same in the person's branch (or its upstream) as on the branch. That holds after a merge, a fast-forward and a
 /// squash alike; a branch the person's side changed further since is not merged by this measure, and stays.

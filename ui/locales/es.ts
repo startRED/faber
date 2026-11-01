@@ -2414,6 +2414,7 @@ export const es: Messages = {
   'notes.340.better': 'Puedes ver en la conversación cuándo el trabajo terminó sin conclusión o se interrumpió.',
   'notes.341.new': 'En un proyecto, cada conversación termina ahora con lo que entregó y lo que costó. La página del proyecto las lista una al lado de otra.',
   'notes.342.better': 'La línea en directo muestra el estado del agente o el título de su último pensamiento, y los pasos quedan alineados con el texto.',
+  'notes.343.fixed': 'Tus copias de proyecto conservan tu trabajo mientras Faber limpia las carpetas regenerables tras siete días sin uso.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

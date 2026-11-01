@@ -54,6 +54,8 @@ mod codex_session;
 mod compact;
 #[path = "conversation_copy.rs"]
 mod conversation_copy;
+#[path = "copy_cleanup.rs"]
+mod copy_cleanup;
 #[path = "engine.rs"]
 mod engine;
 #[path = "evict.rs"]

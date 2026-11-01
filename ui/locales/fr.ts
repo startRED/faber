@@ -2414,6 +2414,7 @@ export const fr: Messages = {
   'notes.340.better': 'Dans la conversation, vous voyez quand le travail se termine sans conclusion ou est interrompu.',
   'notes.341.new': 'Dans un projet, chaque conversation se termine maintenant par ce qu’elle a livré et ce qu’elle a coûté. La page du projet les liste côte à côte.',
   'notes.342.better': "La ligne en direct affiche l'état de l'agent ou le titre de sa dernière réflexion, et les étapes s'alignent sur le texte.",
+  'notes.343.fixed': 'Vos copies de projet gardent votre travail ; Faber nettoie les dossiers recréables après sept jours sans activité.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

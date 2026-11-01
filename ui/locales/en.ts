@@ -2294,6 +2294,7 @@ export const en = {
   'notes.340.better': 'You can see in the conversation when work ended without a conclusion or was interrupted.',
   'notes.341.new': "In a project, each conversation now ends with what it delivered and what it cost. The project's home lists them side by side.",
   'notes.342.better': "The live line shows the agent's own status or its latest thinking headline, and folded steps sit neatly between its words.",
+  'notes.343.fixed': 'Your project copies keep your work while Faber clears rebuildable folders after seven idle days.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2401,6 +2401,7 @@ export const ptBR: Messages = {
   'notes.340.better': 'Você vê na conversa quando o trabalho terminou sem conclusão ou foi interrompido.',
   'notes.341.new': 'Num projeto, cada conversa agora termina mostrando o que entregou e quanto custou. A página inicial do projeto lista todas lado a lado.',
   'notes.342.better': 'A linha ao vivo mostra o que o agente diz estar fazendo ou o título do pensamento mais recente, e os passos ficam alinhados ao texto.',
+  'notes.343.fixed': 'Suas cópias de projeto preservam seu trabalho enquanto o Faber limpa pastas recriáveis após sete dias sem uso.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
