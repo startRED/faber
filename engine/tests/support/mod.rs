@@ -10,9 +10,22 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
+
+/// How long a shared wait gives what it waits for before it fails. A test that passes never waits it out, so it only bounds
+/// a failure, and it holds on a loaded runner, where a 10 ms sleep can take far longer. Real time, never counted in ticks.
+pub const DEADLINE: Duration = Duration::from_secs(30);
+
+/// Polls `done` every 10 ms until it holds, and fails with `what` and the time waited after `DEADLINE`.
+pub async fn until(what: &str, mut done: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while !done() {
+        assert!(start.elapsed() < DEADLINE, "{what} (waited {:.1?})", start.elapsed());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
 
 /// Broker fixtures begin at canonical roots, including macOS's /var system alias.
 pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
@@ -54,7 +67,10 @@ pub fn controlled() -> (Spawner, BufReader<tokio::io::DuplexStream>, tokio::io::
 
 pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Value {
     let mut line = String::new();
-    tokio::time::timeout(Duration::from_secs(1), input.read_line(&mut line)).await.expect("no message on fake wire").unwrap();
+    tokio::time::timeout(DEADLINE, input.read_line(&mut line))
+        .await
+        .unwrap_or_else(|_| panic!("no message on fake wire (waited {DEADLINE:?})"))
+        .unwrap();
     serde_json::from_str(&line).unwrap()
 }
 
@@ -372,19 +388,17 @@ pub fn fake(entries: Vec<Entry>) -> Fake {
 impl Fake {
     /// A project turn starts its CLI once its off-lock project check ends; waits until `count` CLIs have started.
     pub async fn spawned(&self, count: usize) {
-        let end = std::time::Instant::now() + Duration::from_secs(5);
-        while self.args.lock().unwrap().len() < count && std::time::Instant::now() < end {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(self.args.lock().unwrap().len() >= count, "the CLI started in time");
+        until(&format!("fewer than {count} CLIs started"), || self.args.lock().unwrap().len() >= count).await;
     }
 }
 
 /// The request id of the next permission question a session asks.
 pub async fn next_permission(rx: &mut UnboundedReceiver<EngineEvent>) -> String {
     loop {
-        let e =
-            tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no permission question in time").expect("session ended");
+        let e = tokio::time::timeout(DEADLINE, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("no permission question (waited {DEADLINE:?})"))
+            .expect("session ended");
         if let EngineEvent::Permission { request_id, .. } = e {
             return request_id;
         }
@@ -404,9 +418,9 @@ pub async fn drive(
     session.send(UserTurn::text(first));
     let mut events = Vec::new();
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+        let e = tokio::time::timeout(DEADLINE, rx.recv())
             .await
-            .unwrap_or_else(|_| panic!("stalled after {:?}; {:?}", events.last(), fake.mismatches.lock().unwrap()))
+            .unwrap_or_else(|_| panic!("stalled after {:?} (waited {DEADLINE:?}); {:?}", events.last(), fake.mismatches.lock().unwrap()))
             .expect("session ended early");
         events.push(e.clone());
         if react(&e, &session) {
@@ -471,6 +485,8 @@ pub struct Pipe {
     pub lines: Arc<Mutex<Vec<Value>>>,
     /// The driver closed the process's input (the end of a session).
     pub closed: Arc<std::sync::atomic::AtomicBool>,
+    /// The arguments the process was started with.
+    pub args: Vec<String>,
 }
 
 impl Pipe {
@@ -499,7 +515,7 @@ impl Pipe {
 pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
     let made: Arc<Mutex<Vec<Pipe>>> = Arc::default();
     let queue = made.clone();
-    let spawn: Spawner = Arc::new(move |_bin, _argv, _cwd| {
+    let spawn: Spawner = Arc::new(move |_bin, argv, _cwd| {
         let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
         let (fake_out, driver_out) = tokio::io::duplex(1 << 20);
         let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
@@ -514,7 +530,7 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
             }
             done.store(true, Ordering::SeqCst);
         });
-        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
+        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed, args: argv.to_vec() });
         Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
     });
     (spawn, made)
@@ -522,13 +538,14 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
 
 /// The first process a `pipes` spawner started, once it exists.
 pub async fn next_pipe(made: &Arc<Mutex<Vec<Pipe>>>) -> Pipe {
-    for _ in 0..300 {
-        if !made.lock().unwrap().is_empty() {
-            return made.lock().unwrap().remove(0);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("no process was started");
+    let mut pipe = None;
+    until("no process was started", || {
+        let mut made = made.lock().unwrap();
+        pipe = (!made.is_empty()).then(|| made.remove(0));
+        pipe.is_some()
+    })
+    .await;
+    pipe.unwrap()
 }
 
 /// What Faber's own Claude requests (the router, the pulse) must start with whatever mode the person chose: no hooks, no settings
@@ -539,4 +556,53 @@ pub fn assert_no_user_customizations(args: &[String]) {
     assert_eq!(after("--setting-sources"), "", "{args:?}");
     let settings: Value = serde_json::from_str(&after("--settings")).unwrap();
     assert_eq!(settings["disableAllHooks"], true, "{args:?}");
+}
+
+/// Writes a conversation of about `bytes` on disk through `Store::save_checked`, shaped like the owner's biggest one (102 MB:
+/// 1,362 messages, 35,902 tool records): a user turn, then an assistant reply with 52 tool records, 70 % of them a helper's
+/// (`parent` set), each output under the engine's 4000-character cut and every 50th input a written file. Stand-in data
+/// only, built in the given folder, and returned so a test can compare what comes back.
+pub fn big_conversation(data: &std::path::Path, bytes: usize) -> faber_engine::model::Conversation {
+    use faber_engine::model::{Conversation, Message, Role, ToolUse};
+    let mut conversation: Conversation = serde_json::from_str(include_str!("../../../tests/fixtures/conversation-export.json")).unwrap();
+    conversation.piece_values.clear();
+    conversation.browser = None;
+    conversation.messages.clear();
+    let line = "test result: ok. 42 passed; 0 failed; finished in 0.31s\n";
+    let text = |chars: usize| line.repeat(chars / line.len() + 1)[..chars].to_string();
+    let (mut size, mut record) = (0, 0usize);
+    while size < bytes {
+        let n = conversation.messages.len() as u64;
+        conversation.messages.push(Message::new(format!("u{n}"), Role::User, text(300), 1_700_000_000_000 + n * 1000));
+        let mut reply = Message::new(format!("a{n}"), Role::Assistant, text(800), 1_700_000_000_500 + n * 1000);
+        let agent = format!("agent-{n}");
+        let tools = (0..52)
+            .map(|i| {
+                record += 1;
+                let input = if record % 50 == 0 {
+                    json!({ "file_path": format!("src/part{record}.rs"), "content": text(20_000) })
+                } else {
+                    json!({ "command": format!("cargo test --filter case{record}"), "description": text(200) })
+                };
+                let output = text(record * 997 % 4000 + 1);
+                size += input.to_string().len() + output.len() + 200;
+                let tool = json!({
+                    "id": format!("call-{record}"),
+                    "name": if record % 50 == 0 { "Write" } else { "Bash" },
+                    "input": input,
+                    "ok": true,
+                    "output": output,
+                    "parent": (i % 10 < 7).then(|| agent.clone()),
+                    "started": 1_700_000_000_000u64 + record as u64,
+                    "ended": 1_700_000_000_100u64 + record as u64,
+                });
+                serde_json::from_value::<ToolUse>(tool).unwrap()
+            })
+            .collect();
+        reply.tools = Some(tools);
+        size += 1100;
+        conversation.messages.push(reply);
+    }
+    faber_engine::store::Store::new(data).save_checked(&conversation).unwrap();
+    conversation
 }

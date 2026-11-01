@@ -114,6 +114,11 @@ pub fn resolve(exec: &mut dyn Executor, folder: &Path, name: &str) -> Option<Str
         .filter(|oid| valid_oid(oid) && oid.starts_with(&name))
 }
 
+/// The commit a copy is at now.
+pub fn head(exec: &mut dyn Executor, copy: &Path) -> Option<String> {
+    git(exec, copy, &["rev-parse", "--verify", "--quiet", "HEAD"]).filter(|oid| valid_oid(oid))
+}
+
 /// Makes the copy of conversation `id` for the project in `folder`, on `branch`, starting from `from` (another copy's
 /// branch, for a conversation branched from it), else from `at` (a commit's full id, such as the build that crashed; one the
 /// repository does not have is left out) or the head the person has checked out. A copy already in place for this

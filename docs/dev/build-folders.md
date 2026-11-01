@@ -14,6 +14,11 @@ waits rather than making another. `CARGO_TARGET_DIR` explicitly selects another 
 is resolved from the calling checkout. Incremental output is disabled unless the caller explicitly enables it, trading
 some rebuild speed for lower disk use. Dependencies remain reusable.
 
+A cache moves between copies, and Cargo judges the workspace's own crates by the file times of their sources, named
+relative to each copy: a copy whose sources are older than another copy's last build would get that build, the test
+app included. So each cache keeps the copy that last built in it (`.faber-copy`), and when another copy leases it, the
+launcher first removes the workspace crates' fingerprints in every profile, which rebuilds only those crates for it.
+
 Each command gets private `TEMP`, `TMP` and `TMPDIR` under its cache's `.faber-tmp/run-<id>`. Successful and failed
 commands remove their temporary tree. Later invocations retry abandoned cleanup only after a day and when both the
 recorded launcher and child are gone. Live processes, incomplete receipts and links are preserved. Unknown system-wide

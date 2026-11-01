@@ -42,7 +42,8 @@ Native pieces and generated pages have their own [visual-answer rules](visual-an
   since in WebView2 they bring the system bar back with its arrows.
 - It is an app, not a page: the chrome's words are not selectable and keep the arrow cursor; answers, messages, code, files,
   errors and fields are selectable with the text cursor. Buttons, rows and menus show the arrow, never the hand; only a link
-  in text does. Pictures and links never drag, and no list bounces past its end (`tests/ui/shell.check.ts` checks both).
+  in text does (`scripts/arrow-cursor.test.mjs` checks it). Pictures and links never drag, and no list bounces past its
+  end (`tests/ui/shell.check.ts` checks both).
 - Faber's browser is a native view over the window, above everything the screen draws. Anything that can lie over its box
   (the picture viewer, a menu, a dialog, a toast) makes the page leave the window while it is there (`covered` in
   `ui/Site.tsx`, which watches the screen once a frame at most and counts a painted layer by its bounds unless it lies under the box, so a new layer needs a role
@@ -78,6 +79,6 @@ project-home-calm lands, with those lines gone, is its approved photo.
 | :--- | :--- | :--- | :--- | :--- |
 | Chat home ([map](../product-map.md#screens-and-surfaces), [layout](layout.md#the-new-conversation-screen)) | Starting or picking up a conversation | Writing in the composer | Settings, switches, a second model picker, another area's rows | `critique-chat-home-1920x1080.png`, `-1280x800.png` |
 | A project's home ([map](../product-map.md#screens-and-surfaces), [layout](layout.md#the-new-conversation-screen)) | Giving the agent work in this project's folder | Writing the goal in the composer | Chat's suggestions, hints or conversations; the project's settings (Settings, Projects); art behind the words; the project's name more than twice | `critique-project-home-1920x1080.png`, `-1280x800.png` |
-| An open conversation ([map](../product-map.md#screens-and-surfaces), [work log](conversation.md#work-log)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
+| An open conversation ([map](../product-map.md#screens-and-surfaces), [work log](work-log.md)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
 | Settings ([map](../product-map.md#settings-screen), [layout](settings.md#settings)) | Changing how Faber behaves, one short line per option | Choosing an option in the section that is open | Work (a conversation, a goal); explanations longer than a line outside "Learn more"; a new section where one fits | `critique-settings-1920x1080.png`, `-1280x800.png` |
 | Catalog ([map](../product-map.md#screens-and-surfaces), [layout](catalog.md)) | Browsing and managing tools | Search, then an item's action in its detail | Conversation, composer, duplicate Settings catalog cards | Screen verification pending the lead's catalog suite |

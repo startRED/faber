@@ -159,10 +159,13 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .hit-snippet mark { background: transparent; color: inherit; font-weight: 580; text-decoration: underline; }
 .search-focus { outline: 2px solid var(--accent); outline-offset: 6px; }
 .side-foot { flex: none; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; }
-/* The connected accounts, one thin line each: the vendor's mark, how much of its weekly quota window is used (R177), and the share. The
-   rest (window, reset, age, "still counting") is the tooltip. Amber only when the engine says the quota is nearly used. */
+/* The connected accounts, one thin line each: the vendor's mark and name, how much of its weekly quota window is used (R177), and the
+   share in words. The rest (window, reset, age, "still counting") is the tooltip; the bar gives way so the line never wraps. Amber only when the engine says the quota is nearly used. */
 .usage { display: grid; gap: 2px; padding: 0 4px; }
-.vendor { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: var(--fs-xs); text-align: left; }
+.vendor { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: var(--fs-xs); text-align: left; white-space: nowrap; }
+.vendor :is(.name, .used) { flex: none; }
+.vendor .name { color: var(--ink-2); }
+.vendor .share + .used { margin-left: -4px; }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .meter { flex: 1; min-width: 0; height: 3px; }
 .vendor .share { flex: none; min-width: 3.5ch; text-align: right; color: var(--ink-2); }
@@ -199,7 +202,6 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crumb { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; }
 .crumb b { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
 .crumb .sep { flex: none; }
-.crumb .copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-data); font-size: var(--fs-xs); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
 .thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) clamp(16px, 4vw, 40px) var(--thread-tail); contain: strict; }
@@ -352,13 +354,12 @@ svg.i.sm { width: 14px; height: 14px; }
 /* Nothing in a subagent's view is cut or scrolls sideways: the brief and its code wrap, a tool line wraps to two lines and a click shows the rest (the full text is also its title). */
 .rc-body.side-body pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
 .side-body .md code { overflow-wrap: anywhere; }
-.side-body .tools span.full { cursor: default; align-items: baseline; }
 /* A subagent's own words sit between its runs of steps, outside .tools so no chip rule reaches their markup. They wrap like the brief, in the second ink; the paragraphs inside Markdown's wrapper lose the outer margins. */
 .side-body .side-said { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
 .side-said > div > :first-child { margin-top: 0; }
 .side-said > div > :last-child { margin-bottom: 0; }
-.side-body .tools span.full i { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
-.side-body .tools span.full.more i { -webkit-line-clamp: unset; line-clamp: unset; }
+.tools span.full i { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+.tools span.full.more i { -webkit-line-clamp: unset; line-clamp: unset; }
 /* What an ended subagent did: plain lines in the second ink, its files in the mono face, a failed check marked like an error note. */
 .side-facts { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); }
 .side-facts h3 { margin: 0 0 2px; font-size: var(--fs-sm); font-weight: 580; color: var(--ink); }
@@ -590,6 +591,9 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .tools span b { flex: none; font-weight: 580; color: var(--ink); }
 .tools span i { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-style: normal; font-family: var(--font-mono); font-size: 0.92em; }
 .tools span.bad { color: var(--ink-3); text-decoration: line-through; }
+/* A chip that wraps keeps its label on the first line; the running mark stays centred. */
+.tools span.full { cursor: default; align-items: baseline; }
+.tools span .live { align-self: center; }
 /* A run of one kind of step as one phrase: a chip that opens into its steps, which then take the full row. The `.tools` in
    front lifts these rules over the work log's `.disclosure summary` ones, which would make the chip a full-width bar. */
 .tools .step-group { min-width: 0; max-width: 100%; }
@@ -1834,15 +1838,16 @@ html.away-win .catalog-empty .peek svg { animation-play-state: paused !important
 .det-state { color: var(--ink-3); font-size: var(--fs-xs); }
 .det-facts > li[data-state='failed'] > .det-state { color: var(--amber-ink); }
 .details-view .follow, .details-view .checks { margin: 0; }
-.work-chip { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; max-width: 100%; min-height: var(--h-sm); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.work-chip { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; max-width: 100%; min-height: var(--h-sm); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm); overflow-wrap: anywhere; cursor: default; }
 .work-chip > span { min-width: 0; }
-button.work-chip, a.work-chip { cursor: pointer; }
 button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .work-state { color: var(--ink-3); font-size: var(--fs-xs); }
 .background-work > li[data-need='true'] .work-state, .live-reference[data-need='true'] .work-state { color: var(--amber-ink); }
 .work-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
 .work-reason { margin: 0; color: var(--amber-ink); font-size: var(--fs-sm); }
 .technical-reference { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.det-copy { margin: 0; display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.det-copy span { font-family: var(--font-data); font-size: var(--fs-xs); }
 .live-reference { vertical-align: baseline; text-decoration: none; white-space: normal; }
 .project-goals { margin-top: 12px; }
 .goal-state.ask { color: var(--ink); font-weight: 580; }

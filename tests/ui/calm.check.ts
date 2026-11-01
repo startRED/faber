@@ -261,6 +261,7 @@ check('calm: the sidebar footer is one row with the name and Settings, then one 
     const line = view.root.querySelector<HTMLElement>('.usage .vendor')!;
     ok(line.querySelector('.mk') && line.querySelector('.meter') && line.querySelector('.share'), 'its mark, a thin bar and the share');
     equal(line.querySelector('.share')!.textContent, percent(0.44));
+    equal(line.querySelector('.used')!.textContent, t('quota.used'), 'and says it is used');
     equal(line.querySelector('.age, .extra'), null, 'no age or estimate on the line');
     ok(line.title.includes(t('quota.read', { when: '' }).split('{')[0]!.trim() || 'Updated'), `the age is in the tooltip: ${line.title}`);
     ok(!line.classList.contains('low'), 'amber only near the limit');
@@ -285,7 +286,7 @@ check('calm: the usage line never wraps, "still counting" reads "≥ share" with
     ok(line.querySelector('.share')!.textContent!.startsWith('≥ ') && line.title.includes(t('quota.counting')), `"≥" and the words: ${line.title}`);
     ok(!line.textContent!.includes('…'), 'nothing that reads as cut text');
     ok(line.getBoundingClientRect().height <= 32, `one line even in Portuguese: ${line.getBoundingClientRect().height}`);
-    ok(line.textContent!.includes('Codex'), 'the vendor name stays for screen readers');
+    ok(line.querySelector('.name')!.textContent === 'Codex', 'the vendor name shows on the line');
   } finally {
     view.close();
     useLanguage('en');

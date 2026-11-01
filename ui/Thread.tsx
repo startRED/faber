@@ -202,18 +202,20 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
 
 // One step of the work log, or a run of the same kind as one phrase with a count ("Changing 3 files") that opens into its steps.
 // A failed step inside says so beside the phrase, since the phrase itself cannot be struck through.
-function StepRow(props: { group: Accessor<StepGroup> }) {
+// `live` names the step the agent is on, which carries the running mark; `onToggle` reports a run opening or closing.
+function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: (open: boolean) => void }) {
   const group = () => props.group();
   const failed = () => group().tools.filter((tool) => tool.ok === false && !tool.declined).length;
   return (
-    <Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} />}>
-      <details class="step-group">
+    <Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} live={group().tools[0]!.id === props.live} />}>
+      <details class="step-group" onToggle={(e) => props.onToggle?.(e.currentTarget.open)}>
         <summary>
           <b>{groupLabel(group())}</b>
           <Show when={failed()}><span class="sr-only">, </span><em>{t('agent.facts.failed', { n: failed() })}</em></Show>
         </summary>
         <div class="tools">
-          <For each={group().tools}>{(tool) => <ToolChip tool={tool} />}</For>
+          {/* By place, so a step the person expanded keeps its state and focus when the agent's progress replaces it. */}
+          <Index each={group().tools}>{(tool) => <ToolChip tool={tool()} live={tool().id === props.live} />}</Index>
         </div>
       </details>
     </Show>
@@ -278,6 +280,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // Streaming and not yet finished: the agent still writes or works. Once it said all it will say, the reply reads as done while the
   // CLI closes its turn (its Stop hooks, say), and more words after that would undo it.
   const working = () => streaming() && m().finishedAt === undefined;
+  const [closedRefused, setClosedRefused] = createSignal('');
   // The caret means words are arriving. It shows before the first word, and after that only while the text grew in the last
   // moment: never while the agent runs a step or thinks after writing (a reply on 2026-10-19 blinked for nine minutes while a
   // command waited, and looked finished and stuck at once). One timer, reset by each change of the text.
@@ -335,6 +338,22 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const groups = createMemo(() => groupSteps(own()));
   // The living sentence reads a run of one kind as its phrase and the newest step ("Reading 3 files · a.ts").
   const lineOf = (tool: ToolUse) => stepLine(groups(), tool);
+  // The work log and the runs inside it the person opened (a run by its first step): a step on screen there is the one place
+  // it shows, so the latest line under the log and the line under the words leave it out.
+  const [logOpen, setLogOpen] = createSignal(false);
+  const [openRuns, setOpenRuns] = createSignal<ReadonlySet<string>>(new Set());
+  const toggleRun = (first: string, open: boolean) =>
+    setOpenRuns((runs) => {
+      const next = new Set(runs);
+      if (open) next.add(first);
+      else next.delete(first);
+      return next;
+    });
+  const inLog = (tool: ToolUse) => {
+    if (!logOpen()) return false;
+    const group = groups().find((g) => g.tools.some((s) => s.id === tool.id));
+    return !!group && (!group.kind || openRuns().has(group.tools[0]!.id));
+  };
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
   const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
   const kitLine = () => {
@@ -372,9 +391,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const now = nowLine();
     if (now && !finalText().trim()) return now;
     const tool = tools().at(-1);
-    if (tool && tool.ok === undefined) return lineOf(tool);
+    if (tool && tool.ok === undefined) return inLog(tool) ? '' : lineOf(tool);
     if (finalText().trim()) return '';
-    return tool ? lineOf(tool) : middle(thinking().at(-1)?.text ?? '');
+    if (!tool) return middle(thinking().at(-1)?.text ?? '');
+    return inLog(tool) ? '' : lineOf(tool);
   });
   // A long step says how long it has run, from when the engine saw it start (R161 step 9). Only past half a minute, so a
   // quick step never shows a number that changes before it can be read; the clock ticks only while such a step runs and
@@ -388,7 +408,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
     // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
     const tool = runningStep();
-    if (tool) return nowLine() || lineOf(tool);
+    if (tool) return nowLine() || (inLog(tool) ? '' : lineOf(tool));
     if (typing()) return '';
     const thought = middle(thinking().at(-1)?.text ?? '');
     return nowLine() || (thought ? `${t('activity.thinkingNow')} · ${thought}` : t('activity.thinkingNow'));
@@ -397,7 +417,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     if (!working()) return undefined;
     const shownAbove = ((steps() || agents().length) && !finalText().trim() ? latest() : '') || after();
     const last = own().at(-1);
-    for (const line of [nowLine(), last ? lineOf(last) : '', middle(thinking().at(-1)?.text ?? '')]) {
+    for (const line of [nowLine(), last && !inLog(last) ? lineOf(last) : '', middle(thinking().at(-1)?.text ?? '')]) {
       if (line && line !== shownAbove) return line;
     }
     return undefined;
@@ -498,7 +518,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps() || hasKit()}>
-        <details class="activity disclosure">
+        <details class="activity disclosure" onToggle={(e) => setLogOpen(e.currentTarget.open)}>
           <summary>{steps() ? t(working() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) }) : t('kit.details')}</summary>
           <div class="activity-body">
             <Show when={hasKit()}><p class="pace kit">{kitLine()}</p></Show>
@@ -510,7 +530,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
             <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} pieceRevision={props.pieceRevision} />}</For>
             <Show when={own().length}>
               <div class="tools">
-                <Index each={groups()}>{(group) => <StepRow group={group} />}</Index>
+                <Index each={groups()}>{(group) => <StepRow group={group} live={runningStep()?.id} onToggle={(open) => toggleRun(group().tools[0]!.id, open)} />}</Index>
               </div>
             </Show>
           </div>
@@ -595,8 +615,23 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
-      <Show when={m().status === 'stopped' && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
+      <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="note">{t('answer.stopped')}</div>
+      </Show>
+      {/* Faber was closed while this ran: said in place of "Stopped.", and the newest such reply offers to go on (R477). */}
+      <Show when={m().status === 'stopped' && m().closed}>
+        <div class="note">{t('answer.closed')}</div>
+        <Show when={props.area === 'project'}>
+          <div class="note">{t('answer.closedFiles')}</div>
+        </Show>
+        <Show when={props.last && !closedRefused()}>
+          <div>
+            <button type="button" class="btn" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>
+              {t('answer.closedContinue')}
+            </button>
+          </div>
+        </Show>
+        <Show when={closedRefused()}>{(text) => <div class="note err" role="alert">{text()}</div>}</Show>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
         {/* A limit is told calmly (C001); a failure keeps the red bar. */}

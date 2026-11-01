@@ -253,7 +253,7 @@ fn empty_keep_going_reply(c: &Conversation, at: usize) -> bool {
     let Some(u) = at.checked_sub(1).and_then(|i| c.messages.get(i)) else { return false };
     let Some(m) = c.messages.get(at) else { return false };
     u.role == Role::User
-        && u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing")
+        && u.wake.as_ref().is_some_and(|w| matches!(w.why.as_str(), "wake.keepGoing" | "wake.stuck"))
         && m.role == Role::Assistant
         && m.status == Some(Status::Done)
         && m.text.trim().is_empty()
@@ -290,7 +290,7 @@ impl Engine {
 }
 
 impl Core {
-    fn set_keep_going(&mut self, id: &str, on: bool) -> Result<(), String> {
+    pub(super) fn set_keep_going(&mut self, id: &str, on: bool) -> Result<(), String> {
         let c = self.load(id).ok_or("error.conversationGone")?;
         if on && c.area != Area::Project {
             return Err("error.keepGoing".into());
@@ -329,6 +329,10 @@ impl Core {
         {
             self.go_on(id, &reply);
         }
+        // Turned off between two turns of a list, a conversation an agent started has ended: its parent hears now.
+        if !on {
+            self.tell_parent(id);
+        }
         Ok(())
     }
 
@@ -345,6 +349,7 @@ impl Core {
     /// The person stopped the conversation: nothing more goes out by itself.
     pub(super) fn keep_going_off(&mut self, id: &str) {
         let mut cleared = vec![];
+        let was_on = self.convs.get(id).is_some_and(|c| c.keep_going.is_some());
         if let Some(c) = self.convs.get_mut(id)
             && c.keep_going.is_some()
         {
@@ -363,6 +368,10 @@ impl Core {
         }
         for reply in cleared {
             self.push(id, Some(&reply), true);
+        }
+        // A conversation an agent started reports once, when its list ends, not at every turn of it.
+        if was_on {
+            self.tell_parent(id);
         }
     }
 
@@ -402,7 +411,7 @@ impl Core {
             .len()
             .checked_sub(2)
             .and_then(|i| c.messages.get(i))
-            .is_some_and(|u| u.wake.as_ref().is_some_and(|w| w.why == "wake.keepGoing"));
+            .is_some_and(|u| u.wake.as_ref().is_some_and(|w| matches!(w.why.as_str(), "wake.keepGoing" | "wake.stuck")));
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
         // The stop line leaves every reply, Keep going on or off: an agent told about it once may write it again later.
         let stripped = {
@@ -601,12 +610,20 @@ impl Core {
         }
     }
 
-    fn send_next(&mut self, conv: &str, reply_id: &str) {
+    pub(super) fn send_next(&mut self, conv: &str, reply_id: &str) {
         // A large context is compacted first; its end comes back here (`compact.rs`).
         if self.compact_at_boundary(conv, reply_id) {
             return;
         }
         let mut text = CONTINUE.to_string();
+        let (warning, wake) = match self.dry_gate(conv) {
+            dry_run::Gate::Go => (None, Wake::of("wake.keepGoing")),
+            dry_run::Gate::Ask(t) => (Some(t), Wake::of("wake.stuck")),
+            dry_run::Gate::Halt => {
+                self.halt(conv, reply_id, "reason.keepGoing.stuck");
+                return;
+            }
+        };
         let mut chosen = None;
         if let Some(c) = self.convs.get_mut(conv) {
             chosen = c
@@ -639,11 +656,23 @@ impl Core {
             // The box says which reply Faber chose, and its buttons go.
             self.push(conv, Some(reply_id), true);
         }
-        if let Err(error) = self.send_by_itself(conv, text, Wake::of("wake.keepGoing"))
-            && !self.reported(conv, &error)
-        {
-            // A turn that never became a reply (Faber was busy, nothing connected).
-            self.trouble(conv, reply_id, &error);
+        let asked = warning.is_some();
+        if let Some(warning) = warning {
+            // A question Faber answered for the person still says so; the ask replaces only the nudge to go on.
+            text = match &chosen {
+                Some(answer) => format!("{}{warning}", answered_for_you(answer)),
+                None => warning,
+            };
+        }
+        if let Err(error) = self.send_by_itself(conv, text, wake) {
+            // An ask that never went out has not been made: the next end of a turn asks again.
+            if asked {
+                self.unask_stuck(conv);
+            }
+            if !self.reported(conv, &error) {
+                // A turn that never became a reply (Faber was busy, nothing connected).
+                self.trouble(conv, reply_id, &error);
+            }
         }
     }
 
@@ -884,6 +913,7 @@ impl Core {
         }
         self.list_changed();
         (self.emit)(AppEvent::Halted { conversation_id: conv.into(), title, why: why.into(), vendor });
+        self.tell_parent(conv);
     }
 
     /// Another move to an AI with room inside the turn that runs, while the count allows it.
@@ -941,7 +971,7 @@ fn set_away(c: &mut Conversation, reply_id: &str, away: Option<Away>) -> Vec<Str
 
 /// A continuation Faber queued (behind a turn of the person's) never goes out once keep going is off.
 fn drop_own_turns(c: &mut Conversation) {
-    c.queued.retain(|q| q.sending || q.wake.as_ref().is_none_or(|w| w.why != "wake.keepGoing"));
+    c.queued.retain(|q| q.sending || q.wake.as_ref().is_none_or(|w| !matches!(w.why.as_str(), "wake.keepGoing" | "wake.stuck")));
 }
 
 #[cfg(test)]

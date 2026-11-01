@@ -1,11 +1,11 @@
 //! Manual measurement of when a project's agent splits a request into conversations of its own (R160, R161: it decides alone
 //! when to lead). Never part of `cargo t`: it runs the real CLIs with the person's own sign-in and spends a little quota.
 //!
-//!     cargo run -p faber-engine --example leader_eval [-- claude|codex]
+//!     FABER_EVAL_TMP=<a folder outside any repository> node scripts/cargo.mjs run -p faber-engine --example leader_eval [-- claude|codex]
 //!
 //! Each of twelve hand-labelled requests (six big, six small) goes to a fresh project conversation, through the real engine,
-//! so the agent's instructions and Faber's tools are exactly the product's, in a throwaway git repository under the system's
-//! temporary folder. A run stops once the reply ends, three conversations were started, or `RUN_LIMIT` passed, and every
+//! so the agent's instructions and Faber's tools are exactly the product's, in a throwaway git repository of ordinary size
+//! (`grown`) under `base`. A run stops once the reply ends, three conversations were started, or `RUN_LIMIT` passed, and every
 //! conversation is then stopped: the decision is measured, not the work. It prints a verdict per request and a summary per vendor. Run it before and after a
 //! change to the agent's instructions or tools.
 use faber_engine::cli::find_cli;
@@ -26,12 +26,32 @@ const RUN_LIMIT: Duration = Duration::from_secs(150);
 
 /// (big, request), worded the way a person writes them; the fixture repository below has the files they name.
 const REQUESTS: [(bool, &str); 12] = [
-    (true, "Add dark mode to every screen, with a switch in Settings, tests and docs."),
-    (true, "Migrate the three services in services/ from callbacks to async/await, with tests for each service."),
-    (true, "Add Spanish and French to every screen, with a language picker in Settings, tests and docs."),
-    (true, "Add input validation with clear error messages to the form of every screen, with tests and a page documenting the rules."),
-    (true, "Give the project a full test suite: unit tests for every module in src/ and services/, a script that runs them, and docs."),
-    (true, "Build an admin area: a screen listing users, editing their roles and an audit log of changes, with tests and docs."),
+    // Each big one is several pull requests by Faber's own yardstick: three or more areas a person reviews apart, about a
+    // thousand changed lines in all on this sample.
+    (
+        true,
+        "Add accounts: a sign-in screen with password reset, a billing page where people change plans and download invoices, and an export service that sends a user's data as CSV, each with tests and docs.",
+    ),
+    (
+        true,
+        "Replace the in-memory store with a SQLite layer with migrations, move the auth, billing and search services onto it, and add a backup and restore screen, each with tests and docs.",
+    ),
+    (
+        true,
+        "Build an admin area with users, roles and an audit log, a reports dashboard with charts for orders and invoices, and a notification service that emails people about new messages, each with tests and docs.",
+    ),
+    (
+        true,
+        "Add offline support: a sync service that queues changes from every screen, a screen to resolve conflicts, and a Settings section to manage cached data, each with tests and docs.",
+    ),
+    (
+        true,
+        "Add a public REST API for orders, invoices and users with token sign-in, an API keys screen in Settings, and rate limiting in the services, each with tests and docs.",
+    ),
+    (
+        true,
+        "Add Spanish and French to every screen with a language picker, move the three services to async/await, and add a search page with filters and saved searches, each with tests and docs.",
+    ),
     (false, "Rename the function formatDate in src/app.js to formatDay and update its callers."),
     (false, "Why does the test in test/app.test.js fail?"),
     (false, "Fix the typo \"Seetings\" in src/screens/settings.js."),
@@ -62,6 +82,56 @@ const FILES: [(&str, &str); 10] = [
         "const assert = require('assert');\nconst { formatDate } = require('../src/app');\nassert.strictEqual(formatDate(0), '1970-01-02');\n",
     ),
 ];
+
+/// The rest of a project of ordinary size, made at each run (a few hundred lines from these loops, never stored): a request
+/// labelled big is several pieces of work only where there are screens and services to spread it over, and a 16-line project
+/// is rightly done in one go. The files the small requests name stay the ones above.
+fn grown() -> Vec<(String, String)> {
+    const SCREENS: [&str; 10] = ["orders", "cart", "checkout", "search", "reports", "messages", "calendar", "team", "invoices", "help"];
+    const FIELDS: [&str; 6] = ["name", "email", "phone", "address", "note", "date"];
+    const SERVICES: [(&str, [&str; 3]); 3] = [
+        ("auth", ["session", "tokens", "users"]),
+        ("billing", ["invoices", "refunds", "plans"]),
+        ("search", ["index", "ranking", "history"]),
+    ];
+    let mut files = vec![];
+    for screen in SCREENS {
+        let title = format!("{}{}", screen[..1].to_uppercase(), &screen[1..]);
+        let inputs: String =
+            FIELDS.iter().map(|f| format!("    <label>{f}<input name=\"{f}\" value=\"${{data.{f} || ''}}\"></label>\n")).collect();
+        let text = [
+            "const { formatDate } = require('../app');\nconst store = require('../store');\n\n".to_string(),
+            "function rows(items) {\n  return items.map((item) => `<tr><td>${item.name}</td><td>${formatDate(item.at)}</td></tr>`).join('');\n}\n\n".into(),
+            format!("module.exports = (data = {{}}) => `\n  <h1>{title}</h1>\n  <form id=\"{screen}\">\n{inputs}    <button>Save</button>\n"),
+            format!("  </form>\n  <table>${{rows(store.list('{screen}'))}}</table>\n`;\n"),
+        ];
+        files.push((format!("src/screens/{screen}.js"), text.concat()));
+    }
+    for (service, parts) in SERVICES {
+        for part in parts {
+            let kind = format!("'{service}.{part}'");
+            let text = [
+                "const store = require('../../src/store');\n\n".to_string(),
+                format!("exports.list = (cb) => setTimeout(() => cb(null, store.list({kind})), 10);\n\n"),
+                format!(
+                    "exports.get = (id, cb) => setTimeout(() => {{\n  const found = store.list({kind}).find((item) => item.id === id);\n"
+                ),
+                format!("  cb(found ? null : new Error('no {part} ' + id), found);\n}}, 10);\n\n"),
+                format!("exports.save = (item, cb) => setTimeout(() => {{\n  store.add({kind}, item);\n  cb(null, item);\n}}, 10);\n"),
+            ];
+            files.push((format!("services/{service}/{part}.js"), text.concat()));
+        }
+    }
+    let routes: String =
+        ["home", "profile", "settings"].into_iter().chain(SCREENS).map(|s| format!("  '/{s}': require('./screens/{s}'),\n")).collect();
+    files.push(("src/router.js".into(), format!("module.exports = {{\n{routes}}};\n")));
+    files.push((
+        "src/store.js".into(),
+        "const items = {};\nexports.list = (kind) => items[kind] || [];\nexports.add = (kind, item) => (items[kind] = [...exports.list(kind), item]);\n"
+            .into(),
+    ));
+    files
+}
 
 fn hidden(bin: &str) -> Command {
     let command = Command::new(bin);
@@ -135,9 +205,21 @@ struct Run {
     said: String,
 }
 
+/// Where the throwaway folders go: `FABER_EVAL_TMP`, else the temporary folder. Never inside a repository: Claude Code reads
+/// the instructions of every folder above a project, and `scripts/cargo.mjs` points the temporary folder into the one it builds.
+fn base() -> Result<std::path::PathBuf, String> {
+    let base = std::env::var_os("FABER_EVAL_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    match base.ancestors().find(|a| a.join(".git").exists()) {
+        Some(repo) => {
+            Err(format!("{} is inside the repository {}: set FABER_EVAL_TMP to a folder outside any", base.display(), repo.display()))
+        }
+        None => Ok(base),
+    }
+}
+
 /// One request in a throwaway folder; the folder goes whatever happens.
 async fn run(vendor: Vendor, cli: faber_engine::cli::Cli, request: &str) -> Result<Run, String> {
-    let world = std::env::temp_dir().join(format!("faber-leader-eval-{}", uuid::Uuid::new_v4().simple()));
+    let world = base()?.join(format!("faber-leader-eval-{}", uuid::Uuid::new_v4().simple()));
     let result = measure(&world, vendor, cli, request).await;
     for attempt in 0..60 {
         match std::fs::remove_dir_all(&world) {
@@ -152,7 +234,7 @@ async fn run(vendor: Vendor, cli: faber_engine::cli::Cli, request: &str) -> Resu
 
 async fn measure(world: &Path, vendor: Vendor, cli: faber_engine::cli::Cli, request: &str) -> Result<Run, String> {
     let repo = world.join("repo");
-    for (path, text) in FILES {
+    for (path, text) in FILES.iter().map(|(p, t)| (p.to_string(), t.to_string())).chain(grown()) {
         let file = repo.join(path);
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(file, text).map_err(|e| e.to_string())?;

@@ -212,10 +212,44 @@ check('thread: a Codex work log reads cleanly: titles on their own lines, tidy c
   }
 });
 
-check('thread: the final answer is never cut, long commands are cut in the middle, and a command that looks like markup stays text', () => {
+// The 2026-10-29 live look: the running command showed in the opened work log and again as the latest line under it.
+check('thread: the running command shows once, in the opened work log or else in the latest line, also inside a run of commands', async () => {
   const root = document.createElement('div');
   document.body.append(root);
-  const long = `START ${'x'.repeat(300)} END`;
+  const running = (id: string, command: string) => ({ id, name: 'Bash', input: { command }, ok: undefined });
+  const [message, setMessage] = createSignal<Message>({ id: 'once', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [running('a', 'cargo build --release')] });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'once', options: [], onBranch: () => {},
+  }), root);
+  const toggled = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const latest = () => root.querySelector('.activity-latest')?.textContent ?? '';
+  try {
+    const log = root.querySelector<HTMLDetailsElement>('details.activity')!;
+    ok(latest().includes('cargo build'), 'closed, the latest line says the command');
+    log.open = true; await toggled();
+    equal(root.querySelector('.activity-latest'), null, 'open, the log is the one place the command shows');
+    ok(log.querySelector('.tools > span .live'), 'and the running step carries the running mark');
+    setMessage({ ...message(), text: 'Building it now.' });
+    equal(root.querySelector('.activity-latest.after'), null, 'nor under the words');
+    log.open = false; await toggled();
+    ok(root.querySelector('.activity-latest.after')?.textContent?.includes('cargo build'), 'closed again, the line under the words comes back');
+    setMessage({ ...message(), text: '', tools: [{ ...running('a', 'cargo build'), ok: true }, { ...running('b', 'cargo test'), ok: true }, running('c', 'cargo clippy')] });
+    log.open = true; await toggled();
+    const run = log.querySelector<HTMLDetailsElement>('details.step-group')!;
+    ok(latest().includes('cargo clippy'), 'a closed run of commands hides the step, so the latest line stays');
+    run.open = true; await toggled();
+    equal(root.querySelector('.activity-latest'), null, 'an opened run shows it, so the line goes');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: the final answer is never cut, a long command wraps inside a 720 px column, and a command that looks like markup stays text', () => {
+  const root = document.createElement('div');
+  root.style.width = '720px';
+  document.body.append(root);
+  const long = `START ${'x'.repeat(200)} END`;
   const markup = '<img src=x onerror=alert(1)> **not bold** & <b>raw</b>';
   const narration = 'Check\n\n';
   const answer = 'Checking files.';
@@ -234,9 +268,12 @@ check('thread: the final answer is never cut, long commands are cut in the middl
     group.open = true;
     equal(root.querySelector('.ai > .md')!.textContent?.trim(), answer, 'a status that only starts the answer does not cut it');
     ok(group.textContent?.includes('Check'), 'and stays in the activity');
+    group.querySelector<HTMLDetailsElement>('details.step-group')!.open = true;
     const [first, second] = [...group.querySelectorAll<HTMLElement>('.tools > span')];
-    const cut = first!.querySelector('i')!.textContent!;
-    ok(cut.includes('…') && cut.length <= 96 && cut.startsWith('START') && cut.endsWith('END'), cut);
+    equal(first!.querySelector('i')!.textContent, long, 'the whole command, never cut at the edge');
+    const box = first!.getBoundingClientRect();
+    ok(box.right <= root.getBoundingClientRect().right + 0.5, `it stays inside the column (${box.right})`);
+    ok(first!.querySelector('i')!.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(first!).lineHeight || '16'), 'it wraps onto a second line');
     equal(first!.title, long, 'the full command is the tooltip');
     equal(second!.querySelector('i')!.textContent, markup);
     equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
@@ -317,6 +354,40 @@ check('thread: a held-back command says what it would have done, and Got it on t
   } finally {
     dispose(); root.remove(); api.parkedSeen = original;
   }
+});
+
+check('thread: a reply Faber was closed under says so, offers Continue on the newest one, and the person’s own Stop stays "Stopped."', async () => {
+  const user = { id: 'u', role: 'user', text: 'go', at: 1 } as Message;
+  const reply = (closed: boolean) => ({ id: 'reply', role: 'assistant', text: 'Partial', at: 2, status: 'stopped', vendor: 'claude', closed }) as Message;
+  const before = api.continueClosed;
+  const asked: string[][] = [];
+  api.continueClosed = async (id, turn) => { asked.push([id, turn]); };
+  try {
+    for (const area of ['chat', 'project'] as const) {
+      // Attached, so the click reaches Solid's delegated handler.
+      const host = document.createElement('div');
+      document.body.append(host);
+      const dispose = render(() => createComponent(Thread, { conversationId: 'c', area, messages: [user, reply(true)], from: 0, options: [], onBranch: () => {} }), host);
+      try {
+        ok(host.textContent!.includes(t('answer.closed')), area + ': the close is said');
+        ok(!host.textContent!.includes(t('answer.stopped')), area + ': in place of "Stopped."');
+        equal(host.textContent!.includes(t('answer.closedFiles')), area === 'project', area + ': the files line only in a project');
+        const button = [...host.querySelectorAll('button')].find((b) => b.textContent === t('answer.closedContinue'));
+        ok(button, area + ': the newest such reply offers Continue');
+        button!.click();
+      } finally { dispose(); host.remove(); }
+    }
+    deepEqual(asked, [['c', 'reply'], ['c', 'reply']], 'Continue names the conversation and the cut reply');
+    // An older cut reply says it, without the button; the person's own Stop says "Stopped." as before.
+    const later = [{ id: 'u2', role: 'user', text: 'more', at: 3 } as Message, { ...reply(false), id: 'reply2', at: 4 }];
+    const host = document.createElement('div');
+    const dispose = render(() => createComponent(Thread, { conversationId: 'c', messages: [user, reply(true), ...later], from: 0, options: [], onBranch: () => {} }), host);
+    try {
+      ok(host.textContent!.includes(t('answer.closed')));
+      ok(![...host.querySelectorAll('button')].some((b) => b.textContent === t('answer.closedContinue')), 'no Continue once the reply is not the newest');
+      ok(host.textContent!.includes(t('answer.stopped')), 'the person’s Stop is still said');
+    } finally { dispose(); }
+  } finally { api.continueClosed = before; }
 });
 
 check('thread: the answer area speaks plain words, never git, cache or CLI words', () => {

@@ -57,10 +57,13 @@ function ConversationGroup(props: { label: string; children: JSX.Element }) {
   );
 }
 
+/** "5 h", "3 d 13 h": how long until a reset, hours rounded up, so it agrees with the bar's time mark. */
 export function untilReset(resetsAt: number): string {
-  const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
+  const hours = Math.ceil((resetsAt * 1000 - Date.now()) / 3_600_000);
   if (hours <= 0) return t('quota.now');
-  return hours < 24 ? t('quota.hours', { n: Math.ceil(hours) }) : t('quota.days', { n: Math.ceil(hours / 24) });
+  if (hours < 24) return t('quota.hours', { n: hours });
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? t('quota.daysHours', { d: days, h: hours % 24 }) : t('quota.days', { n: days });
 }
 
 /** "now", "4 min ago": how long ago a reading was taken, in plain words. */
@@ -586,9 +589,9 @@ export function Sidebar(props: Props) {
             <span>{t('settings.open')}</span>
           </button>
         </div>
-        {/* One thin line per connected AI: its mark, how much of its weekly window is used (R177), the share. The window, the
-            reset, the other windows (the five-hour one), how old the reading is and "still counting" (C010) are in the
-            tooltip, so the line never wraps. */}
+        {/* One thin line per connected AI: its mark and name, how much of its weekly window is used (R177), the share in words
+            ("24% used"). The window, the reset, the other windows (the five-hour one), how old the reading is and "still
+            counting" (C010) are in the tooltip, so the line never wraps. */}
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
@@ -610,11 +613,14 @@ export function Sidebar(props: Props) {
               return (
                 <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
-                  <span class="sr">{vendorName(v)}</span>
+                  <span class="name">{vendorName(v)}</span>
                   <span class="meter" aria-hidden="true">
                     <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}% 0 0)` }} />
                   </span>
                   <span class="share num">{share()}</span>
+                  <Show when={q()}>
+                    <span class="used">{t('quota.used')}</span>
+                  </Show>
                   <Show when={q() && fresh().counting}>
                     <span class="sr">{t('quota.counting')}</span>
                   </Show>

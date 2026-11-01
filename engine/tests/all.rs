@@ -7,6 +7,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
+#[path = "dry_run.rs"]
+mod dry_run;
 mod loopback;
 #[path = "mcp_servers.rs"]
 mod mcp_servers;
@@ -30,6 +32,8 @@ mod auto_learned;
 mod background;
 #[path = "background_live.rs"]
 mod background_live;
+#[path = "big_conversation.rs"]
+mod big_conversation;
 #[path = "browser_tabs.rs"]
 mod browser_tabs;
 #[path = "budget.rs"]
@@ -42,6 +46,8 @@ mod changes;
 mod claude_session;
 #[path = "claude_sessions.rs"]
 mod claude_sessions;
+#[path = "cli_versions.rs"]
+mod cli_versions;
 #[path = "codex_session.rs"]
 mod codex_session;
 #[path = "compact.rs"]
@@ -116,6 +122,8 @@ mod quota;
 mod quota_live;
 #[path = "recents.rs"]
 mod recents;
+#[path = "results.rs"]
+mod results;
 #[path = "rewind.rs"]
 mod rewind;
 #[path = "route.rs"]

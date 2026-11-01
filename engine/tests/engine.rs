@@ -4340,6 +4340,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
+                leads: false,
                 verify: false,
                 progress: false,
                 area: Area::Project,
@@ -5311,6 +5312,8 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
         .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
         .unwrap();
     let mut agent = next_pipe(&made).await;
+    let leads = faber_engine::persona::LEADS;
+    assert!(appended(&agent.args).is_some_and(|p| p.contains(leads)), "the person's own project agent may lead a team");
     agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
     let input = json!({"title":"Docs","brief":"Write the docs."});
     agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
@@ -5320,6 +5323,7 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     agent.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hold","name":"Read","input":{"file_path":"synthetic.txt"}}]}})).await;
     until(&engine, &parent, |c| c.messages.last().is_some_and(|m| m.tools.iter().flatten().any(|t| t.id == "toolu_hold"))).await;
     let mut child = next_pipe(&made).await;
+    assert!(appended(&child.args).is_some_and(|p| !p.contains(leads)), "a team member never leads one of its own");
     child.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
     child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Wrote the parser page."}}})).await;
     child.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
@@ -5335,6 +5339,123 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     engine.archive(&parent, true).unwrap();
     assert!(engine.open(&parent).unwrap().queued.iter().all(|q| q.wake.is_none()), "archiving drops what Faber queued by itself");
     engine.shutdown();
+}
+
+/// A team member cut off mid-turn by Faber closing reports it to its leader once Faber opens again, so the team never stalls
+/// silently; only once, and never for a member the person stopped.
+#[tokio::test]
+async fn a_team_member_cut_off_by_faber_closing_is_reported_to_its_leader_once() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let mut members = vec![];
+    for (rpc, title) in [(1, "Docs"), (2, "Tests"), (3, "Notes")] {
+        let input = json!({"title": title, "brief": "Do it."});
+        agent.say(json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+            "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":format!("toolu_{rpc}")}}}}})).await;
+        assert_eq!(mcp_answer(&agent, &format!("r{rpc}")).await["result"]["isError"], false);
+        let mut child = next_pipe(&made).await;
+        child.say(json!({"type":"system","subtype":"init","session_id":format!("c{rpc}"),"model":"claude-haiku-5-5"})).await;
+        child.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Halfway there."}}})).await;
+        let id = engine.state().conversations.into_iter().find(|c| c.title == title).unwrap().id;
+        until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.text.contains("Halfway there."))).await;
+        members.push((id, child));
+    }
+    // The person stops "Tests" just before Faber closes, before its CLI says so; "Docs" and "Notes" are still streaming.
+    engine.interrupt(&members[1].0);
+    engine.shutdown();
+    drop(engine);
+    // "Notes" is left as a crash leaves it: still streaming on disk, nothing marked.
+    let file = dir.path().join("conversations").join(format!("{}.json", members[2].0));
+    let mut notes: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    notes.as_object_mut().unwrap().remove("pendingParentReport");
+    let reply = notes["messages"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap();
+    reply.remove("closed");
+    reply.insert("status".into(), json!("streaming"));
+    std::fs::write(&file, notes.to_string()).unwrap();
+    let reports = |engine: &Engine| {
+        let c = engine.open(&parent).unwrap();
+        let mut texts: Vec<String> = c.queued.iter().filter(|q| q.wake.is_some()).map(|q| q.text.clone()).collect();
+        texts.extend(c.messages.iter().filter(|m| m.wake.is_some()).map(|m| m.text.clone()));
+        texts
+    };
+    for round in 0..2 {
+        let (spawn, _made) = pipes();
+        let reopened = two_vendors(&dir, spawn);
+        let found = reports(&reopened);
+        for title in ["\"Docs\"", "\"Notes\""] {
+            let cut: Vec<_> = found.iter().filter(|t| t.contains(title)).collect();
+            assert_eq!(cut.len(), 1, "round {round}: one report for {title}, never again on the next opening: {found:?}");
+            assert!(cut[0].contains("was cut off when Faber closed") && cut[0].contains("Continue where you stopped"), "{}", cut[0]);
+        }
+        assert!(!found.iter().any(|t| t.contains("\"Tests\"")), "the person's Stop is never told as Faber closing: {found:?}");
+        let on_disk: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(on_disk["messages"].as_array().unwrap().last().unwrap()["status"], "stopped", "a crash is recovered once");
+        reopened.shutdown();
+    }
+}
+
+/// A team leader cut off by Faber closing, with no member left to wake it, goes on by itself once Faber opens again, with
+/// the turn Continue sends; a continue that was itself cut waits for the person, and a conversation that started nobody
+/// keeps its Continue button.
+#[tokio::test]
+async fn a_team_leader_cut_off_by_faber_closing_goes_on_once_when_no_member_will_wake_it() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let leader = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title": "Docs", "brief": "Do it."});
+    agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_1"}}}}})).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let mut child = next_pipe(&made).await;
+    child.say(json!({"type":"system","subtype":"init","session_id":"c1","model":"claude-haiku-5-5"})).await;
+    let member = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    let alone = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "on my own", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut own = next_pipe(&made).await;
+    own.say(json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    agent.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Waiting on Docs."}}})).await;
+    until(&engine, &leader, |c| c.messages.last().is_some_and(|m| m.text.contains("Waiting on Docs."))).await;
+    engine.shutdown();
+    drop(engine);
+    // The member had finished and its report was taken in before the close: it owes nothing.
+    let file = dir.path().join("conversations").join(format!("{member}.json"));
+    let mut docs: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    docs.as_object_mut().unwrap().remove("pendingParentReport");
+    let reply = docs["messages"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap();
+    reply.remove("closed");
+    reply.insert("status".into(), json!("done"));
+    std::fs::write(&file, docs.to_string()).unwrap();
+    let continues = |engine: &Engine, id: &str| {
+        let c = engine.open(id).unwrap();
+        let closed = |wake: Option<&faber_engine::model::Wake>| wake.is_some_and(|w| w.why == "wake.closed");
+        c.messages.iter().filter(|m| closed(m.wake.as_ref())).count() + c.queued.iter().filter(|q| closed(q.wake.as_ref())).count()
+    };
+    for (round, expected) in [(0, 1), (1, 1)] {
+        let (spawn, _made) = pipes();
+        let reopened = two_vendors(&dir, spawn);
+        reopened.set_keep_going_pace(0.001);
+        reopened.resume_cut_leaders();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // The second opening finds the continue itself cut by the close: that one is the person's to resume.
+        assert_eq!(continues(&reopened, &leader), expected, "round {round}: one continue for the leader, never a second");
+        assert_eq!(continues(&reopened, &alone), 0, "round {round}: a conversation that started nobody waits for its Continue button");
+        assert!(reopened.open(&leader).unwrap().queued.is_empty(), "round {round}: the continue went out, not into the queue");
+        reopened.shutdown();
+    }
 }
 
 /// A conversation an agent started is never the person's own turn, even on a model picked by hand: once its AI turns out

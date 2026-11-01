@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type Message, type VendorUsage } from '../../ui/api.ts';
-import { useLanguage } from '../../ui/i18n.ts';
+import { percent, t, useLanguage, type Lang } from '../../ui/i18n.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import { ageOf, freshness } from '../../ui/sidebar.ts';
@@ -79,6 +79,26 @@ check('quota: without recent work the number is final, and without a conversion 
   try {
     ok(!unread.text().includes('há'), 'a vendor never read has no age');
   } finally { unread.dispose(); }
+});
+
+// The 2026-10-29 live look: the bars said "≥ 24 %" and "16 %" with what they measure only on hover.
+check('quota: each sidebar line says whose quota and how much is used in words, on one line at the sidebar width in every language', () => {
+  for (const lang of ['en', 'pt-BR', 'es', 'fr', 'de'] as Lang[]) {
+    useLanguage(lang);
+    const s = sidebar(usage({ counting: true }));
+    s.host.style.width = '288px';
+    document.body.append(s.host);
+    try {
+      const line = s.host.querySelector<HTMLElement>('.usage .vendor')!;
+      equal(line.querySelector('.name')?.textContent, 'Codex', `${lang}: the AI is named on the line`);
+      equal(`${line.querySelector('.share')?.textContent} ${line.querySelector('.used')?.textContent}`, `${t('quota.atLeast', { share: percent(0.44) })} ${t('quota.used')}`, `${lang}: the share says it is used`);
+      ok(line.title.startsWith('Codex · '), `${lang}: the tooltip is as before: ${line.title}`);
+      const name = line.querySelector<HTMLElement>('.name')!.getBoundingClientRect();
+      const share = line.querySelector<HTMLElement>('.used')!.getBoundingClientRect();
+      ok(Math.abs(name.top - share.top) <= 2 && share.right <= line.getBoundingClientRect().right + 0.5, `${lang}: one line inside the sidebar`);
+    } finally { s.dispose(); s.host.remove(); }
+  }
+  useLanguage('en');
 });
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));

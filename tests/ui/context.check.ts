@@ -26,7 +26,7 @@ check('context: the meter says the percent, keeps the tokens in its tooltip and 
   try {
     await settle();
     const meter = () => root.querySelector<HTMLElement>('[data-testid=context]')!;
-    equal(meter().textContent?.trim(), t('ctx.share', { pct: 50 }));
+    equal(meter().textContent?.trim(), 'Context 50%', 'the word beside the number, not only in the tooltip');
     equal(meter().title, t('ctx.tip', { used: '150,000', window: '300,000' }), 'the tokens held and the window');
     equal(meter().getAttribute('aria-label'), meter().title, 'read out the same way');
     ok(!meter().classList.contains('near'), 'half full is quiet (C002)');
@@ -38,6 +38,7 @@ check('context: the meter says the percent, keeps the tokens in its tooltip and 
     useLanguage('de');
     await settle();
     ok(meter().title.startsWith('Kontext:'), 'in the language of the screen');
+    equal(meter().textContent?.trim(), 'Kontext 90 %');
   } finally {
     useLanguage('en');
     dispose();

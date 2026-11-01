@@ -37,9 +37,11 @@ mod auto_archive;
 mod browse;
 mod by_itself;
 mod changes;
+mod closed;
 mod compact;
 mod copies;
 mod creative_judges;
+mod dry_run;
 mod ended;
 mod evict;
 pub use aside::Aside;
@@ -454,6 +456,9 @@ struct Core {
     /// The closing box each leading agent last told the tray about (`stage.rs`), so one box is told once. Never saved: after a
     /// restart only a new run ends.
     stage_told: HashMap<String, String>,
+    /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
+    /// (`resume_cut_leaders`, which takes them once).
+    quiet_teams: HashMap<String, Vec<String>>,
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
     /// answers briefly. Never saved.
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
@@ -486,6 +491,8 @@ struct Core {
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
+    /// When each conversation was last continued after a restart cut its reply (`closed.rs`), the newest few, in memory.
+    closed_continues: HashMap<String, Vec<u64>>,
     worker_memory: worker_memory::State,
     /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
     installing: bool,
@@ -549,6 +556,9 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// When a Claude probe (`account::claude_probe`) last gave no clean reading: what it saw about extra usage may be lost, so
+    /// only word newer than this lets the next one run.
+    probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
@@ -655,7 +665,7 @@ impl Engine {
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
-        let parent_reports = Core::restore_parent_reports(&store);
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -678,8 +688,10 @@ impl Engine {
                 transcript_timer: false,
                 parent_reports,
                 stage_told: HashMap::new(),
+                quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
+                closed_continues: HashMap::new(),
                 installing: false,
                 compacts: HashMap::new(),
                 compactions: HashMap::new(),
@@ -714,6 +726,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
@@ -1020,6 +1033,23 @@ impl Engine {
             let opened = core.opened(id)?;
             core.shown(id);
             Some(opened.for_screen())
+        })
+    }
+    /// What a conversation delivered and what it cost, from its stored messages (`crate::results`).
+    pub fn results(&self, id: &str) -> Option<crate::results::Results> {
+        self.with(|c| c.load(id).map(|conversation| crate::results::tally(conversation)))
+    }
+    /// The same for every conversation of a project, with its total, most spent first. Read from the stored summaries, which
+    /// hold each conversation's numbers, so no conversation is opened for it.
+    pub fn project_results(&self, project: &str) -> crate::results::ProjectResults {
+        self.with(|c| {
+            crate::results::project(
+                c.store
+                    .list()
+                    .into_iter()
+                    .filter(|s| s.project_id.as_deref() == Some(project))
+                    .filter_map(|s| s.results.map(|r| (s.id, s.title, r))),
+            )
         })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
@@ -1481,6 +1511,15 @@ impl Engine {
             }
             let ids: Vec<_> = c.convs.keys().cloned().collect();
             for id in ids {
+                // Cut off by the close, not by the person's Stop: a team member owes its leader that report the next time
+                // Faber opens (`restore_parent_reports`), since no turn end will send it. With Keep going on it goes on by
+                // itself instead, and reports when its list ends.
+                if let Some(conv) = c.convs.get_mut(&id).filter(|conv| !conv.stopped)
+                    && let Some(m) = conv.messages.last_mut().filter(|m| m.status == Some(Status::Streaming))
+                {
+                    m.closed = true;
+                    conv.pending_parent_report |= conv.started_by.is_some() && conv.keep_going.is_none();
+                }
                 c.stop_waiting(&id, false);
             }
             c.transfers.clear();
@@ -1918,6 +1957,7 @@ impl Core {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(|m| {
+                m.closed |= m.status == Some(Status::Streaming);
                 settle(m);
                 m.refresh_commits();
             });
@@ -3087,6 +3127,8 @@ impl Core {
         } else {
             return;
         };
+        // A turn that delivered ends a stuck run, whether or not Keep going sends another.
+        self.clear_dry_delivery(conv);
         // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
         if !completed_ok {
             self.compacts.remove(conv);
@@ -3911,6 +3953,8 @@ impl Core {
         if self.defer_unattended(id, reply_id, pick, &text, &images, by_hand) {
             return Ok(());
         }
+        // A step's conversation that works again, whoever wrote to it, is no longer waiting to be joined.
+        self.edit_worker(id, |w| w.joining = false);
         if let Some(held) = self.copying.get_mut(id) {
             held.reply = reply_id.to_string();
             held.tail = Some(copies::Tail { pick: pick.clone(), text, images, by_hand });
@@ -4326,6 +4370,8 @@ impl Core {
         let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
         let browse = self.offers_browser(area, tool_mode);
         let conversations = siblings::offers(area);
+        // Only the person's own project conversation leads a team: a team member or a goal's fix never starts one of its own.
+        let leads = conversations && self.convs.get(conv).is_some_and(|c| c.started_by.is_none() && c.goal_fix.is_none());
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
@@ -4338,6 +4384,7 @@ impl Core {
                         helper,
                         browse,
                         conversations,
+                        leads,
                         verify,
                         progress,
                         area,
@@ -4364,6 +4411,7 @@ impl Core {
                     helper,
                     browse,
                     conversations,
+                    leads,
                     verify,
                     progress,
                     cwd,
@@ -4494,6 +4542,7 @@ impl Core {
             pinned_at: None,
             ended: None,
             plan: None,
+            stuck: None,
             context: None,
             fresh_after: None,
             messages: vec![],
@@ -4741,6 +4790,8 @@ impl Core {
             .cloned()
             .map(|mut m| {
                 settle(&mut m);
+                // A copy never ran, so nothing in it was cut by a close: only the source offers to continue.
+                m.closed = false;
                 // The pull request stays the source's to follow: two conversations never wake on the same one.
                 m.follow = None;
                 m

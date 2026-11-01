@@ -401,6 +401,10 @@ pub struct Message {
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
+    /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
+    /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
@@ -545,6 +549,12 @@ impl FollowState {
     pub fn open(self) -> bool {
         matches!(self, FollowState::Pending | FollowState::Failing | FollowState::Conflict)
     }
+
+    /// Whether a timer still reads it: an open one, and a green pull request until it is merged or closed, since a queue
+    /// run may still turn it red (`follow.rs`).
+    pub fn watched(self) -> bool {
+        self.open() || self == FollowState::Passing
+    }
 }
 
 /// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
@@ -677,8 +687,39 @@ pub struct Estimate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanStep {
+    /// Short and stable, so other steps can wait on it (`crate::progress::plan` gives `s1`, `s2`… by position when the agent sends
+    /// none); empty only in a plan stored before ids existed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub text: String,
     pub state: StepState,
+    /// Paths or folders the step expects to change, relative to the project, written with `/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Ids of the steps that must be done before this one starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<String>,
+    /// The step only reads (search, collect, review): it goes to a helper and never gets a copy of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read: bool,
+    /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<StepWorker>,
+}
+
+/// The conversation that works on a plan step, and where its copy started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepWorker {
+    pub conversation: String,
+    /// The branch of its copy; empty until the copy is made, and when the project works in its own folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub branch: String,
+    /// The leader's commit the copy started from.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub base: String,
+    /// The conversation stopped working: the step waits for its work to be joined and is not running any more.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub joining: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -828,6 +869,7 @@ impl Message {
             look: None,
             follow: None,
             wake: None,
+            closed: false,
             halt: None,
             auto_answers: None,
             away: None,
@@ -1010,6 +1052,9 @@ pub struct Conversation {
     /// The agent's plan for the request (`crate::progress::plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
+    /// The watchdog found this conversation delivering nothing for a long run of turns (`crate::results::Stuck`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<crate::results::Stuck>,
     pub messages: Vec<Message>,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1131,6 +1176,12 @@ pub struct Summary {
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
+    /// What the conversation delivered and cost, derived from its messages (`crate::results`); none before its first reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<crate::results::Results>,
+    /// The watchdog found it delivering nothing for a long run of turns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the

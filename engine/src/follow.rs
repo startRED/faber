@@ -1,7 +1,8 @@
 //! A project conversation follows its pull request (R200). When the agent opens, readies or queues a pull request, the
 //! conversation follows it: Faber reads its checks with the person's own gh now and then, and when they fail or the pull
 //! request conflicts with its base, it continues the conversation by itself with one short message, so the agent fixes
-//! it. Passing, merged or closed ends the following with a quiet line, and nothing is spent on green.
+//! it. Merged or closed ends the following with a quiet line. Green does not end it while the pull request is open: a queue
+//! run (`land.mjs`) posts its own status on the same commit later and may still turn it red. Nothing is spent on green.
 //!
 //! This file is the part with no process and no clock of its own: what a command's output names, what a reading means,
 //! and when to look again. `engine/pr_watch.rs` runs it.
@@ -341,7 +342,7 @@ pub fn step(f: &mut Follow, look: &Look, now_ms: u64) -> (Next, bool) {
             CiState::Passing => {
                 f.state = FollowState::Passing;
                 f.failed.clear();
-                Next::End
+                Next::Keep
             }
             CiState::None if now_ms.saturating_sub(f.since) >= NO_CHECKS_MS => {
                 f.state = FollowState::Stopped;
@@ -441,6 +442,10 @@ mod tests {
             assert!(!commits(line), "{line}");
         }
         assert_eq!(kind("git commit -m fix && git push && gh pr create"), Some(Kind::Opens));
+        // A pull request body written to a file first, as agents do: the heredoc is text, so `gh pr create` after it opens one.
+        let body = "cat > /tmp/b.md <<'EOF'\n## What changed\n\nIt's done; see `gh pr create`.\nEOF\ngh pr create --title t --body-file /tmp/b.md 2>&1 | tail -1";
+        assert_eq!(kind(body), Some(Kind::Opens));
+        assert_eq!(kind("cat > /tmp/b.md <<'EOF'\ngh pr create\nEOF"), None, "a body naming the command opens nothing");
     }
 
     #[test]
@@ -531,8 +536,11 @@ mod tests {
             matches!(step(&mut f, &look(PrState::Open, CiState::Failing, "bbb"), 5).0, Next::Wake { .. }),
             "a new commit, a new chance"
         );
-        assert_eq!(step(&mut f, &look(PrState::Open, CiState::Passing, "ccc"), 6).0, Next::End);
+        assert_eq!(step(&mut f, &look(PrState::Open, CiState::Passing, "ccc"), 6).0, Next::Keep, "green and open: a queue run may follow");
         assert_eq!(f.state, FollowState::Passing);
+        // The queue's status on the same commit turns red after the pull request's own run went green: it wakes once.
+        assert!(matches!(step(&mut f, &look(PrState::Open, CiState::Failing, "ccc"), 7).0, Next::Wake { why: "wake.checksFailed", .. }));
+        assert_eq!(step(&mut f, &look(PrState::Merged, CiState::Passing, "ccc"), 8).0, Next::End);
         let mut f = follow();
         assert_eq!(step(&mut f, &look(PrState::Merged, CiState::Passing, "aaa"), 1).0, Next::End);
         assert_eq!(f.state, FollowState::Merged);
