@@ -1052,6 +1052,9 @@ pub struct Conversation {
     /// The agent's plan for the request (`crate::progress::plan`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
+    /// The watchdog found this conversation delivering nothing for a long run of turns (`crate::results::Stuck`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<crate::results::Stuck>,
     pub messages: Vec<Message>,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1173,6 +1176,12 @@ pub struct Summary {
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
+    /// What the conversation delivered and cost, derived from its messages (`crate::results`); none before its first reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<crate::results::Results>,
+    /// The watchdog found it delivering nothing for a long run of turns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the

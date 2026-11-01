@@ -41,6 +41,7 @@ mod closed;
 mod compact;
 mod copies;
 mod creative_judges;
+mod dry_run;
 mod ended;
 mod evict;
 pub use aside::Aside;
@@ -1026,6 +1027,23 @@ impl Engine {
             let opened = core.opened(id)?;
             core.shown(id);
             Some(opened.for_screen())
+        })
+    }
+    /// What a conversation delivered and what it cost, from its stored messages (`crate::results`).
+    pub fn results(&self, id: &str) -> Option<crate::results::Results> {
+        self.with(|c| c.load(id).map(|conversation| crate::results::tally(conversation)))
+    }
+    /// The same for every conversation of a project, with its total, most spent first. Read from the stored summaries, which
+    /// hold each conversation's numbers, so no conversation is opened for it.
+    pub fn project_results(&self, project: &str) -> crate::results::ProjectResults {
+        self.with(|c| {
+            crate::results::project(
+                c.store
+                    .list()
+                    .into_iter()
+                    .filter(|s| s.project_id.as_deref() == Some(project))
+                    .filter_map(|s| s.results.map(|r| (s.id, s.title, r))),
+            )
         })
     }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
@@ -3103,6 +3121,8 @@ impl Core {
         } else {
             return;
         };
+        // A turn that delivered ends a stuck run, whether or not Keep going sends another.
+        self.clear_dry_delivery(conv);
         // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
         if !completed_ok {
             self.compacts.remove(conv);
@@ -4515,6 +4535,7 @@ impl Core {
             pinned_at: None,
             ended: None,
             plan: None,
+            stuck: None,
             context: None,
             fresh_after: None,
             messages: vec![],
