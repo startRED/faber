@@ -56,7 +56,7 @@ check('quota: the sidebar shows the age, the marker and the not-yet-counted esti
   try {
     const text = s.text();
     ok(text.includes('44%'), text);
-    ok(text.includes('~2%'), `the estimate is in the tooltip of the line: ${text}`);
+    ok(text.includes('cerca de 2% a mais ainda sem contar'), `the estimate is in the tooltip of the line: ${text}`);
     ok(text.includes('há 4 min'), text);
     ok(text.includes('ainda contando'), text);
   } finally { s.dispose(); }
@@ -139,7 +139,7 @@ check('quota: Settings spells out the estimate and the age, behind the Details o
     host.querySelector<HTMLButtonElement>('#acct-codex-details')!.click();
     await tick();
     const text = host.textContent!;
-    ok(text.includes('+ ~2% ainda vai entrar na conta'), text);
+    ok(text.includes('cerca de 2% a mais ainda sem contar'), text);
     ok(text.includes('Atualizado há 4 min'), text);
     ok(text.includes('O número ainda pode subir'), text);
   } finally { dispose(); host.remove(); }

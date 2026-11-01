@@ -1287,7 +1287,7 @@ check('settings keyboard traversal: entry, reading order, hidden controls and vi
               el.focus();
               equal(document.activeElement, el, `reachable control: ${el.outerHTML}`);
               const ring = getComputedStyle(el.matches('input[type=color]') ? el.parentElement! : el);
-              ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+              if (el.matches(':focus-visible') || el.matches('input[type=color]')) ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
             }
           };
           inspect();

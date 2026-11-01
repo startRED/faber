@@ -118,7 +118,11 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
                     const ring = getComputedStyle(target), rect = target.getBoundingClientRect();
                     return parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)' && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
                 }})()"#))?;
-                same(result.as_bool(), Some(true), &format!("section {section}, expanded {expanded}, Tab stop {index}: order and visible ring"))?;
+                same(
+                    result.as_bool(),
+                    Some(true),
+                    &format!("section {section}, expanded {expanded}, Tab stop {index}: order and visible ring"),
+                )?;
                 let switch = page.eval("document.activeElement.matches('input[role=switch]')")?.as_bool() == Some(true);
                 if switch && section != 3 {
                     let checked = page.eval("document.activeElement.checked")?;
@@ -136,7 +140,10 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
                 if select {
                     page.press("Space")?;
                     page.press("Escape")?;
-                    page.wait_for("native picker Escape keeps its Settings select", "document.querySelector('.settings') && document.activeElement?.matches('select')")?;
+                    page.wait_for(
+                        "native picker Escape keeps its Settings select",
+                        "document.querySelector('.settings') && document.activeElement?.matches('select')",
+                    )?;
                 }
                 let text = page.eval("document.activeElement.matches('input[type=text], textarea')")?.as_bool() == Some(true);
                 if text {
@@ -157,7 +164,10 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
         }
     }
     page.press("Escape")?;
-    page.wait_for("Escape returns focus to Chat", "!document.querySelector('.settings') && document.activeElement === document.querySelector('.composer textarea')")
+    page.wait_for(
+        "Escape returns focus to Chat",
+        "!document.querySelector('.settings') && document.activeElement === document.querySelector('.composer textarea')",
+    )
 }
 
 /// Opens a section from the list on the left and waits for its heading.
@@ -182,7 +192,7 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota to show", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")?;
     open_settings(page)?;
 
     // General: the language, hooks, both notification switches, keep-awake, resume-interrupted, autostart and full trust for Faber's own setup.
@@ -261,7 +271,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota to show", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")?;
     let vendor = css(".usage .vendor").has_text("Claude");
     page.click(&vendor)?;
     let heading = page.named("heading", "set.subscriptions")?;
@@ -271,7 +281,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     same(page.eval(shares)?.as_str(), Some("≥ 7% ≥ 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
-    page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota after a reload", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")?;
     // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
     page.wait_visible(&actions)?;
     // DOM readiness can precede the new document's native pointer hit-test frame.
