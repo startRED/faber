@@ -173,12 +173,19 @@ fn lint(command: Command, root: &Path, proof: &[&str], jobs: usize, log: &mut Lo
 struct Log {
     path: PathBuf,
     file: Option<File>,
+    quarantine: Vec<&'static str>,
+    tolerate: bool,
 }
 
 impl Log {
     fn create(path: PathBuf) -> Log {
         let file = path.parent().and_then(|dir| std::fs::create_dir_all(dir).ok()).and_then(|()| File::create(&path).ok());
-        Log { path, file }
+        let quarantine = crate::quarantine::names(include_str!("../quarantine.txt"));
+        let tolerate = crate::quarantine::tolerated(
+            std::env::var("GITHUB_ACTIONS").ok().as_deref(),
+            std::env::var("GITHUB_EVENT_NAME").ok().as_deref(),
+        );
+        Log { path, file, quarantine, tolerate }
     }
 
     fn write(&mut self, text: &str) {
@@ -192,8 +199,9 @@ impl Log {
             self.write(&timed);
         }
         for outcome in outcomes {
-            self.write(&line(outcome));
-            if let Some(text) = quiet(outcome) {
+            let outcome = crate::quarantine::judge(outcome, &self.quarantine, self.tolerate);
+            self.write(&line(&outcome));
+            if let Some(text) = quiet(&outcome) {
                 println!("{text}");
             }
         }
@@ -430,11 +438,12 @@ fn run_suites(args: &[String], log_out: &mut Option<Log>) -> i32 {
         println!("No test name contains {:?}. Nothing ran.", filter.unwrap_or_default());
         return 1;
     }
+    let outcomes: Vec<_> = outcomes.iter().map(|o| crate::quarantine::judge(o, &log.quarantine, log.tolerate)).collect();
     let total = summary(&outcomes);
     log.write(&total);
     let every = if log.file.is_some() { format!(". Every line: {}", log.path.display()) } else { String::new() };
     println!("\n{total}{every}");
-    if outcomes.iter().any(|o| o.status == Status::Fail && matches!(o.suite, Suite::Ui | Suite::Screen)) {
+    if outcomes.iter().any(|o| matches!(o.status, Status::Fail | Status::Quarantined) && matches!(o.suite, Suite::Ui | Suite::Screen)) {
         println!("Screenshots of failures are in {}", paths.shots.display());
     }
     exit_code(&outcomes)
