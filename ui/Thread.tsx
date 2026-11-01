@@ -223,10 +223,11 @@ function stepState(tool: ToolUse, working: boolean): 'running' | 'done' | 'faile
 
 /** One step the agent took, as a thin row: what it did ("Read", "Running" while it works), what it acted on, the lines it
  * changed. A click opens what it ran and what came back, and closes it again; nothing else moves. */
-function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string }) {
+function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string; workingFolder?: string; preview?: boolean }) {
   const [open, setOpen] = createSignal(false);
   const state = () => stepState(props.tool(), props.working);
-  const row = () => toolRow(props.tool(), state() !== 'running');
+  const row = () => toolRow(props.tool(), state() !== 'running', props.workingFolder ?? '');
+  const fullDetail = () => toolRow(props.tool(), state() !== 'running').detail;
   const change = createMemo(() => changeOf(props.tool()));
   const output = createMemo(() => {
     const lines = (props.tool().output ?? '').replace(/\s+$/, '').split('\n');
@@ -234,7 +235,7 @@ function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string 
   });
   return (
     <div class="step" data-state={state()} role="listitem">
-      <button type="button" class="step-line" aria-expanded={open()} title={row().detail || undefined} onClick={() => setOpen((on) => !on)}>
+      <button type="button" class="step-line" aria-expanded={open()} title={fullDetail() || undefined} onClick={() => setOpen((on) => !on)}>
         <span class="step-icon" aria-hidden="true">
           <Show when={state() === 'running'} fallback={<Icon name={ICONS[stepIcon(props.tool())]} small />}>
             <span class="live" />
@@ -246,9 +247,12 @@ function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string 
         <Show when={state() === 'failed'}><em class="step-failed">{t('agent.failed')}</em></Show>
         <Show when={state() === 'running' && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
       </button>
+      {/* The newest edit shows a few of its lines under its own row until the next step or words (R161 step 9). */}
+      <Show when={props.preview && !open() && change()}>{(c) => <ChangedLines change={c()} />}</Show>
       <Show when={open()}>
         <div class="step-detail">
-          <Show when={change()} fallback={<Show when={row().detail}><code class="step-what">{row().detail}</code></Show>}>
+          <Show when={fullDetail()}><code class="step-what">{fullDetail()}</code></Show>
+          <Show when={change()}>
             {(c) => <ChangedLines change={c()} shown={40} read />}
           </Show>
           <Show when={output().shown.trim() && !change()}>
@@ -288,7 +292,7 @@ function Thought(props: { text: string; live: boolean }) {
 /** Steps and thinking that came together between two stretches of words. One is its own row; two or more fold into one
  * line that counts them ("Read 3 files · Ran 2 commands") and, while the agent is on them, says the step it is on now.
  * Opened, every row in order. The words before and after never fold. */
-function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean; long?: string }) {
+function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean; long?: string; workingFolder?: string; previewId?: string }) {
   const [open, setOpen] = createSignal(false);
   const tools = createMemo(() => props.items().flatMap((item) => (item.kind === 'tool' ? [item.tool] : [])));
   const running = createMemo(() => (props.working ? tools().findLast((tool) => tool.ok === undefined && !tool.interrupted) : undefined));
@@ -296,13 +300,14 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
   const summary = createMemo(() => stepsSummary(tools()) || (tools().length ? '' : t('step.thought')));
   const now = () => {
     const tool = running();
-    if (tool) return toolLine(tool);
+    if (tool) return toolLine(tool, props.workingFolder ?? '');
     if (!thinkingNow()) return '';
     const last = props.items().at(-1);
     const line = last?.kind === 'thought' ? middle(thinkingParts(last.text).at(-1)?.text ?? '') : '';
     return line ? `${t('step.thinking')} · ${line}` : t('step.thinking');
   };
   const failed = () => tools().filter((tool) => tool.ok === false && !tool.declined).length;
+  const previewed = () => (props.previewId ? tools().find((tool) => tool.id === props.previewId) : undefined);
   // A row can be read once more after its place changed kind or went away (an Index slot outlives its item for a tick), so
   // each row keeps the last tool and words it saw instead of reading a stale slot.
   const item = (it: Accessor<Item | undefined>, i: number) => {
@@ -320,7 +325,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
     };
     return (
       <Show when={it()?.kind === 'tool'} fallback={<Thought text={words()} live={thinkingNow() && i === props.items().length - 1} />}>
-        <Step tool={tool} working={props.working} long={tool().id === running()?.id ? props.long : undefined} />
+        <Step tool={tool} working={props.working} workingFolder={props.workingFolder} preview={tool().id === props.previewId} long={tool().id === running()?.id ? props.long : undefined} />
       </Show>
     );
   };
@@ -335,6 +340,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
           <Show when={failed()}><span class="sr-only">, </span><em class="step-failed">{t('agent.facts.failed', { n: failed() })}</em></Show>
           <Show when={running() && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
         </button>
+        <Show when={!open() && previewed()}>{(tool) => <Show when={changeOf(tool())}>{(c) => <ChangedLines change={c()} />}</Show>}</Show>
         <Show when={open()}>
           <div class="steps-list" role="list">
             <Index each={props.items()}>{(it, i) => item(it, i)}</Index>
@@ -348,6 +354,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  workingFolder?: string;
   pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
@@ -495,11 +502,12 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const e = elapsed(since, clock());
     return t(e.key, { n: e.n });
   };
-  // While the newest step is an edit, the lines it changed sit under the reply until the next step or words, even once it ended (R161 step 9).
+  // While the newest step is an edit, a few of the lines it changed sit under its own row until the next step or words, even once
+  // it ended (R161 step 9).
   const changing = createMemo(() => {
     const last = parts().at(-1);
     const item = working() && last?.kind === 'steps' ? last.items.at(-1) : undefined;
-    return item?.kind === 'tool' && tools().at(-1) === item.tool ? changeOf(item.tool) : undefined;
+    return item?.kind === 'tool' && tools().at(-1) === item.tool && changeOf(item.tool) ? item.tool.id : undefined;
   });
   // The last part shows the agent at work by itself (a running step, its thinking, a subagent at work, its words arriving);
   // when none does, one quiet line under the reply says it is thinking, in its own words when it gave some. Never while a
@@ -518,7 +526,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const planNow = () => {
     if (!working()) return undefined;
     const tool = runningStep();
-    for (const line of [nowLine(), tool ? toolLine(tool) : '', middle(thinking().at(-1)?.text ?? '')]) {
+    for (const line of [nowLine(), tool ? toolLine(tool, props.workingFolder ?? '') : '', middle(thinking().at(-1)?.text ?? '')]) {
       if (line && line !== liveLine()) return line;
     }
     return undefined;
@@ -623,7 +631,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 </div>
               </Match>
               <Match when={part().kind === 'steps'}>
-                <Steps items={block} working={working()} last={i === parts().length - 1} long={longFor()} />
+                <Steps items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
               </Match>
               <Match when={step()}>
                 <div class="agents" role="list" aria-label={t('agent.label')}>
@@ -655,7 +663,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={working() && sources().hosts.length}>
         <SourceList sources={sources()} />
       </Show>
-      <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds
         parked={m().parked ?? []}
@@ -724,7 +731,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
         </p>
       </Show>
-      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} />}</Show>
+      <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} written={m().text.trim() !== ''} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
             Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}

@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "better": {
+      "en": "A big request is split again: the AI runs up to three conversations side by side and checks each one's work. Small requests stay in one conversation.",
+      "pt-BR": "Um pedido grande volta a ser dividido: a IA abre até três conversas lado a lado e confere o trabalho de cada uma. Pedido pequeno continua em uma conversa só.",
+      "es": "Un pedido grande vuelve a dividirse: la IA abre hasta tres conversaciones a la vez y revisa el trabajo de cada una. Un pedido pequeño sigue en una sola conversación.",
+      "fr": "Un gros projet est de nouveau découpé : l'IA ouvre jusqu'à trois conversations en parallèle et vérifie le travail de chacune. Une petite demande reste dans une seule conversation.",
+      "de": "Große Aufträge werden wieder aufgeteilt: Die KI startet bis zu drei Unterhaltungen parallel und prüft die Arbeit jeder einzelnen. Kleine Aufträge bleiben in einer Unterhaltung."
+    }
+  },
+  "decisions": ["| R-next | 2026-11-01 | A project's own agent splits a big request into a team of up to three conversations again, and keeps a small one direct. It picks each child's AI with auto and never asks the person to choose a model or whether a team may start. Restores the team rule of R470 and supersedes R504. | Erick (2026-11-01, asked to restore it) |"]
+}

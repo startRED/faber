@@ -1120,6 +1120,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }),
   );
 
+  // Opening or closing a step is reading: the thread stops following the reply, so the row stays under the pointer while
+  // the reply grows below it (W1). Scrolling back to the end follows again.
+  const openedHere = (e: MouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.closest('article [aria-expanded]')) return;
+    stick = false;
+    keepReading();
+  };
+
   const onScroll = (el: HTMLDivElement) => {
     if (restoringReading) return;
     const below = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -1931,7 +1939,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           el.addEventListener('scrollend', saveReading);
                           onCleanup(() => { tailWatch().unobserve(el); el.removeEventListener('scrollend', saveReading); });
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} onClick={openedHere} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
@@ -1949,6 +1957,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                               >
                                 {(c) => (
                                   <Thread
+                                    workingFolder={c().workingFolder}
                                     messages={c().messages}
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}

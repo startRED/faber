@@ -46,6 +46,12 @@ mod dry_run;
 mod ended;
 mod evict;
 pub use aside::Aside;
+
+/// Where a stored conversation stands, as the list shows it (`ended::run_state`, with no turn running).
+pub(crate) fn run_state(c: &Conversation) -> crate::sibling::State {
+    ended::run_state(c, false)
+}
+
 pub use browse::TabStep;
 pub use copies::GitRunner;
 pub mod facts;
@@ -68,6 +74,7 @@ mod pr_watch;
 mod quota_watch;
 mod recovery;
 mod research;
+mod resume_cut;
 mod rewind;
 mod settings_change;
 mod siblings;
@@ -492,6 +499,7 @@ struct Core {
     live: HashMap<String, Live>,
     /// When each conversation was last continued after a restart cut its reply (`closed.rs`), the newest few, in memory.
     closed_continues: HashMap<String, Vec<u64>>,
+    update_resumes: HashSet<String>,
     worker_memory: worker_memory::State,
     /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
     installing: bool,
@@ -695,6 +703,7 @@ impl Engine {
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
+                update_resumes: HashSet::new(),
                 installing: false,
                 compacts: HashMap::new(),
                 compactions: HashMap::new(),
@@ -2163,7 +2172,7 @@ impl Core {
         }
         AppState {
             background: self.background.list(),
-            conversations: self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect(),
+            conversations: self.listed(),
             projects,
             groups: self.store.chat_groups().unwrap_or_default(),
             vendors: self.vendors(),
@@ -2173,6 +2182,24 @@ impl Core {
             usage: self.usage(),
             unclean_exit: self.unclean_exit,
         }
+    }
+
+    /// The sidebar's conversations. A loaded conversation states itself from memory (a turn running now, or not); one that is
+    /// not loaded and was saved with a reply still streaming was cut by Faber closing or crashing mid-turn: interrupted.
+    fn listed(&self) -> Vec<Summary> {
+        let mut list: Vec<Summary> = self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect();
+        for row in &mut list {
+            row.state = match self.convs.get(&row.id) {
+                Some(c) => (!c.messages.is_empty()).then(|| ended::run_state(c, self.live.get(&row.id).is_some_and(|l| l.turn.is_some()))),
+                None if row.state == Some(crate::sibling::State::Working)
+                    && !self.running.items.iter().any(|i| i.conversation_id == row.id) =>
+                {
+                    Some(crate::sibling::State::Interrupted)
+                }
+                None => row.state,
+            };
+        }
+        list
     }
 
     fn emit_background(&mut self) {
@@ -2224,6 +2251,7 @@ impl Core {
             tutorial_done: patch.tutorial_done.or(before.tutorial_done),
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
             keep_awake: patch.keep_awake.or(before.keep_awake),
+            resume_interrupted: patch.resume_interrupted.or(before.resume_interrupted),
             autostart: patch.autostart.or(before.autostart),
             grants_epoch: before.grants_epoch,
             before_plan: before.before_plan,
@@ -3273,6 +3301,7 @@ impl Core {
             if !approving {
                 self.keep_going_unless_compacting(conv, keep_going);
             }
+            self.request_conclusion(conv);
             // Faber's checks end the turn later (`verifying.rs`), and the report waits for them. An idle process that
             // exits ends no reply, so it reports nothing twice.
             if turn_id.is_some() {

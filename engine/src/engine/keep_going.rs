@@ -20,11 +20,11 @@ and check it the way the project says. When the task you take next has nothing t
 Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
-with done set to true; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
+with outcome done, saying what you checked; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
 
 /// What the agent is told once, when it first says nothing is left: a second look at the original request before Faber believes it.
 pub const CHECK: &str = "Before you stop: reread the person's original request word for word. List anything that is not done or not \
-verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with done set to true again; only if you \
+verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with outcome done again, saying what you checked; only if you \
 have no wrap_up tool, end your reply with this line alone again: [keep going: stop]";
 
 /// The line the agent ended its reply with when nothing was left, before the closing box's `done` (task 017). Still read for a
@@ -450,6 +450,9 @@ impl Core {
             reply_id.to_string()
         };
         let m = c.messages.last_mut()?;
+        if silent_twice {
+            m.halt = Some("reason.keepGoing.silent".into());
+        }
         let ok = m.status == Some(Status::Done);
         let error = m.error.clone().unwrap_or_else(|| "error.turnFailed".into());
         let asked = ok && unanswered_question(m);
@@ -479,7 +482,7 @@ impl Core {
         let before = kg.clone();
         self.note_away(conv, &halt_id);
         let decision = if silent_twice {
-            Next::Halt("reason.keepGoing.done")
+            Next::Halt("reason.keepGoing.silent")
         } else {
             next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
         };

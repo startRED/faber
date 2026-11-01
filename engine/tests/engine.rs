@@ -5661,7 +5661,7 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     let c = until(&engine, &parent, |c| c.queued.iter().any(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone"))).await;
     let note = c.queued.iter().find(|q| q.wake.is_some()).unwrap();
     assert!(
-        note.text.contains("\"Docs\"") && note.text.contains("finished its latest turn") && note.text.contains("Wrote the parser page."),
+        note.text.contains("\"Docs\"") && note.text.contains("concluded its task") && note.text.contains("Wrote the parser page."),
         "{}",
         note.text
     );

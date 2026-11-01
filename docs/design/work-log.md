@@ -57,8 +57,8 @@ and a useful file location is allowed when the person needs to find or open an a
   (R161 step 9): "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error
   note's 2 px edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
 - A file change's row ends with its line count in the data face, `+N` in the accent's text ink and `−N` in the error
-  ink (R161 step 9). While the newest running step of a reply is a file change, the lines it changed sit under the reply
-  until the next step or the answer: at most four, one line each in the data face and the third ink, the sign in
+  ink (R161 step 9). While the newest step of a reply is a file change, the lines it changed sit under its own row (or
+  under the folded line it sits in), lined up with its label, until the next step or words: at most four, one line each in the data face and the third ink, the sign in
   the count's ink, then "N more lines". Nothing moves, and the step row already names the change, so the lines are hidden
   from a screen reader.
 - While a reply runs and has read a web page, a quiet line under the reply names the sites it opened (R161 step 9):

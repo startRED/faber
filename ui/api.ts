@@ -242,7 +242,12 @@ export interface WrapUp {
   recap: string;
   ask?: string;
   actions?: string[];
+  /** True only for the outcome `done`. */
   done?: boolean;
+  /** How the agent concluded; absent on a box written before conclusions had outcomes. */
+  outcome?: 'done' | 'blocked' | 'needsYou';
+  /** What the agent said it did, the result, what is not done and what it checked. */
+  summary?: { did: string; result: string; notDone?: string; verified?: string };
   /** The reply Faber gave for the person while Keep going ran and nobody answered. */
   answered?: string;
 }
@@ -377,16 +382,24 @@ export interface Summary {
   startedBy?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
   ended?: Ended;
+  /** Where the conversation stands now (engine `State`): the sidebar and the running list read the same word. */
+  state?: RunStateName;
   /** How far the agent's plan has come. */
   plan?: PlanCount;
 }
+/**
+ * The one set of states a conversation is in: working, waiting for the person, concluded (the AI concluded it), unconcluded
+ * (a turn ended and the AI never concluded), stuck (spends time with no new result), failed, stopped (by the person) and
+ * interrupted (Faber closed or crashed mid-turn).
+ */
+export type RunStateName = 'working' | 'waiting' | 'concluded' | 'unconcluded' | 'stuck' | 'failed' | 'stopped' | 'interrupted';
 /** How a run ended that nobody saw end (engine `Ended`). */
 export interface Ended {
   at: number;
-  kind: 'done' | 'needsYou' | 'failed';
+  kind: 'done' | 'needsYou' | 'failed' | 'unconcluded' | 'interrupted';
   /** From its first turn to its end, in milliseconds. */
   workMs: number;
-  /** The last line the agent wrote. */
+  /** The closing recap and unfinished plan steps, or the last line the agent wrote. */
   line?: string;
 }
 export interface WorkCopy {
@@ -538,6 +551,7 @@ export interface Settings {
    * an empty text clears it. */
   userName?: string;
   keepAwake?: boolean;
+  resumeInterrupted?: boolean;
   autostart?: boolean;
   /** Receive previews: update checks read the preview channel. Off by default; turning it off never downgrades. */
   previews?: boolean;
@@ -863,7 +877,7 @@ export interface Plural {
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
 /** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
-export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
+export const STOPS = ['done', 'silent', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
 
 /** A sign that the agent's own work seems stuck: a step with no news (`quiet`), a long compaction, or the same step again
  * and again. `minutes` without news for the first two. It never stops anything by itself. */

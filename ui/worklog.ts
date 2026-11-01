@@ -105,7 +105,19 @@ function detailOf(input: unknown): string {
   return typeof detail === 'string' ? detail.replace(/^https?:\/\//, '') : '';
 }
 
-export function toolRow(tool: ToolUse, done = false): ToolRow {
+function shownPath(path: string, folder?: string): string {
+  const value = path.replace(/\\/g, '/');
+  const base = folder?.replace(/\\/g, '/').replace(/\/+$/, '') || (folder?.startsWith('/') ? '/' : '');
+  // Windows paths, on a drive or a network share (`\\server\share`), ignore letter case; others keep it.
+  const windows = (/^[a-z]:\//i.test(value) && /^[a-z]:(?:\/|$)/i.test(base)) || (value.startsWith('//') && base.startsWith('//'));
+  const compare = (s: string) => windows ? s.toLowerCase() : s;
+  const prefix = base === '/' ? base : `${base}/`;
+  if (base && compare(value).startsWith(compare(prefix))) return value.slice(prefix.length);
+  if (!/^(?:[a-z]:\/|\/)/i.test(value)) return value;
+  return value.split('/').filter(Boolean).slice(-2).join('/');
+}
+
+export function toolRow(tool: ToolUse, done = false, folder?: string): ToolRow {
   // A step that ended reads in the past ("Read", "Ran"), one still at work in the present ("Reading", "Running").
   const say = (key: Key) => t(done && PAST[key] ? PAST[key]! : key);
   if (tool.name === 'Settings') {
@@ -137,7 +149,8 @@ export function toolRow(tool: ToolUse, done = false): ToolRow {
   const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Helper' ? input?.title : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   // A helper's few words show only in the person's language (task 130); its own view keeps them.
   if (isAgentCall(tool) && !(typeof named === 'string' && readsIn(named, lang()))) return { label: say(KINDS[tool.name]!), detail: '' };
-  const raw = typeof named === 'string' ? named : detailOf(tool.input);
+  const fileDetail = tool.name === 'fileChange' ? filesOf(tool).join(', ') : detailOf(tool.input);
+  const raw = typeof named === 'string' ? named : fileDetail;
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.
   const mcp = /^mcp__(.+?)__/.exec(tool.name);
@@ -156,7 +169,9 @@ export function toolRow(tool: ToolUse, done = false): ToolRow {
   }
   // The path of the program is the only part Codex escapes twice.
   const detail = raw.replace(/^"([^"]+)"/, (_, path: string) => `"${path.replace(/\\\\/g, '\\')}"`);
-  return { label, detail: KINDS[tool.name] === 'tool.command' ? stripBoilerplate(detail) : detail };
+  const inputObject = tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input) ? tool.input as Record<string, unknown> : undefined;
+  const isFile = tool.name === 'fileChange' || (KINDS[tool.name] !== 'tool.command' && !!inputObject && inputObject.query == null && inputObject.url == null && inputObject.target == null && (typeof inputObject.file_path === 'string' || typeof inputObject.notebook_path === 'string'));
+  return { label, detail: folder !== undefined && isFile ? filesOf(tool).map((path) => shownPath(path, folder)).join(', ') : KINDS[tool.name] === 'tool.command' ? stripBoilerplate(detail) : detail };
 }
 
 /** One line for a row or a status: newlines folded, the middle cut so the start and the end both stay readable. */
@@ -167,8 +182,8 @@ export function middle(text: string, max = 96): string {
   return `${line.slice(0, head)}…${line.slice(line.length - (max - 1 - head))}`;
 }
 
-export const toolLine = (tool: ToolUse): string => {
-  const row = toolRow(tool);
+export const toolLine = (tool: ToolUse, folder?: string): string => {
+  const row = toolRow(tool, false, folder);
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
 
@@ -226,12 +241,12 @@ export const groupLabel = (group: StepGroup): string => (group.kind ? groupPhras
 
 /** The living sentence for a step: inside a group it reads the group so far and then the step ("Reading 3 files · a.ts"), so
  * a burst of reads does not flash by file name; anywhere else it is the step's own line. */
-export function stepLine(groups: StepGroup[], tool: ToolUse): string {
+export function stepLine(groups: StepGroup[], tool: ToolUse, folder?: string): string {
   const group = groups.find((g) => g.kind && g.tools.some((s) => s.id === tool.id));
-  if (!group) return toolLine(tool);
+  if (!group) return toolLine(tool, folder);
   const n = countOf(group.kind!, group.tools.slice(0, group.tools.findIndex((s) => s.id === tool.id) + 1));
-  if (n < 2) return toolLine(tool);
-  const { detail } = toolRow(tool);
+  if (n < 2) return toolLine(tool, folder);
+  const { detail } = toolRow(tool, false, folder);
   return detail ? `${groupPhrase(group.kind!, n)} · ${middle(detail)}` : groupPhrase(group.kind!, n);
 }
 

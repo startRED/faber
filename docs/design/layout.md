@@ -163,6 +163,8 @@ own group, shown only when a reply has a reference, never under Saved changes) c
 Unknown or ambiguous references stay literal. Passing checks never claim a landing; merged is shown only when observed.
 Closing the pane releases its output and reference elements.
 
+A project turn that ended without a conclusion says "ended without a conclusion" in its card and sidebar marker, never "done"; the card keeps the recap and names unfinished plan steps in its detail line.
+
 This plain line uses only the latest reply’s Faber checks and engine needs-you state, shared with the Running row
 and done card. Failures, fixing, needed decisions and unfinished closing boxes stay amber with the column closed
 at 720 px; the person’s Stop stays neutral. Saved counts include only engine-confirmed commits. When none of those

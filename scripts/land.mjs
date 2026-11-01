@@ -734,8 +734,9 @@ async function split(number, sha, self) {
  * The branch `train` holds the top of the train that runs; the land and report jobs send the next one when theirs ends,
  * as does every queueing while none runs, and queue.yml every twenty minutes, for a run that stopped without either.
  */
-// Four: about one run in four fails, often for no code reason, so a longer train would rarely pass whole.
-export const TRAIN = 4;
+// Six: checks that fail by chance wait in quarantine (#543) and the last trains passed whole, so six ride; a red one
+// splits in half and finds its rider in a few runs. The owner asked to try six, then eight (2026-11-01).
+export const TRAIN = 6;
 const LOCK = 'refs/heads/train';
 
 /** The commit the train that runs is checked on (the `train` branch), or ''. */

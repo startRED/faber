@@ -13,7 +13,7 @@ import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
-import type { Place } from './running.ts';
+import { type Place, stateWords } from './running.ts';
 import { planWords } from './Plan.tsx';
 import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
@@ -377,8 +377,9 @@ export function Sidebar(props: Props) {
             <span class="tag-quiet">{t('archive.tag')}</span>
           </Show>
           <Show when={row.c.ended && row.c.id !== props.place.id}>
-            <span class="unseen" role="img" aria-label={t('side.unseen')} title={t('side.unseen')} />
+            <span class="unseen" role="img" aria-label={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} title={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} />
           </Show>
+          <Show when={!row.c.archived && stateWords(row.c.state)}>{(words) => <span class="state-mark" data-state={row.c.state} title={words()}>{words()}</span>}</Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>

@@ -1157,7 +1157,7 @@ fn copy_per_conversation(ctx: &mut Ctx) -> Result {
         ensure(named && path.is_dir(), || format!("the details show the copy's folder, which exists: {tip}"))?;
         copies.push((branch, path));
         // The copy is what this checks, not the answer: the reply is stopped so the conversation can go.
-        let stop = page.named("button", "composer.stop")?;
+        let stop = page.named("button", "composer.stop")?.exact();
         page.click(&stop)?;
         page.wait_gone(&stop)?;
     }
@@ -2182,7 +2182,7 @@ fn streaming_pane_reading(ctx: &mut Ctx) -> Result {
         &format!("document.querySelectorAll('article.ai .steps .step:not(.thought)').length > {}", before["tools"]),
     )?;
     ctx.shot(&mut app, "streaming-panes-reading-preserved")?;
-    let stop = app.page.named("button", "composer.stop")?;
+    let stop = app.page.named("button", "composer.stop")?.exact();
     app.page.click(&stop)?;
     app.page.wait_gone(&stop)?;
     same(

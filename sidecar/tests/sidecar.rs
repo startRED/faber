@@ -198,3 +198,39 @@ fn the_sidecar_orders_the_tray_in_the_words_the_screen_sent_and_reports_what_the
     assert!(status.success(), "closing stdin is a clean end: {status}");
     reader.join().unwrap();
 }
+
+#[test]
+fn the_command_line_reaches_the_sidecars_table_over_the_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_faber-sidecar"));
+    command
+        .env("FABER_DATA_DIR", dir.path())
+        .env("FABER_HIDDEN", "1")
+        .env("FABER_CLI_CLAUDE", "")
+        .env("FABER_CLI_CODEX", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let state = runtime.block_on(async {
+        use faber_channel::client::Client;
+        use faber_channel::server::Hello;
+        for _ in 0..500 {
+            if let Ok(client) = Client::connect(dir.path(), Hello::default()).await {
+                return client.call("conversations", json!({})).await;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the sidecar's channel never opened");
+    });
+    let state = state.unwrap().unwrap();
+    assert!(state.is_array(), "the conversations: {state}");
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+}
