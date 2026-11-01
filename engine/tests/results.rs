@@ -1,5 +1,5 @@
 //! What a conversation delivered and cost reaches the people who ask: the conversation list carries it, the engine answers it
-//! for one conversation and for a project, and an empty conversation stays out (R-next, results ledger).
+//! for one conversation and for a project, and an empty conversation stays out (R494, results ledger).
 use crate::support;
 
 use faber_engine::model::{Area, Conversation, Message, Role, Status, Vendor};

@@ -275,6 +275,13 @@ impl Store {
         replace_with(&*self.disk, path, bytes.as_bytes(), patient)
     }
 
+    /// A conversation file is written compact: a big one holds tens of thousands of tool records, and an indent and a line
+    /// break on each of their fields made every rewrite slower. Reading takes both.
+    fn write_compact<T: Serialize>(&self, path: &Path, value: &T, patient: bool) -> Result<(), Fault> {
+        let bytes = serde_json::to_vec(value).expect("plain data always serializes");
+        replace_with(&*self.disk, path, &bytes, patient)
+    }
+
     fn file(&self, id: &str) -> PathBuf {
         self.conversations.join(format!("{id}.json"))
     }
@@ -410,7 +417,7 @@ impl Store {
             self.recover_group_move()?;
         }
         let path = self.file(&conversation.id);
-        self.write_with(&path, conversation, patient)?;
+        self.write_compact(&path, conversation, patient)?;
         self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.written(path, conversation);
         self.search.saved(conversation);
@@ -552,7 +559,7 @@ impl Store {
             let _ = fs::remove_file(journal);
             return Err(error);
         }
-        if let Err(error) = self.write(&self.file(&conversation.id), conversation) {
+        if let Err(error) = self.write_compact(&self.file(&conversation.id), conversation, true) {
             // Keep the journal if rollback also fails, so the next reader retries before using membership.
             let _ = self.recover_group_move();
             return Err(error);
@@ -767,6 +774,15 @@ impl Store {
     pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<KeptDecision> + Send + 'static {
         let (path, project) = (self.decisions_kept.clone(), project.to_string());
         move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// `kept_decisions` for taking a review back, where a file that cannot be read is an error, as for Keep: one unreadable now,
+    /// or damaged for this version (a newer one may read it), may still hold the review.
+    pub(crate) fn kept_decisions_now(&self, project: &str) -> Result<Vec<KeptDecision>, Fault> {
+        Ok(read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?
+            .unwrap_or_default()
+            .remove(project)
+            .unwrap_or_default())
     }
 
     /// Called under the engine lock: a stale listing must never overwrite a newer Keep.

@@ -1,5 +1,5 @@
 //! Reads stored conversations (read-only) and prints what each delivered and cost, and how long the tally took. It is how the
-//! watchdog's thresholds were checked against real use (R-next, results ledger). Never part of `cargo t`.
+//! watchdog's thresholds were checked against real use (R494, results ledger). Never part of `cargo t`.
 //!
 //!     cargo run -p faber-engine --example results_measure -- <conversations folder> [--dry-over <turns>]
 

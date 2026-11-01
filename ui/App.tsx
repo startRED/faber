@@ -1544,7 +1544,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }}
       onDismiss={(c) => void api.seen(c.id).catch(() => {})}
       onClose={closeColumn}
-      details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages,
+      details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages, copy: current()?.id === place().id ? sideDetails()!.copy : undefined,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,
           incomplete: changeList()?.incomplete, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } } : undefined}
       agent={sideAgent()}
@@ -1799,20 +1799,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                         {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
-                      {/* A project conversation in a copy of its own says which branch, quietly; the path is the tooltip. */}
-                      <Show when={current()?.id === place().id && current()?.copy}>
-                        {(copy) => (
-                          <>
-                            <span class="sep" aria-hidden="true">
-                              {t('crumb.separator')}
-                            </span>
-                            <span class="copy" data-testid="crumb-copy" title={`${t('crumb.copy')}
-${copy().path}`}>
-                              {copy().branch}
-                            </span>
-                          </>
-                        )}
-                      </Show>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
@@ -1957,6 +1943,10 @@ ${copy().path}`}>
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
+                                    onOpenConversation={(id) => {
+                                      const to = state().conversations.find((conversation) => conversation.id === id);
+                                      if (to) openSummary(to);
+                                    }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                   />
                                 )}

@@ -187,10 +187,10 @@ fn proof(ctx: &mut Ctx) -> Result {
     ask(page, "Add a line to notes.txt.")?;
     // The fake CLI writes nothing, so while the recording holds after its Write step the file lands in the work copy
     // here: Faber's checks run only on a copy whose files changed. The copy is found by its name, as in the app suite.
-    let crumb = css("[data-testid=crumb-copy]");
-    page.wait_visible(&crumb)?;
-    let tip = page.attr(&crumb, "title")?.unwrap_or_default();
-    let shown = std::path::PathBuf::from(tip.lines().last().unwrap_or_default());
+    page.click(&css(".det-line button"))?;
+    let folder = css("[data-testid=details-copy] span");
+    page.wait_visible(&folder)?;
+    let shown = std::path::PathBuf::from(page.inner_text(&folder)?.trim());
     let copy = ctx.sb.data.join("copies").join(shown.file_name().unwrap_or_default());
     for _ in 0..40 {
         if copy.is_dir() {

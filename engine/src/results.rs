@@ -98,6 +98,8 @@ pub struct Stuck {
     /// When the first turn with nothing delivered started.
     pub since: u64,
     pub turns: u32,
+    #[serde(default)]
+    pub wall_ms: u64,
     pub usd: f64,
     /// When Faber asked the AI to change approach or stop; asked once per window.
     #[serde(default, skip_serializing_if = "Option::is_none")]

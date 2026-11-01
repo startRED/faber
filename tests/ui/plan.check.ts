@@ -140,3 +140,35 @@ check('plan: a working reply shows the current thinking headline after its words
     view.done();
   }
 });
+
+check('plan: a step another conversation does names it with where it stands, and a click opens it, in German at 720 px', async () => {
+  useLanguage('de');
+  const opened: string[] = [];
+  const plan: Plan = {
+    at: 1,
+    steps: [
+      { text: 'Die Dokumentation schreiben', state: 'active', conversation: 'c-docs', member: 'waiting' },
+      { text: 'Den Parser prüfen', state: 'pending', conversation: 'c-parser', member: 'running' },
+      { text: 'Alles zusammenführen', state: 'pending' },
+    ],
+  };
+  const view = mount(() =>
+    createComponent(PlanList, { plan, names: { 'c-docs': 'Dokumentation', 'c-parser': 'Parser prüfen' }, onOpen: (id: string) => opened.push(id) }),
+  );
+  view.root.style.width = '720px';
+  try {
+    await settle();
+    const steps = [...view.root.querySelectorAll<HTMLElement>('.plan li')];
+    const links = steps.map((s) => s.querySelector<HTMLButtonElement>('.member button'));
+    deepEqual(links.map((b) => b?.textContent ?? null), ['Dokumentation', 'Parser prüfen', null], 'the title of the conversation doing each step');
+    deepEqual(steps.map((s) => s.querySelector('.member-state')?.textContent ?? null), [` · ${t('agent.waiting')}`, ` · ${t('agent.running')}`, null], 'where it stands, in the words of a helper row');
+    links[1]!.click();
+    deepEqual(opened, ['c-parser'], 'a click opens that conversation');
+    const text = steps[0]!.querySelector<HTMLElement>('.text')!.getBoundingClientRect();
+    const member = steps[0]!.querySelector<HTMLElement>('.member')!.getBoundingClientRect();
+    ok(member.top >= text.bottom - 1 && member.right <= view.root.getBoundingClientRect().right + 0.5, 'under the step, inside the column');
+  } finally {
+    useLanguage('en');
+    view.done();
+  }
+});

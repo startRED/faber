@@ -5,7 +5,7 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
 - The first run has three steps in a window with no sidebar: connected accounts, appearance, first conversation. A stepper
   at the top shows the place. Each step is a modal dialog: its heading takes focus when it opens, and Esc and the
   shortcuts of the shell (Ctrl N, Ctrl comma, Ctrl period) do nothing until a button is used.
-- Step 1 is the account cards. The compact introduction names the plans and says choosing only checks installation/account; installing or signing in needs its own action. At heights up to 600 px, the introduction drops its extra top margin so the AI choices stay above the sticky footer. With Continue and Skip, both go on to step 2 (or straight to the Chat home when a look is
+- Step 1 is the account cards. The compact introduction names the plans and says choosing only checks installation/account; installing or signing in needs its own action. At heights up to 600 px, the introduction drops its extra top margin so the AI choices stay above the sticky footer. When a picked AI's card shows its buttons (Install, Sign in), the step scrolls just enough to keep them above that footer. With Continue and Skip, both go on to step 2 (or straight to the Chat home when a look is
   already saved). Opened later, from the no-AI state or from
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
