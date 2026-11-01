@@ -2264,6 +2264,7 @@ export const ptBR: Messages = {
   'notes.327.better': 'As linhas de trabalho nos Detalhes técnicos agora mostram um desenho pequeno do estado: trabalhando, esperando você, travado, concluído, parado ou com falha.',
   'notes.328.fixed': 'Quando falta uma leitura atual do limite, você vê onde conferi-lo no lugar de uma barra vazia.',
   'notes.329.better': 'Você pode ver por que o Faber continuou uma conversa e o que pediu a um ajudante.',
+  'notes.330.fixed': 'Um endereço que você está digitando no navegador do Faber não se perde mais quando a janela muda de tamanho.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

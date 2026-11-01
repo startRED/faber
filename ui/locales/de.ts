@@ -2277,6 +2277,7 @@ export const de: Messages = {
   'notes.327.better': 'Die Arbeitszeilen in den technischen Details zeigen jetzt ein kleines Bild ihres Zustands: arbeitet, wartet auf dich, hängt, fertig, gestoppt oder fehlgeschlagen.',
   'notes.328.fixed': 'Wenn ein aktueller Wert für das Limit fehlt, siehst du statt eines leeren Balkens, wo du nachsehen kannst.',
   'notes.329.better': 'Du siehst, warum Faber ein Gespräch fortgesetzt und was es einem Helfer aufgetragen hat.',
+  'notes.330.fixed': 'Eine Adresse, die du in Fabers Browser tippst, geht nicht mehr verloren, wenn sich die Fenstergröße ändert.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

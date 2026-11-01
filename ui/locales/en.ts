@@ -2157,6 +2157,7 @@ export const en = {
   'notes.327.better': 'Work rows in Technical details now show a small picture of their state: working, waiting for you, stuck, done, stopped or failed.',
   'notes.328.fixed': 'When a limit has no current reading, you can see where to check it instead of an empty bar.',
   'notes.329.better': 'You can see why Faber continued a conversation and what it asked a helper to do.',
+  'notes.330.fixed': "An address you are typing in Faber's browser is no longer lost when the window is resized.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2277,6 +2277,7 @@ export const es: Messages = {
   'notes.327.better': 'Las filas de trabajo de los Detalles técnicos ahora muestran un dibujo pequeño de su estado: trabajando, esperándote, atascado, concluido, detenido o con fallo.',
   'notes.328.fixed': 'Cuando falta una lectura actual del límite, ves dónde consultarlo en lugar de una barra vacía.',
   'notes.329.better': 'Puedes ver por qué Faber continuó una conversación y qué le pidió a un ayudante.',
+  'notes.330.fixed': 'Una dirección que estás escribiendo en el navegador de Faber ya no se pierde cuando cambia el tamaño de la ventana.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
