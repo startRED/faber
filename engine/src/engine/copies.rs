@@ -149,6 +149,7 @@ impl Engine {
     /// conversation that is idle, clean and merged into the person's branch. That conversation keeps its record, and its
     /// next message makes the copy again in the same folder, so its CLI session resumes.
     pub fn sweep_copies(&self) {
+        let _background = faber_winproc::background_thread();
         let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
         let Some(mut exec) = run() else { return };
         for id in copy::found(&data) {
@@ -170,6 +171,22 @@ impl Engine {
             // starting its agent in a folder being deleted.
             if copy::merged(&mut *exec, &record) && self.with(|c| idle(c).is_some() && copy::set_aside(&data, &id)) {
                 let _ = copy::retire(&mut *exec, &data, &id, &record);
+                continue;
+            }
+            if let Some((_, false, mark)) = self.with(|c| c.copy_state(&id))
+                && mark.1 != 0
+            {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                let age = now.saturating_sub(Duration::from_millis(mark.1));
+                copy::cleanup(&mut *exec, &data, &id, &record, age, false, |remove| {
+                    self.with(|c| {
+                        if c.copy_state(&id).is_some_and(|(copy, busy, current)| !busy && current == mark && copy == record)
+                            && !c.live.contains_key(&id)
+                        {
+                            remove();
+                        }
+                    });
+                });
             }
         }
     }
