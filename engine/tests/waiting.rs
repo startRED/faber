@@ -606,6 +606,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         pinned_at: None,
         ended: None,
         plan: None,
+        stuck: None,
         stopped: false,
         send_after_stop: None,
         context: None,
