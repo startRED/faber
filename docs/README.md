@@ -113,6 +113,7 @@ one is never touched again, and its boxes say nothing.
 | [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Accepted eight-surface motion critique and incorporated sidebar correction; bounded scores and observation limits preserved |
 | [research/2026-10-27-native-ui-spike/report.md](research/2026-10-27-native-ui-spike/report.md) | Chat screen rebuilt in GPUI and measured against the current screen on the same PC: about 4× less memory with GPU memory counted, but no screen-reader text and no way for the screen runner to drive it; no-go for now, R459 stands |
 | [research/2026-10-24-frontend-interaction.md](research/2026-10-24-frontend-interaction.md) | UX/UI/IxD references, clean behavioral comparison, partial implementation receipts and remaining gaps; no human user study |
+| [research/2026-11-01-landing-in-user-repos.md](research/2026-11-01-landing-in-user-repos.md) | Proposal, nothing built: how Faber lands its agents' work in a person's own GitHub repository (profiles per repository, file claims, trains, GitHub's merge queue), with three questions for the owner |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 | superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
 
