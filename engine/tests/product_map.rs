@@ -29,6 +29,7 @@ fn settings_keys() -> Vec<String> {
         tutorial_done: Some(true),
         user_name: Some(String::new()),
         keep_awake: Some(true),
+        resume_interrupted: Some(true),
         autostart: Some(true),
         web_search: Some(Default::default()),
         reasoning_summary: Some(Default::default()),

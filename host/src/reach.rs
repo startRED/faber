@@ -1,4 +1,4 @@
-//! Who may send which command (R-next). Every caller goes through the same rule, in Rust, before a command runs: the screen,
+//! Who may send which command (R499). Every caller goes through the same rule, in Rust, before a command runs: the screen,
 //! the command line and the AI's own tools alike. A command's reach is written beside it in the table; this decides it for
 //! one caller.
 //!
@@ -66,6 +66,7 @@ pub const PERSON_SETTINGS: &[&str] =
 pub const SCREEN_ONLY: &str = "error.reach.screen";
 pub const PERSON_ONLY: &str = "error.reach.person";
 pub const ASK_PERSON: &str = "error.reach.ask";
+pub const BAD_ARGS: &str = "error.host.badArgs";
 
 /// Whether `caller` may send `command` with `args`. `family` gives the root of a conversation's family (None for one that
 /// does not exist), so an AI's own family is told apart from the others.
@@ -84,15 +85,25 @@ pub fn check(
         Reach::Person => return Err(PERSON_ONLY),
         _ => {}
     }
-    if command == "save_settings" && args["patch"].as_object().is_some_and(|patch| PERSON_SETTINGS.iter().any(|f| patch.contains_key(*f))) {
-        return Err(PERSON_ONLY);
+    if command == "save_settings" {
+        // A struct also decodes from an array, field by field: only an object can be read for the fields it names.
+        match args.get("patch") {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(patch)) if !PERSON_SETTINGS.iter().any(|f| patch.contains_key(*f)) => {}
+            Some(Value::Object(_)) => return Err(PERSON_ONLY),
+            Some(_) => return Err(BAD_ARGS),
+        }
     }
     let Caller::Agent { conversation } = caller else { return Ok(()) };
     match reach {
         Reach::Free => Ok(()),
         Reach::Ask => Err(ASK_PERSON),
         Reach::Own(pointer) => {
-            let Some(target) = args.pointer(pointer).and_then(Value::as_str) else { return Ok(()) };
+            let target = match target_of(args, pointer) {
+                Ok(Some(target)) => target,
+                Ok(None) => return Ok(()),
+                Err(refusal) => return Err(refusal),
+            };
             let mine = conversation.as_deref().and_then(&family);
             match (mine, family(target)) {
                 (Some(mine), Some(theirs)) if mine == theirs => Ok(()),
@@ -101,6 +112,23 @@ pub fn check(
         }
         Reach::Person | Reach::Screen => unreachable!("refused above"),
     }
+}
+
+/// The conversation a command names at `pointer`, walking object by object. A step that is present but not an object (a
+/// struct also decodes from an array, field by field, so the pointer would find nothing while the command still reads the
+/// value) or a name that is not text is refused; a name that is absent or null names no existing conversation.
+fn target_of<'a>(args: &'a Value, pointer: &str) -> Result<Option<&'a str>, &'static str> {
+    let mut at = args;
+    for step in pointer.split('/').skip(1) {
+        match at {
+            Value::Object(map) => match map.get(step) {
+                None | Some(Value::Null) => return Ok(None),
+                Some(next) => at = next,
+            },
+            _ => return Err(BAD_ARGS),
+        }
+    }
+    at.as_str().map(Some).ok_or(BAD_ARGS)
 }
 
 /// The root of `id`'s family: following who started each conversation up to the first one, given each conversation's
@@ -181,5 +209,21 @@ mod tests {
         assert_eq!(check(&agent("c1"), "archive", archive, &json!({"id": "c9", "on": true}), families()), Err(ASK_PERSON));
         assert_eq!(check(&Caller::Person, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
         assert_eq!(check(&Caller::Screen, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
+    }
+
+    #[test]
+    fn a_struct_given_as_an_array_never_slips_past_the_rule_that_reads_its_fields() {
+        // A derived struct also decodes from an array, field by field, so the command would read what the rule could not.
+        let send = Reach::Own("/req/conversationId");
+        let unknown = Caller::Agent { conversation: None };
+        let array = json!({"req": ["c9", "chat", null, "run it"]});
+        assert_eq!(check(&unknown, "send", send, &array, families()), Err(BAD_ARGS));
+        assert_eq!(check(&agent("c1"), "send", send, &json!({"req": "c9"}), families()), Err(BAD_ARGS));
+        assert_eq!(check(&agent("c1"), "send", send, &json!({"req": {"conversationId": 9}}), families()), Err(BAD_ARGS));
+        assert_eq!(check(&agent("c1"), "send", send, &json!({"req": null}), families()), Ok(()), "no conversation named");
+        for caller in [Caller::Person, agent("c1")] {
+            let patch = json!({"patch": [null, true, "dontAsk"]});
+            assert_eq!(check(&caller, "save_settings", Reach::Ask, &patch, families()), Err(BAD_ARGS));
+        }
     }
 }

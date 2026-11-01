@@ -53,8 +53,10 @@ fn baseline(ctx: &mut Ctx) -> Result {
     page.wait_visible(&css("article.ai").last())?;
     let drawn = page.count(&css("article.ai"))?;
     ensure(drawn > 0 && drawn <= 25, || format!("expected bounded initial answers, found {drawn}"))?;
-    page.wait_visible(&css("article.ai details.activity").last())?;
-    ensure(page.count(&css("article.ai details.activity[open]"))? == 0, || "the fixture's tools should start collapsed".into())?;
+    page.wait_visible(&css("article.ai .steps.one").last())?;
+    ensure(page.count(&css("article.ai .step-line[aria-expanded=\"true\"]"))? == 0, || {
+        "the fixture's tool details should start closed".into()
+    })?;
     // Exercise the real older-message loader once before measuring a stable scrollable slice.
     page.eval_on(&css(".thread"), "el.scrollTop=0; return {};")?;
     page.wait_for("older answers", &format!("document.querySelectorAll('article.ai').length>{drawn}"))?;
@@ -62,7 +64,7 @@ fn baseline(ctx: &mut Ctx) -> Result {
     frames(page)?;
     let mounted = page.count(&css("article.ai"))?;
     ensure(mounted > drawn && mounted <= drawn + 25, || format!("older-message load mounted {mounted} answers from {drawn}"))?;
-    ensure(page.count(&css("article.ai details.activity"))? == mounted, || "mounted answers lost their tool groups".into())?;
+    ensure(page.count(&css("article.ai .steps.one"))? == mounted, || "mounted answers lost their tool groups".into())?;
     let loaded_mb = ctx.memory_mb(app.id)?.0;
     let mut peak_mb = loaded_mb;
 
@@ -158,16 +160,16 @@ fn baseline(ctx: &mut Ctx) -> Result {
         "active native edits did not reach the composer exactly once per cycle".into()
     })?;
     peak_mb = peak_mb.max(ctx.memory_mb(app.id)?.0);
-    let final_groups = page.count(&css("article.ai details.activity"))?;
-    ensure(final_groups > 0 && final_groups <= mounted && page.count(&css("article.ai details.activity[open]"))? == 0, || {
-        format!("expected bounded collapsed tool groups, found {final_groups}")
+    let final_groups = page.count(&css("article.ai .steps.one"))?;
+    ensure(final_groups > 0 && final_groups <= mounted && page.count(&css("article.ai .step-line[aria-expanded=\"true\"]"))? == 0, || {
+        format!("expected bounded tool rows with closed details, found {final_groups}")
     })?;
     ensure(
         actions > 0 && [loaded_mb, peak_mb, idle_wall, idle_cpu, active_wall, active_cpu].iter().all(|v| v.is_finite() && *v >= 0.0),
         || "invalid baseline resource measurement".into(),
     )?;
     ctx.notes.push(format!(
-        "Baseline synthetic 1000 messages, 500 collapsed tools x 40 output lines: whole app loaded {loaded_mb:.1} MB, sampled peak {peak_mb:.1} MB; matched 5 s windows: idle {idle_cpu:.0} ms CPU over {idle_wall:.0} ms ({:.1}% one core), active {active_cpu:.0} ms CPU over {active_wall:.0} ms ({:.1}% one core), {actions} input/scroll/resize cycles; one workload, no optimization claim",
+        "Baseline synthetic 1000 messages, 500 tools with closed details x 40 output lines: whole app loaded {loaded_mb:.1} MB, sampled peak {peak_mb:.1} MB; matched 5 s windows: idle {idle_cpu:.0} ms CPU over {idle_wall:.0} ms ({:.1}% one core), active {active_cpu:.0} ms CPU over {active_wall:.0} ms ({:.1}% one core), {actions} input/scroll/resize cycles; one workload, no optimization claim",
         idle_cpu / idle_wall * 100.0, active_cpu / active_wall * 100.0
     ));
     ensure(peak_mb <= 400.0, || format!("baseline sampled peak {peak_mb:.1} MB exceeds 400 MB"))

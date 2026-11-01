@@ -95,9 +95,9 @@ check('pace: quota reasons, manual effort and grouped activity coexist without h
       ok(pace!.textContent!.toLowerCase().includes({ step: 'one step up', fast: 'being used fast', low: 'close to its limit' }[kind]));
       ok(host.querySelector('.model .effort')!.textContent!.includes('high effort'), 'the effort shows beside the model');
       ok(!host.querySelector<HTMLElement>('.model')!.title.includes('ffort'), 'and not again in the tooltip');
-      equal(host.querySelectorAll('details.activity').length, 1);
-      equal(host.querySelector<HTMLDetailsElement>('details.activity')!.open, false);
-      equal(host.querySelector('.ai > .md')!.textContent!.trim(), 'Answer');
+      equal(host.querySelectorAll('.steps.one .step').length, 1, 'the single step stays visible');
+      const words = [...host.querySelectorAll('.ai > .md')].map((part) => part.textContent!.trim());
+      equal(words.join('|'), 'Checking the files.|Answer');
     } finally { dispose(); }
   }
 });

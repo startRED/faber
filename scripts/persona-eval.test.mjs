@@ -61,6 +61,9 @@ test('the conclusion comes first, and normal use keeps asked-for terms and stays
   assert.equal(grade('conclusion-first', { text: 'Consegue sim, não se preocupe.' }).pass, false);
   assert.equal(grade('conclusion-first', { text: 'Não se preocupe, você consegue comprar a TV.' }).pass, false);
   assert.equal(grade('conclusion-first', { text: 'Não. Faltam R$ 200.' }).pass, true);
+  // The AI's own voice may hedge the conclusion, as long as it still opens the reply.
+  assert.equal(grade('conclusion-first', { text: 'Provavelmente não: a compra passa R$ 200 do limite.' }).pass, true);
+  assert.equal(grade('conclusion-first', { text: 'Em geral, não: o cartão pode recusar a compra.' }).pass, true);
   assert.equal(grade('conclusion-first', { text: 'Numa compra só não dá: faltam R$ 200.' }).pass, true);
   assert.equal(grade('asked-for-terms', { text: '```\ngit rev-parse HEAD\ngit rev-parse --abbrev-ref HEAD\n```' }).pass, true);
   assert.equal(grade('quiet', { text: 'Camberra.' }).pass, true);
