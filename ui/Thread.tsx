@@ -17,7 +17,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { StateGlyph } from './icons/kinds.tsx';
+import { StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { StallNote } from './StallNote.tsx';
 import { ResultsNote } from './Results.tsx';
@@ -42,7 +42,7 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepIcon, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep, type StepIcon } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -172,7 +172,6 @@ function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
 function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conversationId: string; messageId: string }) {
   const step = () => props.step();
   const state = () => agentState(step(), props.streaming);
-  const live = () => ['running', 'background', 'waiting', 'stuck'].includes(state());
   const open = () => showAgent({ conversationId: props.conversationId, messageId: props.messageId, callId: step().call.id });
   const shown = () => {
     const agent = openedAgent();
@@ -182,9 +181,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
     <div class="agent-item" role="listitem" data-parent={step().parent?.id}>
       <button type="button" class="agent" data-state={state()} title={step().parent ? `${step().parent!.title} › ${step().title}` : undefined} aria-controls="running" aria-current={shown() ? 'true' : undefined} onClick={open}>
         <span class="agent-mark" aria-hidden="true">
-          <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
-            <span class="live" />
-          </Show>
+          <StateGlyph state={state() === 'done' && !(step().call.facts?.checks && !step().call.facts?.failed) ? 'ended' : stateKind(state())} small />
         </span>
         <b>{step().title || t('agent.untitled')}</b>
         <span class="agent-meta">{agentMeta(step(), props.streaming)}</span>
@@ -204,15 +201,6 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
   );
 }
 
-const ICONS: Record<StepIcon, Parameters<typeof Icon>[0]['name']> = {
-  read: 'sheet',
-  change: 'edit',
-  command: 'terminal',
-  search: 'search',
-  web: 'globe',
-  tool: 'plug',
-  thought: 'feather',
-};
 /** Lines of a step's output shown once it is opened; the rest is counted. */
 const OUTPUT_LINES = 30;
 
@@ -239,9 +227,7 @@ function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string;
     <div class="step" data-state={state()} role="listitem">
       <button type="button" class="step-line" aria-expanded={open()} title={fullDetail() || undefined} onClick={() => setOpen((on) => !on)}>
         <span class="step-icon" aria-hidden="true">
-          <Show when={state() === 'running'} fallback={<Icon name={ICONS[stepIcon(props.tool())]} small />}>
-            <span class="live" />
-          </Show>
+          <Show when={state() === 'done'} fallback={<StateGlyph state={stateKind(state())} small />}><ToolGlyph kind={toolKind(props.tool().name)} small /></Show>
         </span>
         <b>{row().label}</b>
         <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
@@ -277,7 +263,7 @@ function Thought(props: { text: string; live: boolean }) {
     <div class="step thought" data-state={props.live ? 'running' : 'done'} role="listitem">
       <button type="button" class="step-line" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
         <span class="step-icon" aria-hidden="true">
-          <Show when={props.live} fallback={<Icon name="feather" small />}><span class="live" /></Show>
+          <Show when={props.live} fallback={<ToolGlyph kind="thought" small />}><StateGlyph state="working" small /></Show>
         </span>
         <b>{t(props.live ? 'step.thinking' : 'step.thought')}</b>
         <Show when={line()}><i>{line()}</i></Show>
@@ -336,7 +322,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
       <div class="steps" data-state={running() || thinkingNow() ? 'running' : 'done'}>
         <button type="button" class="steps-head" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
           <span class="step-icon" aria-hidden="true">
-            <Show when={running() || thinkingNow()} fallback={<Icon name="right" small />}><span class="live" /></Show>
+            <Show when={running() || thinkingNow()} fallback={<Icon name="right" small />}><StateGlyph state="working" small /></Show>
           </span>
           <b>{[summary(), now()].filter(Boolean).join(' · ')}</b>
           <Show when={failed()}><span class="sr-only">, </span><em class="step-failed">{t('agent.facts.failed', { n: failed() })}</em></Show>
@@ -677,7 +663,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       {/* Nothing above shows the agent at work: it is thinking, said in its own words when it gave some. */}
       <Show when={liveLine()}>
         <div class="activity-latest live-line" role="status" aria-live="polite" aria-atomic="true">
-          <span class="live" aria-hidden="true" />
+          <StateGlyph state="working" small />
           <span class="step">{liveLine()}</span>
         </div>
       </Show>
@@ -708,7 +694,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
-        <div class="note">{t('answer.stopped')}</div>
+        <div class="faber-act note"><div class="faber-act-line"><StateGlyph state="stopped" small /><span>{t('answer.stopped')}</span></div></div>
       </Show>
       <Show when={props.last && m().id === props.messages?.at(-1)?.id && props.endState === 'unconcluded'}>
         <div class="faber-act"><div class="faber-act-line"><StateGlyph state="ended" small /><span>{t('run.unconcluded')}</span></div></div>
@@ -1118,7 +1104,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             }
           >
             <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
-            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><Icon name="loop" small /><span>{t('wake.conclusion')}</span></div></div></Show>
+            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><ToolGlyph kind="decision" small /><span>{t('wake.conclusion')}</span></div></div></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (

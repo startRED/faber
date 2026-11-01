@@ -279,7 +279,7 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     const row = () => root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(root.querySelectorAll('.agents .agent').length, 1);
     equal(row().dataset.state, 'running');
-    ok(row().querySelector('.live'), 'a running helper shows the live mark');
+    ok(row().querySelector('.st-working'), 'a running helper shows the working ring');
     equal(row().querySelector('b')!.textContent, 'Find file defining load_config');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · working · 1 step');
     ok(row().querySelector('.agent-now')?.textContent?.includes('load_config'), 'the main thread shows the helper current task');
@@ -320,17 +320,17 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     equal(row().getAttribute('aria-current'), null);
     setMessage({ ...message(), status: 'stopped', tools: [OWN, AGENT, GREP] });
     equal(row().dataset.state, 'stopped', 'a helper that never finished is not shown as working once the reply ended');
-    equal(row().querySelector('.live'), null);
+    equal(row().querySelector('.st-working'), null);
     // A refusal is not a failure, and a helper sent to the background keeps working after the reply ends.
     setMessage({ ...message(), tools: [{ ...AGENT, ok: false, declined: true, output: 'The user declined.' }] });
     equal(row().dataset.state, 'declined');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · declined · 0 steps');
     setMessage({ ...message(), tools: [{ ...AGENT, input: { ...(AGENT.input as object), run_in_background: true } }] });
     equal(row().dataset.state, 'background');
-    ok(row().querySelector('.live'), 'a background helper still shows the live mark');
+    ok(row().querySelector('.st-working'), 'a background helper still shows the working ring');
     setMessage({ ...message(), status: 'done', tools: [{ ...AGENT, input: { ...(AGENT.input as object), run_in_background: true }, interrupted: true }] });
     equal(row().dataset.state, 'stopped', 'a restored background helper has no live owner');
-    equal(row().querySelector('.live'), null);
+    equal(row().querySelector('.st-working'), null);
     equal(row().querySelector('.agent-now'), null);
   } finally {
     dispose();

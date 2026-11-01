@@ -27,6 +27,7 @@ drawing means what). Decided 2026-10-31 in the rework, by the owner.
 | Helper AI | two rings that overlap | `Helper` |
 | Faber's decision | a stem that forks into two arrows | what Faber chose or sent on its own |
 | Plan, question, skill, tool server, conversation | list, speech bubble with "?", wand, plug, speech bubble | `TodoWrite`, `AskUserQuestion`, `Skill`, `mcpToolCall` and `mcp__*`, `Conversation` |
+| Thought | a feather | thinking within an answer |
 | Anything else | a bolt | a name nobody mapped never gets a wrong picture |
 
 ## States
@@ -56,6 +57,4 @@ and the name always comes with the mark.
 
 ## Where it is used
 
-`Details.tsx` (a helper's or a command's state in the Technical details list) uses the state drawings from this change. The
-work log, the running column and the sidebar adopt them in their own lanes, with the step drawings; this page is the table
-they follow.
+`Details.tsx` (a helper's or a command's state in the Technical details list) uses the state drawings from this change. The work log uses the shared step drawings and state marks, including helpers, thinking and end rows. The running column and sidebar adopt them in their own lanes.
