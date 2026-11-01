@@ -2422,6 +2422,7 @@ export const fr: Messages = {
   'notes.341.new': 'Dans un projet, chaque conversation se termine maintenant par ce qu’elle a livré et ce qu’elle a coûté. La page du projet les liste côte à côte.',
   'notes.342.better': "La ligne en direct affiche l'état de l'agent ou le titre de sa dernière réflexion, et les étapes s'alignent sur le texte.",
   'notes.343.better': 'Les sections du projet sont expliquées, le Catalogue privilégie la recherche et les libellés du Chat et des quotas en français sont plus soignés.',
+  'notes.344.better': 'L’IA peut choisir quand utiliser les plans, le suivi, les vérifications et le bilan de fin.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

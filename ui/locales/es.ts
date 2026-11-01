@@ -2422,6 +2422,7 @@ export const es: Messages = {
   'notes.341.new': 'En un proyecto, cada conversación termina ahora con lo que entregó y lo que costó. La página del proyecto las lista una al lado de otra.',
   'notes.342.better': 'La línea en directo muestra el estado del agente o el título de su último pensamiento, y los pasos quedan alineados con el texto.',
   'notes.343.better': 'Las secciones del proyecto tienen una explicación, el Catálogo da prioridad a la búsqueda y las etiquetas de Chat y de cuota en francés son más claras.',
+  'notes.344.better': 'La IA puede elegir cuándo usar planes, actualizaciones de progreso, comprobaciones y el cierre.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
