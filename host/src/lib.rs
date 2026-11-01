@@ -12,6 +12,8 @@
 mod macros;
 pub mod autostart;
 pub mod awake;
+#[cfg(test)]
+mod ask;
 mod failure;
 mod feed;
 pub mod folder;
