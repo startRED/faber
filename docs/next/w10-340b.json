@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Permission modes that limit access now protect Faber’s conversations and settings from changes, even when a project is inside Faber’s data folder.",
+      "pt-BR": "Os modos que limitam o acesso agora protegem as conversas e configurações do Faber contra alterações, mesmo quando um projeto fica dentro da pasta de dados do Faber.",
+      "es": "Los modos que limitan el acceso ahora protegen las conversaciones y los ajustes de Faber frente a cambios, incluso cuando un proyecto está dentro de la carpeta de datos de Faber.",
+      "fr": "Les modes qui limitent l’accès protègent désormais les conversations et les réglages de Faber contre les modifications, même quand un projet se trouve dans le dossier de données de Faber.",
+      "de": "Modi mit eingeschränktem Zugriff schützen jetzt Fabers Gespräche und Einstellungen vor Änderungen, auch wenn ein Projekt in Fabers Datenordner liegt."
+    }
+  }
+}

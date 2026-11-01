@@ -407,6 +407,13 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
                 settings["permissions"] = json!({ "deny": deny() });
             }
         }
+        if launch.permissions != Permissions::FullAccess {
+            let rules = settings["permissions"]["deny"].as_array_mut().unwrap();
+            for root in crate::store::Store::data_roots() {
+                let path = crate::permissions::claude_rule_path(&crate::project::git::native_path(&root));
+                rules.extend([json!(format!("Edit({path}/**)")), json!(format!("Write({path}/**)"))]);
+            }
+        }
         let hooks_off = match launch.permissions {
             Permissions::Isolated => true,
             Permissions::FullAccess => false,
@@ -1016,6 +1023,16 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
+                                    if crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
+                                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                                            "response": { "behavior": "deny", "message": "Faber's data folder is read-only in this permission mode." } } });
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
+                                            on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
+                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                            break 'driver;
+                                        }
+                                        continue;
+                                    }
                                     // Calling the helper changes nothing by itself: what the helper does is held to the same mode. The
                                     // browser is offered only in full access, which asks nothing, and the engine checks every address.
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)

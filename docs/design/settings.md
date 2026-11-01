@@ -61,11 +61,17 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
   | Mode | Claude Code `--permission-mode` | Codex approvalPolicy / sandbox / approvalsReviewer |
   |---|---|---|
-  | Ask | `default` | `untrusted` / `workspace-write` / `user` |
-  | Accept edits | `acceptEdits` | `on-request` / `workspace-write` / `user` |
-  | Plan | `plan` | `on-request` / `read-only` / `user` |
-  | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
+  | Ask | `default` | `untrusted` / named writable profile / `user` |
+  | Accept edits | `acceptEdits` | `on-request` / named writable profile / `user` |
+  | Plan | `plan` | `on-request` / named read-only profile / `user` |
+  | Auto | `auto` (else `acceptEdits`) | `on-request` / named writable profile / `auto_review` |
   | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
+
+  Sandboxed file tools deny writes to the actual Store root, including `FABER_DATA_DIR`. Codex profiles keep it and
+  nested workspaces read-only, preserving allowed reads and approval policies. Both drivers refuse recognized writes
+  before a card. Guarded Claude commands use best-effort text checks: opaque scripts can hide a path; Isolated
+  commands use the native sandbox. Full access is unchanged; its five warnings now name conversations and settings.
+  No control, layout or motion changes.
 
   Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode
   stops a running turn and revokes every remembered grant. The revocation is a new random token, `grantsEpoch`, written in the
