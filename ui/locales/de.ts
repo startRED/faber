@@ -5,6 +5,8 @@ export const de: Messages = {
   "cli.help.status": "Status anzeigen",
   "cli.help.list": "Unterhaltungen auflisten",
   "cli.help.read": "Unterhaltung lesen",
+  "cli.help.export": "Eine Unterhaltung exportieren",
+  "cli.help.search": "Nachrichten durchsuchen",
   "cli.help.send": "Nachricht senden",
   "cli.help.stop": "Unterhaltung stoppen",
   "cli.help.continue": "Unterbrochene Unterhaltung fortsetzen",

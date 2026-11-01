@@ -197,3 +197,21 @@ fn quitting_ends_the_crash_marker_before_anything_else_closes() {
         .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
 }
+
+#[tokio::test]
+async fn markdown_read_matches_file_export_builder() {
+    let (host, dir) = host().await;
+    let conversation: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    faber_engine::store::Store::new(&dir.path().join("data")).save_checked(&conversation).unwrap();
+    host.engine.save_settings(Settings { language: Some("en".into()), ..Settings::default() }).unwrap();
+    let words = faber_engine::export::Words {
+        you: "You".into(),
+        auto: "Auto".into(),
+        attachments: "Attachments".into(),
+        files: "Files changed".into(),
+    };
+    let (_, expected) = host.engine.export_conversation(&conversation.id, &words).unwrap();
+    let value = host.dispatch("conversation_markdown", json!({"id":conversation.id})).await.unwrap();
+    assert_eq!(value["markdown"], expected);
+}

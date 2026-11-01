@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "You can export and search conversations from the command line.",
+      "pt-BR": "Você pode exportar e buscar conversas pela linha de comando.",
+      "es": "Puedes exportar y buscar conversaciones desde la línea de comandos.",
+      "fr": "Vous pouvez exporter et rechercher des conversations depuis la ligne de commande.",
+      "de": "Sie können Unterhaltungen über die Befehlszeile exportieren und durchsuchen."
+    }
+  },
+  "decisions": [
+    "| R-next-6 | 2026-10-31 | The command line can export a conversation as Markdown without writing a file and search messages in Chat and Projects. | AI (owner delegated) |"
+  ]
+}

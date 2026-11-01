@@ -1014,6 +1014,18 @@
     "reach": "person"
   },
   {
+    "name": "conversation_markdown",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The same readable record as the file export, without writing a file."
+  },
+  {
     "name": "export_conversation",
     "args": [
       [

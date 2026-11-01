@@ -467,6 +467,27 @@ table! {
         look::export_theme(&target, &json)?;
         Ok(true)
     }
+    /// The same readable record as the file export, without writing a file.
+    Read Free fn conversation_markdown(h, id: String) -> Value {
+        let engine = h.engine.clone();
+        let language = faber_engine::guide::Language::resolve(engine.settings().language.as_deref(), &faber_engine::guide::system_languages());
+        let source = match language {
+            faber_engine::guide::Language::En => include_str!("../../ui/locales/en.ts"),
+            faber_engine::guide::Language::PtBr => include_str!("../../ui/locales/pt-BR.ts"),
+            faber_engine::guide::Language::Es => include_str!("../../ui/locales/es.ts"),
+            faber_engine::guide::Language::Fr => include_str!("../../ui/locales/fr.ts"),
+            faber_engine::guide::Language::De => include_str!("../../ui/locales/de.ts"),
+        };
+        let word = |key: &str| -> Res<String> {
+            let line = source.lines().find(|line| line.trim_start().starts_with(&format!("\"{key}\":")) || line.trim_start().starts_with(&format!("'{key}':"))).ok_or("error.export.read")?;
+            let value = line.split_once(':').ok_or("error.export.read")?.1.trim().trim_end_matches(',').trim();
+            let quote = value.chars().next().ok_or("error.export.read")?;
+            Ok(value.strip_prefix(quote).and_then(|v| v.strip_suffix(quote)).ok_or("error.export.read")?.to_string())
+        };
+        let words = faber_engine::export::Words { you: word("export.you")?, auto: word("model.auto")?, attachments: word("export.attachments")?, files: word("export.files")? };
+        let (_, markdown) = off("error.export.read", move || engine.export_conversation(&id, &words)).await??;
+        Ok(json!({"markdown": markdown}))
+    }
     Write Person fn export_conversation(h, id: String, words: faber_engine::export::Words) -> bool [Failure] {
         use std::io::Write;
         let engine = h.engine.clone();

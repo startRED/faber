@@ -43,6 +43,8 @@ impl Backend for Fake {
                 "conversation" => {
                     Ok(json!({"id":args["id"],"state":if working {"working"} else {"concluded"},"conclusion":{"recap":"Done","done":true}}))
                 }
+                "conversation_markdown" => Ok(json!({"markdown":"# Example\n"})),
+                "search_messages" => Ok(json!({"ready":true,"hits":[{"conversationId":"c1","title":"Example","snippet":"hello"}]})),
                 "send" => {
                     if !asks {
                         tokio::spawn(async move {
@@ -242,4 +244,16 @@ async fn human_overrides_json_and_the_end_of_flags_is_respected() {
     assert_eq!(lines(&r.stdout)[0], "c1");
     let calls = fake.calls.lock().unwrap();
     assert_eq!(calls.iter().find(|(cmd, _)| cmd == "send").unwrap().1["req"]["text"], "--human");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn export_and_search_use_the_host_commands() {
+    let (export, fake) = faber(false, &["export", "c1"], "", &[]).await;
+    assert_eq!(export.code, 0);
+    assert_eq!(lines(&export.stdout)[0]["markdown"], "# Example\n");
+    assert_eq!(fake.calls.lock().unwrap()[0], ("conversation_markdown".into(), json!({"id":"c1"})));
+    let (search, fake) = faber(false, &["search", "hello", "world", "--area", "projects"], "", &[]).await;
+    assert_eq!(search.code, 0);
+    assert_eq!(lines(&search.stdout)[0]["hits"][0]["conversationId"], "c1");
+    assert_eq!(fake.calls.lock().unwrap()[0], ("search_messages".into(), json!({"query":"hello world","area":"project"})));
 }

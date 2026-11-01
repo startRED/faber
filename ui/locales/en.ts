@@ -15,6 +15,8 @@ export const en = {
   "cli.help.status": "Show status",
   "cli.help.list": "List conversations",
   "cli.help.read": "Read a conversation",
+  "cli.help.export": "Export a conversation",
+  "cli.help.search": "Search messages",
   "cli.help.send": "Send a message",
   "cli.help.stop": "Stop a conversation",
   "cli.help.continue": "Continue an interrupted conversation",
