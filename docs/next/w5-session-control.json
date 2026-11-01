@@ -1,0 +1,24 @@
+{
+  "notes": {
+    "new": {
+      "en": "The agent can now stop, resume and archive the conversations it started, and wait for them without ending its turn as if done.",
+      "pt-BR": "O agente agora pode parar, retomar e arquivar as conversas que iniciou, e esperar por elas sem encerrar a sua vez como pronto.",
+      "es": "El agente ahora puede detener, reanudar y archivar las conversaciones que inició, y esperar por ellas sin cerrar su turno como terminado.",
+      "fr": "L’agent peut désormais arrêter, reprendre et archiver les conversations qu’il a lancées, et les attendre sans clore son tour comme terminé.",
+      "de": "Der Agent kann von ihm gestartete Unterhaltungen jetzt stoppen, fortsetzen und archivieren sowie auf sie warten, ohne seinen Zug als fertig zu beenden."
+    },
+    "better": {
+      "en": "When starting a conversation, the agent can now choose the AI, model and effort.",
+      "pt-BR": "Ao iniciar uma conversa, o agente agora pode escolher a IA, o modelo e o esforço.",
+      "es": "Al iniciar una conversación, el agente ahora puede elegir la IA, el modelo y el esfuerzo.",
+      "fr": "Au lancement d’une conversation, l’agent peut désormais choisir l’IA, le modèle et l’effort.",
+      "de": "Beim Starten einer Unterhaltung kann der Agent jetzt die KI, das Modell und den Aufwand wählen."
+    }
+  },
+  "decisions": [
+    "| R-next-3 | 2026-10-31 | An AI acts only on the conversations it started (`started_by` chain, transitively; never itself, never its parent, and never the person's own conversations), a stricter boundary than the host's family reach: `stop`, `resume`, `archive` of another conversation and `wait` apply to these owned conversations only, while reading stays free. | AI (owner delegated) |",
+    "| R-next-4 | 2026-10-31 | An AI never uses `send`: host callers that are an agent get `error.session.useSession`. Instead, an AI starts and messages through session commands (`start_conversation`, `message_conversation`, `resume_conversation`) so every conversation it opens is linked and counted and every message it writes is labelled (`wake.asked`). | AI (owner delegated) |",
+    "| R-next-5 | 2026-10-31 | `wait` (`mark_waiting`) records that a conversation waits on listed child conversations (`waiting_on`) instead of ending its turn as if done. The marker clears when a listed conversation reports to its parent (`tell_parent`), at the asker's next turn start, or when archived; while set, the conversation reads as `waiting`, Keep going sends no prod turns, and auto-archive spares it. | AI (owner delegated) |",
+    "| R-next-6 | 2026-10-31 | In the shared command table, `archive` moves from `free` to `own` (`Reach::Own(\"/id\")`): an AI caller may archive only conversations within its family, and the engine narrows that to conversations it started. Unarchive (`on: false`) from an AI is refused. | AI (owner delegated) |"
+  ]
+}

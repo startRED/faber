@@ -23,12 +23,13 @@ pub const MAX_OPEN: usize = 5;
 /// The most of a conversation's latest answer a read returns.
 const MAX_READ: usize = 4000;
 
-const DESCRIPTION: &str = "The other conversations of this project, each with its own agent, and this conversation itself. \
+const DESCRIPTION: &str = "Start parallel work only for independent pieces. Start a team only when the person asked for one. Stop a child that went the wrong way; resume it rather than start again. Archive children once their work is read and verified. For a handoff start a child, then call wait with its id and end your turn; wait instead of polling. `stop` and `resume` take an `id`, resume also takes an optional `message`. `wait` takes an `on` list of child ids and/or a `note`. `archive` with an id archives a child.\n\
+The other conversations of this project, each with its own agent, and this conversation itself. \
 `action` says what to do:\n\
 - `start` with `title` and `brief`: a new conversation for a separate piece of work, so it runs in parallel with you. Its \
 agent cannot see this conversation, so the brief must say everything it needs (the goal, the files involved, what done \
 looks like). It answers at once with the new conversation's `id`; the person sees it in the sidebar and may talk to it. \
-When it stops working, its answer is sent to you by itself: never wait or poll for it, go on with your own work. Use it for independent work that takes a while; never for small steps, and never for two pieces that change the same files. `step` names the plan step it does: its copy then starts from your latest work, and a step that waits or shares files with a running one is refused. \
+When it stops working, its answer is sent to you by itself; call wait if you have no independent work left. Use it for independent work that takes a while; never for small steps, and never for two pieces that change the same files. `step` names the plan step it does: its copy then starts from your latest work, and a step that waits or shares files with a running one is refused. \
 `ai` says which AI runs it: `same` (yours, the default), `auto` (Faber picks by the task and each AI's quota) or an AI by \
 name (`claude`, `codex`); spread work over the AIs that have room (call `quota` first), and have a review done by the AI \
 that did not write the code. `keep_going` true makes it go through an ordered list of tasks in its brief by itself, one \
@@ -59,14 +60,18 @@ fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "archive", "context", "compact", "clear"] },
+            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "stop", "resume", "wait", "archive", "context", "compact", "clear"] },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: everything the new conversation needs to do the work on its own." },
             "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: which AI runs it; same when left out." },
+            "model": { "type": "string", "description": "start: model of the chosen AI; not with auto." },
+            "effort": { "type": "string", "enum": ["low", "medium", "high"] },
+            "on": { "type": "array", "items": { "type": "string" } },
+            "note": { "type": "string" },
             "keep_going": { "type": "boolean", "description": "start: true when the brief is an ordered list of tasks it goes through by itself." },
             "step": { "type": "string", "description": "start: the id of the plan step this conversation does; its copy starts from your latest work." },
-            "id": { "type": "string", "description": "read, ask: the other conversation's id." },
-            "message": { "type": "string", "description": "ask: your question for the other conversation's agent." },
+            "id": { "type": "string", "description": "read, ask, stop, resume, archive: the other conversation's id." },
+            "message": { "type": "string", "description": "ask: your question; resume: an optional instruction for the conversation." },
             "next": { "type": "string", "description": "compact, clear: everything you need to continue afterwards; sent to you word for word." }
         },
         "additionalProperties": false
@@ -86,11 +91,14 @@ pub fn mcp_tool() -> Value {
 /// What one call asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
-    Start { title: String, brief: String, ai: Ai, keep_going: bool, step: Option<String> },
+    Start { title: String, brief: String, ai: Ai, model: Option<String>, effort: Option<String>, keep_going: bool, step: Option<String> },
     Read { id: String },
     List,
     Ask { id: String, message: String },
-    Archive,
+    Archive { id: Option<String> },
+    Stop { id: String },
+    Resume { id: String, message: Option<String> },
+    Wait { on: Vec<String>, note: Option<String> },
     Context,
     Compact { next: Option<String> },
     Clear { next: String },
@@ -116,7 +124,27 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
     let text = |key: &str| input[key].as_str().map(str::trim).filter(|v| !v.is_empty()).map(String::from);
     match text("action").as_deref() {
         Some("list") => return Ok(Request::List),
-        Some("archive") => return Ok(Request::Archive),
+        Some("archive") => {
+            let id = if input.get("id").is_some() { Some(text("id").ok_or("archive needs a valid id or no id")?) } else { None };
+            return Ok(Request::Archive { id });
+        }
+        Some("stop") => return Ok(Request::Stop { id: text("id").ok_or("stop needs an id")? }),
+        Some("resume") => {
+            let message = if input.get("message").is_some() { Some(text("message").ok_or("the message was empty")?) } else { None };
+            return Ok(Request::Resume { id: text("id").ok_or("resume needs an id")?, message });
+        }
+        Some("wait") => {
+            let on = match input.get("on") {
+                None => vec![],
+                Some(v) => v
+                    .as_array()
+                    .ok_or("on must be a list of ids")?
+                    .iter()
+                    .map(|v| v.as_str().filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).ok_or("on must contain ids"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            return Ok(Request::Wait { on, note: text("note") });
+        }
         Some("context") => return Ok(Request::Context),
         Some("compact") => {
             let next = text("next");
@@ -139,7 +167,7 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
         }
         Some("read") => return text("id").map(|id| Request::Read { id }).ok_or("read needs an id"),
         Some("start") | None => {}
-        Some(_) => return Err("the action is not one of start, read, list, ask, archive, context, compact or clear"),
+        Some(_) => return Err("the action is not one of start, read, list, ask, stop, resume, wait, archive, context, compact or clear"),
     }
     match (text("id"), text("brief")) {
         (Some(_), Some(_)) => Err("pass either an id to read or a title and brief to start, not both"),
@@ -153,7 +181,18 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
                     Ai::Named(Vendor::ALL.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?)
                 }
             };
-            Ok(Request::Start { title, brief, ai, keep_going: input["keep_going"].as_bool().unwrap_or(false), step: text("step") })
+            let model = if input.get("model").is_some() { Some(text("model").ok_or("model must be a nonempty name")?) } else { None };
+            let effort =
+                if input.get("effort").is_some() { Some(text("effort").ok_or("effort must be low, medium or high")?) } else { None };
+            Ok(Request::Start {
+                title,
+                brief,
+                ai,
+                model,
+                effort,
+                keep_going: input["keep_going"].as_bool().unwrap_or(false),
+                step: text("step"),
+            })
         }
         (None, None) => Err("the brief was empty"),
     }
@@ -173,7 +212,8 @@ pub fn started(title: &str, id: &str) -> String {
     format!(
         "Started the conversation \"{title}\" (id {id}). It runs on its own in this project and the person sees it in the \
          sidebar. Its answer is sent to you by itself once it stops working; call this tool with {{\"id\": \"{id}\"}} only to \
-         read where it stands before that."
+         read where it stands before that.\n{}",
+        serde_json::json!({ "childId": id })
     )
 }
 
@@ -383,6 +423,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_control_calls_read_their_arguments() {
+        assert_eq!(request(&json!({"action":"stop","id":"child"})), Ok(Request::Stop { id: "child".into() }));
+        assert_eq!(
+            request(&json!({"action":"resume","id":"child","message":"continue"})),
+            Ok(Request::Resume { id: "child".into(), message: Some("continue".into()) })
+        );
+        assert_eq!(request(&json!({"action":"archive","id":"child"})), Ok(Request::Archive { id: Some("child".into()) }));
+        assert_eq!(
+            request(&json!({"action":"wait","on":["child"],"note":"working"})),
+            Ok(Request::Wait { on: vec!["child".into()], note: Some("working".into()) })
+        );
+        assert!(request(&json!({"action":"wait","on":[4]})).is_err());
+        assert!(request(&json!({"action":"archive","id":""})).is_err());
+        assert!(request(&json!({"action":"archive","id":42})).is_err());
+        assert!(request(&json!({"brief":"work","effort":""})).is_err());
+        assert!(request(&json!({"brief":"work","model":4})).is_err());
+        assert!(
+            matches!(request(&json!({"brief":"do it","model":"haiku","effort":"high"})), Ok(Request::Start { model: Some(model), effort: Some(effort), .. }) if model == "haiku" && effort == "high")
+        );
+        assert!(request(&json!({"id":"child","brief":"do it"})).is_err());
+    }
+
+    #[test]
     fn a_call_starts_with_a_brief_reads_with_an_id_and_never_both() {
         assert_eq!(
             request(&json!({"title":" Fix the build ","brief":"Make cargo build pass."})),
@@ -390,6 +453,8 @@ mod tests {
                 title: "Fix the build".into(),
                 brief: "Make cargo build pass.".into(),
                 ai: Ai::Same,
+                model: None,
+                effort: None,
                 keep_going: false,
                 step: None
             })
@@ -401,6 +466,8 @@ mod tests {
                 title: "A piece of work".into(),
                 brief: "x".into(),
                 ai: Ai::Named(Vendor::Codex),
+                model: None,
+                effort: None,
                 keep_going: true,
                 step: None
             })
@@ -412,7 +479,7 @@ mod tests {
         assert_eq!(on("gemini"), Err("ai is not one of same, auto, claude or codex"));
         assert_eq!(request(&json!({"id":"abc"})), Ok(Request::Read { id: "abc".into() }));
         assert_eq!(request(&json!({"action":"list","id":"x"})), Ok(Request::List));
-        assert_eq!(request(&json!({"action":"archive"})), Ok(Request::Archive));
+        assert_eq!(request(&json!({"action":"archive"})), Ok(Request::Archive { id: None }));
         assert_eq!(request(&json!({"action":"context"})), Ok(Request::Context));
         // The `next` that survives word for word is never cut: one too long is refused so the agent can shorten it.
         let whole = "a".repeat(MAX_NEXT);
@@ -446,6 +513,9 @@ mod tests {
     #[test]
     fn the_answers_name_the_conversation_and_a_long_answer_is_cut() {
         assert!(started("Docs", "c1").contains("{\"id\": \"c1\"}"));
+        let result = started("Docs", "c1");
+        let link: serde_json::Value = serde_json::from_str(result.lines().last().unwrap()).unwrap();
+        assert_eq!(link["childId"], "c1");
         assert!(prompt("Docs", "Write it.").ends_with("Task: Docs\n\nWrite it."));
         assert_eq!(read("Docs", State::Working, ""), "The conversation \"Docs\" is still working.");
         let long = read("Docs", State::Concluded, &"x".repeat(5000));

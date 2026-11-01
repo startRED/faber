@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const es: Messages = {
+  "child.working": "Trabajando",
+  "child.waiting": "En espera",
+  "child.stopped": "Detenida",
+  "child.done": "Terminada",
+  "child.failed": "Falló",
+  "child.archived": "Archivada",
   "cli.help.help": "Mostrar ayuda",
   "cli.help.status": "Mostrar estado",
   "cli.help.list": "Listar conversaciones",
@@ -2415,5 +2421,8 @@ export const es: Messages = {
   'piece.discard': "Descartar cambio",
   'piece.retry': "Volver a intentar",
   'piece.show': "Mostrar {title}",
+  'error.session.refused': "Faber rechazó esta acción. El detalle explica por qué.",
+  'error.session.agentOnly': "Este comando es solo para una IA dentro de una conversación de Faber. Para escribir, usa send.",
+  'error.session.useSession': "Una IA empieza una conversación con start_conversation y escribe en otra con message_conversation, nunca con send.",
 
 };

@@ -47,8 +47,7 @@ and a useful file location is allowed when the person needs to find or open an a
   localized display name and pointing to Catalog for the person's installation decision. No setting, automatic install,
   timer or motion comes with it. Chat and Projects use the same fold, including at 720 px and with reduced motion.
 - A conversation the agent starts by itself (R198) is one step row, "Working in parallel" (or "Started conversation" once
-  done) with its title (or the id when the agent reads it back); the conversation is a normal sidebar row, never a step
-  inside.
+  done) with its title (or the id when the agent reads it back); the conversation is a normal sidebar row. A linked child also shows a button with its title, AI and model, state, waiting note and latest short line; opening it goes to the conversation. An archived child stays visible as archived. Existing conversation events update it, with no row timers.
 - The agent running Faber's checks (the `verify` tool) is one step row with no detail: "Running the quick checks" /
   "Ran the quick checks", or "Running every check" / "Ran every check" for the full level. What failed is the agent's to
   read.

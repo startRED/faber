@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "child.working": "Arbeitet",
+  "child.waiting": "Wartet",
+  "child.stopped": "Gestoppt",
+  "child.done": "Fertig",
+  "child.failed": "Fehlgeschlagen",
+  "child.archived": "Archiviert",
   "cli.help.help": "Hilfe anzeigen",
   "cli.help.status": "Status anzeigen",
   "cli.help.list": "Unterhaltungen auflisten",
@@ -2415,5 +2421,8 @@ export const de: Messages = {
   'piece.discard': "Änderung verwerfen",
   'piece.retry': "Erneut versuchen",
   'piece.show': "{title} anzeigen",
+  'error.session.refused': "Faber hat das abgelehnt. Der Grund steht im Detail.",
+  'error.session.agentOnly': "Dieser Befehl ist nur für eine KI in einem Faber-Gespräch. Nutze stattdessen send.",
+  'error.session.useSession': "Eine KI startet ein Gespräch mit start_conversation und schreibt an eines mit message_conversation, nie mit send.",
 
 };

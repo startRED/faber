@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "new": {
+      "en": "You can open the conversations the agent starts and follow their progress from its work log.",
+      "pt-BR": "Você pode abrir as conversas iniciadas pelo agente e acompanhar o andamento delas no registro de trabalho.",
+      "es": "Puedes abrir las conversaciones que inicia el agente y seguir su avance desde el registro de trabajo.",
+      "fr": "Vous pouvez ouvrir les conversations lancées par l’agent et suivre leur progression dans le journal de travail.",
+      "de": "Du kannst die vom Agenten gestarteten Unterhaltungen öffnen und ihren Fortschritt im Arbeitsprotokoll verfolgen."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-10-31 | Each conversation started by an agent is a linked live row in its tool call in the thread, showing its title, AI, model, state, waiting note and latest short line; archived rows remain. Existing conversation events update the row without per-row timers or subscriptions. | AI (owner delegated) |"
+  ]
+}

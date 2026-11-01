@@ -1,6 +1,12 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "child.working": "Working",
+  "child.waiting": "Waiting",
+  "child.stopped": "Stopped",
+  "child.done": "Done",
+  "child.failed": "Failed",
+  "child.archived": "Archived",
   "error.reach.ask": "A person needs to approve this.",
   "error.reach.person": "Only a person can do this.",
   "error.reach.screen": "Only the screen can do this.",
@@ -2295,6 +2301,9 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.session.refused': "Faber refused this action. The detail explains why.",
+  'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
+  'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
 } as const;
 

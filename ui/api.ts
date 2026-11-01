@@ -380,6 +380,10 @@ export interface Summary {
   pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
+  waitingOn?: { ids?: string[]; note?: string };
+  childState?: 'working' | 'waiting' | 'stopped' | 'done' | 'failed';
+  childChoice?: Choice;
+  childLine?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
   ended?: Ended;
   /** Where the conversation stands now (engine `State`): the sidebar and the running list read the same word. */

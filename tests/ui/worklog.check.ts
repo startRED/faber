@@ -346,6 +346,26 @@ check('settings_search: unknown choices never leak into the settings work log', 
   );
 });
 
+check('worklog: linked child updates and opens from its tool call', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [child, setChild] = createSignal<import('../../ui/api.ts').Summary>({ id: 'child', title: 'First title', area: 'project', updatedAt: 0, startedBy: 'lead', childState: 'working', childLine: 'Reading files' });
+  const message: Message = { id: 'answer', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [{ id: 'call', name: 'Conversation', input: { action: 'start', title: 'First title' }, ok: true, output: 'Started.\n{"childId":"child"}' }] };
+  let opened = '';
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'lead', options: [], onBranch: () => {}, get conversations() { return [child()]; }, onOpenChild: (c) => { opened = c.id; } }), root);
+  try {
+    const row = () => root.querySelector<HTMLButtonElement>('.child-conversation')!;
+    ok(row().textContent!.includes('First title') && row().textContent!.includes('Working'));
+    setChild({ ...child(), title: 'Renamed', childState: 'waiting', waitingOn: { note: 'Review' }, childLine: 'Ready for review' });
+    ok(row().textContent!.includes('Renamed') && row().textContent!.includes('Waiting') && row().textContent!.includes('Review'));
+    setChild({ ...child(), archived: true });
+    ok(row().textContent!.includes('Archived'));
+    row().click();
+    equal(opened, 'child');
+  } finally { dispose(); root.remove(); }
+});
+
 check('timeline: words, thoughts, steps and agents keep their places and unchanged objects', () => {
   const tools: ToolUse[] = [
     { id: 'read', name: 'Read', input: {}, at: 3, ok: true },

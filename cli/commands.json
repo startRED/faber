@@ -260,11 +260,16 @@
       [
         "id",
         "String"
+      ],
+      [
+        "by",
+        "Option<String>"
       ]
     ],
     "kind": "write",
     "reach": "own",
-    "conversation": "/id"
+    "conversation": "/id",
+    "about": "Stops a conversation's running turn. An AI may only stop a conversation it started; its own conversation, its parent and the person's conversations are refused."
   },
   {
     "name": "results",
@@ -586,11 +591,116 @@
       [
         "on",
         "bool"
+      ],
+      [
+        "by",
+        "Option<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation it started that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused."
+  },
+  {
+    "name": "start_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "title",
+        "String"
+      ],
+      [
+        "brief",
+        "String"
+      ],
+      [
+        "ai",
+        "Option<String>"
+      ],
+      [
+        "model",
+        "Option<String>"
+      ],
+      [
+        "effort",
+        "Option<String>"
+      ],
+      [
+        "keepGoing",
+        "Option<bool>"
+      ],
+      [
+        "step",
+        "Option<String>"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Starts a new conversation in the same project for an independent piece of work and returns its id. `ai` is `same` (default), `auto`, `claude` or `codex`; `model` and `effort` (`low`, `medium`, `high`) apply to a named AI or `same`, never `auto`. Refused outside an AI's conversation, from a conversation another AI started, or when the project cap or account quota is reached."
+  },
+  {
+    "name": "message_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "String"
+      ],
+      [
+        "message",
+        "String"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Sends `message` to another unarchived conversation of the same project as a message from this AI. Refused outside an AI's conversation, for this conversation itself, for an archived conversation or for one in another project."
+  },
+  {
+    "name": "resume_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "String"
+      ],
+      [
+        "message",
+        "Option<String>"
+      ]
+    ],
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Resumes a conversation this AI started that is stopped, cut off, failed or ended, sending `message` or the default continuation line. Refused outside an AI's conversation, for a conversation this AI did not start, or while the conversation is working, waiting for the person or archived."
+  },
+  {
+    "name": "mark_waiting",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "on",
+        "Option<Vec<String>>"
+      ],
+      [
+        "note",
+        "Option<String>"
       ]
     ],
     "kind": "write",
     "reach": "free",
-    "about": "Archives a conversation, or brings an archived one back."
+    "about": "Marks this AI's conversation as waiting for the conversations in `on` (all started by it, at most 12) and/or for `note` (at most 200 characters), so Faber wakes it when one of them reports and spares it from Keep going prods and auto-archive meanwhile. Refused outside an AI's conversation, when both `on` and `note` are empty, or for an `on` id this AI did not start."
   },
   {
     "name": "pin",
@@ -602,10 +712,15 @@
       [
         "on",
         "bool"
+      ],
+      [
+        "by",
+        "Option<String>"
       ]
     ],
     "kind": "write",
-    "reach": "free"
+    "reach": "free",
+    "about": "Pins a conversation, or unpins it. An AI may pin but never unpin: the person pinned it to keep it."
   },
   {
     "name": "move_to_project",
