@@ -169,10 +169,17 @@ function createWindow(): BrowserWindow {
   // The host decides notices, and a question that comes while the person looks at Faber is never one.
   window.on('focus', () => host?.note({ kind: 'focus', focused: true }));
   window.on('blur', () => host?.note({ kind: 'focus', focused: false }));
+  // The updater installs only while the window is not on screen (never under the person's hands).
+  const seen = (visible: boolean) => () => host?.note({ kind: 'window', visible });
+  window.on('show', seen(true));
+  window.on('restore', seen(true));
+  window.on('hide', seen(false));
+  window.on('minimize', seen(false));
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   window.on('closed', () => {
     if (win === window) win = null;
     host?.note({ kind: 'focus', focused: false });
+    host?.note({ kind: 'window', visible: false });
     releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
   });
@@ -311,10 +318,17 @@ void app.whenReady().then(() => {
     event: (event) => {
       // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
       // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
-      if ((event as { type?: unknown } | null)?.type === 'lagged') win?.webContents.reload();
-      else win?.webContents.send('faber:event', event);
+      const type = (event as { type?: unknown } | null)?.type;
+      if (type === 'lagged') win?.webContents.reload();
+      else if (type === 'update') {
+        // The updater's status has its own channel on the screen (`onUpdate`), without the tag that routes it.
+        const { type: _tag, ...status } = event as Record<string, unknown>;
+        win?.webContents.send('faber:update', status);
+      } else win?.webContents.send('faber:event', event);
     },
     order: (order) => apply(order, window),
   });
-  if (!autostart) show();
+  // A start with the system keeps the window away, and the updater must know that before it decides anything.
+  if (autostart) host.note({ kind: 'window', visible: false });
+  else show();
 });

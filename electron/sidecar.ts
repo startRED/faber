@@ -55,6 +55,8 @@ export class Sidecar {
       FABER_VERSION: app.getVersion(),
       FABER_SHELL_PID: String(process.pid),
       FABER_AUTOSTART: app.isPackaged && startsWithSystem() ? '1' : '0',
+      // Self-updates (`faber-update`) run only in the installed app, which says where its program is for the installer.
+      ...(app.isPackaged ? { FABER_UPDATES: '1', FABER_INSTALL_DIR: path.dirname(process.execPath) } : {}),
     };
     // No shell, no console window: the host is a plain child of the app.
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
@@ -104,7 +106,12 @@ export class Sidecar {
   }
 
   /** Tells the host what only the app sees (`ShellNote` in `host/src/wire.rs`); it answers nothing. */
-  note(note: { kind: 'focus'; focused: boolean } | { kind: 'picked'; id: number; path: string | null; noWindow: boolean }): void {
+  note(
+    note:
+      | { kind: 'focus'; focused: boolean }
+      | { kind: 'window'; visible: boolean }
+      | { kind: 'picked'; id: number; path: string | null; noWindow: boolean },
+  ): void {
     if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 
