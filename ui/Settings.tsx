@@ -206,7 +206,7 @@ export function Settings(props: Props) {
               </Opt>
             </Group>
             <Group title={t('set.group.ai')}>
-              <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>
+              <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()]).split('\n')}>
                 <PickMenu
                   id="set-permissions-pick"
                   label={t('set.permissions')}

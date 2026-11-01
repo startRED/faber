@@ -43,6 +43,7 @@ pub mod progress;
 pub mod project;
 mod prompt_history;
 pub mod recents;
+pub mod results;
 pub mod rewind;
 pub mod route;
 pub mod router;
