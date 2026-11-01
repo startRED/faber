@@ -758,6 +758,9 @@ export function riders(entries, only) {
     .slice(0, TRAIN);
 }
 
+/** The entries still waiting after the chosen riders were blamed. */
+export const remainingRiders = (entries, blamed) => entries.filter((e) => !blamed.includes(e));
+
 /** The pull requests of a red train that ride again: the first half, at least one. */
 export const half = (prs) => prs.slice(0, Math.max(1, Math.ceil(prs.length / 2)));
 
@@ -914,25 +917,32 @@ async function train({ after = '', self = '', only = null, later = [] } = {}) {
     console.log('Another train is being built: whoever is queued waits for it.');
     return 0;
   }
-  const entries = waiting(base);
+  let entries = waiting(base);
   const then = readThen();
-  const pick = pickRiders(entries, then.groups, only, later);
-  const chosen = riders(entries, pick.only);
+  let pick = pickRiders(entries, then.groups, only, later);
   let parent = base;
   const members = [];
   const behind = [];
-  for (const e of chosen) {
-    const opts = { onto: parent };
-    if ((await land(e.pr, false, e.oid, ['--alone'], opts)) === 0 && opts.commit) {
-      parent = opts.commit;
-      members.push(e.pr);
-    } else if (parent === base) {
-      // Not even on the base alone: only its author can settle it.
-      blame(e.pr, e.oid, e.commit, `it does not squash on ${BASE}`);
-    } else {
-      console.log(`#${e.pr} does not go on top of the riders before it: it waits for the next train.`);
-      behind.push(e.pr);
+  while (true) {
+    const chosen = riders(entries, pick.only);
+    if (!chosen.length) break;
+    for (const e of chosen) {
+      const opts = { onto: parent };
+      if ((await land(e.pr, false, e.oid, ['--alone'], opts)) === 0 && opts.commit) {
+        parent = opts.commit;
+        members.push(e.pr);
+      } else if (parent === base) {
+        // Not even on the base alone: only its author can settle it.
+        blame(e.pr, e.oid, e.commit, `it does not squash on ${BASE}`);
+      } else {
+        console.log(`#${e.pr} does not go on top of the riders before it: it waits for the next train.`);
+        behind.push(e.pr);
+      }
     }
+    if (members.length) break;
+    // Nobody rode: keep the remaining riders in this group ahead of the next group.
+    entries = remainingRiders(entries, chosen);
+    pick = pickRiders(entries, pick.only ? [pick.only, ...pick.groups] : pick.groups, null);
   }
   // A group's riders that did not fit ride next, still before any newcomer.
   const groups = pick.only && behind.length ? [behind, ...pick.groups] : pick.groups;
