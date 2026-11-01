@@ -30,14 +30,24 @@ impl Out {
         }
     }
     pub fn fail(&self, key: &str, code: i32) -> i32 {
+        self.fail_detail(key, None, code)
+    }
+    pub fn fail_detail(&self, key: &str, detail: Option<&str>, code: i32) -> i32 {
         if self.json {
             let english = Words::new("en");
             let message = english.get(key);
             let message = if message == key { english.get("cli.error.refused") } else { message };
-            self.line(&json!({"error":key,"message":message}));
+            let mut output = json!({"error":key,"message":message});
+            if let Some(detail) = detail {
+                output["detail"] = json!(detail);
+            }
+            self.line(&output);
         } else {
             let message = self.words.get(key);
             eprintln!("{}", if message == key { self.words.get("cli.error.refused") } else { message });
+            if let Some(detail) = detail {
+                eprintln!("{detail}");
+            }
         }
         code
     }

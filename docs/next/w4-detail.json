@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Command-line refusals now include the explanation when one is available.",
+      "pt-BR": "Quando um comando é recusado, a explicação aparece se estiver disponível.",
+      "es": "Cuando se rechaza un comando, aparece la explicación si está disponible.",
+      "fr": "Lorsqu’une commande est refusée, son explication apparaît si elle est disponible.",
+      "de": "Wird ein Befehl abgelehnt, erscheint die Erklärung, sofern eine vorliegt."
+    }
+  }
+}
