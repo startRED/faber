@@ -112,6 +112,11 @@ fn network_error(e: reqwest::Error) -> io::Error {
     io::Error::new(kind, e)
 }
 
+fn body_error(e: reqwest::Error) -> io::Error {
+    let kind = if e.is_timeout() { io::ErrorKind::TimedOut } else { io::ErrorKind::NotConnected };
+    io::Error::new(kind, e)
+}
+
 /// Downloads a payload into `part`, removing a partial file on failure.
 fn download_payload(download: &Download<'_>, url: &str, part: &Path, what: &str, progress: &Progress<'_>) -> Result<String, Value> {
     download(url, part).map_err(|e| {
@@ -773,7 +778,7 @@ pub(crate) async fn metadata_body(mut res: reqwest::Response, limit: usize, url:
         return Err(too_big());
     }
     let mut body = Vec::new();
-    while let Some(chunk) = res.chunk().await.map_err(network_error)? {
+    while let Some(chunk) = res.chunk().await.map_err(body_error)? {
         if body.len() + chunk.len() > limit {
             return Err(too_big());
         }
@@ -814,7 +819,7 @@ async fn stream_to<W: Write>(
     let mut res = get(url, loopback, idle).await?;
     let mut out = create(dest).map_err(write_failure)?;
     let mut hasher = Sha256::new();
-    while let Some(chunk) = res.chunk().await.map_err(network_error)? {
+    while let Some(chunk) = res.chunk().await.map_err(body_error)? {
         hasher.update(&chunk);
         out.write_all(&chunk).map_err(write_failure)?;
     }

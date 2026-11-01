@@ -1654,7 +1654,6 @@ export const en = {
   'reason.setup.write': "Faber could not write the download. Free up space or check folder permissions, then try again.",
   'reason.setup.timeout': "The download took too long. Check your connection and try again.",
   'error.setup.download': 'Could not download the official program. Check the connection and try again, or install it from its official page.',
-  'error.setup.checksum': 'The downloaded file is not the original, so nothing was installed.',
   'error.setup.install': 'Could not complete the installation. Try again, or install it from its official page.',
   'error.setup.unsupported': 'This platform or setup method is not supported.',
   'error.setup.signIn': 'Could not start the sign-in process.',

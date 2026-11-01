@@ -1659,7 +1659,6 @@ export const fr: Messages = {
   'reason.setup.write': "Faber ne peut pas enregistrer le téléchargement. Libérez de l’espace ou vérifiez les permissions du dossier, puis réessayez.",
   'reason.setup.timeout': "Le téléchargement a pris trop de temps. Vérifiez votre connexion et réessayez.",
   'error.setup.download': 'Impossible de télécharger l’outil officiel. Vérifiez la connexion et réessayez, ou installez-le depuis sa page officielle.',
-  'error.setup.checksum': 'Le fichier téléchargé n’est pas l’original : rien n’a été installé.',
   'error.setup.install': 'Impossible de terminer l’installation. Réessayez, ou installez l’outil depuis sa page officielle.',
   'error.setup.unsupported': 'Cette plateforme ou méthode d’installation n’est pas prise en charge.',
   'error.setup.signIn': 'Impossible de lancer la procédure de connexion.',

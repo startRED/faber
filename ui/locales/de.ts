@@ -1659,7 +1659,6 @@ export const de: Messages = {
   'reason.setup.write': "Faber konnte den Download nicht speichern. Gib Speicherplatz frei oder prüfe die Ordnerberechtigungen und versuche es erneut.",
   'reason.setup.timeout': "Der Download hat zu lange gedauert. Prüfe die Verbindung und versuche es erneut.",
   'error.setup.download': 'Das offizielle Programm konnte nicht heruntergeladen werden. Prüfe die Verbindung und versuche es noch einmal, oder installiere es über seine offizielle Seite.',
-  'error.setup.checksum': 'Die heruntergeladene Datei ist nicht das Original, daher wurde nichts installiert.',
   'error.setup.install': 'Die Installation konnte nicht abgeschlossen werden. Versuche es noch einmal, oder installiere das Programm über seine offizielle Seite.',
   'error.setup.unsupported': 'Diese Plattform oder Installationsmethode wird nicht unterstützt.',
   'error.setup.signIn': 'Der Anmeldevorgang konnte nicht gestartet werden.',

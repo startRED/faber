@@ -60,7 +60,7 @@ check('setup C4.3: an installed signed-in subscription has a connected card with
 check('setup C4.4: a failed installation translates the error key and keeps technical detail separate', () => {
   const detail = 'checksum mismatch: expected abcd, received 1234; C:\\temporary\\download.exe';
   for (const [language, messages] of Object.entries(languages)) {
-    const key = 'error.setup.checksum';
+    const key = 'reason.setup.checksum';
     const sentence = text(messages, key);
     const card = setupCard(
       {
@@ -93,7 +93,7 @@ check('setup C4.6: all five languages fill every guide key and preserve English 
     'setup.step.prerequisite', 'setup.step.download', 'setup.step.verify', 'setup.step.install', 'setup.step.done',
     'setup.signedOut', 'setup.signIn', 'setup.waiting', 'setup.checkAgain', 'setup.connected',
     'setup.details', 'setup.skip', 'setup.close', 'set.subscriptions', 'set.openSetup',
-    'error.setup.download', 'error.setup.checksum', 'error.setup.install',
+    'error.setup.download', 'error.setup.install',
     'error.setup.unsupported', 'error.setup.signIn', 'error.setup.check',
   ];
   const isGuideKey = (key: string) => key.startsWith('setup.') || key.startsWith('error.setup.') || key.startsWith('set.subscriptions') || key === 'set.openSetup';

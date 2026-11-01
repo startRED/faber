@@ -1656,7 +1656,6 @@ export const ptBR: Messages = {
   'reason.setup.write': "O Faber não conseguiu salvar o download. Libere espaço ou confira as permissões da pasta e tente de novo.",
   'reason.setup.timeout': "O download demorou demais. Confira a conexão e tente de novo.",
   'error.setup.download': 'Não foi possível baixar o programa oficial. Confira a conexão e tente de novo, ou instale pela página oficial.',
-  'error.setup.checksum': 'O arquivo baixado não é o original, então nada foi instalado.',
   'error.setup.install': 'Não foi possível concluir a instalação. Tente de novo, ou instale pela página oficial.',
   'error.setup.unsupported': 'Esta plataforma ou forma de instalação não é suportada.',
   'error.setup.signIn': 'Não foi possível iniciar o login.',

@@ -1659,7 +1659,6 @@ export const es: Messages = {
   'reason.setup.write': "Faber no pudo guardar la descarga. Libera espacio o comprueba los permisos de la carpeta y vuelve a intentarlo.",
   'reason.setup.timeout': "La descarga tardó demasiado. Comprueba la conexión y vuelve a intentarlo.",
   'error.setup.download': 'No se pudo descargar la herramienta oficial. Revisa la conexión y vuelve a intentarlo, o instálala desde su página oficial.',
-  'error.setup.checksum': 'El archivo descargado no es el original, así que no se instaló nada.',
   'error.setup.install': 'No se pudo completar la instalación. Vuelve a intentarlo, o instálala desde su página oficial.',
   'error.setup.unsupported': 'Esta plataforma o forma de instalación no es compatible.',
   'error.setup.signIn': 'No se pudo iniciar el proceso de sesión.',

@@ -802,6 +802,7 @@ async fn a_connection_cut_halfway_leaves_no_part_file() {
     let part = dir.path().join("cut.part");
     let error = loopback_download(format!("{}/cut", server.origin), part.clone(), server.origin.clone()).await.unwrap_err();
     assert!(!faber_engine::install::is_write_failure(&error), "a broken connection is not a write failure: {error}");
+    assert_eq!(error.kind(), io::ErrorKind::NotConnected);
     assert!(!part.exists());
 }
 
