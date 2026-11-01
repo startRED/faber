@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Your project copies keep your work while Faber clears rebuildable folders after seven idle days.",
+      "pt-BR": "Suas cópias de projeto preservam seu trabalho enquanto o Faber limpa pastas recriáveis após sete dias sem uso.",
+      "es": "Tus copias de proyecto conservan tu trabajo mientras Faber limpia las carpetas regenerables tras siete días sin uso.",
+      "fr": "Vos copies de projet gardent votre travail ; Faber nettoie les dossiers recréables après sept jours sans activité.",
+      "de": "Deine Projektkopien behalten deine Arbeit; Faber räumt wiederherstellbare Ordner nach sieben Tagen ohne Aktivität auf."
+    }
+  }
+}
