@@ -118,8 +118,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
    never visibility: a hidden button leaves the tab order, so the keyboard could not reach it to reveal it. */
 .group-h .plus { position: absolute; right: 0; top: -7px; opacity: 0; }
 .projects:hover .group-h .plus, .chat-groups:hover .group-h .plus, .group-h:focus-within .plus, .group-h .plus:focus-visible { opacity: 1; }
-.projects:has(.side-empty) .group-h { min-height: var(--h-sm); padding-bottom: 0; }
-.projects:has(.side-empty) .group-h .plus { top: 0; opacity: 1; }
+.chat-groups.no-groups .group-h, .projects:has(.side-empty) .group-h { min-height: var(--h-sm); padding-bottom: 0; }
+.chat-groups.no-groups .group-h .plus, .projects:has(.side-empty) .group-h .plus { top: 0; opacity: 1; }
 .plus:hover { background: var(--s3); color: var(--ink); }
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
 .list > section, .proj, .crow { min-width: 0; }
@@ -151,6 +151,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crow .x.confirm { color: var(--ink); font-weight: 580; }
 .crow:hover .x, .crow:focus-within .x { opacity: 1; }
 .side-empty { display: grid; gap: 6px; justify-items: start; padding: 4px 10px 0; color: var(--ink-3); font-size: var(--fs-sm); }
+/* Projects home already explains the folder action; its sidebar keeps only the quiet empty label. */
+.projects .side-empty > :is(p, .peek) { display: none; }
 /* Message emphasis remains visible without colour. */
 .message-hits { display: grid; gap: 4px; min-width: 0; }
 .message-hit { display: grid; gap: 4px; width: 100%; min-width: 0; padding: 8px 10px; border-radius: var(--r-xs); text-align: left; }
@@ -329,6 +331,11 @@ svg.i.sm { width: 14px; height: 14px; }
 /* An opened subagent as a full thread: the column covers the work area, its text keeps the reading column's width, and the composer stays below. */
 .work > .runcol.wide { width: 100%; border-left: 0; box-shadow: none; }
 .runcol.wide :is(.rc-head, .rc-body) { padding-inline: max(18px, calc((100% - 660px) / 2)); }
+/* Automatic questions keep the full page width on small windows; explicitly opened views keep their modal layout. */
+.work.under:has(> .runcol:not([aria-modal]):not(.wide)) { grid-template-rows: minmax(0, 1fr) auto minmax(0, min(30%, 220px)); }
+.work.under:has(> .runcol:not([aria-modal]):not(.wide)) :is(.thread.welcome, .projects-stage.home) { padding-right: clamp(24px, 4vw, 60px); }
+.work > .runcol:not([aria-modal]):not(.wide) { grid-row: 3; width: 100%; border-left: 0; border-top: 1px solid var(--line-2); box-shadow: none; }
+.work > .runcol:not([aria-modal]):not(.wide) > .grip { display: none; }
 .rc-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 18px; }
 .rc-head h2 { font-size: var(--fs-lead); }
 .rc-head .n { color: var(--ink-3); font-size: var(--fs-sm); }
@@ -1591,7 +1598,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 @keyframes find-in { from { opacity: 0; transform: translateY(calc(-1 * var(--motion-slide) / 2)); } }
 @keyframes find-out { to { opacity: 0; transform: translateY(calc(-1 * var(--motion-slide) / 2)); } }
 .find { max-width: calc(100% - 48px); }
-.main:has(.work.under) .find { right: calc(min(352px, 100%) + 24px); max-width: calc(100% - min(352px, 100%) - 48px); }
+.main:has(.work.under > .runcol:is([aria-modal], .wide)) .find { right: calc(min(352px, 100%) + 24px); max-width: calc(100% - min(352px, 100%) - 48px); }
 .main:has(> .find) .thread { padding-top: calc(22px * var(--dens) + var(--h-lg)); }
 .find .field.search { flex: 1 1 200px; width: auto; min-width: 0; }
 .find .iconbtn { flex: none; }
@@ -1899,3 +1906,5 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .faber-act-line button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .faber-act details { margin-left: 22px; }
 .faber-act-sent { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
+
+.project-summary { margin: 0; color: var(--ink-3); font-size: var(--fs-sm); }

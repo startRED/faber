@@ -513,8 +513,8 @@ export function Sidebar(props: Props) {
         </section>
         </Show>
         <Show when={inChat()}>
-          <section class="chat-groups" aria-labelledby="side-chat-groups">
-            <div class="group-h"><span id="side-chat-groups">{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
+          <section class="chat-groups" classList={{ "no-groups": groups().length === 0 }} aria-labelledby="side-chat-groups">
+            <div class="group-h"><span id="side-chat-groups" classList={{ sr: groups().length === 0 }}>{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
             <Show when={newGroup()}><RenameBox title="" onDone={(name) => {
               setNewGroup(false);
               if (name?.trim()) void api.createChatGroup(name).then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));

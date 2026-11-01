@@ -225,7 +225,7 @@ export const fr: Messages = {
   'area.label': 'Espace',
   'brand.name': 'Faber',
   'quota.label': 'Quota',
-  'quota.window': 'fenêtre de {window}',
+  'quota.window': 'Fenêtre de {window}',
   'quota.five_hour': '5 heures',
   'quota.seven_day': '7 jours',
   'quota.now': 'maintenant',
@@ -361,6 +361,7 @@ export const fr: Messages = {
   's1.try': 'Pour commencer',
   's1.pickUp': 'Reprendre où vous en étiez',
   's1.terminal': 'Sessions du terminal',
+  's1.terminal.summary': "Sessions lancées dans ce dossier.",
   's1.terminal.hint': 'Sessions que vous avez lancées dans un terminal dans ce dossier : ouvrez-en une ici, elle reprend là où elle en était.',
   's1.terminal.none': 'Aucune session n’a été lancée dans un terminal dans ce dossier.',
   'suggest.1': 'Expliquer un sujet',
@@ -1821,6 +1822,7 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "memory.title": "Mémoire",
+  'memory.summary': "Consignes et décisions du projet.",
   "memory.scope": "Uniquement ce dossier de projet. Les copies séparées et les dossiers privés de connexion de vos IA restent à part.",
   "memory.nextLaunch": "Les changements prennent effet au prochain démarrage de l’IA dans ce dossier. Les consignes d’un sous-dossier s’y appliquent.",
   "memory.refresh": "Actualiser",
@@ -2020,6 +2022,7 @@ export const fr: Messages = {
   "set.projects.copiesDesc": "Chaque nouvelle conversation travaille sur sa propre branche, faber/…, dans une copie du dépôt : deux conversations et votre propre dossier ne modifient jamais les mêmes fichiers. L’agent rapporte son travail par un commit, un push ou une pull request ; Faber ne fusionne jamais de lui-même.",
   "set.projects.copiesTech": "Un git worktree dans le dossier de données de Faber, créé depuis la branche que vous avez ouverte au moment du premier message, seulement dans un dépôt qui a au moins un commit. Il part avec sa conversation, ou à l’ouverture de Faber une fois son travail fusionné et sans rien de non commité ; un travail qui n’existe nulle part ailleurs n’est jamais supprimé sans vous demander. Désactiver ceci garde les copies que les conversations ont déjà.",
   "goals.title": "Objectifs permanents",
+  'goals.summary': "Ce qui doit rester vrai.",
   "goals.scope": "Ce que ce projet doit toujours garder vrai. Chacun est une vérification confirmée ou, dans le projet de Faber lui-même, aucun nouveau plantage.",
   "goals.refresh": "Actualiser",
   "goals.off": "Faber ne surveille ces objectifs que si la réparation automatique est activée dans Réglages, Projets.",

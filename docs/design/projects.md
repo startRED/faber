@@ -13,6 +13,8 @@ mission board and the local build card left the bundle with their 30 s poll (R17
 
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
   recent folders and saved environments, and at most three project conversations to pick up.
+  Its folder-purpose sentence and illustration appear here only: the empty sidebar keeps its quiet status and Add button,
+  with the duplicate sentence and illustration hidden from layout and accessibility (`tests/ui/shell.check.ts`).
 - With a project open, the new-conversation screen of Chat (`welcome-grid project`) scoped to the folder, in one column:
   Curioso, then the folder in short form as one quiet line in the interface size (the last two folder names,
   the full path on hover; the sidebar and the crumb already name the project, so the page says it only to screen readers), the greeting "What should we tackle?", the shared
@@ -23,9 +25,8 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   separate-copies switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
   the rest behind the "?" of the row.
 - With an AI connected, a quiet button with the terminal icon, "Sessions from the terminal", sits under the pick-up list
-  (its tooltip says what it lists). Only a click asks: Codex starts for a moment, and Claude Code's history of the
-  folder is read; the section then takes the
-  heading, says "Looking…", and shows up to five sessions started in a terminal in the folder (the pick-up row: the
+  (a short line says what it lists). Opening it asks: Codex starts for a moment, and Claude Code's history of the
+  folder is read; the button stays available to close or reopen the list; it says "Looking…", and shows up to five sessions started in a terminal in the folder (the pick-up row: the
   session's title or first message, "Codex · when" or "Claude · when"), or one line when there is none. A row opens the session as a
   project conversation in the folder itself, never a separate copy, whose next message resumes it with its own CLI, even
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
@@ -33,7 +34,7 @@ mission board and the local build card left the bundle with their 30 s poll (R17
 
 ### Standing goals
 
-Above Memory, one more quiet fold (`ui/ProjectGoals.tsx`) built the same way: a text button, the shared Collapse, one
+A short line beneath each title explains standing goals, memory and terminal sessions whether the fold is open or closed. Above Memory, one more quiet fold (`ui/ProjectGoals.tsx`) built the same way: a text button, the shared Collapse, one
 column, read on open and on Refresh, nothing polling. Each goal is a row of the person's words, then one small line: the
 state word (Holding, Checking, Broke and being fixed, Needs you, Paused), when it was last checked and its check as code.
 Needs you is the only state word set heavier (the ink colour at weight 580, no amber) and carries its reason in plain

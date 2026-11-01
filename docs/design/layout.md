@@ -12,8 +12,8 @@ so the layout changes with its width:
 | Window width | Sidebar | Running column | Reading column |
 | :--- | :--- | :--- | :--- |
 | About 1,030 px and wider (whenever the stage keeps 440 px beside the column) | 288 px, beside the stage; it folds away while a wide view would squeeze the stage under 560 px | Its view's usual width when open, beside the stage | Shrinks with the stage, 760 px at most. The stage is never narrower than 440 px |
-| 900 px to where the column no longer docks | 288 px, beside the stage | When open, an overlay on the stage | Up to 760 px |
-| 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | When open, an overlay on the stage | Up to 760 px |
+| 900 px to where the column no longer docks | 288 px, beside the stage | Automatic list below the page; manually opened views overlay the stage | Up to 760 px |
+| 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | Automatic list below the page; manually opened views overlay the stage | Up to 760 px |
 
 In the narrow sidebar overlay, switching between Chat and Projects keeps navigation open so the chosen area's rows remain reachable. Choosing a project or conversation, opening Catalog, Escape or the scrim closes it. Tab stays inside the modal overlay; Escape returns focus to the topbar menu button. Wide navigation stays beside the stage. The narrow sidebar remains painted through its full-motion exit, then becomes hidden; reduced and no motion hide it immediately. Closing makes it inert immediately, even while the exit is visible.
 
