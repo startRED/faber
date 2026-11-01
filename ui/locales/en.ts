@@ -1,6 +1,20 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "act.faber": "Faber",
+  "act.route.chose": "chose {model}, {effort} effort",
+  "act.kit.chose": "picked tools for this task: {ids}",
+  "act.recovery.moved": "moved this to {vendor} because the first AI was out of quota",
+  "act.recovery.waited": "is waiting for the included quota to come back",
+  "act.helper.started": "gave a helper this job",
+  "act.why.keepGoing": "Keep going is on for this conversation and the AI stopped",
+  "act.why.compacted": "the AI asked to continue afterward",
+  "act.why.compactFailed": "the AI asked to continue afterward",
+  "act.change": "Change",
+  "act.sent": "What Faber said to the AI",
+  "act.why": "because {why}",
+  "act.router": "{name} router",
+  "act.helper": "{name} helper",
   "tools.marketing-aso.needs": "Needs web access to inspect store listings.",
   "catalog.cliName": "Name in the AI tool: {name}",
   "catalog.job.code": "Working on code",
@@ -2142,6 +2156,7 @@ export const en = {
   'notes.326.better': 'The plan shows which conversation works on each step and whether it waits for you, and opens it with a click.',
   'notes.327.better': 'Work rows in Technical details now show a small picture of their state: working, waiting for you, stuck, done, stopped or failed.',
   'notes.328.fixed': 'When a limit has no current reading, you can see where to check it instead of an empty bar.',
+  'notes.329.better': 'You can see why Faber continued a conversation and what it asked a helper to do.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

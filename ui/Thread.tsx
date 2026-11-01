@@ -1,3 +1,4 @@
+import { FaberActs } from './FaberAct.tsx';
 import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
 import {
   api,
@@ -246,15 +247,15 @@ interface Shared {
   plan?: Plan;
   /** A button of a closing box: its words go as the person's message. */
   onReply?: (text: string) => void;
+  onActChange?: (target: NonNullable<import('./api.ts').FaberAct['change']>) => void;
   conversationNames?: Record<string, string>;
   /** Opens another conversation, as its sidebar row does: a plan step's link (task 040). */
   onOpenConversation?: (id: string) => void;
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
-  // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
-  // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
-  const woke = () => props.prompt?.wake;
+  // Older automatic messages without acts keep their loop mark in the reply header.
+  const woke = () => props.prompt?.acts?.length ? undefined : props.prompt?.wake;
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
@@ -577,6 +578,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         surface="ask"
         seen={props.last && !m().parkedSeen ? () => api.parkedSeen(props.conversationId, m().id) : undefined}
       />
+      <FaberActs acts={m().acts} onChange={props.onActChange} />
       <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
         <PieceReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
         <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />
@@ -1055,7 +1057,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
               </Show>
             }
           >
-            {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
+            <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (

@@ -4,6 +4,10 @@ Answers with their bar, the person's messages and the viewer. The work log above
 and the running column are in [layout.md](layout.md); helper rows, memory waits and creative comparisons are in
 [subagents.md](subagents.md).
 
+## Faber's decision rows
+
+A quiet labeled row records each decision or message Faber made on its own. It is never the person's voice or the AI's reply. The row names its actor, decision and reason, with a Change action where available; the exact words sent to an AI stay selectable inside a closed disclosure. Wake rows omit a separate reason when their sentence already explains it; helper rows disclose the brief sent to the helper. Rows wrap in narrow windows.
+
 ## Answers
 
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
@@ -49,7 +53,7 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 - In the work log, what the agent wrote between steps shows its last two paragraphs; earlier ones wait under a quiet
   "1 more" link in the third ink (R251). A code block keeps the narration whole. The answer itself never folds.
 - The caret blinks only while words arrive; a reply at work after its words shows its step under them in the status
-  line's style, or "Thinking…" with its thinking headline once words stop. Faber's plumbing takes no row: its own message is a loop mark after the next reply's model (R241; the
+  line's style, or "Thinking…" with its thinking headline once words stop. Older messages without decision rows keep the loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check

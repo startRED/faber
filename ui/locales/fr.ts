@@ -1,6 +1,20 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "a choisi {model}, effort {effort}",
+  "act.kit.chose": "a choisi les outils pour cette tâche : {ids}",
+  "act.recovery.moved": "a confié la suite à {vendor} car la première IA avait épuisé son quota",
+  "act.recovery.waited": "attend le retour du quota inclus",
+  "act.helper.started": "a confié cette tâche à une IA de renfort",
+  "act.why.keepGoing": "Continuer est activé pour cette conversation et l’IA s’est arrêtée",
+  "act.why.compacted": "l’IA a demandé à continuer ensuite",
+  "act.why.compactFailed": "l’IA a demandé à continuer ensuite",
+  "act.change": "Modifier",
+  "act.sent": "Ce que Faber a dit à l’IA",
+  "act.why": "parce que {why}",
+  "act.router": "{name}, choix de l’IA",
+  "act.helper": "{name}, renfort",
   "tools.marketing-aso.needs": "Nécessite un accès web pour examiner les pages des boutiques.",
   "catalog.cliName": "Nom dans l’outil d’IA : {name}",
   "catalog.pluginRecord": "Registre du plugin",
@@ -2262,6 +2276,7 @@ export const fr: Messages = {
   'notes.326.better': "Le plan montre quelle conversation s'occupe de chaque étape et si elle vous attend, et l'ouvre d'un clic.",
   'notes.327.better': 'Les lignes de travail des Détails techniques montrent maintenant un petit dessin de leur état : en cours, en attente de vous, bloqué, terminé, arrêté ou en échec.',
   'notes.328.fixed': 'Quand la limite n’a pas de relevé actuel, vous voyez où la consulter à la place d’une barre vide.',
+  'notes.329.better': 'Vous voyez pourquoi Faber a poursuivi une conversation et ce qu’il a demandé à un assistant.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -405,6 +405,8 @@ pub struct Message {
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acts: Vec<crate::act::FaberAct>,
     /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
     /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -890,6 +892,7 @@ impl Message {
             look: None,
             follow: None,
             wake: None,
+            acts: vec![],
             closed: false,
             halt: None,
             auto_answers: None,

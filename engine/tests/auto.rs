@@ -103,11 +103,18 @@ async fn auto_routes_the_first_message_blind_and_says_why() {
     let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
-    engine.send(auto(SKY)).unwrap();
+    let id = engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("conversations").join(format!("{id}.json"))).unwrap()).unwrap();
+    assert_eq!(saved["messages"][1]["acts"], serde_json::to_value(&reply).unwrap()["acts"]);
     assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
     assert_eq!(reply.reason.as_deref(), Some("reason.route.chat.easy"));
+    let act = serde_json::to_value(&reply).unwrap()["acts"][0].clone();
+    assert_eq!(act["kind"], "route");
+    assert_eq!(act["params"]["model"], "gpt-6-luna");
+    assert_eq!(act["why"], "reason.route.chat.easy");
     let prompt = calls.lock().unwrap()[0].to_lowercase();
     assert!(prompt.contains(&SKY.to_lowercase()) && !prompt.contains("luna") && !prompt.contains("gpt"));
 }

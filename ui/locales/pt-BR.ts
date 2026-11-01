@@ -1,6 +1,20 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "escolheu {model}, esforço {effort}",
+  "act.kit.chose": "escolheu ferramentas para esta tarefa: {ids}",
+  "act.recovery.moved": "passou para {vendor} porque a primeira IA ficou sem cota",
+  "act.recovery.waited": "está esperando a cota incluída voltar",
+  "act.helper.started": "deu esta tarefa a uma IA ajudante",
+  "act.why.keepGoing": "Continuar está ligado nesta conversa e a IA parou",
+  "act.why.compacted": "a IA pediu para continuar depois",
+  "act.why.compactFailed": "a IA pediu para continuar depois",
+  "act.change": "Alterar",
+  "act.sent": "O que o Faber disse à IA",
+  "act.why": "porque {why}",
+  "act.router": "{name}, escolha de IA",
+  "act.helper": "{name}, ajudante",
   "tools.marketing-aso.needs": "Precisa de acesso à web pra examinar as páginas das lojas.",
   "catalog.cliName": "Nome na ferramenta de IA: {name}",
   "catalog.job.code": "Programar",
@@ -2249,6 +2263,7 @@ export const ptBR: Messages = {
   'notes.326.better': 'O plano mostra qual conversa cuida de cada passo e se ela espera por você, e abre essa conversa com um clique.',
   'notes.327.better': 'As linhas de trabalho nos Detalhes técnicos agora mostram um desenho pequeno do estado: trabalhando, esperando você, travado, concluído, parado ou com falha.',
   'notes.328.fixed': 'Quando falta uma leitura atual do limite, você vê onde conferi-lo no lugar de uma barra vazia.',
+  'notes.329.better': 'Você pode ver por que o Faber continuou uma conversa e o que pediu a um ajudante.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

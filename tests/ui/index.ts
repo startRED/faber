@@ -99,6 +99,7 @@ import './steer.check.ts';
 import './edit-queued.check.ts';
 import './stop-helpers.check.ts';
 import './thread.check.ts';
+import './faber-act.check.ts';
 import './viewer.check.ts';
 import './tutorial.check.ts';
 import './unsent.check.ts';

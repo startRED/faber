@@ -1,6 +1,20 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "hat {model} mit Aufwand {effort} gewählt",
+  "act.kit.chose": "hat Werkzeuge für diese Aufgabe gewählt: {ids}",
+  "act.recovery.moved": "hat an {vendor} übergeben, weil das Kontingent der ersten KI aufgebraucht war",
+  "act.recovery.waited": "wartet, bis das enthaltene Kontingent zurück ist",
+  "act.helper.started": "hat einer weiteren KI diese Aufgabe gegeben",
+  "act.why.keepGoing": "Weitermachen ist für diese Unterhaltung eingeschaltet und die KI hat angehalten",
+  "act.why.compacted": "die KI danach weitermachen wollte",
+  "act.why.compactFailed": "die KI danach weitermachen wollte",
+  "act.change": "Ändern",
+  "act.sent": "Was Faber der KI gesagt hat",
+  "act.why": "weil {why}",
+  "act.router": "{name}, KI Auswahl",
+  "act.helper": "{name}, Hilfe",
   "tools.marketing-aso.needs": "Benötigt Webzugriff zum Prüfen der Store-Seiten.",
   "catalog.cliName": "Name im KI-Werkzeug: {name}",
   "catalog.pluginRecord": "Plugin-Eintrag",
@@ -2262,6 +2276,7 @@ export const de: Messages = {
   'notes.326.better': 'Der Plan zeigt, welches Gespräch an jedem Schritt arbeitet und ob es auf dich wartet, und öffnet es mit einem Klick.',
   'notes.327.better': 'Die Arbeitszeilen in den technischen Details zeigen jetzt ein kleines Bild ihres Zustands: arbeitet, wartet auf dich, hängt, fertig, gestoppt oder fehlgeschlagen.',
   'notes.328.fixed': 'Wenn ein aktueller Wert für das Limit fehlt, siehst du statt eines leeren Balkens, wo du nachsehen kannst.',
+  'notes.329.better': 'Du siehst, warum Faber ein Gespräch fortgesetzt und was es einem Helfer aufgetragen hat.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

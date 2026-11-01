@@ -1,6 +1,20 @@
 import type { Messages } from './en.ts';
 
 export const es: Messages = {
+  "act.faber": "Faber",
+  "act.route.chose": "eligió {model}, esfuerzo {effort}",
+  "act.kit.chose": "eligió herramientas para esta tarea: {ids}",
+  "act.recovery.moved": "pasó a {vendor} porque la primera IA se quedó sin cuota",
+  "act.recovery.waited": "espera a que vuelva la cuota incluida",
+  "act.helper.started": "dio esta tarea a una IA de apoyo",
+  "act.why.keepGoing": "Seguir está activado en esta conversación y la IA se detuvo",
+  "act.why.compacted": "la IA pidió continuar después",
+  "act.why.compactFailed": "la IA pidió continuar después",
+  "act.change": "Cambiar",
+  "act.sent": "Lo que Faber dijo a la IA",
+  "act.why": "porque {why}",
+  "act.router": "{name}, selección de IA",
+  "act.helper": "{name}, apoyo",
   "tools.marketing-aso.needs": "Necesita acceso web para revisar las páginas de las tiendas.",
   "catalog.cliName": "Nombre en la herramienta de IA: {name}",
   "catalog.job.code": "Programar",
@@ -2262,6 +2276,7 @@ export const es: Messages = {
   'notes.326.better': 'El plan muestra qué conversación se ocupa de cada paso y si te está esperando, y la abre con un clic.',
   'notes.327.better': 'Las filas de trabajo de los Detalles técnicos ahora muestran un dibujo pequeño de su estado: trabajando, esperándote, atascado, concluido, detenido o con fallo.',
   'notes.328.fixed': 'Cuando falta una lectura actual del límite, ves dónde consultarlo en lugar de una barra vacía.',
+  'notes.329.better': 'Puedes ver por qué Faber continuó una conversación y qué le pidió a un ayudante.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

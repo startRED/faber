@@ -185,6 +185,11 @@ async fn keep_going_sends_the_next_turn_by_itself_until_the_agent_says_nothing_i
     assert!(turns(&pipe)[1].contains("keep going on your own"), "{:?}", turns(&pipe));
     let c = until(&engine, &id, |c| c.messages.len() == 4).await;
     assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.keepGoing"), "Faber's own message says so");
+    let act = serde_json::to_value(&c.messages[2]).unwrap()["acts"][0].clone();
+    assert_eq!(act["kind"], "wake");
+    assert_eq!(act["actor"], serde_json::json!({"who":"faber"}));
+    assert_eq!(act["change"], "keepGoing");
+    assert_eq!(act["sent"], c.messages[2].text);
     assert_eq!(c.keep_going.as_ref().map(|k| k.turns), Some(1));
     // The next item ends with the stop line, which leaves the answer. The first stop is not believed: Faber asks the agent to
     // reread the original request word for word.

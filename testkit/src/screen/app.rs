@@ -352,7 +352,8 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
-    // The header is the mark and the name; why Auto chose it, and the effort, are its tooltip, and the price note is the cost's.
+    // The header is the mark and the name; why Auto chose it, and the effort, are its tooltip and also the Faber row above the answer
+    // (R493: every intermediary is visible), and the price note is the cost's tooltip.
     let reason = page.text_of("reason.autoDefault")?;
     let tips = page.eval("(() => ({ header: document.querySelector('article.ai .model')?.title, cost: document.querySelector('article.ai .actions .cost')?.title }))()")?;
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
@@ -361,7 +362,8 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(!text.contains(&reason) && !text.contains("in API value"), || format!("neither sits on the page itself: {text}"))?;
+    ensure(text.contains(&reason), || format!("the Faber row should say why Auto chose the model: {text}"))?;
+    ensure(!text.contains("in API value"), || format!("the price note stays in the cost's tooltip: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
