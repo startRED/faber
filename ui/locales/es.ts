@@ -2259,6 +2259,7 @@ export const es: Messages = {
   'notes.324.better': 'Tras una hora sin nada entregado, Faber le pide una vez a la IA que cambie de enfoque. Si sigue sin nada, Seguir solo se detiene y te dice por qué.',
   'notes.325.fixed': 'Una decisión que conservaste y luego borraste en Memoria ya no vuelve como conservada si un agente la escribe otra vez: aparece sin revisar.',
   'notes.326.better': 'El plan muestra qué conversación se ocupa de cada paso y si te está esperando, y la abre con un clic.',
+  'notes.327.better': 'Las filas de trabajo de los Detalles técnicos ahora muestran un dibujo pequeño de su estado: trabajando, esperándote, atascado, concluido, detenido o con fallo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

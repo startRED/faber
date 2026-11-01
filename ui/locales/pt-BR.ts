@@ -2246,6 +2246,7 @@ export const ptBR: Messages = {
   'notes.324.better': 'Depois de uma hora sem nada entregue, o Faber pede uma vez à IA que mude de rumo. Se continuar sem nada, o Continuar sozinho para e conta o motivo.',
   'notes.325.fixed': 'Uma decisão que você manteve e depois apagou na Memória não volta como mantida quando um agente a escreve de novo: ela aparece como não revisada.',
   'notes.326.better': 'O plano mostra qual conversa cuida de cada passo e se ela espera por você, e abre essa conversa com um clique.',
+  'notes.327.better': 'As linhas de trabalho nos Detalhes técnicos agora mostram um desenho pequeno do estado: trabalhando, esperando você, travado, concluído, parado ou com falha.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

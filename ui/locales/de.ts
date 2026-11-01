@@ -2259,6 +2259,7 @@ export const de: Messages = {
   'notes.324.better': 'Nach einer Stunde ohne Ergebnis bittet Faber die KI einmal, anders vorzugehen. Bleibt es dabei, hört Selbst weitermachen auf und sagt dir warum.',
   'notes.325.fixed': 'Eine Entscheidung, die du behalten und dann im Gedächtnis gelöscht hast, gilt nicht mehr als behalten, wenn ein Agent sie neu schreibt: Sie erscheint als nicht geprüft.',
   'notes.326.better': 'Der Plan zeigt, welches Gespräch an jedem Schritt arbeitet und ob es auf dich wartet, und öffnet es mit einem Klick.',
+  'notes.327.better': 'Die Arbeitszeilen in den technischen Details zeigen jetzt ein kleines Bild ihres Zustands: arbeitet, wartet auf dich, hängt, fertig, gestoppt oder fehlgeschlagen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

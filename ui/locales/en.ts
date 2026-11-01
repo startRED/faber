@@ -2139,6 +2139,7 @@ export const en = {
   'notes.324.better': 'After an hour with nothing delivered, Faber asks the AI once to change approach. Still nothing: Keep going stops and tells you why.',
   'notes.325.fixed': 'A decision you kept and then deleted in Memory no longer comes back as kept when an agent writes it again: it reads not reviewed.',
   'notes.326.better': 'The plan shows which conversation works on each step and whether it waits for you, and opens it with a click.',
+  'notes.327.better': 'Work rows in Technical details now show a small picture of their state: working, waiting for you, stuck, done, stopped or failed.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
