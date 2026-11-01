@@ -3,10 +3,12 @@
 use std::collections::HashMap;
 
 /// Flags that take a value (`--id c1` or `--id=c1`).
-const VALUED: &[&str] =
-    &["id", "to", "project", "family", "state", "query", "last", "timeout", "vendor", "model", "effort", "limit", "data"];
+const VALUED: &[&str] = &[
+    "id", "to", "project", "family", "state", "query", "last", "timeout", "vendor", "model", "effort", "limit", "data", "ai", "step", "on",
+    "note",
+];
 /// Flags that are on or off.
-const SWITCHES: &[&str] = &["json", "human", "no-start", "archived", "all", "wait", "help"];
+const SWITCHES: &[&str] = &["json", "human", "no-start", "archived", "all", "wait", "help", "keep-going"];
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Args {

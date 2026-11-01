@@ -163,6 +163,26 @@ async fn piped_output_and_list_arguments() {
     );
 }
 #[tokio::test(flavor = "multi_thread")]
+async fn session_verbs_send_the_host_their_arguments() {
+    for (args, stdin, command, expected) in [
+        (
+            vec!["start", "Work", "-", "--ai", "codex", "--effort", "high", "--keep-going"],
+            "brief",
+            "start_conversation",
+            json!({"title":"Work","brief":"brief","ai":"codex","model":null,"effort":"high","step":null,"keepGoing":true}),
+        ),
+        (vec!["message", "c1", "hello"], "", "message_conversation", json!({"id":"c1","message":"hello"})),
+        (vec!["resume", "c1"], "", "resume_conversation", json!({"id":"c1","message":null})),
+        (vec!["mark-waiting", "--on", "c1,c2", "--note", "checks"], "", "mark_waiting", json!({"on":["c1","c2"],"note":"checks"})),
+        (vec!["stop", "c1"], "", "interrupt", json!({"id":"c1"})),
+        (vec!["archive", "c1"], "", "archive", json!({"id":"c1","on":true})),
+    ] {
+        let (result, fake) = faber(false, &args, stdin, &[]).await;
+        assert_eq!(result.code, 0, "{}", result.stdout);
+        assert!(fake.calls.lock().unwrap().iter().any(|(name, value)| name == command && value == &expected));
+    }
+}
+#[tokio::test(flavor = "multi_thread")]
 async fn errors_use_the_contract_exit_codes() {
     let data = tempfile::tempdir().unwrap();
     let bad = run(data.path(), &["list", "--bad"], "", &[]).await;
