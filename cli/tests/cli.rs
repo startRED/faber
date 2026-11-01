@@ -63,7 +63,9 @@ impl Backend for Fake {
     }
     fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> faber_channel::server::DetailedAnswer {
         if cmd == "ask" {
-            return Box::pin(async { Err(faber_channel::wire::Error { key: "error.reach.ask".into(), data: Some(json!({"request":"abcd1234"})) }) });
+            return Box::pin(async {
+                Err(faber_channel::wire::Error { key: "error.reach.ask".into(), data: Some(json!({"request":"abcd1234"})) })
+            });
         }
         let answer = self.dispatch(who, cmd, args);
         Box::pin(async move { answer.await.map_err(Into::into) })

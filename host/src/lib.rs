@@ -10,9 +10,9 @@
 
 #[macro_use]
 mod macros;
+mod ask;
 pub mod autostart;
 pub mod awake;
-mod ask;
 mod failure;
 mod feed;
 pub mod folder;
