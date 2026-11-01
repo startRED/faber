@@ -42,14 +42,21 @@ Every command in `host/src/table.rs` names one of five reaches, checked in `Host
 
 | Reach | Who may run it | What uses it |
 | :--- | :--- | :--- |
-| `free` | Anyone | `conversations`, `conversation`, `projects`, `quota`, `settings`, `create_chat_group`, `move_chat_to_group`, `search_messages`, `prompt_history`, `cli_sessions`, `versions`, `visual_answers`, `visual_pieces`, `rename`, `archive`, `pin`, `child_words`, `child_transcript`, `mentions`, `commands`, `context_parts`, `background_commands`, `changes`, `change_patch`, `rewind_points`, `rewind_redos`, `rewind_redo_preview`, `rewind_preview`, `asides`, `recents`, `project_goals`, `project_proof`, `project_memory`, `update_status`, `setup_check`, `tools_list`, `tools_inventory`, `mcp_servers`, `tools_in_use` |
+| `free` | Anyone | `conversations`, `conversation`, `conversation_markdown`, `results`, `project_results`, `projects`, `quota`, `settings`, `create_chat_group`, `move_chat_to_group`, `search_messages`, `prompt_history`, `cli_sessions`, `versions`, `visual_answers`, `visual_pieces`, `rename`, `archive`, `pin`, `child_words`, `child_transcript`, `mentions`, `commands`, `context_parts`, `background_commands`, `changes`, `change_patch`, `rewind_points`, `rewind_redos`, `rewind_redo_preview`, `rewind_preview`, `asides`, `recents`, `project_goals`, `project_proof`, `project_memory`, `update_status`, `setup_check`, `tools_list`, `tools_inventory`, `mcp_servers`, `tools_in_use` |
 | `own` | Person anywhere; an AI only in its own family (or to start a new conversation) | `move_turn`, `wait_turn`, `continue_closed`, `interrupt`, `send`, `branch`, `branch_here`, `save_piece_value`, `keep_going`, `remove_queued`, `edit_queued`, `send_queued`, `tell_helper`, `compact_now`, `ask_aside`, `clear_asides`, `unfollow_pr`, `read_file_at`, `read_image`, `site_tabs`, `site_picture` |
-| `ask` | Person at a terminal or on screen; an AI gets `error.reach.ask` and asks the person | `save_chat_group`, `add_chat_group_files`, `remove_chat_group_file`, `remove_chat_group`, `new_group_chat`, `forget_auto_learned`, `pick_up`, `move_to_project`, `stop_background`, `rewind_recover`, `rewind_restore`, `rewind_redo`, `stop_aside`, `remove_project`, `save_settings`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment`, `show_file`, `show_project`, `open_link`, `project_copies`, `project_goals_auto`, `project_goal_add`, `project_goal_add_crashes`, `project_goal_remove`, `project_goal_resume`, `edit_project_memory`, `update_restart`, `setup_install`, `tools_install`, `tools_prepare_replacement`, `tools_replace`, `tools_remove`, `tools_set_enabled`, `tools_restore` |
+| `ask` | Person at a terminal or on screen; an AI gets `error.reach.ask` and asks the person | `show_conversation`, `save_chat_group`, `add_chat_group_files`, `remove_chat_group_file`, `remove_chat_group`, `new_group_chat`, `forget_auto_learned`, `pick_up`, `move_to_project`, `stop_background`, `rewind_recover`, `rewind_restore`, `rewind_redo`, `stop_aside`, `remove_project`, `save_settings`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment`, `show_file`, `show_project`, `open_link`, `project_copies`, `project_goals_auto`, `project_goal_add`, `project_goal_add_crashes`, `project_goal_remove`, `project_goal_resume`, `edit_project_memory`, `update_restart`, `setup_install`, `tools_install`, `tools_prepare_replacement`, `tools_replace`, `tools_remove`, `tools_set_enabled`, `tools_restore` |
 | `person` | Only the person on the screen (`error.reach.person` for everyone else): signing in, answering cards, granting folders, security settings, deleting for good, native pickers | `answer_plan`, `approve_credits`, `answer`, `approve_plan`, `answer_question`, `remove`, `save_theme`, `export_conversation`, `open_theme`, `add_project`, `open_folders`, `chat_folder`, `save_file`, `open_terminal`, `project_proof_confirm`, `setup_sign_in`, `set_mcp_server`, `tools_clear_removed`, `cookie_profiles`, `cookie_sites`, `cookie_import`, `cookie_held`, `cookie_forget`, and the security fields of `save_settings` (`permissions`, `userHooks`, `faberTrust`, `grantsEpoch`, `permissionsRevision`, `beforePlan`, `previews`, `autostart`) |
 | `screen` | Only the screen itself (`error.reach.screen` over the channel) | `open`, `state`, `set_clock`, `quota_attention`, `parked_seen`, `warm`, `route_draft`, `seen`, `preview_look`, `set_shell_texts`, `input_seen`, `draft_dirty`, `game_in_front`, `notes_seen`, `save_notes_seen`, `site_place`, `site_round`, `site_size`, `site_park`, `site_open`, `site_step`, `site_go`, `site_tab`, `site_history`, `site_clear`, `screen_ready`, `visual_open`, `visual_page`, `visual_close`, `visual_policy`, `report_checks`, `checks_progress`, `test_site_probe`, `test_host_size`, `test_site_refuse_once` |
 
 An AI's **family** is the root conversation found by following `startedBy` up from the AI's own conversation (up to 64
 steps), plus every conversation whose `startedBy` chain leads to that same root.
+
+When an identified agent needs the person's permission, Faber records a request and returns `error.reach.ask` with a
+request ID. `faber asks` lists that conversation's requests and their state. An approval permits one identical retry,
+for the same conversation, command and arguments, within ten minutes. A refusal or expiry does not grant access.
+The screen reads `asks` on opening and after an `asks` event to recover each pending command and its arguments; events carry only summaries and agents receive only their own request status. Requests are kept in memory, at most 20, and do not survive a restart. Expired arguments are cleared on the next book operation. An agent without a conversation still receives
+`error.reach.ask`, but has no request ID or grant because Faber cannot distinguish it from another unidentified agent;
+the person must perform the action on the screen. Person-only and screen-only commands are never askable.
 
 What the rules do not stop: they keep a well-meant AI on its own work. An AI runs as the same user as the person, so a
 program that sets out to break them can read `<data>/channel/secret`, make a token for another conversation, or act as
@@ -84,6 +91,9 @@ Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--ti
 | `status` | | `hello` offer + `conversations {state: ["running"]}` |
 | `list` | `[--state s1,s2] [--archived \| --all] [--project <id>] [--family <id>] [--query <words>] [--limit <n>]` | `conversations` (default limit 50; `--state running` means `working,waiting`) |
 | `read` | `<id> [--last <n>]` | `conversation` (default `last: 20`) |
+| `export` | `<id>` | `conversation_markdown` returns the same Markdown as the file export without writing a file |
+| `search` | `<words> [--area chat\|projects]` | `search_messages` searches Chat and Projects, or the selected area |
+| `open` | `<id>` | `show_conversation` brings the window to the conversation |
 | `send` | `<text \| -> [--to <id>] [--project <id>] [--vendor auto\|claude\|codex] [--model <m>] [--effort low\|medium\|high] [--wait] [--timeout <s>]` | `send`, then `wait` when `--wait` is given |
 | `stop` | `<id>` | `interrupt` |
 | `continue` | `<id>` | `conversation {id, last: 1}` to find the last message id, then `continue_closed` |
@@ -91,6 +101,7 @@ Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--ti
 | `pin` / `unpin` | `<id>` | `pin` (`pinned: true` / `false`) |
 | `rename` | `<id> <title>` | `rename` |
 | `projects` / `quota` / `settings` | | `projects`, `quota`, `settings` |
+| `asks` | | `asks` (the calling conversation's permission requests) |
 | `watch` | `[--id <id>] [--family <id>] [--project <id>]` | Subscribes to channel events and emits state-transition JSON lines |
 | `wait` | `<id> [--timeout <s>]` | Waits until `<id>` is no longer `working`, prints `conversation {id, last: 1}` (default timeout 300 s; `0` = none) |
 | `call` | `<command> [<arguments as JSON> \| -]` | Any non-`screen` command in `host/src/table.rs` |
@@ -101,6 +112,8 @@ When `--json` is passed or stdout is not a terminal (every AI tool call), `faber
 on stdout, and failures write `{"error":"<key>","message":"<English words>"}` on stdout as well. When stdout is a
 terminal (or `--human` is passed), `faber` prints short lines in the user's language (`cli.*` in `ui/locales/*.ts`) and
 errors on stderr. When a refusal includes a detail, both modes show it; JSON puts it in a separate `detail` field and keeps `error` unchanged.
+
+An ask refusal with a request ID instead prints `{"error":"error.reach.ask","request":"<id>"}` in JSON mode.
 
 | Exit code | Meaning |
 | :--- | :--- |

@@ -13,7 +13,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{Semaphore, broadcast, mpsc, watch};
+use tokio::sync::{Semaphore, broadcast, mpsc};
 
 pub type Answer = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 pub type DetailedAnswer = Pin<Box<dyn Future<Output = Result<Value, wire::Error>> + Send>>;
@@ -175,7 +175,7 @@ fn accept<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             tokio::spawn(async move {
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
-                    stream.write_all(b"{\"id\":0,\"err\":\"error.channel.busy\"}\n"),
+                    stream.write_all(format!("{{\"id\":0,\"err\":\"{}\"}}\n", "error.channel.busy").as_bytes()),
                 )
                 .await;
             });
@@ -193,7 +193,6 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
 ) {
     let (read, mut write) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::channel::<String>(256);
-    let (closing, mut closed) = watch::channel(false);
     let mut writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
             // A peer that stopped reading must not keep a connection slot forever.
@@ -201,15 +200,7 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                 write.write_all(line.as_bytes()).await?;
                 write.write_all(b"\n").await
             };
-            tokio::pin!(send);
-            let sent = if *closed.borrow() {
-                tokio::time::timeout(std::time::Duration::from_secs(5), &mut send).await
-            } else {
-                tokio::select! {
-                    result = &mut send => Ok(result),
-                    _ = closed.changed() => tokio::time::timeout(std::time::Duration::from_secs(5), &mut send).await,
-                }
-            };
+            let sent = tokio::time::timeout(std::time::Duration::from_secs(5), send).await;
             if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
@@ -222,16 +213,15 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     let mut events: Option<tokio::task::JoinHandle<()>> = None;
     let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
     loop {
-        let line = if who.is_none() {
-            match tokio::time::timeout_at(deadline, wire::read_line(&mut reader, &mut buffer, MAX_REQUEST)).await {
-                Ok(Ok(Some(line))) => line,
-                _ => break,
-            }
-        } else {
-            match wire::read_line(&mut reader, &mut buffer, MAX_REQUEST).await {
-                Ok(Some(line)) => line,
-                _ => break,
-            }
+        let line = tokio::select! {
+            line = async {
+                if who.is_none() {
+                    tokio::time::timeout_at(deadline, wire::read_line(&mut reader, &mut buffer, MAX_REQUEST)).await.ok().and_then(Result::ok).flatten()
+                } else {
+                    wire::read_line(&mut reader, &mut buffer, MAX_REQUEST).await.ok().flatten()
+                }
+            } => match line { Some(line) => line, None => break },
+            _ = tx.closed() => break,
         };
         // A line that is not a request has no id to answer: the client broke the wire, so the connection ends.
         let Ok(Request { id, cmd, args }) = serde_json::from_str::<Request>(&line) else { break };
@@ -309,7 +299,6 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     if let Some(events) = events {
         events.abort();
     }
-    closing.send_replace(true);
     drop(tx);
     if tokio::time::timeout(std::time::Duration::from_secs(5), &mut writer).await.is_err() {
         writer.abort();

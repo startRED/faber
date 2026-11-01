@@ -44,7 +44,11 @@ impl Backend for Arc<Host> {
             if Host::kind(&cmd) == Some(Kind::Window) {
                 return Err("error.host.noWindow".into());
             }
-            host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| crate::wire::Error { key: failure.key, detail: failure.detail })
+            host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| crate::wire::Error {
+                key: failure.key,
+                detail: failure.detail,
+                data: failure.data,
+            })
         })
     }
     #[cfg(windows)]

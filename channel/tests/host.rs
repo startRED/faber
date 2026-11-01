@@ -68,6 +68,24 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     let deep = client(&host, faber_channel::server::MAX_AGENT_DEPTH).await;
     let started = deep.call("new_group_chat", json!({ "groupId": "g" })).await.unwrap();
     assert_eq!(started, Err("error.channel.agentDepth".into()), "a turn the table marks as starting one is held");
+
+    let (ours, theirs) = tokio::io::duplex(1 << 16);
+    tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), test_secret(), 0));
+    let named = Client::over(
+        ours,
+        Hello { client: "test".into(), secret: test_secret().hex(), token: Some(test_secret().token("c1")), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    let args = json!({"patch": {"language": "en"}});
+    let failure = named.call_detailed("save_settings", args.clone()).await.unwrap().unwrap_err();
+    assert_eq!(failure.key, "error.reach.ask");
+    let id = failure.data.unwrap()["request"].as_str().unwrap().to_string();
+    assert_eq!(named.call("asks", json!({})).await.unwrap().unwrap()[0]["state"], "pending");
+    assert_eq!(host.dispatch_as(&faber_host::Caller::Screen, "answer_ask", json!({"id": id, "allow": true})).await.unwrap(), true);
+    assert_eq!(named.call("asks", json!({})).await.unwrap().unwrap()[0]["state"], "allowed");
+    assert!(named.call("save_settings", args.clone()).await.unwrap().is_ok());
+    assert_eq!(named.call("save_settings", args).await.unwrap(), Err("error.reach.ask".into()));
 }
 
 #[tokio::test(flavor = "multi_thread")]

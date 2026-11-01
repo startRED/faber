@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 /// Flags that take a value (`--id c1` or `--id=c1`).
 const VALUED: &[&str] =
-    &["id", "to", "project", "family", "state", "query", "last", "timeout", "vendor", "model", "effort", "limit", "data"];
+    &["id", "to", "area", "project", "family", "state", "query", "last", "timeout", "vendor", "model", "effort", "limit", "data"];
 /// Flags that are on or off.
 const SWITCHES: &[&str] = &["json", "human", "no-start", "archived", "all", "wait", "help"];
 

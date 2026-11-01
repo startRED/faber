@@ -29,6 +29,14 @@ impl Out {
             human(value, 0, &self.words);
         }
     }
+    pub fn ask_refused(&self, request: &str) -> i32 {
+        if self.json {
+            self.line(&json!({"error": "error.reach.ask", "request": request}));
+        } else {
+            eprintln!("{}: {}", self.words.get("cli.ask.request"), request);
+        }
+        PERSON
+    }
     pub fn fail(&self, key: &str, code: i32) -> i32 {
         self.fail_detail(key, None, code)
     }

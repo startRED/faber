@@ -1,5 +1,28 @@
 [
   {
+    "name": "asks",
+    "args": [],
+    "kind": "read",
+    "reach": "free",
+    "about": "This conversation's requests and their current state."
+  },
+  {
+    "name": "answer_ask",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "allow",
+        "bool"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person",
+    "about": "Allow one identical retry, or decline the request."
+  },
+  {
     "name": "conversations",
     "args": [
       [
@@ -1153,6 +1176,18 @@
     "reach": "person"
   },
   {
+    "name": "conversation_markdown",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The same readable record as the file export, without writing a file."
+  },
+  {
     "name": "export_conversation",
     "args": [
       [
@@ -1747,6 +1782,18 @@
     "kind": "read",
     "reach": "free",
     "about": "The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the engine's memory when the panel opens; nothing is prepared, polled or started."
+  },
+  {
+    "name": "show_conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "window",
+    "reach": "ask",
+    "about": "Bring the window to a conversation."
   },
   {
     "name": "cookie_profiles",

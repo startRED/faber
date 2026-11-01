@@ -12,25 +12,29 @@ use std::{
     time::{Duration, Instant},
 };
 
-const VERBS: &[&str] = &[
-    "help",
-    "status",
-    "list",
-    "read",
-    "send",
-    "stop",
-    "continue",
-    "archive",
-    "unarchive",
-    "pin",
-    "unpin",
-    "rename",
-    "projects",
-    "quota",
-    "settings",
-    "watch",
-    "wait",
-    "call",
+pub const VERBS: &[(&str, &[&str])] = &[
+    ("help", &[]),
+    ("status", &["conversations"]),
+    ("list", &["conversations"]),
+    ("read", &["conversation"]),
+    ("export", &["conversation_markdown"]),
+    ("search", &["search_messages"]),
+    ("open", &["show_conversation"]),
+    ("send", &["send", "conversation"]),
+    ("stop", &["interrupt"]),
+    ("continue", &["conversation", "continue_closed"]),
+    ("archive", &["archive"]),
+    ("unarchive", &["archive"]),
+    ("pin", &["pin"]),
+    ("unpin", &["pin"]),
+    ("rename", &["rename"]),
+    ("projects", &["projects"]),
+    ("quota", &["quota"]),
+    ("settings", &["settings"]),
+    ("asks", &["asks"]),
+    ("watch", &["conversations", "conversation"]),
+    ("wait", &["conversation"]),
+    ("call", &[]),
 ];
 type ResultValue = Result<Value, i32>;
 async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultValue {
@@ -42,6 +46,11 @@ async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultVa
             } else {
                 out::REFUSED
             };
+            if error.key == "error.reach.ask"
+                && let Some(request) = error.data.as_ref().and_then(|data| data.get("request")).and_then(Value::as_str)
+            {
+                return Err(out.ask_refused(request));
+            }
             Err(out.fail_detail(&error.key, error.detail.as_deref(), code))
         }
         Err(_) => Err(out.fail("cli.error.channel", out::UNREACHED)),
@@ -65,10 +74,11 @@ fn valid(args: &Args, verb: &str) -> bool {
     let count = args.words.len();
     let (min, max) = match verb {
         "help" => (0, 2),
-        "read" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
+        "read" | "export" | "open" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
+        "search" => (2, usize::MAX),
         "rename" => (3, 3),
         "call" => (2, 3),
-        "status" | "list" | "projects" | "quota" | "settings" | "watch" => (1, 1),
+        "status" | "list" | "projects" | "quota" | "settings" | "asks" | "watch" => (1, 1),
         _ => return false,
     };
     if !(min..=max).contains(&count) || args.on("archived") && args.on("all") {
@@ -77,6 +87,7 @@ fn valid(args: &Args, verb: &str) -> bool {
     let allowed = match verb {
         "list" => &["state", "archived", "all", "project", "family", "query", "limit"][..],
         "read" => &["last"],
+        "search" => &["area"],
         "send" => &["to", "project", "vendor", "model", "effort", "wait", "timeout"],
         "watch" => &["id", "family", "project"],
         "wait" => &["timeout"],
@@ -86,6 +97,9 @@ fn valid(args: &Args, verb: &str) -> bool {
         return false;
     }
     if ["limit", "last", "timeout"].iter().any(|k| args.value(k).is_some_and(|v| v.parse::<u64>().is_err())) {
+        return false;
+    }
+    if args.value("area").is_some_and(|v| !["chat", "projects"].contains(&v)) {
         return false;
     }
     if args.value("vendor").is_some_and(|v| !["auto", "claude", "codex"].contains(&v))
@@ -111,8 +125,8 @@ pub async fn run(args: Args, out: Out) -> i32 {
         let target = args.word(1);
         let verbs: Vec<Value> = VERBS
             .iter()
-            .filter(|v| target.is_none_or(|t| t == **v))
-            .map(|v| {
+            .filter(|(v, _)| target.is_none_or(|t| t == *v))
+            .map(|(v, _)| {
                 let key = format!("cli.help.{v}");
                 json!({"name":v,"description":if out.json { key.clone() } else { out.words.get(&key) }})
             })
@@ -171,6 +185,36 @@ pub async fn run(args: Args, out: Out) -> i32 {
             ask(&client, &out, "conversations", v).await
         }
         "read" => ask(&client, &out, "conversation", json!({"id":id,"last":num(&args,"last",20).unwrap()})).await,
+        "export" => ask(&client, &out, "conversation_markdown", json!({"id":id})).await,
+        "search" => {
+            let query = args.words[1..].join(" ");
+            let areas: &[&str] = match args.value("area") {
+                Some("chat") => &["chat"],
+                Some("projects") => &["project"],
+                _ => &["chat", "project"],
+            };
+            let mut results = json!({"ready":true,"hits":[]});
+            let mut failure = None;
+            for area in areas {
+                match ask(&client, &out, "search_messages", json!({"query":query,"area":area})).await {
+                    Ok(v) => {
+                        results["ready"] = json!(results["ready"].as_bool().unwrap_or(false) && v["ready"].as_bool().unwrap_or(false));
+                        if let Some(hits) = v["hits"].as_array() {
+                            results["hits"].as_array_mut().unwrap().extend(hits.iter().cloned());
+                        }
+                    }
+                    Err(e) => {
+                        failure = Some(e);
+                        break;
+                    }
+                }
+            }
+            match failure {
+                Some(e) => Err(e),
+                None => Ok(results),
+            }
+        }
+        "open" => ask(&client, &out, "show_conversation", json!({"id":id})).await,
         "send" => {
             let Some(text) = input(id) else { return usage(&out) };
             let mut choice = json!({"vendor":args.value("vendor").unwrap_or("auto")});
@@ -208,7 +252,7 @@ pub async fn run(args: Args, out: Out) -> i32 {
         "archive" | "unarchive" => ask(&client, &out, "archive", json!({"id":id,"on":verb=="archive"})).await,
         "pin" | "unpin" => ask(&client, &out, "pin", json!({"id":id,"on":verb=="pin"})).await,
         "rename" => ask(&client, &out, "rename", json!({"id":id,"title":args.word(2)})).await,
-        "projects" | "quota" | "settings" => ask(&client, &out, verb, json!({})).await,
+        "projects" | "quota" | "settings" | "asks" => ask(&client, &out, verb, json!({})).await,
         "wait" => return wait(&client, &out, id, num(&args, "timeout", 300).unwrap()).await,
         "watch" => return watch(&client, &out, &args).await,
         "call" => {
@@ -225,7 +269,20 @@ pub async fn run(args: Args, out: Out) -> i32 {
     };
     match result {
         Ok(v) => {
-            out.result(&v);
+            if !out.json && verb == "export" {
+                print!("{}", v["markdown"].as_str().unwrap_or(""));
+            } else if !out.json && verb == "search" {
+                for hit in v["hits"].as_array().into_iter().flatten() {
+                    println!(
+                        "{}  {}  {}",
+                        hit["conversationId"].as_str().unwrap_or(""),
+                        hit["title"].as_str().unwrap_or(""),
+                        hit["snippet"].as_str().unwrap_or("")
+                    );
+                }
+            } else {
+                out.result(&v);
+            }
             out::DONE
         }
         Err(e) => e,
@@ -305,5 +362,27 @@ async fn watch(client: &Client, out: &Out, args: &Args) -> i32 {
         }
         initial = false;
         tokio::select! { _=tokio::signal::ctrl_c()=>return out::STOPPED, event=events.recv()=>if event.is_none() {return out.fail("cli.error.channel",out::UNREACHED)} }
+    }
+}
+
+#[cfg(test)]
+mod parity {
+    use super::VERBS;
+    #[test]
+    fn verb_commands_exist_and_free_reads_are_documented() {
+        let commands: serde_json::Value = serde_json::from_str(include_str!("../commands.json")).unwrap();
+        let commands = commands.as_array().unwrap();
+        for (verb, names) in VERBS {
+            for name in *names {
+                assert!(commands.iter().any(|c| c["name"] == *name), "{verb} calls unknown {name}");
+            }
+        }
+        let page = include_str!("../../docs/product/cli.md");
+        for command in commands {
+            if command["kind"] == "read" && command["reach"] == "free" {
+                let name = command["name"].as_str().unwrap();
+                assert!(page.contains(&format!("`{name}`")), "CLI page omits {name}");
+            }
+        }
     }
 }

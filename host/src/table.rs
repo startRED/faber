@@ -78,6 +78,20 @@ fn data_url(source: &Path, kind: &str, max: u64) -> Option<String> {
 }
 
 table! {
+    /// This conversation's requests and their current state.
+    Read Free fn asks(h) -> Vec<Value> {
+        Ok(lock(&h.asks).pending_details())
+    }
+    /// Allow one identical retry, or decline the request.
+    Write Person fn answer_ask(h, id: String, allow: bool) -> bool {
+        let (answered, pending) = {
+            let mut book = lock(&h.asks);
+            let answered = book.answer(&id, allow);
+            (answered, book.pending())
+        };
+        if answered { h.announce(&json!({"type": "asks", "asks": pending})); }
+        Ok(answered)
+    }
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
         lock(&h.feed).forget();
@@ -553,6 +567,27 @@ table! {
         look::export_theme(&target, &json)?;
         Ok(true)
     }
+    /// The same readable record as the file export, without writing a file.
+    Read Free fn conversation_markdown(h, id: String) -> Value {
+        let engine = h.engine.clone();
+        let language = faber_engine::guide::Language::resolve(engine.settings().language.as_deref(), &faber_engine::guide::system_languages());
+        let source = match language {
+            faber_engine::guide::Language::En => include_str!("../../ui/locales/en.ts"),
+            faber_engine::guide::Language::PtBr => include_str!("../../ui/locales/pt-BR.ts"),
+            faber_engine::guide::Language::Es => include_str!("../../ui/locales/es.ts"),
+            faber_engine::guide::Language::Fr => include_str!("../../ui/locales/fr.ts"),
+            faber_engine::guide::Language::De => include_str!("../../ui/locales/de.ts"),
+        };
+        let word = |key: &str| -> Res<String> {
+            let line = source.lines().find(|line| line.trim_start().starts_with(&format!("\"{key}\":")) || line.trim_start().starts_with(&format!("'{key}':"))).ok_or("error.export.read")?;
+            let value = line.split_once(':').ok_or("error.export.read")?.1.trim().trim_end_matches(',').trim();
+            let quote = value.chars().next().ok_or("error.export.read")?;
+            Ok(value.strip_prefix(quote).and_then(|v| v.strip_suffix(quote)).ok_or("error.export.read")?.to_string())
+        };
+        let words = faber_engine::export::Words { you: word("export.you")?, auto: word("model.auto")?, attachments: word("export.attachments")?, files: word("export.files")? };
+        let (_, markdown) = off("error.export.read", move || engine.export_conversation(&id, &words)).await??;
+        Ok(json!({"markdown": markdown}))
+    }
     Write Person fn export_conversation(h, id: String, words: faber_engine::export::Words) -> bool [Failure] {
         use std::io::Write;
         let engine = h.engine.clone();
@@ -830,6 +865,12 @@ table! {
     }
 
     // What only a window answers: the front end that has one handles these itself, and any other answers `error.host.noWindow`.
+
+    /// Bring the window to a conversation.
+    Window Ask fn show_conversation(h, id: String) -> () {
+        h.shell.show_conversation(&id)?;
+        Ok(())
+    }
 
     /// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
     Window Screen fn site_place(h, load: u32, box_id: u64, x: f64, y: f64, width: f64, height: f64) -> bool {

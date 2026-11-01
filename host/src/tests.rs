@@ -89,7 +89,7 @@ fn only_the_browser_pane_the_page_server_and_the_first_paint_are_the_windows() {
                 || name.starts_with("cookie_")
                 || name.starts_with("visual_")
                 || name.starts_with("test_")
-                || ["screen_ready", "report_checks"].contains(name),
+                || ["screen_ready", "report_checks", "show_conversation"].contains(name),
             "{name} needs the window, yet it is not one of the pane's, the page server's or the first paint's"
         );
     }
@@ -128,6 +128,30 @@ fn key(result: Result<Value, Failure>) -> String {
 }
 
 #[tokio::test]
+async fn unidentified_agents_never_record_or_receive_a_grant() {
+    let (host, _dir) = host().await;
+    let agent = Caller::Agent { conversation: None };
+    for _ in 0..2 {
+        let failure = host.dispatch_as(&agent, "save_settings", json!({"patch": {"language": "en"}})).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask");
+        assert!(failure.data.is_none());
+    }
+    assert!(lock(&host.asks).pending().is_empty());
+    assert_eq!(host.dispatch_as(&agent, "asks", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test]
+async fn screen_can_recover_exact_pending_requests_without_exposing_them_to_other_agents() {
+    let (host, _dir) = host().await;
+    lock(&host.asks).record("one", "remove_project", json!({"id": "target"}), "projects");
+    let pending = host.dispatch("asks", json!({})).await.unwrap();
+    assert_eq!(pending[0]["command"], "remove_project");
+    assert_eq!(pending[0]["args"]["id"], "target");
+    let other = Caller::Agent { conversation: Some("other".into()) };
+    assert_eq!(host.dispatch_as(&other, "asks", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test]
 async fn arguments_that_do_not_fit_and_names_not_in_the_table_are_refused_by_key() {
     let (host, _dir) = host().await;
     assert_eq!(key(host.dispatch("open", json!({})).await), "error.host.badArgs");
@@ -151,6 +175,7 @@ async fn a_chat_group_made_through_the_table_is_in_the_state_the_screen_reads() 
 #[tokio::test]
 async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first() {
     let (host, _dir) = host().await;
+    assert_eq!(key(host.dispatch("show_conversation", json!({"id":"c1"})).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "https://example.com" })).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("open_link", json!({ "url": "file:///C:/Windows" })).await), "error.link.web");
@@ -196,6 +221,24 @@ fn quitting_ends_the_crash_marker_before_anything_else_closes() {
         .map(|call| body.find(call).expect(call))
         .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
+}
+
+#[tokio::test]
+async fn markdown_read_matches_file_export_builder() {
+    let (host, dir) = host().await;
+    let conversation: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    faber_engine::store::Store::new(&dir.path().join("data")).save_checked(&conversation).unwrap();
+    host.engine.save_settings(Settings { language: Some("en".into()), ..Settings::default() }).unwrap();
+    let words = faber_engine::export::Words {
+        you: "You".into(),
+        auto: "Auto".into(),
+        attachments: "Attachments".into(),
+        files: "Files changed".into(),
+    };
+    let (_, expected) = host.engine.export_conversation(&conversation.id, &words).unwrap();
+    let value = host.dispatch("conversation_markdown", json!({"id":conversation.id})).await.unwrap();
+    assert_eq!(value["markdown"], expected);
 }
 
 fn seed_conversation(host: &Host, id: &str, started_by: Option<&str>, waiting_on: Option<faber_engine::model::WaitingOn>) {
