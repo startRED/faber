@@ -38,7 +38,8 @@ fn new_engine_with(
         max_warm,
         idle,
         runtime: tokio::runtime::Handle::current(),
-        ask: None,
+        // These wire scenarios cover conversation turns; auxiliary models are mocked separately.
+        ask: Some(Arc::new(|_| Box::pin(async { None }))),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // Faber goes on by itself only on a known subscription.

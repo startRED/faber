@@ -4958,7 +4958,8 @@ fn two_vendors_heard(dir: &support::DataFolder, spawn: Spawner) -> (Engine, toki
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
-        ask: None,
+        // Helper and side-chat recordings do not contain auxiliary title requests.
+        ask: Some(Arc::new(|_| Box::pin(async { None }))),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // Faber calls a vendor on its own only on a known subscription.

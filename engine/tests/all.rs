@@ -189,6 +189,7 @@ fn every_test_file_is_listed() {
         let name = entry.unwrap().file_name().into_string().unwrap();
         let alone = [
             "all.rs",
+            "title.rs", // Unit tests linked from engine/title.rs, where Core is accessible.
             "install_memory.rs",
             "rewind_cost.rs",
             "background_cost.rs",

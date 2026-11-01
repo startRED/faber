@@ -39,7 +39,8 @@ fn engine_with(
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
-        ask: None,
+        // These wire scenarios cover conversation turns; auxiliary models are mocked separately.
+        ask: Some(Arc::new(|_| Box::pin(async { None }))),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     engine.set_keep_going_pace(0.001);

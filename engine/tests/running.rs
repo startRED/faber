@@ -37,7 +37,8 @@ fn engine(dir: &crate::support::DataFolder, vendors: &[Vendor], spawn: Spawner, 
         max_warm: 8,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
-        ask,
+        // Preserve an explicit router mock and isolate the permission recordings from auxiliary titles.
+        ask: Some(ask.unwrap_or_else(|| Arc::new(|_| Box::pin(async { None })))),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap();
     // These scenarios exercise permission queues and stale card answers, not the unattended default.
