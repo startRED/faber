@@ -9,9 +9,7 @@ impl Core {
     /// offers Unarchive), or a new one in the project folder (never a separate copy, since the session's history belongs to
     /// the folder it ran in).
     pub(super) fn pick_up(&mut self, project_id: &str, session: CliSession) -> Result<String, String> {
-        if self.project_of(Some(project_id)).is_none() {
-            return Err("error.projectGone".into());
-        }
+        self.check_project_folder(Some(project_id))?;
         let holds = |c: &Conversation| c.project_id.as_deref() == Some(project_id) && c.sessions.get(&session.vendor) == Some(&session.id);
         if let Some(id) = self.convs.values().find(|c| holds(c)).map(|c| c.id.clone()) {
             return Ok(id);
@@ -64,6 +62,7 @@ impl Engine {
     /// (`crate::claude_sessions`), since it has no list to ask.
     pub async fn cli_sessions(&self, project_id: &str, timeout: Duration) -> Result<Vec<CliSession>, String> {
         let (folder, codex, claude, spawn, windows) = self.with(|c| {
+            c.check_project_folder(Some(project_id))?;
             let project = c.project_of(Some(project_id)).ok_or("error.projectGone")?;
             let clis = &c.opts.clis;
             Ok::<_, String>((

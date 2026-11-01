@@ -2275,6 +2275,7 @@ export const en = {
   'notes.337.fixed': 'Work no longer shows as done when the AI never concluded it; it says it ended without a conclusion, and Faber asks the AI once to close it.',
   'notes.338.better': 'Opening a step to read it keeps the page still while the reply goes on below, and steps show short file names instead of long folder paths.',
   'notes.339.better': "A big request is split again: the AI runs up to three conversations side by side and checks each one's work. Small requests stay in one conversation.",
+  'notes.340.better': 'Faber now helps you find a moved project folder and tells you when it did not close cleanly.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
@@ -2296,6 +2297,18 @@ export const en = {
   'piece.discard': "Discard change",
   'piece.retry': "Try again",
   'piece.show': "Show {title}",
+  'error.project.missing': 'This project folder is missing or was moved. Point Faber to its new place or remove it.',
+  'error.project.disconnected': 'The drive for this project folder is not connected right now.',
+  'projects.missingNote': 'The folder {path} is missing or was moved. Your conversations are still here.',
+  'projects.disconnectedNote': 'The drive for {path} is not connected right now. Your conversations are still here.',
+  'projects.findFolder': 'Find the folder',
+  'projects.removeFromFaber': 'Remove from Faber',
+  'crash.note': 'Faber did not finish closing last time. Your conversations and projects are safe.',
+  'crash.noteWhen': "The previous run was found unclosed at {when}.",
+  'crash.notePanic': "A panic was recorded.",
+  'crash.noteNoPanic': "No panic was recorded.",
+  'crash.openLogs': 'Open the log folder',
+  'crash.dismiss': 'Dismiss',
 
 } as const;
 

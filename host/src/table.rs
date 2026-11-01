@@ -501,6 +501,30 @@ table! {
         let Some(path) = picked else { return Ok(None) };
         h.engine.open_folder(&path.to_string_lossy()).map(Some)
     }
+    Write Person fn repoint_project(h, id: String, path: Option<String>) -> Option<Project> {
+        project_commands::id(&id)?;
+        if let Some(path) = path {
+            return h.engine.repoint_project(&id, &path).map(Some);
+        }
+        if h.hidden {
+            return Err("error.project.missing".into());
+        }
+        let picked = h.shell.pick_folder().await.map_err(|why| if why == PickError::NoWindow { NO_WINDOW } else { "error.folder.notLocal" })?;
+        let Some(path) = picked else { return Ok(None) };
+        h.engine.repoint_project(&id, &path.to_string_lossy()).map(Some)
+    }
+    Read Person fn open_log_folder(h) -> String {
+        let crash_file = h.data_dir.join(faber_engine::crash::CRASHES);
+        let target = if crash_file.exists() { crash_file } else { h.data_dir.clone() };
+        if !h.hidden && !cfg!(feature = "test-hooks") {
+            h.shell.reveal(target)?;
+        }
+        Ok(h.data_dir.to_string_lossy().into_owned())
+    }
+    Write Free fn dismiss_unclean_exit(h) -> () {
+        h.engine.dismiss_unclean_exit();
+        Ok(())
+    }
     /// The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key.
     Read Free fn recents(h) -> faber_engine::recents::RecentsView {
         Ok(h.engine.recents())
