@@ -110,6 +110,23 @@ async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
   try { return await run(); } finally { api.setupCheck = was; }
 }
 
+check('quota: missing readings explain where to check the limit', () => signedIn(async () => {
+  useLanguage('en');
+  const s = sidebar(usage(), false);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+    quotas: {}, now: NOW, usage: usage(), onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
+  const dispose = render(() => createComponent(Settings, props), host);
+  try {
+    await tick();
+    ok(s.host.querySelector('.usage .vendor')!.textContent!.includes(t('side.usage')), s.text());
+    ok(!s.host.querySelector('.usage .meter'), 'no empty bar for an unknown reading');
+    ok(host.textContent!.includes(t('quota.unavailable')), host.textContent!);
+    ok(!host.querySelector('.acct[data-vendor="codex"] .meter'), 'no empty bar in Settings');
+  } finally { s.dispose(); dispose(); host.remove(); }
+}));
+
 check('quota: Settings spells out the estimate and the age, behind the Details of the account', async () => {
   useLanguage('pt-BR');
   const host = document.createElement('div');

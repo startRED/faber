@@ -26,8 +26,11 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
   tagged as `electron-f1`.
 - **Moving to Electron (R459, started 2026-10-29).** One Chromium on every system, with everything that is not
-  Chromium, V8 or the screen in Rust. The commands already live in one table, `host/` (`Host::dispatch`), which the
-  Tauri shell relays to and the Electron one will too; the plan and its phases are in
+  Chromium, V8 or the screen in Rust. Every command already lives in one table, `host/` (`Host::dispatch`), which the
+  Tauri shell relays to; the Electron one runs the same table as the `faber-sidecar` process (newline-delimited JSON on
+  stdin and stdout), and what needs a window is a method of the host's `Shell` trait. The tray, the notifications,
+  keeping the PC awake and starting with the system are decided in the host too: the sidecar sends them as `order`
+  lines and the shell only carries them out. Only the browser pane's commands stay the shell's own; the plan and its phases are in
   `docs/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
   complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the
@@ -37,7 +40,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   drawn, more on scrolling up), 4 MB closed to the tray (the screen is freed; the engine keeps running and the window
   comes back where it was). For comparison, the Claude desktop app used 2.5 GB that day. A streaming reply reaches the
   screen up to 30 times a second, so an update carries only the steps that changed since the last one
-  (`src-tauri/src/feed.rs`): sent whole, a long agent reply (thousands of steps, 11 MB) was parsed by the webview at each
+  (`host/src/feed.rs`): sent whole, a long agent reply (thousands of steps, 11 MB) was parsed by the webview at each
   update, and on 2026-10-22 the window grew to 8.3 GB after a few hours of such replies. The engine keeps in memory
   only the conversation on screen and the ones something is still working on (`engine/src/engine/evict.rs`, R461):
   every conversation opened used to stay until Faber closed, tool outputs included, and the installed app reached 707 MB

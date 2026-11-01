@@ -117,6 +117,15 @@ pub struct Transcript {
     pub failed: bool,
 }
 
+/// A piece of a reply's thinking: it starts at `from` in the thinking (UTF-16 units) and came when the reply's text was
+/// `at` units long and the agent had started `steps` calls of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThinkingMark {
+    pub from: usize,
+    pub at: usize,
+    pub steps: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -171,6 +180,11 @@ pub struct ToolUse {
     /// Visible child-session pages, kept outside the conversation and read one at a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    /// Where the reply's words stood when the agent's own call started, in UTF-16 units of its text, so the thread draws
+    /// the words and the steps in the order they happened (W1, 2026-10-31). None for a subagent's call (it sits in its
+    /// subagent's row) and for calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<usize>,
     /// On an edit step: the lines it added and removed and the first of them (`change.rs`), so the screen counts them
     /// without the whole input. Absent on other steps and on conversations recorded before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -306,6 +320,10 @@ pub struct Message {
     /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity_end: Option<usize>,
+    /// Where each piece of the thinking began and where it falls among the words and the steps, oldest first (W1,
+    /// 2026-10-31): the thread draws each piece in its place. Empty on replies recorded before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_marks: Vec<ThinkingMark>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     /// On a reply that ended well: how long it took from its start (`at`), in milliseconds. Absent on older replies.
@@ -405,6 +423,8 @@ pub struct Message {
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acts: Vec<crate::act::FaberAct>,
     /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
     /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -852,6 +872,7 @@ impl Message {
             visual_file_count: None,
             text_breaks: None,
             activity_end: None,
+            thinking_marks: vec![],
             at,
             took: None,
             images: None,
@@ -890,6 +911,7 @@ impl Message {
             look: None,
             follow: None,
             wake: None,
+            acts: vec![],
             closed: false,
             halt: None,
             auto_answers: None,
@@ -1077,6 +1099,10 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stuck: Option<crate::results::Stuck>,
     pub messages: Vec<Message>,
+    /// Only on a copy for the screen that holds the newest messages (`Engine::open_for_screen_window`): how many came before
+    /// them, read with `Engine::messages_before`. Never saved with a value: a stored conversation keeps every message.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub earlier: usize,
     /// Changes to typed inline pieces, bound to the original reply block's source digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub piece_values: Vec<crate::pieces::SavedValue>,
@@ -1618,8 +1644,8 @@ pub enum Setup {
     Skipped,
 }
 
-fn is_zero(n: &u32) -> bool {
-    *n == 0
+fn is_zero<T: Default + PartialEq>(n: &T) -> bool {
+    *n == T::default()
 }
 
 fn is_zero_usd(n: &f64) -> bool {

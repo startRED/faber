@@ -21,7 +21,7 @@ const RED = new Set(['failure', 'timed_out', 'startup_failure']);
 const IGNORED = new Set(['cancelled', 'skipped', 'neutral', 'stale']);
 
 /**
- * `{ run, since, newer }` when the newest finished push run of the base failed, `null` when it passed or nothing is known.
+ * `{ run, since, newer }` when the newest finished push or dispatched run of the base failed, `null` when it passed or nothing is known.
  * `runs` is `gh run list --json`, newest first; `since` is the oldest failure of the red streak, `newer` the runs still going.
  */
 export function verdict(runs) {
@@ -83,7 +83,9 @@ function status() {
   let text;
   try {
     const fields = 'status,conclusion,headSha,databaseId,createdAt,displayTitle,url';
-    const runs = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--branch', BASE, '--event', 'push', '--limit', '20', '--json', fields]));
+    // A push run, or the full check the land job starts after a change landed on a base that moved elsewhere.
+    const list = (event) => JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--branch', BASE, '--event', event, '--limit', '20', '--json', fields]));
+    const runs = [...list('push'), ...list('workflow_dispatch')].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
     const red = verdict(runs);
     if (!red) {
       text = '';

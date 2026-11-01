@@ -1,7 +1,7 @@
 //! Setup guide backend: checking CLI status, installation, and login.
 
-use crate::Faber;
 use crate::terminal;
+use crate::{Host, Res, lock};
 use faber_engine::cli::Cli;
 use faber_engine::model::Vendor;
 use faber_engine::{AccountStatus, AppEvent};
@@ -9,9 +9,6 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
-
-type Res<T> = Result<T, String>;
 
 /// How long the sign-in check may take. The status commands run at idle priority, so a busy PC slows them: Codex's
 /// took 5.2 s on the maintainer's PC (2026-10-29), and the old 5 s limit read a signed-in account as unsure.
@@ -87,36 +84,34 @@ fn user_home_dir() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
-#[tauri::command]
-pub async fn setup_check(app: AppHandle, faber: State<'_, Faber>, vendor: String) -> Res<CheckResult> {
+pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
     let Some(v) = parse_vendor(&vendor) else {
         return Err("error.setup.check".into());
     };
     let clis = detect_clis();
     let installed = clis.contains_key(&v);
-    faber.engine.replace_clis(clis.clone());
-    let account = if installed { faber.engine.account_status(v, SIGN_IN_TIMEOUT).await } else { AccountStatus::Unknown };
+    h.engine.replace_clis(clis.clone());
+    let account = if installed { h.engine.account_status(v, SIGN_IN_TIMEOUT).await } else { AccountStatus::Unknown };
 
     if account == AccountStatus::SignedIn {
         let updated = detect_clis();
-        faber.engine.replace_clis(updated.clone());
-        if faber.engine.ledger().of(v).billing == faber_engine::budget::Billing::Unknown {
+        h.engine.replace_clis(updated.clone());
+        if h.engine.ledger().of(v).billing == faber_engine::budget::Billing::Unknown {
             // Short on purpose: the screen waits on this answer to show Connected, and a plan missed here is read again later.
-            faber.engine.check_plans(Duration::from_secs(5)).await;
+            h.engine.check_plans(Duration::from_secs(5)).await;
         }
         // The guide and the tutorial check again on every focus and step; the models are asked for only while Faber has none.
-        if let Some(codex) = updated.get(&Vendor::Codex).filter(|_| crate::lock(&faber.models).is_empty()) {
-            crate::load_models(&app, codex.clone(), faber.data_dir.clone());
+        if let Some(codex) = updated.get(&Vendor::Codex).filter(|_| lock(&h.models).is_empty()) {
+            h.load_models(codex.clone(), h.data_dir.clone());
         }
-        let _ = app.emit("faber:event", AppEvent::List);
+        h.announce(&AppEvent::List);
     }
 
     let can_install = cfg!(windows);
     Ok(CheckResult { vendor: v, installed, account, can_install })
 }
 
-#[tauri::command]
-pub async fn setup_sign_in(vendor: String) -> Res<()> {
+pub(crate) async fn sign_in(vendor: String) -> Res<()> {
     let Some(v) = parse_vendor(&vendor) else {
         return Err("error.setup.signIn".into());
     };
@@ -133,35 +128,28 @@ pub async fn setup_sign_in(vendor: String) -> Res<()> {
     terminal::open(&cmd).map_err(|_| "error.setup.signIn".into())
 }
 
-#[tauri::command]
-pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: String) -> Res<()> {
-    // An update never ends the process in the middle of an install (update.rs).
-    let _running = crate::update::SetupRunning::begin()?;
+pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
+    // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
+    let _running = h.shell.hold_install()?;
     let Some(v) = parse_vendor(&vendor) else {
-        let _ = app.emit(
-            "faber:event",
-            SetupProgressEvent {
-                event_type: "setup".into(),
-                vendor: Vendor::Claude,
-                step: "failed".into(),
-                error: Some("error.setup.unsupported".into()),
-                detail: Some("Unknown vendor".into()),
-            },
-        );
+        h.announce(&SetupProgressEvent {
+            event_type: "setup".into(),
+            vendor: Vendor::Claude,
+            step: "failed".into(),
+            error: Some("error.setup.unsupported".into()),
+            detail: Some("Unknown vendor".into()),
+        });
         return Err("error.setup.unsupported".into());
     };
 
     let emit_progress = |step: &str, error: Option<&str>, detail: Option<&str>| {
-        let _ = app.emit(
-            "faber:event",
-            SetupProgressEvent {
-                event_type: "setup".into(),
-                vendor: v,
-                step: step.into(),
-                error: error.map(String::from),
-                detail: detail.map(String::from),
-            },
-        );
+        h.announce(&SetupProgressEvent {
+            event_type: "setup".into(),
+            vendor: v,
+            step: step.into(),
+            error: error.map(String::from),
+            detail: detail.map(String::from),
+        });
     };
 
     if !cfg!(windows) {
@@ -173,14 +161,14 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
     // the user's PATH is left alone. The engine refuses any other address, so tests run the same install code as people.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     let destination = match source {
-        Some(_) => faber.data_dir.join("bin"),
+        Some(_) => h.data_dir.join("bin"),
         None => user_home_dir().join(".local").join("bin"),
     };
     let mut request = serde_json::json!({
         "vendor": v.name(),
         "windows": true,
         "arch": std::env::consts::ARCH,
-        "data_dir": faber.data_dir,
+        "data_dir": h.data_dir,
         "destination": destination,
     });
     if let Some(base) = &source {
@@ -193,11 +181,11 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
 
     let fetch = |url: &str| {
         let (url, loopback) = (url.to_string(), source.clone());
-        run_on_thread(async move { faber_engine::install::default_fetch(&url, loopback.as_deref()).await })
+        run_on_thread(h, async move { faber_engine::install::default_fetch(&url, loopback.as_deref()).await })
     };
     let download = |url: &str, dest: &Path| {
         let (url, dest, loopback) = (url.to_string(), dest.to_path_buf(), source.clone());
-        run_on_thread(async move { faber_engine::install::default_download(&url, &dest, loopback.as_deref()).await })
+        run_on_thread(h, async move { faber_engine::install::default_download(&url, &dest, loopback.as_deref()).await })
     };
     let register = |dir: &Path| if source.is_some() { Ok(()) } else { faber_engine::install::default_register_path(dir) };
     let progress = |val: serde_json::Value| {
@@ -211,20 +199,22 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
 
     // After install succeeds: redetect, replace in engine, reload Codex models, emit list
     let updated = detect_clis();
-    faber.engine.replace_clis(updated.clone());
+    h.engine.replace_clis(updated.clone());
     if let Some(codex) = updated.get(&Vendor::Codex) {
-        crate::load_models(&app, codex.clone(), faber.data_dir.clone());
+        h.load_models(codex.clone(), h.data_dir.clone());
     }
-    let _ = app.emit("faber:event", AppEvent::List);
+    h.announce(&AppEvent::List);
 
     Ok(())
 }
 
 /// Runs a network job to the end on its own thread, because the installer calls it from a synchronous callback.
-fn run_on_thread<T: Send + 'static>(job: impl std::future::Future<Output = std::io::Result<T>> + Send + 'static) -> std::io::Result<T> {
-    std::thread::spawn(move || tauri::async_runtime::block_on(job))
-        .join()
-        .unwrap_or_else(|_| Err(std::io::Error::other("network thread panicked")))
+fn run_on_thread<T: Send + 'static>(
+    h: &Host,
+    job: impl std::future::Future<Output = std::io::Result<T>> + Send + 'static,
+) -> std::io::Result<T> {
+    let runtime = h.runtime.clone();
+    std::thread::spawn(move || runtime.block_on(job)).join().unwrap_or_else(|_| Err(std::io::Error::other("network thread panicked")))
 }
 
 #[cfg(test)]

@@ -133,9 +133,10 @@ check('plan: a working reply shows the current thinking headline after its words
   const view = mount(() => createComponent(Thread, { conversationId: 'c1', messages, from: 0, options: [], onBranch: () => {}, plan }));
   try {
     await settle();
-    equal(view.root.querySelector('.plan li.active .now')!.textContent, ` · ${t('tool.command')} · npm test`);
+    equal(view.root.querySelector('.plan li.active .now')!.textContent, ' · Auditing failing assertions');
     await settle(1_600);
-    equal(view.root.querySelector('.activity-latest.after .step')!.textContent, `${t('activity.thinkingNow')} · Auditing failing assertions`);
+    view.root.querySelector<HTMLButtonElement>('.steps-head')!.click();
+    ok(view.root.querySelector('.thought .step-line')!.textContent!.includes('Auditing failing assertions'));
   } finally {
     view.done();
   }

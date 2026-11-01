@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, Show, type Accessor } from 'solid-js';
+import { FaberActs } from './FaberAct.tsx';
+import { createEffect, createMemo, createResource, createSignal, For, Index, Match, on, onCleanup, Show, Switch, type Accessor } from 'solid-js';
 import {
   api,
   errorText,
@@ -22,11 +23,11 @@ import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
-import { html, openLinks, pressImage } from './markdown.tsx';
+import { openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
 import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
-import { agentActivity, agentMeta, ChangedLines, openedAgent, SourceList, showAgent, startMessage, talkAbout, ToolChip } from './AgentChat.tsx';
+import { agentActivity, agentMeta, ChangedLines, Delta, openedAgent, SourceList, showAgent, startMessage, talkAbout } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
@@ -39,7 +40,8 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, groupLabel, groupSteps, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepLine, thinkingParts, type AgentStep, type StepGroup } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepIcon, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep, type StepIcon } from './worklog.ts';
+import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -200,24 +202,145 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
   );
 }
 
-// One step of the work log, or a run of the same kind as one phrase with a count ("Changing 3 files") that opens into its steps.
-// A failed step inside says so beside the phrase, since the phrase itself cannot be struck through.
-// `live` names the step the agent is on, which carries the running mark; `onToggle` reports a run opening or closing.
-function StepRow(props: { group: Accessor<StepGroup>; live?: string; onToggle?: (open: boolean) => void }) {
-  const group = () => props.group();
-  const failed = () => group().tools.filter((tool) => tool.ok === false && !tool.declined).length;
+const ICONS: Record<StepIcon, Parameters<typeof Icon>[0]['name']> = {
+  read: 'sheet',
+  change: 'edit',
+  command: 'terminal',
+  search: 'search',
+  web: 'globe',
+  tool: 'plug',
+  thought: 'feather',
+};
+/** Lines of a step's output shown once it is opened; the rest is counted. */
+const OUTPUT_LINES = 30;
+
+/** Where a step is: at work, ended well, failed, refused or cut with its reply. */
+function stepState(tool: ToolUse, working: boolean): 'running' | 'done' | 'failed' | 'declined' | 'stopped' {
+  if (tool.ok === undefined) return working && !tool.interrupted ? 'running' : 'stopped';
+  if (tool.declined) return 'declined';
+  return tool.ok ? 'done' : 'failed';
+}
+
+/** One step the agent took, as a thin row: what it did ("Read", "Running" while it works), what it acted on, the lines it
+ * changed. A click opens what it ran and what came back, and closes it again; nothing else moves. */
+function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string }) {
+  const [open, setOpen] = createSignal(false);
+  const state = () => stepState(props.tool(), props.working);
+  const row = () => toolRow(props.tool(), state() !== 'running');
+  const change = createMemo(() => changeOf(props.tool()));
+  const output = createMemo(() => {
+    const lines = (props.tool().output ?? '').replace(/\s+$/, '').split('\n');
+    return { shown: lines.slice(0, OUTPUT_LINES).join('\n'), more: Math.max(0, lines.length - OUTPUT_LINES) };
+  });
   return (
-    <Show when={group().kind} fallback={<ToolChip tool={group().tools[0]!} live={group().tools[0]!.id === props.live} />}>
-      <details class="step-group" onToggle={(e) => props.onToggle?.(e.currentTarget.open)}>
-        <summary>
-          <b>{groupLabel(group())}</b>
-          <Show when={failed()}><span class="sr-only">, </span><em>{t('agent.facts.failed', { n: failed() })}</em></Show>
-        </summary>
-        <div class="tools">
-          {/* By place, so a step the person expanded keeps its state and focus when the agent's progress replaces it. */}
-          <Index each={group().tools}>{(tool) => <ToolChip tool={tool()} live={tool().id === props.live} />}</Index>
+    <div class="step" data-state={state()} role="listitem">
+      <button type="button" class="step-line" aria-expanded={open()} title={row().detail || undefined} onClick={() => setOpen((on) => !on)}>
+        <span class="step-icon" aria-hidden="true">
+          <Show when={state() === 'running'} fallback={<Icon name={ICONS[stepIcon(props.tool())]} small />}>
+            <span class="live" />
+          </Show>
+        </span>
+        <b>{row().label}</b>
+        <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
+        <Show when={change()}>{(c) => <Delta change={c()} />}</Show>
+        <Show when={state() === 'failed'}><em class="step-failed">{t('agent.failed')}</em></Show>
+        <Show when={state() === 'running' && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
+      </button>
+      <Show when={open()}>
+        <div class="step-detail">
+          <Show when={change()} fallback={<Show when={row().detail}><code class="step-what">{row().detail}</code></Show>}>
+            {(c) => <ChangedLines change={c()} shown={40} read />}
+          </Show>
+          <Show when={output().shown.trim() && !change()}>
+            <pre class="step-out" aria-label={t('step.output')}>{output().shown}</pre>
+            <Show when={output().more}><p class="note">{t('tool.moreLines', { n: output().more })}</p></Show>
+          </Show>
         </div>
-      </details>
+      </Show>
+    </div>
+  );
+}
+
+/** A piece of the agent's thinking, in its place: one quiet row with its first words; opened, all of it. While the agent
+ * is still in it, the row reads "Thinking" with the line it is on now, in its own words. */
+function Thought(props: { text: string; live: boolean }) {
+  const [open, setOpen] = createSignal(false);
+  const parts = createMemo(() => thinkingParts(props.text));
+  const line = () => middle((props.live ? parts().at(-1) : parts()[0])?.text ?? '');
+  return (
+    <div class="step thought" data-state={props.live ? 'running' : 'done'} role="listitem">
+      <button type="button" class="step-line" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
+        <span class="step-icon" aria-hidden="true">
+          <Show when={props.live} fallback={<Icon name="feather" small />}><span class="live" /></Show>
+        </span>
+        <b>{t(props.live ? 'step.thinking' : 'step.thought')}</b>
+        <Show when={line()}><i>{line()}</i></Show>
+      </button>
+      <Show when={open()}>
+        <div class="step-detail thought-text">
+          <For each={parts()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** Steps and thinking that came together between two stretches of words. One is its own row; two or more fold into one
+ * line that counts them ("Read 3 files · Ran 2 commands") and, while the agent is on them, says the step it is on now.
+ * Opened, every row in order. The words before and after never fold. */
+function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean; long?: string }) {
+  const [open, setOpen] = createSignal(false);
+  const tools = createMemo(() => props.items().flatMap((item) => (item.kind === 'tool' ? [item.tool] : [])));
+  const running = createMemo(() => (props.working ? tools().findLast((tool) => tool.ok === undefined && !tool.interrupted) : undefined));
+  const thinkingNow = () => props.working && props.last && props.items().at(-1)?.kind === 'thought';
+  const summary = createMemo(() => stepsSummary(tools()) || (tools().length ? '' : t('step.thought')));
+  const now = () => {
+    const tool = running();
+    if (tool) return toolLine(tool);
+    if (!thinkingNow()) return '';
+    const last = props.items().at(-1);
+    const line = last?.kind === 'thought' ? middle(thinkingParts(last.text).at(-1)?.text ?? '') : '';
+    return line ? `${t('step.thinking')} · ${line}` : t('step.thinking');
+  };
+  const failed = () => tools().filter((tool) => tool.ok === false && !tool.declined).length;
+  // A row can be read once more after its place changed kind or went away (an Index slot outlives its item for a tick), so
+  // each row keeps the last tool and words it saw instead of reading a stale slot.
+  const item = (it: Accessor<Item | undefined>, i: number) => {
+    let seenTool: ToolUse | undefined;
+    let seenText = '';
+    const tool = () => {
+      const v = it();
+      if (v?.kind === 'tool') seenTool = v.tool;
+      return seenTool!;
+    };
+    const words = () => {
+      const v = it();
+      if (v?.kind === 'thought') seenText = v.text;
+      return seenText;
+    };
+    return (
+      <Show when={it()?.kind === 'tool'} fallback={<Thought text={words()} live={thinkingNow() && i === props.items().length - 1} />}>
+        <Step tool={tool} working={props.working} long={tool().id === running()?.id ? props.long : undefined} />
+      </Show>
+    );
+  };
+  return (
+    <Show when={props.items().length > 1} fallback={<div class="steps one" role="list">{item(() => props.items()[0]!, 0)}</div>}>
+      <div class="steps" data-state={running() || thinkingNow() ? 'running' : 'done'}>
+        <button type="button" class="steps-head" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
+          <span class="step-icon" aria-hidden="true">
+            <Show when={running() || thinkingNow()} fallback={<Icon name="right" small />}><span class="live" /></Show>
+          </span>
+          <b>{[summary(), now()].filter(Boolean).join(' · ')}</b>
+          <Show when={failed()}><span class="sr-only">, </span><em class="step-failed">{t('agent.facts.failed', { n: failed() })}</em></Show>
+          <Show when={running() && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
+        </button>
+        <Show when={open()}>
+          <div class="steps-list" role="list">
+            <Index each={props.items()}>{(it, i) => item(it, i)}</Index>
+          </div>
+        </Show>
+      </div>
     </Show>
   );
 }
@@ -246,15 +369,15 @@ interface Shared {
   plan?: Plan;
   /** A button of a closing box: its words go as the person's message. */
   onReply?: (text: string) => void;
+  onActChange?: (target: NonNullable<import('./api.ts').FaberAct['change']>) => void;
   conversationNames?: Record<string, string>;
   /** Opens another conversation, as its sidebar row does: a plan step's link (task 040). */
   onOpenConversation?: (id: string) => void;
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
-  // A turn Faber started by itself: its message takes no row (Faber's own plumbing never does, the 2026-10-19 design), so the
-  // reply's header carries it as a small loop mark whose tooltip says what Faber asked.
-  const woke = () => props.prompt?.wake;
+  // Older automatic messages without acts keep their loop mark in the reply header.
+  const woke = () => props.prompt?.acts?.length ? undefined : props.prompt?.wake;
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
@@ -308,56 +431,19 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   tickWhile(createMemo(() => agePending(m(), !!props.last, ageNow())));
   const foot = () => footText(m(), !!props.last, ageNow());
   const waiting = () => m().permissions ?? [];
-  // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible. So does a reply that is still
-  // streaming: the boundary moves with every step, and what the agent said between steps would fold away and come back
-  // as the stream goes on. It folds into the activity once, when the answer ends.
-  const boundary = createMemo(() => {
-    const end = m().activityEnd;
-    return !working() && tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
-  });
-  // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
-  // activity instead, so it shows once.
-  const finalText = createMemo(() => text().slice(boundary()));
-  const narration = createMemo(() => {
-    if (!boundary()) return [];
-    // Visual ranges refer to the saved text: keep its spacing intact inside the work log too.
-    const hasVisual = text().slice(0, boundary()).includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => v.messageId === m().id && v.end <= boundary()));
-    const prefix = text().slice(0, boundary()).trimEnd();
-    const paragraphs = prefix.split(/\n{2,}/);
-    const last = paragraphs.at(-1)?.trim();
-    const answer = finalText().trimStart();
-    const duplicate = last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!));
-    if (duplicate) paragraphs.pop();
-    const rest = hasVisual ? (duplicate ? prefix.slice(0, prefix.lastIndexOf(last!)).trimEnd() : prefix) : paragraphs.join('\n\n').trim();
-    return rest ? [rest] : [];
-  });
+  // Its own memo, so a tick that adds only words never parses the thinking again.
   const thinkingText = createMemo(() => m().thinking ?? '');
   const thinking = createMemo(() => thinkingParts(thinkingText()));
-  // The agent's own tools; each subagent and what it ran show as their own step below (AgentRow).
-  const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
   // A helper always comes from the AI that is not running the reply.
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const agents = createMemo(() => agentSteps(tools(), helperKind()));
-  const groups = createMemo(() => groupSteps(own()));
-  // The living sentence reads a run of one kind as its phrase and the newest step ("Reading 3 files · a.ts").
-  const lineOf = (tool: ToolUse) => stepLine(groups(), tool);
-  // The work log and the runs inside it the person opened (a run by its first step): a step on screen there is the one place
-  // it shows, so the latest line under the log and the line under the words leave it out.
-  const [logOpen, setLogOpen] = createSignal(false);
-  const [openRuns, setOpenRuns] = createSignal<ReadonlySet<string>>(new Set());
-  const toggleRun = (first: string, open: boolean) =>
-    setOpenRuns((runs) => {
-      const next = new Set(runs);
-      if (open) next.add(first);
-      else next.delete(first);
-      return next;
-    });
-  const inLog = (tool: ToolUse) => {
-    if (!logOpen()) return false;
-    const group = groups().find((g) => g.tools.some((s) => s.id === tool.id));
-    return !!group && (!group.kind || openRuns().has(group.tools[0]!.id));
-  };
-  const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
+  // The agent's own tools, without its subagents' (each subagent's sit in its own row).
+  const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
+  // The reply as it happened: words, thinking and steps in their order (W1). Each part that did not change keeps its object, so
+  // a tick of the stream redraws only the part that grew.
+  let before: Part[] | undefined;
+  const parts = createMemo(() => (before = keepParts(before, timeline(m(), text()))));
+  const agentOf = (id: string) => agents().find((step) => step.call.id === id);
   const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
   const kitLine = () => {
     const kit = m().toolKit;
@@ -378,8 +464,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const away = m().away;
     return away ? awaySites(props.messages ?? [], away.turns) : [];
   });
-  const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
-  // The answer on screen is never repeated here: once it has text, the status line steps aside.
   // The checks this reply ran, ticking up as each one ends (R161 step 9). The engine marks a check when it starts, so the
   // screen keeps no list of its own; a subagent's checks are its own facts.
   const tally = createMemo(() => {
@@ -388,43 +472,14 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   });
   // The sites it opened, for research (R161 step 9); a subagent's reading stays in its own step.
   const sources = createMemo(() => sourcesOf(own()));
-  // What the agent said it is doing now (task 017) stands in for the newest step's words while it works.
+  // What the agent said it is doing now (task 017), in its own words.
   const nowLine = () => (working() ? m().now : undefined);
-  const latest = createMemo(() => {
-    const now = nowLine();
-    if (now && !finalText().trim()) return now;
-    const tool = tools().at(-1);
-    if (tool && tool.ok === undefined) return inLog(tool) ? '' : lineOf(tool);
-    if (finalText().trim()) return '';
-    if (!tool) return middle(thinking().at(-1)?.text ?? '');
-    return inLog(tool) ? '' : lineOf(tool);
-  });
   // A long step says how long it has run, from when the engine saw it start (R161 step 9). Only past half a minute, so a
   // quick step never shows a number that changes before it can be read; the clock ticks only while such a step runs and
   // the window shows.
   const LONG = 30_000;
   // The newest of the agent's own steps still open, wherever it is in the list: a later one may already have ended.
-  const runningStep = createMemo(() => (working() ? tools().findLast((tool) => !tool.parent && tool.ok === undefined) : undefined));
-  // Under the words: the step it is on, in the status line's words, or that it is thinking (only once words stop). Never
-  // while a question waits on the person.
-  const after = () => {
-    if (!working() || !finalText().trim() || waiting().length || m().waitUntil) return '';
-    // A running step shows at once (the caret never blinks over one); "Thinking…" waits until the words stop.
-    const tool = runningStep();
-    if (tool) return nowLine() || (inLog(tool) ? '' : lineOf(tool));
-    if (typing()) return '';
-    const thought = middle(thinking().at(-1)?.text ?? '');
-    return nowLine() || (thought ? `${t('activity.thinkingNow')} · ${thought}` : t('activity.thinkingNow'));
-  };
-  const planNow = () => {
-    if (!working()) return undefined;
-    const shownAbove = ((steps() || agents().length) && !finalText().trim() ? latest() : '') || after();
-    const last = own().at(-1);
-    for (const line of [nowLine(), last && !inLog(last) ? lineOf(last) : '', middle(thinking().at(-1)?.text ?? '')]) {
-      if (line && line !== shownAbove) return line;
-    }
-    return undefined;
-  };
+  const runningStep = createMemo(() => (working() ? tools().findLast((tool) => !tool.parent && tool.ok === undefined && !isProgressCall(tool)) : undefined));
   const [clock, setClock] = createSignal(Date.now());
   // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
   const runningSince = () => runningStep()?.started;
@@ -440,16 +495,35 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
     const e = elapsed(since, clock());
     return t(e.key, { n: e.n });
   };
-  // While the newest step is an edit, the lines it changed sit under the status line until the next step or the answer:
-  // the view fits the work (R161 step 9). Text before the newest step's end is narration, not the answer.
-  const answering = () => {
-    const end = m().activityEnd;
-    return Number.isInteger(end) ? !!text().slice(end).trim() : !!finalText().trim();
-  };
+  // While the newest step is an edit, the lines it changed sit under the reply until the next step or words, even once it ended (R161 step 9).
   const changing = createMemo(() => {
-    const tool = tools().at(-1);
-    return working() && tool && (tool.ok === undefined || !answering()) ? changeOf(tool) : undefined;
+    const last = parts().at(-1);
+    const item = working() && last?.kind === 'steps' ? last.items.at(-1) : undefined;
+    return item?.kind === 'tool' && tools().at(-1) === item.tool ? changeOf(item.tool) : undefined;
   });
+  // The last part shows the agent at work by itself (a running step, its thinking, a subagent at work, its words arriving);
+  // when none does, one quiet line under the reply says it is thinking, in its own words when it gave some. Never while a
+  // question waits on the person.
+  const shownLive = () => {
+    const last = parts().at(-1);
+    if (runningStep()) return true;
+    if (last?.kind === 'steps') return last.items.at(-1)?.kind === 'thought';
+    if (last?.kind === 'agent') return last.tool.ok === undefined;
+    return last?.kind === 'text' && typing();
+  };
+  const liveLine = () => {
+    if (!working() || waiting().length || m().waitUntil || shownLive()) return '';
+    return nowLine() || t('activity.thinkingNow');
+  };
+  const planNow = () => {
+    if (!working()) return undefined;
+    const tool = runningStep();
+    for (const line of [nowLine(), tool ? toolLine(tool) : '', middle(thinking().at(-1)?.text ?? '')]) {
+      if (line && line !== liveLine()) return line;
+    }
+    return undefined;
+  };
+  const caretOn = () => working() && !waiting().length && !m().waitUntil && !runningStep() && typing();
   // The header says which model answers and how hard it thinks: the vendor's mark, the model's name from the moment it is
   // known to the end and after reopening (a model the CLI never named reads as the vendor's name), and its effort when the
   // answer has one (the owner, 2026-10-17). Auto's reason sits in its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
@@ -520,37 +594,49 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
-      <Show when={steps() || hasKit()}>
-        <details class="activity disclosure" onToggle={(e) => setLogOpen(e.currentTarget.open)}>
-          <summary>{steps() ? t(working() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) }) : t('kit.details')}</summary>
-          <div class="activity-body">
-            <Show when={hasKit()}><p class="pace kit">{kitLine()}</p></Show>
-            <Show when={thinking().length}>
-              <div class="activity-thinking">
-                <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
-              </div>
-            </Show>
-            <For each={narration()}>{(text) => <Narration text={text} conversationId={props.conversationId} messageId={m().id} visuals={props.visuals} pieceRevision={props.pieceRevision} />}</For>
-            <Show when={own().length}>
-              <div class="tools">
-                <Index each={groups()}>{(group) => <StepRow group={group} live={runningStep()?.id} onToggle={(open) => toggleRun(group().tools[0]!.id, open)} />}</Index>
-              </div>
-            </Show>
-          </div>
+      <Show when={hasKit()}>
+        <details class="kit disclosure">
+          <summary>{t('kit.details')}</summary>
+          <p class="pace kit">{kitLine()}</p>
         </details>
       </Show>
-      <Show when={agents().length}>
-        <div class="agents" role="list" aria-label={t('agent.label')}>
-          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={working()} conversationId={props.conversationId} messageId={m().id} />}</Index>
-        </div>
-      </Show>
-      <Show when={(steps() || agents().length) && working() && latest() && !finalText().trim()}>
-        <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>
-          <span class="step">{latest()}</span>
-          {/* The time is for the eye: a live region that changed every few seconds would keep talking. */}
-          <Show when={longFor()}>
-            <span class="long" aria-hidden="true"> · {longFor()}</span>
-          </Show>
+      {/* The reply as it happened: the words, the thinking and the steps in order. The words never fold. */}
+      {/* Each place keeps its node while its part grows; a place whose part changes kind swaps its child. The children read
+          the part through guards, never through a Match's own accessor, which goes stale while the kind changes. */}
+      <FaberActs acts={m().acts} onChange={props.onActChange} />
+      <Index each={parts()}>
+        {(part, i) => {
+          const words = () => { const p = part(); return p.kind === 'text' ? p : undefined; };
+          const block = () => { const p = part(); return p.kind === 'steps' ? p.items : []; };
+          const step = createMemo(() => { const p = part(); return p.kind === 'agent' ? agentOf(p.tool.id) : undefined; });
+          // The row keeps the last step it showed while its place changes kind, so it never reads an empty one.
+          let seen: AgentStep | undefined;
+          const shownStep = () => (seen = step() ?? seen)!;
+          return (
+            <Switch>
+              <Match when={part().kind === 'text'}>
+                <div class="md" onClick={openLinks} onKeyDown={pressImage}>
+                  <PieceReply text={text().slice(words()?.from ?? 0, words()?.to ?? 0)} offset={words()?.from ?? 0} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
+                  <Show when={caretOn() && i === parts().length - 1}>
+                    <span class="cursor" aria-hidden="true" />
+                  </Show>
+                </div>
+              </Match>
+              <Match when={part().kind === 'steps'}>
+                <Steps items={block} working={working()} last={i === parts().length - 1} long={longFor()} />
+              </Match>
+              <Match when={step()}>
+                <div class="agents" role="list" aria-label={t('agent.label')}>
+                  <AgentRow step={shownStep} streaming={working()} conversationId={props.conversationId} messageId={m().id} />
+                </div>
+              </Match>
+            </Switch>
+          );
+        }}
+      </Index>
+      <Show when={props.visuals?.some((a) => a.versions.some((v) => v.file && v.messageId === m().id))}>
+        <div class="md">
+          <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />
         </div>
       </Show>
       {/* One polite region for the whole reply, so a screen reader hears each check end and the first failure. */}
@@ -577,20 +663,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         surface="ask"
         seen={props.last && !m().parkedSeen ? () => api.parkedSeen(props.conversationId, m().id) : undefined}
       />
-      <div class="md" aria-busy={working()} onClick={openLinks} onKeyDown={pressImage}>
-        <PieceReply text={finalText()} offset={boundary()} messageId={m().id} conversationId={props.conversationId} answers={props.visuals ?? []} revision={props.pieceRevision} />
-        <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />
-        <Show when={working() && !waiting().length && !m().waitUntil && !runningStep() && (typing() || !finalText().trim())}>
-          <span class="cursor" aria-hidden="true" />
-        </Show>
-      </div>
-      {/* Words on screen and the agent still at work: the step it is on sits right under them, where the eye is. */}
-      <Show when={after()}>
-        <div class="activity-latest after" role="status" aria-live="polite" aria-atomic="true">
-          <span class="step">{after()}</span>
-          <Show when={longFor()}>
-            <span class="long" aria-hidden="true"> · {longFor()}</span>
-          </Show>
+      {/* Nothing above shows the agent at work: it is thinking, said in its own words when it gave some. */}
+      <Show when={liveLine()}>
+        <div class="activity-latest live-line" role="status" aria-live="polite" aria-atomic="true">
+          <span class="live" aria-hidden="true" />
+          <span class="step">{liveLine()}</span>
         </div>
       </Show>
       {/* The agent's own work seems stuck (a step with no news, a long compaction, the same step again): said where the eye is, with Stop. */}
@@ -654,14 +731,14 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         <div class={working() ? 'live-foot' : 'actions'}>
           <Show when={!working()}>
           <CopyButton text={() => m().text} />
-          <Show when={canSpeak() && finalText().trim()}>
+          <Show when={canSpeak() && text().trim()}>
             <button
               type="button"
               class="iconbtn"
               aria-pressed={speaking() === m().id}
               title={t(speaking() === m().id ? 'answer.listenStop' : 'answer.listen')}
               aria-label={t(speaking() === m().id ? 'answer.listenStop' : 'answer.listen')}
-              onClick={() => toggleSpeech(m().id, finalText())}
+              onClick={() => toggleSpeech(m().id, text())}
             >
               <span class="swap" classList={{ done: speaking() === m().id }}>
                 <Icon name="speaker" small />
@@ -967,28 +1044,6 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
-const PARAGRAPHS = /\n{2,}/;
-const BLANK = '\n\n';
-/** The agent's words between its steps, in the work log: the last two paragraphs, the earlier ones under "N more". */
-function Narration(props: { text: string; conversationId: string; messageId: string; visuals?: VisualAnswer[]; pieceRevision?: number }) {
-  const [all, setAll] = createSignal(false);
-  const parts = createMemo(() => (props.text.includes('```') ? [props.text] : props.text.split(PARAGRAPHS)));
-  const hidden = () => (all() || parts().length < 3 ? 0 : parts().length - 2);
-  return (
-    <>
-      <Show when={hidden()}>
-        <button type="button" class="more-narration" onClick={() => setAll(true)}>
-          {t('narration.more', { n: hidden() })}
-        </button>
-      </Show>
-      <Show when={props.text.includes('faber-piece') || props.visuals?.some((a) => a.versions.some((v) => !v.file && v.messageId === props.messageId && v.end <= props.text.length))}
-        fallback={<div class="md" onClick={openLinks} innerHTML={html(parts().slice(hidden()).join(BLANK))} />}>
-        <div class="md" onClick={openLinks} onKeyDown={pressImage}><PieceReply text={props.text} offset={0} conversationId={props.conversationId} messageId={props.messageId} answers={props.visuals ?? []} revision={props.pieceRevision} /></div>
-      </Show>
-    </>
-  );
-}
-
 export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
@@ -1055,7 +1110,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
               </Show>
             }
           >
-            {/* A message Faber sent by itself takes no row: the reply's header carries it (`woke` in Answer). */}
+            <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (

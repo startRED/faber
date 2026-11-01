@@ -1060,6 +1060,23 @@ impl Engine {
             )
         })
     }
+    /// Like `open_for_screen`, with only the newest `newest` messages; `earlier` says how many came before them.
+    pub fn open_for_screen_window(&self, id: &str, newest: usize) -> Option<Conversation> {
+        self.with(|core| {
+            let opened = core.opened_window(id, newest)?;
+            core.shown(id);
+            Some(opened.for_screen())
+        })
+    }
+    /// The `n` messages just before `message_id`, oldest first, as the screen gets them. None when the conversation or that
+    /// message is gone.
+    pub fn messages_before(&self, id: &str, message_id: &str, n: usize) -> Option<Vec<Message>> {
+        self.with(|core| {
+            let messages = &core.load(id)?.messages;
+            let at = messages.iter().position(|m| m.id == message_id)?;
+            Some(messages[at.saturating_sub(n)..at].iter().cloned().map(Message::for_screen).collect())
+        })
+    }
     pub fn visual_answers_for_screen(&self, id: &str, message_id: Option<&str>, block: Option<usize>) -> Vec<crate::visual::VisualAnswer> {
         self.with(|c| c.load(id).map(|conversation| crate::visual::list(&conversation.messages, message_id.zip(block))).unwrap_or_default())
     }
@@ -1985,8 +2002,21 @@ impl Core {
 
     /// A copy of conversation `id` as the screen reads it, its last reply saying whether it waits for the person.
     fn opened(&mut self, id: &str) -> Option<Conversation> {
-        let mut c = self.load(id)?.clone();
-        let needs = reply_needs_you(&c, self.live.get(id));
+        self.opened_window(id, usize::MAX)
+    }
+
+    /// A copy of the conversation with only its newest `newest` messages cloned, and how many came before them.
+    fn opened_window(&mut self, id: &str, newest: usize) -> Option<Conversation> {
+        self.load(id)?;
+        let conv = self.convs.get_mut(id)?;
+        let needs = reply_needs_you(conv, self.live.get(id));
+        // The other messages never leave the loaded conversation, so a window of a huge one costs only its own messages.
+        let all = std::mem::take(&mut conv.messages);
+        let mut c = conv.clone();
+        let start = all.len().saturating_sub(newest);
+        c.messages = all[start..].to_vec();
+        c.earlier = start;
+        conv.messages = all;
         if let Some(reply) = c.messages.last_mut().filter(|m| m.role == Role::Assistant) {
             reply.needs_you = needs;
         }
@@ -2648,8 +2678,17 @@ impl Core {
                 {
                     l.settled = false;
                 }
-                if let Some(m) = self.turn(conv) {
-                    m.thinking.get_or_insert_default().push_str(&delta);
+                if let Some(m) = self.turn(conv)
+                    && !delta.is_empty()
+                {
+                    // A piece of thinking after new words or a new step of the agent's own starts a new place in the thread.
+                    let at = m.text.encode_utf16().count();
+                    let steps = m.tools.iter().flatten().filter(|t| t.parent.is_none()).count();
+                    let thinking = m.thinking.get_or_insert_default();
+                    if m.thinking_marks.last().is_none_or(|mark| (mark.at, mark.steps) != (at, steps)) {
+                        m.thinking_marks.push(crate::model::ThinkingMark { from: thinking.encode_utf16().count(), at, steps });
+                    }
+                    thinking.push_str(&delta);
                 }
             }
             EngineEvent::Tool { id, name, input, parent } => {
@@ -2685,7 +2724,11 @@ impl Core {
                         check: false,
                         started: Some(now()),
                         ended: None,
+                        at: None,
                     };
+                    if tool.parent.is_none() {
+                        tool.at = Some(m.text.encode_utf16().count());
+                    }
                     if matches!(tool.name.as_str(), "Agent" | "Task" | "Helper") {
                         tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
                     }
@@ -3515,6 +3558,9 @@ impl Core {
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &item.text));
+        }
         let mut reply =
             Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), now);
         question.rewind = point;
@@ -3783,12 +3829,18 @@ impl Core {
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
         question.wake = item.wake.clone();
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &item.text));
+        }
         let mut reply = Message::new(point.as_ref().map_or_else(new_id, |point| point.turn_id.clone()), Role::Assistant, String::new(), at);
         if !routing {
             reply.vendor = Some(pick.vendor);
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+            reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
+        }
         reply.note = resent.then(|| "note.historyResent".to_string());
         question.rewind = point;
         reply.tools = Some(vec![]);
@@ -3845,8 +3897,9 @@ impl Core {
                 let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                    let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
                 }
             });
             return Ok(());
@@ -4130,6 +4183,11 @@ impl Core {
         let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
+            if let Some(kit) = &tool_kit
+                && !kit.ids.is_empty()
+            {
+                m.acts.push(crate::act::FaberAct::kit(kit));
+            }
             m.tool_kit = tool_kit;
             if rewind_notice.is_some() {
                 m.note = rewind_notice;
@@ -4608,6 +4666,7 @@ impl Core {
             working_folder: None,
             project_start_pending: area == Area::Project,
             copy: None,
+            earlier: 0,
             sessions: BTreeMap::new(),
             session_kits: BTreeMap::new(),
             session_start_cards: BTreeMap::new(),
@@ -4756,6 +4815,9 @@ impl Core {
         };
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
         question.wake = wake;
+        if let Some(wake) = &question.wake {
+            question.acts.push(crate::act::FaberAct::wake(wake, &req.text));
+        }
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
@@ -4764,6 +4826,9 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+            reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
+        }
         reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
@@ -4826,8 +4891,9 @@ impl Core {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
-                    let routed = verdict.and_then(|v| core.table_at(&v, only, before.as_ref()));
-                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                    let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    core.after_route(&conv, &reply_id, routed, (pick, actor), text, images);
                 }
             });
             return Ok(id);

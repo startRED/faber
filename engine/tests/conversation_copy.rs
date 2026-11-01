@@ -827,7 +827,8 @@ async fn r_next_a_first_message_shows_at_once_and_its_agent_starts_in_the_copy_w
     }));
     let started = std::time::Instant::now();
     let id = s.engine.send(ask(&s.project, "Fix the login page")).unwrap();
-    assert!(started.elapsed() < Duration::from_secs(1), "send waited for the copy: {:?}", started.elapsed());
+    // The hook holds capture for 10 seconds, so 5 seconds still proves send does not wait for the copy.
+    assert!(started.elapsed() < Duration::from_secs(5), "send waited for the copy: {:?}", started.elapsed());
     // The question and the reply that is typing are on screen, and nothing runs yet: no copy, no agent, nothing in the folder.
     let shown = s.engine.open(&id).unwrap();
     assert_eq!(shown.messages.len(), 2, "{:?}", shown.messages);

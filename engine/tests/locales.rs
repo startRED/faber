@@ -66,6 +66,7 @@ fn every_english_text_is_shown_somewhere() {
     let mut code = sources("ui", &["ts", "tsx"], "locales");
     code.extend(sources("engine/src", &["rs"], ""));
     code.extend(sources("src-tauri/src", &["rs"], ""));
+    code.extend(sources("host/src", &["rs"], ""));
     let starts = built_starts(&code);
     // "What's new" reads every `notes.<id>.<kind>` from the English file itself (`ui/notes.ts`): its keys are the list. In a
     // branch the id is still the placeholder `next` or `next-2` (R164) until `scripts/numbers.mjs` gives it its number.
@@ -116,6 +117,17 @@ fn every_shipped_catalog_item_has_one_display_name_in_every_locale() {
             let line = text.lines().find(|line| line.contains(&format!("'{key}':"))).unwrap();
             let value = line.split_once(':').unwrap().1.trim().trim_end_matches(',').trim_matches(['\'', '"']);
             assert!(!value.trim().is_empty(), "{locale}: empty name for {id}");
+        }
+    }
+}
+
+#[test]
+fn every_wake_reason_exists_in_every_locale() {
+    for locale in ["en", "pt-BR", "es", "fr", "de"] {
+        let text = std::fs::read_to_string(repo(&format!("ui/locales/{locale}.ts"))).unwrap();
+        let found = keys(&text);
+        for key in ["act.why.keepGoing", "act.why.compacted", "act.why.compactFailed"] {
+            assert_eq!(found.iter().filter(|entry| entry.as_str() == key).count(), 1, "{locale}: {key}");
         }
     }
 }

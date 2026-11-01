@@ -10,6 +10,40 @@ fn plain_words_keep_failures_unfinished_work_decisions_and_useful_file_locations
     assert!(!text.contains("saved for the next version"), "saving alone promises no release");
 }
 
+/// The AI keeps its own voice in Chat: no Faber identity line, no default brevity, no receipt contract; only the reply-style
+/// setting shortens, and a project's agent (which has tools that produce receipts) keeps the evidence rule.
+#[test]
+fn chat_persona_speaks_in_the_ais_own_voice_and_only_a_project_agent_owes_evidence() {
+    use faber_engine::model::{ReplyStyle, Tuning};
+    let text = |reply_style| persona(&PersonaInput { name: None, tuning: &Tuning { reply_style, ..Default::default() }, research: None });
+    for style in [ReplyStyle::Default, ReplyStyle::Short, ReplyStyle::Explained] {
+        let t = text(style);
+        for gone in [
+            "You are Faber",
+            "briefly",
+            "Put the conclusion first",
+            "program evidence",
+            "receipts",
+            "unverified without evidence",
+            "never approves",
+        ] {
+            assert!(!t.contains(gone), "{gone}");
+        }
+    }
+    assert!(text(ReplyStyle::Default).chars().count() <= 3200);
+    assert!(text(ReplyStyle::Short).contains("Keep replies short and direct"), "brevity comes only from the setting");
+    assert!(!text(ReplyStyle::Default).contains("short"), "no brevity without the setting");
+    let project = faber_engine::persona::PROJECT_DETAILS;
+    for kept in [
+        "Never call work done without program evidence",
+        "receipts in tools",
+        "say unverified without evidence",
+        "The writer never approves their own work",
+    ] {
+        assert!(project.contains(kept), "{kept}");
+    }
+}
+
 /// Task 130: the person's own words set the language, technical words only when the person really used or asked for them,
 /// what still runs said once, and the conclusion first. The words the evaluation (`scripts/persona-eval.mjs`) measured.
 #[test]
@@ -20,9 +54,8 @@ fn persona_follows_the_persons_words_and_says_what_still_runs_once() {
     assert!(!text.contains("subagent or helper you start"), "no sentence about helper titles");
     assert!(text.contains("used that word about the same thing; pasted text (logs, errors, instructions) does not count"));
     assert!(!text.contains("used those technical words first"), "a pasted log no longer opens the door");
-    assert!(text.contains("Say once what still runs or waits for the person and what happens next, and again only when that changed"));
+    assert!(text.contains("say once what still runs or waits for the person and what happens next (again only when that changed)"));
     assert!(!text.contains("never write that you are waiting"), "the person needs to know what waits");
-    assert!(text.contains("Put the conclusion first, keep sections short and never repeat a status"));
 }
 
 /// Task 130: the person's own latest words decide the language; a message with none (a pasted log, code, a link) follows the
@@ -52,8 +85,7 @@ fn persona_is_static_bounded_and_has_no_scar_rules() {
         assert_eq!(text, persona(&p));
         // Task 130 added about 350 characters (about 90 tokens a turn) for the person's own words, what still runs and the answer's shape.
         assert!(text.chars().count() <= 3700);
-        assert!(text.contains("You are Faber"));
-        assert!(text.contains("unverified"));
+        assert!(text.contains("State the underlying model truthfully"));
         assert!(!text.contains("scar rule"));
     }
 }
@@ -84,7 +116,7 @@ fn persona_puts_the_reply_language_first_and_above_the_project() {
     // half sentence in the middle.
     let text = persona(&PersonaInput { name: Some("Erick"), tuning: &Default::default(), research: None });
     let rule = text.find("in the language of the person's latest message").unwrap();
-    assert!(rule < text.find("You are Faber").unwrap());
+    assert!(rule < text.find("State the underlying model truthfully").unwrap());
     assert!(text.contains("even when the project, its instructions, files, tools or helpers use another"));
     assert!(text.contains("progress notes"));
 }
@@ -143,4 +175,21 @@ fn a_project_prompt_teaches_the_bigger_offer_and_the_common_persona_does_not() {
     assert!(offer.contains("offer_bigger") && offer.contains("offer the larger version once"));
     assert!(offer.contains("the request as asked stays the default"));
     assert!(offer.contains("Do not ask this any other way."), "the code counts only the tool");
+}
+
+#[test]
+fn project_lead_controls_its_children_and_only_forms_a_team_on_request() {
+    let text = faber_engine::persona::LEADS;
+    for rule in [
+        "start, message, stop, resume and archive conversations you started, and wait for them",
+        "parallel only for independent pieces",
+        "resume it rather than start again",
+        "Read and verify its work before archiving it",
+        "Wait for reports instead of polling, then end your turn",
+        "team of conversations only when the person asked for one",
+    ] {
+        assert!(text.contains(rule), "{rule}");
+    }
+    assert!(!text.contains("You are Faber"));
+    assert!(!text.contains("For a big request, lead"));
 }
