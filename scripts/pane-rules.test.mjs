@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { allowedUrl, CALLS, plainProfile } from '../electron/panerules.ts';
+import { allowedRequest, allowedUrl, CALLS, plainProfile } from '../electron/panerules.ts';
+
+test('pane requests cannot reach Faber origins or privileged schemes', () => {
+  for (const url of ['https://example.org/', 'ws://localhost:3000/', 'data:text/plain,x', 'blob:https://example.org/id']) {
+    assert.equal(allowedRequest(url), true, url);
+  }
+  for (const url of ['https://ipc.localhost/', 'wss://tauri.localhost./', 'file:///x', 'faber://app/', 'javascript:alert(1)']) {
+    assert.equal(allowedRequest(url), false, url);
+  }
+});
 
 // The shell's copy of the pane's rules answers as host/src/pane/rules.rs does (`only_web_pages_load_and_never_faber_s_own_origins`).
 test('only web pages load, and never Faber\'s own origins', () => {

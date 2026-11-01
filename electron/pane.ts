@@ -8,7 +8,7 @@
 // permission and loads only web pages. Parked, it sits outside the window where Chromium keeps drawing it.
 
 import { type BrowserWindow, type Rectangle, type Session, session, type WebContents, WebContentsView } from 'electron';
-import { allowedUrl, CALLS, plainProfile } from './panerules.ts';
+import { allowedRequest, allowedUrl, CALLS, plainProfile } from './panerules.ts';
 
 type Name = 'main' | 'behind';
 
@@ -86,7 +86,8 @@ function whole(x: unknown, y: unknown, width: unknown, height: unknown): Rectang
 
 /** Everything a profile holds is cleared: its cookies, storage and caches, and the connections that may carry its sign-ins. */
 async function wipe(profile: Session): Promise<void> {
-  await Promise.allSettled([profile.clearData(), profile.clearAuthCache(), profile.clearHostResolverCache(), profile.closeAllConnections()]);
+  const results = await Promise.allSettled([profile.clearData(), profile.clearAuthCache(), profile.clearHostResolverCache(), profile.closeAllConnections()]);
+  if (results.some((result) => result.status === 'rejected')) throw new Error('profile cleanup failed');
 }
 
 /** A session no page can ask anything of: no permission, no device, no download. Its certificate errors keep Chromium's answer. */
@@ -95,6 +96,7 @@ function guard(profile: Session): void {
   profile.setPermissionCheckHandler(() => false);
   profile.setDevicePermissionHandler(() => false);
   profile.setSpellCheckerEnabled(false);
+  profile.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !allowedRequest(details.url) }));
   profile.on('will-download', (event) => event.preventDefault());
 }
 
@@ -166,7 +168,8 @@ export class Pane {
   /** Closes every view without a word to the host: the app is ending. */
   closeAll(): void {
     // A Map may lose the entry it is on while it is walked.
-    for (const name of this.views.keys()) this.close(name);
+    this.close('main');
+    this.close('behind');
   }
 
   private run(order: PaneOrder): Promise<unknown> {
@@ -230,6 +233,7 @@ export class Pane {
           webSecurity: true,
           allowRunningInsecureContent: false,
           spellcheck: false,
+          backgroundThrottling: false,
           // A page that asks (alert, confirm, a file dialog) would hold a parked view forever.
           disableDialogs: true,
           navigateOnDragDrop: false,
@@ -335,13 +339,31 @@ export class Pane {
   private async call(name: Name, method: string, params: unknown): Promise<unknown> {
     const entry = this.need(name);
     if (!CALLS.has(method)) throw new Error('that DevTools call is not one Faber makes');
-    return await entry.contents.debugger.sendCommand(method, params ?? {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        entry.contents.debugger.sendCommand(method, params ?? {}),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            if (method === 'Runtime.evaluate' && entry.contents.debugger.isAttached()) {
+              void entry.contents.debugger.sendCommand('Runtime.terminateExecution').catch(() => {});
+            }
+            reject(new Error('the browser call timed out'));
+          }, 10_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async clear(name: Name): Promise<void> {
     const entry = this.need(name);
     const held = this.held.get(entry.profile);
-    if (held) await wipe(held.session);
+    if (held) {
+      held.ready = held.ready.then(() => wipe(held.session));
+      await held.ready;
+    }
   }
 
   /** Closes `name` and everything its page holds; nothing more is reported for it. Does nothing for a view that is not open. */
@@ -352,8 +374,6 @@ export class Pane {
     this.views.delete(name);
     entry.open = false;
     const { contents, view } = entry;
-    contents.debugger.removeAllListeners();
-    contents.removeAllListeners();
     try {
       if (contents.debugger.isAttached()) contents.debugger.detach();
     } catch {}
@@ -370,11 +390,14 @@ export class Pane {
     if (!held || !held.users.delete(claim)) return;
     if (held.users.size > 0) return;
     this.held.delete(profile);
-    this.spare.push({ session: held.session, ready: held.ready.then(() => wipe(held.session)) });
+    const ready = held.ready.then(() => wipe(held.session));
+    // A failed cleanup retires this session instead of sharing its data with another profile.
+    void ready.then(() => this.spare.push({ session: held.session, ready: Promise.resolve() }), () => {});
   }
 
   /** The window closed: its views are gone with it, and the host hears so before they are dropped. */
   private windowClosed(): void {
     for (const entry of this.views.values()) this.gone(entry);
+    this.closeAll();
   }
 }

@@ -47,6 +47,7 @@ struct Link {
     waiting: Option<HashMap<u64, Answer>>,
     /// The views the shell opened and the host has not closed.
     open: HashSet<View>,
+    generation: HashMap<View, u64>,
 }
 
 /// A [`Driver`] whose views are the shell's, reached by orders.
@@ -60,7 +61,7 @@ pub struct Relay {
 impl Relay {
     /// `send` carries an order to the shell (the process's one writer).
     pub fn new(send: Arc<dyn Fn(Order) + Send + Sync>) -> Arc<Relay> {
-        Arc::new(Relay { send, next: AtomicU64::new(1), link: Mutex::new(Link { waiting: Some(HashMap::new()), open: HashSet::new() }) })
+        Arc::new(Relay { send, next: AtomicU64::new(1), link: Mutex::new(Link { waiting: Some(HashMap::new()), open: HashSet::new(), generation: HashMap::new() }) })
     }
 
     /// The shell answered call `id`. An answer nobody waits for (a call the host gave up on, or an id never sent) changes
@@ -84,20 +85,12 @@ impl Relay {
         }
     }
 
-    /// Sends an order that answers nothing. Not sent once the shell is gone.
-    fn tell(&self, view: View, op: PaneOp) {
-        let link = lock(&self.link);
-        if link.waiting.is_some() {
-            (self.send)(Order::Pane { id: None, view: view_of(view), op });
-        }
-    }
-
     /// Sends a call when the future is first polled, and waits for the shell's answer. A future dropped before it ends (the
     /// host's deadline) forgets the call, so a late answer is dropped.
     fn ask(&self, view: View, op: PaneOp) -> BoxFuture<'_, Res<Value>> {
         Box::pin(async move {
             let (answer, answered) = oneshot::channel();
-            let id = {
+            let (id, generation) = {
                 let mut link = lock(&self.link);
                 if link.waiting.is_none() {
                     return Err(GONE.into());
@@ -105,14 +98,30 @@ impl Relay {
                 if !matches!(op, PaneOp::Open { .. }) && !link.open.contains(&view) {
                     return Err("not open".into());
                 }
+                let generation = if matches!(op, PaneOp::Open { .. }) {
+                    let generation = link.generation.entry(view).or_default();
+                    *generation += 1;
+                    Some(*generation)
+                } else {
+                    None
+                };
                 let id = self.next.fetch_add(1, Ordering::Relaxed);
                 link.waiting.get_or_insert_with(HashMap::new).insert(id, answer);
                 (self.send)(Order::Pane { id: Some(id), view: view_of(view), op });
-                id
+                (id, generation)
             };
             let mut forget = Forget { relay: self, id: Some(id) };
             let result = answered.await.unwrap_or_else(|_| Err(GONE.into()));
             forget.id = None;
+            if result.is_ok() {
+                if let Some(generation) = generation {
+                    let mut link = lock(&self.link);
+                    if link.waiting.is_none() || link.generation.get(&view) != Some(&generation) {
+                        return Err(GONE.into());
+                    }
+                    link.open.insert(view);
+                }
+            }
             result
         })
     }
@@ -137,21 +146,18 @@ impl Drop for Forget<'_> {
 impl Driver for Relay {
     fn open(&self, view: View, profile: String) -> BoxFuture<'_, Res<()>> {
         Box::pin(async move {
-            self.ask(view, PaneOp::Open { profile }).await?;
-            // The shell may have been lost while it opened: then the view is not one the host can use.
-            let mut link = lock(&self.link);
-            if link.waiting.is_none() {
-                return Err(GONE.into());
-            }
-            link.open.insert(view);
-            Ok(())
+            self.ask(view, PaneOp::Open { profile }).await.map(drop)
         })
     }
 
     fn close(&self, view: View) {
-        lock(&self.link).open.remove(&view);
+        let mut link = lock(&self.link);
+        link.open.remove(&view);
+        *link.generation.entry(view).or_default() += 1;
         // Always sent: an open the host gave up on may still have made the view.
-        self.tell(view, PaneOp::Close);
+        if link.waiting.is_some() {
+            (self.send)(Order::Pane { id: None, view: view_of(view), op: PaneOp::Close });
+        }
     }
 
     fn place(&self, view: View, place: Place) -> Res<()> {
@@ -208,6 +214,32 @@ mod tests {
             Order::Pane { id, view, op } => (id, view, op),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn close_invalidates_a_late_open_and_precedes_a_replacement() {
+        let (relay, mut orders) = relay();
+        let first = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "first".into()).await }
+        });
+        let (id, _, _) = pane_order(next(&mut orders).await);
+        relay.close(View::Main);
+        assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
+        let second = tokio::spawn({
+            let relay = relay.clone();
+            async move { relay.open(View::Main, "second".into()).await }
+        });
+        let (second_id, _, _) = pane_order(next(&mut orders).await);
+        relay.answer(second_id.unwrap(), Ok(Value::Null));
+        assert_eq!(second.await.unwrap(), Ok(()));
+        relay.answer(id.unwrap(), Ok(Value::Null));
+        assert!(first.await.unwrap().is_err());
+        assert!(relay.place(View::Main, Place::Parked).is_ok());
+        relay.close(View::Main);
+        assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Park));
+        assert_eq!(pane_order(next(&mut orders).await), (None, PaneView::Main, PaneOp::Close));
+        assert!(relay.place(View::Main, Place::Parked).is_err());
     }
 
     /// Opens `view` the way the pane does, with the shell answering at once.

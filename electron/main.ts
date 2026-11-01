@@ -13,6 +13,9 @@ import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
+// The test runner sets its own debugging switch later, in testmode.prepare().
+if (['remote-debugging-port', 'remote-debugging-pipe', 'remote-debugging-address'].some((name) => app.commandLine.hasSwitch(name))) app.exit(1);
+
 const SCHEME = 'faber';
 const ORIGIN = `${SCHEME}://app`;
 /** The screen's colour before it paints, Dark Room's frame (`ui/styles.css`), so the window never flashes white. */
@@ -28,10 +31,6 @@ const root = path.resolve(import.meta.dirname, '..', '..');
 const dist = realpathSync(testmode.screenFolder(path.join(root, 'dist')));
 const hidden = process.env.FABER_HIDDEN === '1';
 const autostart = process.argv.includes('--autostart');
-
-// Chromium's remote debugging would let any process of the account run script in the screen and call the host; only the
-// screen test runner (which sets its own switch in `testmode.prepare`) may open it.
-if (!testmode.testing && process.argv.some((arg) => /^--remote-debugging-(port|pipe|address)/.test(arg))) app.exit(1);
 
 // Every renderer runs in the system sandbox, not only the ones that ask for it.
 app.enableSandbox();
@@ -166,6 +165,7 @@ function createWindow(): BrowserWindow {
     },
   });
   // The screen opens links through `open_link`; a page never opens a window or leaves its origin by itself.
+  window.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const stay = (event: Electron.Event, url: string) => {
     if (!url.startsWith(`${ORIGIN}/`)) event.preventDefault();

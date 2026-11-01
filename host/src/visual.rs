@@ -33,9 +33,14 @@ fn guard() -> &'static Guard {
     })
 }
 
+/// The guard goes first in the document, before any markup of the author's, so nothing the author wrote can come before it:
+/// no `<head>` hidden in a comment can move it, and an author `<meta>` policy only applies to what is parsed after it. The
+/// header policy (`document`) already holds the guard's hash, so no policy of our own is needed ahead of it. Nothing is
+/// searched for: the only thing skipped is a plain `<!doctype html>` at the start, because a script ahead of it would
+/// put the page in quirks mode.
 fn inject_guard(document: &str) -> Vec<u8> {
     let tag = format!("<script>{}</script>", guard().script);
-    let at = after_tag(document, "<meta http-equiv=\"Content-Security-Policy\"").or_else(|| after_tag(document, "<head")).unwrap_or(0);
+    let at = simple_doctype_end(document);
     let mut out = String::with_capacity(document.len() + tag.len());
     out.push_str(&document[..at]);
     out.push_str(&tag);
@@ -43,10 +48,35 @@ fn inject_guard(document: &str) -> Vec<u8> {
     out.into_bytes()
 }
 
-fn after_tag(document: &str, prefix: &str) -> Option<usize> {
-    let start = document.find(prefix)?;
-    let end = document[start..].find('>')?;
-    Some(start + end + 1)
+/// Where a leading `<!doctype html>` (any case, optional space) ends, else 0. Any other doctype (public identifiers can hold
+/// a `>` in quotes) or anything before it gets the guard in front of it.
+fn simple_doctype_end(document: &str) -> usize {
+    let bytes = document.as_bytes();
+    let start = if document.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+    let space = |at: usize| bytes.get(at).is_some_and(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c'));
+    let mut at = start;
+    while space(at) {
+        at += 1;
+    }
+    let word = |at: usize, word: &str| bytes.get(at..at + word.len()).is_some_and(|got| got.eq_ignore_ascii_case(word.as_bytes()));
+    if !word(at, "<!doctype") {
+        return 0;
+    }
+    at += "<!doctype".len();
+    if !space(at) {
+        return 0;
+    }
+    while space(at) {
+        at += 1;
+    }
+    if !word(at, "html") {
+        return 0;
+    }
+    at += "html".len();
+    while space(at) {
+        at += 1;
+    }
+    if bytes.get(at) == Some(&b'>') { at + 1 } else { 0 }
 }
 
 fn page_path(uri: &str) -> Option<String> {
@@ -167,6 +197,39 @@ mod tests {
         assert!(!GUARD_JS.to_ascii_lowercase().contains("</script"));
     }
 
+    fn guarded(document: &str) -> String {
+        String::from_utf8(inject_guard(document)).unwrap()
+    }
+
+    #[test]
+    fn the_guard_is_the_first_thing_of_the_document_whatever_the_markup_holds() {
+        let tag = format!("<script>{}</script>", guard().script);
+        // A `<head>` inside a comment (or a script string) cannot draw the guard away from the front.
+        assert_eq!(guarded("<!-- <head> --><p>x</p>"), format!("{tag}<!-- <head> --><p>x</p>"));
+        assert_eq!(guarded("<script>var s = \"<head>\"</script><head></head>"), format!("{tag}<script>var s = \"<head>\"</script><head></head>"));
+        assert_eq!(guarded(""), tag);
+        // The page's own policy comes after the guard, so it only applies to what follows: it cannot forbid the guard.
+        let own = "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'\"><p>x</p>";
+        let out = guarded(own);
+        assert_eq!(out, format!("{tag}{own}"));
+        assert!(out.find("<script>").unwrap() < out.find("<meta").unwrap());
+        // The same with the meta tag written in other cases and inside a head.
+        let head = "<HEAD><META HTTP-EQUIV=content-security-policy content=\"default-src 'none'\"></HEAD>";
+        assert_eq!(guarded(head), format!("{tag}{head}"));
+    }
+
+    #[test]
+    fn a_plain_doctype_stays_first_so_the_page_is_not_put_in_quirks_mode() {
+        let tag = format!("<script>{}</script>", guard().script);
+        assert_eq!(guarded("<!DOCTYPE html><p>x"), format!("<!DOCTYPE html>{tag}<p>x"));
+        assert_eq!(guarded("\u{feff}  <!doctype  HTML ><p>x"), format!("\u{feff}  <!doctype  HTML >{tag}<p>x"));
+        // Anything else before or inside the doctype puts the guard in front of everything.
+        assert_eq!(guarded("<!DOCTYPE html PUBLIC \"a>b\"><p>x"), format!("{tag}<!DOCTYPE html PUBLIC \"a>b\"><p>x"));
+        assert_eq!(guarded("<!-- c --><!DOCTYPE html><p>x"), format!("{tag}<!-- c --><!DOCTYPE html><p>x"));
+        assert_eq!(guarded("<!DOCTYPEhtml><p>x"), format!("{tag}<!DOCTYPEhtml><p>x"));
+        assert_eq!(guarded("<!doctype html"), format!("{tag}<!doctype html"));
+    }
+
     #[test]
     fn visual_document_serves_only_the_requested_page_once_with_guard_and_both_header_policies() {
         let pages = Pages::electron();
@@ -181,10 +244,10 @@ mod tests {
             assert!(decoded.contains("private page"));
             assert!(decoded.contains("document.currentScript?.remove();"));
             assert!(decoded.contains("faber-visual-escape"));
-            let meta_end = decoded.find("content=\"default-src 'none'\">").unwrap();
+            let meta_start = decoded.find("<meta http-equiv").unwrap();
             let guard_start = decoded.find("<script>document.currentScript?.remove();").unwrap();
             let loader_start = decoded.find("<script>loader()</script>").unwrap();
-            assert!(meta_end < guard_start && guard_start < loader_start, "the guard runs after meta CSP and before the loader");
+            assert!(guard_start < meta_start && meta_start < loader_start, "the guard is first, before the page's own policy and loader");
             let expected = format!(
                 "{}, script-src {LOADER_HASH} 'strict-dynamic' {}; sandbox allow-scripts; {ANCESTORS}{DEV_ANCESTOR}",
                 if live { LIVE } else { OFFLINE },
