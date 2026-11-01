@@ -314,6 +314,30 @@
     "conversation": "/id"
   },
   {
+    "name": "results",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply."
+  },
+  {
+    "name": "project_results",
+    "args": [
+      [
+        "project_id",
+        "String"
+      ]
+    ],
+    "kind": "read",
+    "reach": "free",
+    "about": "The same for a project: its total and each conversation's numbers, most spent first."
+  },
+  {
     "name": "answer",
     "args": [
       [

@@ -207,6 +207,14 @@ table! {
         h.engine.interrupt(&id);
         Ok(())
     }
+    /// What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply.
+    Read Free fn results(h, id: String) -> Option<faber_engine::results::Results> {
+        Ok(h.engine.results(&id).filter(|r| r.cost.turns > 0))
+    }
+    /// The same for a project: its total and each conversation's numbers, most spent first.
+    Read Free fn project_results(h, project_id: String) -> faber_engine::results::ProjectResults {
+        Ok(h.engine.project_results(&project_id))
+    }
     Write Person fn answer(h, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> () {
         h.engine.answer(&id, &turn_id, &request_id, allow, always).await
     }
