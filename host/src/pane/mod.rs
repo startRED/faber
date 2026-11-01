@@ -12,6 +12,8 @@
 //! The agent acts by the words a person sees (`act.js`, run inside the page); on a page that asks for a login, a captcha or a
 //! payment it may read and scroll but never click or type.
 //!
+//! A shell in another process makes its [`Driver`] with [`relay::Relay`], which orders its views over the wire.
+//!
 //! A shell makes a [`Pane`] over its [`Driver`] and a [`Home`], hands [`PaneBrowser`] to the engine, feeds the views' events to
 //! [`Pane::event`], and answers the window commands (`site_*`, `cookie_*`) with the methods of the same names.
 
@@ -21,6 +23,7 @@ pub mod firefox;
 mod home;
 mod lifecycle;
 mod person;
+pub mod relay;
 mod rules;
 #[cfg(test)]
 mod tests;
@@ -28,6 +31,7 @@ mod tests;
 pub use agent::PaneBrowser;
 pub use driver::{Driver, PARKED, PARKED_SIZE, Place, View, ViewEvent};
 pub use home::{EngineHome, Home, PaneEvent};
+pub use relay::Relay;
 pub use rules::{allowed, allowed_url};
 
 use faber_engine::screens::Viewport;

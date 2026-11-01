@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
@@ -65,6 +66,8 @@ if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.fabe
 
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
+/** Faber's browser pane: the views the host orders (`electron/pane.ts`). */
+const pane = new Pane({ window: () => win, note: (note) => host?.note(note) });
 
 /**
  * The hashes of the inline scripts dist/index.html ships: only the fixed loader that starts the screen's modules
@@ -124,6 +127,8 @@ function serveScreen(): void {
 
 /** Only the screen itself speaks to the shell: its window, its top frame, its own origin. */
 function fromScreen(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  // A page of the browser pane is never the screen, whatever address it shows (its views have no preload, so none can ask).
+  if (pane.owns(event.sender)) return false;
   const frame = event.senderFrame;
   if (!win || !frame || event.sender !== win.webContents) return false;
   // Two handles on one frame are different objects: the frame is told by its process and routing ids.
@@ -169,6 +174,7 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-redirect', stay);
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   guardVisualFrames(window.webContents);
+  pane.watch(window);
   const failsafe = setTimeout(() => reveal(window), REVEAL_FAILSAFE_MS);
   window.once('show', () => clearTimeout(failsafe));
   const resized = () => window.webContents.send('faber:window-resized');
@@ -302,6 +308,7 @@ app.on('before-quit', (event) => {
   stopping = true;
   event.preventDefault();
   release();
+  pane.closeAll();
   void host.stop(HOST_STOP_MS).finally(() => app.quit());
 });
 
@@ -330,13 +337,21 @@ void app.whenReady().then(() => {
       // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
       const type = (event as { type?: unknown } | null)?.type;
       if (type === 'lagged') win?.webContents.reload();
+      else if (type === 'pane') {
+        // What the browser pane tells the screen, on the channel the host names (only the pane's own channels reach it).
+        const { channel, payload } = event as { channel?: unknown; payload?: unknown };
+        if (typeof channel === 'string' && SCREEN_CHANNELS.has(channel)) win?.webContents.send(channel, payload);
+      }
       else if (type === 'update') {
         // The updater's status has its own channel on the screen (`onUpdate`), without the tag that routes it.
         const { type: _tag, ...status } = event as Record<string, unknown>;
         win?.webContents.send('faber:update', status);
       } else win?.webContents.send('faber:event', event);
     },
-    order: (order) => apply(order, window),
+    order: (order) => {
+      if ((order as { kind?: unknown } | null)?.kind === 'pane') pane.order(order);
+      else apply(order, window);
+    },
   });
   // A start with the system keeps the window away, and the updater must know that before it decides anything.
   if (autostart) host.note({ kind: 'window', visible: false });

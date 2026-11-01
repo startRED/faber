@@ -744,67 +744,69 @@ table! {
     }
 
     // What only a window answers: the front end that has one handles these itself, and any other answers `error.host.noWindow`.
+    // The browser pane's commands (`site_*`, `cookie_*`) are the exception: a shell whose pane lives behind the host (the sidecar
+    // of the Electron shell) gives the host its pane (`Host::set_pane`), and they reach it here.
 
     /// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
     Window Screen fn site_place(h, load: u32, box_id: u64, x: f64, y: f64, width: f64, height: f64) -> bool {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_place(load, box_id, x, y, width, height).await
     }
     /// The browser pane's page takes the corners of the card the screen shows it in: `radius` in logical pixels and the card's
     /// colour as red, green and blue; a radius of 0 leaves them square.
     Window Screen fn site_round(h, radius: f64, color: [u8; 3]) -> () {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_round(radius, color).await
     }
     /// The screen sizes Faber's browser can draw its pages at and the one in use; with `pick`, `size` becomes the pane's first.
     Window Screen fn site_size(h, pick: bool, size: Option<String>) -> Value {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_size(pick, size).await
     }
     /// The browser pane leaves the screen for the screen's box `box_id` and every older one; it keeps its page.
     Window Screen fn site_park(h, load: u32, box_id: u64) -> () {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_park(load, box_id).await
     }
     /// The person opens a page from a reply's card in the browser pane; it is that conversation's page from then on.
     Window Screen fn site_open(h, id: String, url: String) -> bool {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_open(id, url).await
     }
     /// The person goes back, forward or reloads in the browser pane, on that conversation's page only.
     Window Screen fn site_step(h, id: String, step: String) -> bool {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_step(id, step).await
     }
     /// The person loads an address they typed in the tab in front of the browser pane.
     Window Screen fn site_go(h, id: String, url: String) -> bool {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_go(id, url).await
     }
     /// What the person did to the browser pane's tabs, answered with the tabs and the tab it concerns.
     Window Screen fn site_tab(h, id: String, step: String, tab: Option<String>) -> Option<Value> {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_tab(id, step, tab).await
     }
     /// Whether Back and Forward of the browser pane can act on conversation `id`'s page: `[back, forward]`.
     Window Screen fn site_history(h, id: String) -> [bool; 2] {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_history(id).await
     }
     /// Clears conversation `id`'s browsing data once the person said yes: tabs, closed tabs, sign-ins and the page's own data.
     Window Screen fn site_clear(h, id: String) -> () {
-        Err(NO_WINDOW.into())
+        h.pane()?.site_clear(id).await
     }
     /// The Firefox profiles on this computer whose sign-ins the browser pane can bring over.
     Window Person fn cookie_profiles(h) -> Value {
-        Err(NO_WINDOW.into())
+        h.pane()?.cookie_profiles().await
     }
     /// The sites with cookies in the profile `profile`, under a ticket the import names.
     Window Person fn cookie_sites(h, profile: String) -> Value {
-        Err(NO_WINDOW.into())
+        h.pane()?.cookie_sites(profile).await
     }
     /// Brings the person's sign-ins on the sites they picked into conversation `id`'s pages; answers how many sites came over.
     Window Person fn cookie_import(h, id: String, ticket: String, sites: Vec<String>) -> usize {
-        Err(NO_WINDOW.into())
+        h.pane()?.cookie_import(id, ticket, sites).await
     }
     /// The sites whose sign-ins conversation `id` holds.
     Window Person fn cookie_held(h, id: String) -> Vec<String> {
-        Err(NO_WINDOW.into())
+        h.pane()?.cookie_held(id).await
     }
     /// Forgets the sign-ins conversation `id` holds and signs its page out of them.
     Window Person fn cookie_forget(h, id: String) -> () {
-        Err(NO_WINDOW.into())
+        h.pane()?.cookie_forget(id).await
     }
     /// The screen painted its first frame: the window may show now.
     Window Screen fn screen_ready(h) -> () {

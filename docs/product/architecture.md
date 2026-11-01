@@ -30,7 +30,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   Tauri shell relays to; the Electron one runs the same table as the `faber-sidecar` process (newline-delimited JSON on
   stdin and stdout), and what needs a window is a method of the host's `Shell` trait. The tray, the notifications,
   keeping the PC awake and starting with the system are decided in the host too: the sidecar sends them as `order`
-  lines and the shell only carries them out. Only the browser pane's commands stay the shell's own; the plan and its phases are in
+  lines and the shell only carries them out. The browser pane's rules are in the host too (`host/src/pane/`); the Electron shell only owns its views (`electron/pane.ts`), ordered over the same lines (`pane` orders, answered by `paneAnswer` and `paneEvent` notes), while the Tauri shell still answers the pane's commands itself; the plan and its phases are in
   `docs/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
   complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the

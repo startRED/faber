@@ -21,12 +21,19 @@
 //!   of a start that only finishes an install). The status of the update is the event `{"type":"update",...}`; the end of the
 //!   app, which the installer is about to replace, is the order `quit`. Without them nothing updates.
 //!
-//! The shell says what only it sees (its window's focus, and whether it is on screen) with a `{"shell":{...}}` line (`faber_host::wire::ShellNote`).
+//! - `FABER_PANE`: `1` when the shell has views for Faber's own browser pane, set only for a visible app. Then this process
+//!   holds the pane's rules (`faber_host::pane`), orders the views with `{"order":{"kind":"pane",...}}` lines, and the window
+//!   commands `site_*` and `cookie_*` reach that pane; what the screen should hear of it comes as events
+//!   `{"type":"pane","channel":...,"payload":...}`. Without it those commands answer `error.host.noWindow`.
+//!
+//! The shell says what only it sees (its window's focus, whether it is on screen, the answers to its dialogs and to the pane's
+//! orders, what the pane's views tell) with a `{"shell":{...}}` line (`faber_host::wire::ShellNote`).
 
 // A windowed program on Windows, like the Tauri shell: no console is ever made for it (none to flash, no console host
 // process), and its pipes work the same.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use faber_host::pane::{EngineHome, Pane, PaneBrowser};
 use faber_host::sidecar::{SidecarOptions, SidecarShell};
 use faber_host::wire::{self, Event, Incoming, Ordered, Reply};
 use faber_host::{Host, StartOptions};
@@ -102,13 +109,30 @@ async fn run() -> ExitCode {
         chime: faber_host::tray::chime::play,
     }));
     let update_data = data_dir.clone();
+    // Faber's own browser pane, when the shell has views for it: the pane is made before the engine, which is handed its browser.
+    // Its events go out through `orders`, which is emptied at the end, so the pane never keeps the writer open.
+    let pane = (!hidden && std::env::var("FABER_PANE").is_ok_and(|v| v == "1")).then(|| {
+        let home = EngineHome::new({
+            let orders = orders.clone();
+            move |event| {
+                let (channel, payload) = event.wire();
+                let event = serde_json::json!({ "type": "pane", "channel": channel, "payload": payload });
+                if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                    let _ = out.send(wire::line(&Event { event }));
+                }
+            }
+        });
+        let pane = Pane::new(shell.pane_driver(), home.clone(), tokio::runtime::Handle::current());
+        shell.attach_pane(pane.clone());
+        (pane, home)
+    });
     let options = StartOptions {
         data_dir,
         hidden,
         runtime: tokio::runtime::Handle::current(),
         installed_data_dir: faber_host::installed_data_dir(hidden),
         game_guard: None,
-        browser: None,
+        browser: pane.as_ref().map(|(pane, _)| Arc::new(PaneBrowser(pane.clone())) as Arc<dyn faber_engine::browser::Browser>),
     };
     let host: Arc<Host> = match faber_host::start(options, shell.clone()) {
         Ok(host) => host,
@@ -120,6 +144,10 @@ async fn run() -> ExitCode {
     // The engine exists: the tray is told for the first time, and its settings decide the notifications from now on.
     let engine = host.engine.clone();
     shell.attach(move || engine.settings());
+    if let Some((pane, home)) = pane {
+        home.attach(host.engine.clone());
+        host.set_pane(pane);
+    }
 
     // Self-updates, only in a packaged, visible app that says so (`updates`): the screen then sees where the update is.
     if !hidden

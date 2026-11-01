@@ -7,6 +7,7 @@
 //! registered to start with the system now. A setting saved later updates this copy and sends an `autostart` order, since
 //! this process cannot register the shell's own program.
 
+use crate::pane::{Driver, Pane, Relay, relay};
 use crate::tray::decide::{Attention, ShellTexts};
 use crate::tray::{self, Deck, Moment};
 use crate::wire::{Order, PickFilter, PickMode, ShellNote};
@@ -79,6 +80,11 @@ struct Inner {
     saving: Mutex<()>,
     /// Single-use pages for the Electron shell's `faber-visual` scheme.
     visual: crate::visual::Pages,
+    /// The browser pane's views, which live in the shell: the pane's calls leave as orders and the shell's answers come back as
+    /// notes.
+    views: Arc<Relay>,
+    /// The pane made over `views` ([`SidecarShell::attach_pane`]); what the views tell reaches it.
+    pane: OnceLock<Arc<Pane>>,
 }
 
 struct State {
@@ -102,6 +108,7 @@ impl SidecarShell {
             awake_on: false,
             autostart,
         };
+        let views = Relay::new(send.clone());
         Self(Arc::new(Inner {
             version: version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
             hidden,
@@ -121,6 +128,8 @@ impl SidecarShell {
             state: Mutex::new(state),
             saving: Mutex::new(()),
             visual: crate::visual::Pages::electron(),
+            views,
+            pane: OnceLock::new(),
         }))
     }
 
@@ -146,6 +155,16 @@ impl SidecarShell {
         let _ = self.0.updater.set(updater);
     }
 
+    /// The views of the browser pane, which the shell makes: the driver a [`Pane`] is made over. Calls on it leave as orders.
+    pub fn pane_driver(&self) -> Arc<dyn Driver> {
+        self.0.views.clone()
+    }
+
+    /// The pane made over [`pane_driver`](Self::pane_driver): from now on what the shell's views tell reaches it. Set once.
+    pub fn attach_pane(&self, pane: Arc<Pane>) {
+        let _ = self.0.pane.set(pane);
+    }
+
     /// Whether Faber's window is on screen and not minimized, as the shell last said (true until it says).
     pub fn window_visible(&self) -> bool {
         self.0.visible.load(Ordering::SeqCst)
@@ -160,6 +179,15 @@ impl SidecarShell {
                 // An answer nobody waits for (an id never asked, or asked by a closing program) changes nothing.
                 if let Some(waiting) = lock(&self.0.asks).as_mut().and_then(|asks| asks.remove(&id)) {
                     let _ = waiting.send(answer(path, no_window));
+                }
+            }
+            ShellNote::PaneAnswer { id, ok, err } => {
+                self.0.views.answer(id, err.map_or_else(|| Ok(ok.unwrap_or(Value::Null)), Err));
+            }
+            ShellNote::PaneEvent { view, event } => {
+                // A report that comes before the pane exists (or from a shell that has none) changes nothing.
+                if let Some(pane) = self.0.pane.get() {
+                    pane.event(relay::view_named(view), relay::event_of(event));
                 }
             }
         }
@@ -415,6 +443,8 @@ impl Shell for SidecarShell {
     fn shut_down(&self) {
         // Dialogs still open are answered "no window": their commands end instead of waiting for a shell that is gone.
         lock(&self.0.asks).take();
+        // And the pane's calls fail, so nothing waits on a view that is gone.
+        self.0.views.lost();
         let mut state = lock(&self.0.state);
         state.awake.shutdown();
         self.0.sync_awake(&mut state);
@@ -807,6 +837,50 @@ mod tests {
             chime: quiet,
         });
         assert_eq!(shell.version(), "9.8.7");
+    }
+
+    #[tokio::test]
+    async fn the_panes_views_are_ordered_through_the_shell_and_answered_by_its_notes() {
+        use crate::pane::View;
+        use crate::wire::{PaneOp, PaneView, ViewNote};
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, sink) = shell_in(dir.path(), false, false, normal);
+        let shell = Arc::new(shell);
+        let driver = shell.pane_driver();
+        let opening = tokio::spawn({
+            let driver = driver.clone();
+            async move { driver.open(View::Main, "faber-pane-1".into()).await }
+        });
+        let asked = until(&sink, 1).await;
+        let [Order::Pane { id: Some(id), view: PaneView::Main, op: PaneOp::Open { profile } }] = asked.as_slice() else {
+            panic!("{asked:?}")
+        };
+        assert_eq!(profile, "faber-pane-1");
+        shell.note(ShellNote::PaneAnswer { id: *id, ok: None, err: None });
+        assert_eq!(opening.await.unwrap(), Ok(()));
+        // A failure of the shell is the call's failure; a result is its result.
+        let calling = tokio::spawn({
+            let driver = driver.clone();
+            async move { tokio::join!(driver.call(View::Main, "Page.reload", json!({})), driver.call(View::Main, "Page.reload", json!({}))) }
+        });
+        let asked = until(&sink, 2).await;
+        let ids: Vec<u64> =
+            asked.iter().map(|order| if let Order::Pane { id: Some(id), .. } = order { *id } else { panic!("{order:?}") }).collect();
+        shell.note(ShellNote::PaneAnswer { id: ids[0], ok: Some(json!({ "done": true })), err: None });
+        shell.note(ShellNote::PaneAnswer { id: ids[1], ok: None, err: Some("the page stopped answering".into()) });
+        assert_eq!(calling.await.unwrap(), (Ok(json!({ "done": true })), Err("the page stopped answering".into())));
+        // What a view tells before there is a pane changes nothing.
+        shell.note(ShellNote::PaneEvent { view: PaneView::Main, event: ViewNote::Gone });
+        // A shell that goes away fails the calls still waiting, and no later one is ordered.
+        let waiting = tokio::spawn({
+            let driver = driver.clone();
+            async move { driver.call(View::Main, "Page.reload", json!({})).await }
+        });
+        until(&sink, 1).await;
+        shell.shut_down();
+        assert_eq!(waiting.await.unwrap(), Err("Faber's window is closed".into()));
+        assert_eq!(driver.load(View::Main, "https://example.org/".into()).await, Err("Faber's window is closed".into()));
+        assert!(taken(&sink).iter().all(|order| !matches!(order, Order::Pane { .. })));
     }
 
     #[tokio::test]

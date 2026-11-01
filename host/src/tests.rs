@@ -147,6 +147,31 @@ async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first
 }
 
 #[tokio::test]
+async fn the_panes_window_commands_reach_the_pane_a_front_end_gives_the_host_and_none_without() {
+    let (host, _dir) = host().await;
+    let asks = [
+        ("cookie_held", json!({ "id": "c" })),
+        ("site_history", json!({ "id": "c" })),
+        ("site_place", json!({ "load": 1, "boxId": 1, "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 })),
+    ];
+    for (name, args) in &asks {
+        assert_eq!(
+            key(host.dispatch(name, args.clone()).await),
+            NO_WINDOW,
+            "{name}: the Tauri shell and the command line have no pane here"
+        );
+    }
+    let views = pane::Relay::new(Arc::new(|_| {}));
+    host.set_pane(pane::Pane::new(views, pane::EngineHome::new(|_| {}), Handle::current()));
+    let answers = [json!([]), json!([false, false]), json!(false)];
+    for ((name, args), answer) in asks.iter().zip(answers) {
+        assert_eq!(host.dispatch(name, args.clone()).await.unwrap(), answer, "{name}: the pane answers, with no page open");
+    }
+    // The commands that are still a window's own stay so.
+    assert_eq!(key(host.dispatch("screen_ready", Value::Null).await), NO_WINDOW);
+}
+
+#[tokio::test]
 async fn an_appearance_that_fails_comes_back_with_the_field_it_is_about() {
     let (host, _dir) = host().await;
     let failure = host.dispatch("preview_look", json!({ "appearance": { "base": "nowhere" } })).await.unwrap_err();
