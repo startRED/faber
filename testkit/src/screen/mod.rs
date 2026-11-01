@@ -31,6 +31,7 @@ pub mod shell;
 pub mod streaming;
 pub mod thread_order;
 pub mod thread_scroll;
+pub mod ux_audit;
 pub mod visual_network;
 
 use crate::app::{Ctx, Paths};
@@ -74,6 +75,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(streaming::scenarios())
         .chain(thread_order::scenarios())
         .chain(thread_scroll::scenarios())
+        .chain(ux_audit::scenarios())
         .chain(sentinel::scenarios());
     let all = all.chain(visual_network::scenarios());
     #[cfg(windows)]
