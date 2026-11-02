@@ -26,7 +26,8 @@ type Order =
   | PickOrder
   | { kind: 'awake'; on: boolean }
   | { kind: 'autostart'; on: boolean }
-  | { kind: 'reveal'; path: string };
+  | { kind: 'reveal'; path: string }
+  | { kind: 'quit' };
 
 /** The answer to a dialog, as the host reads it (`ShellNote::Picked`). */
 export type Picked = { kind: 'picked'; id: number; path: string | null; noWindow: boolean };
@@ -45,7 +46,7 @@ export type Window = {
   hidden: boolean;
 };
 
-const KINDS = new Set(['tray', 'notify', 'awake', 'autostart', 'pick', 'reveal']);
+const KINDS = new Set(['tray', 'notify', 'awake', 'autostart', 'pick', 'reveal', 'quit']);
 
 let tray: Tray | null = null;
 let blocker: number | null = null;
@@ -161,6 +162,12 @@ export function apply(value: unknown, window: Window): void {
       break;
     case 'reveal':
       if (!window.hidden) shell.showItemInFolder(value.path);
+      break;
+    case 'quit':
+      // The self-update is about to replace this program: it ends now, not after the usual wait for the host to stop
+      // (the host sent this order itself, and a copy of it finishes the install).
+      release();
+      app.exit(0);
       break;
   }
 }
