@@ -430,13 +430,33 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     else setError(failureText(err));
   };
   // The sidebar's quota line still names the old usage section: accounts and their limits are one section now.
-  const openSettings = (at?: Section | 'usage') => {
+  let settingsOpener: string | undefined;
+  const openSettings = (at?: Section | 'usage', from = document.activeElement) => {
+    if (!settingsOpen()) {
+      const path: string[] = [];
+      for (let el = from instanceof HTMLElement ? from : null; el?.parentElement && el !== document.body; el = el.parentElement) {
+        if (el.dataset.restore || el.id || el.matches('.shell')) {
+          path.unshift(el.dataset.restore ? `[data-restore="${CSS.escape(el.dataset.restore)}"]` : el.id ? `#${CSS.escape(el.id)}` : '.shell');
+          break;
+        }
+        path.unshift(`${el.localName}:nth-child(${[...el.parentElement.children].indexOf(el) + 1})`);
+      }
+      settingsOpener = path.join(' > ') || undefined;
+    }
     setSettingsAt(at === 'usage' ? 'accounts' : at);
     setSettingsOpen(true);
   };
   const closeSettings = () => {
+    const key = settingsOpener;
+    settingsOpener = undefined;
     setSettingsOpen(false);
     setBack(undefined);
+    // The shell is recreated: restore its control by identity, after it has mounted.
+    if (key) queueMicrotask(() => {
+      const target = document.querySelector<HTMLElement>(key);
+      if (target && sideEl?.contains(target) && narrow()) setSideOpen(true);
+      target?.focus();
+    });
   };
   // The account cards close to where they were opened from: Settings when it sent them, else the shell.
   const closeSetup = () => {
@@ -1892,7 +1912,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   void go(openPlace(place(), c), hit.messageIndex);
                 }}
                 onRemove={remove}
-                onSettings={(at) => (closeSide(false), openSettings(at))}
+                onSettings={(at, from) => (closeSide(false), openSettings(at, from))}
                 onError={(err) => setSaveError(failureText(err))}
               />
               <Show when={!narrow()}>

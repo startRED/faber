@@ -2467,6 +2467,7 @@ export const es: Messages = {
   'notes.365.new': 'Puedes conectar las herramientas de Faber a una IA mediante MCP.',
   'notes.366.better': 'Puedes abrir las conversaciones que el agente inicia mediante comandos y ver su estado.',
   'notes.367.better': 'Las conversaciones nuevas reciben un título corto en el idioma de tu mensaje tras la primera respuesta, sin cambiar los nombres que elegiste.',
+  'notes.368.better': 'El foco del teclado entra en Ajustes al abrirlos, sigue en tu opción al guardar y vuelve al cerrarlos.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

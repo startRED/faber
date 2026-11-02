@@ -639,6 +639,7 @@ export function Composer(props: Props) {
         )}
       </Show>
       <textarea
+        data-restore="composer"
         aria-label={t('composer.message')}
         aria-describedby={[attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
         rows={1}

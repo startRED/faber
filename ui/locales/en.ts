@@ -2347,6 +2347,7 @@ export const en = {
   'notes.365.new': "You can connect Faber's tools to an AI through MCP.",
   'notes.366.better': 'You can open conversations the agent starts from its command steps and see their current state.',
   'notes.367.better': "New conversations get a short title in your message's language after the first answer, while names you choose stay yours.",
+  'notes.368.better': 'Keyboard focus enters Settings when opened, stays on your choice when settings save, and returns when closed.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

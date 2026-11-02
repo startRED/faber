@@ -2467,6 +2467,7 @@ export const de: Messages = {
   'notes.365.new': 'Sie können Fabers Werkzeuge über MCP mit einer KI verbinden.',
   'notes.366.better': 'Du kannst Gespräche öffnen, die der Agent per Befehl startet, und ihren Status sehen.',
   'notes.367.better': 'Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten.',
+  'notes.368.better': 'Der Tastaturfokus wechselt beim Öffnen in die Einstellungen, bleibt beim Speichern auf deiner Auswahl und kehrt beim Schließen zurück.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

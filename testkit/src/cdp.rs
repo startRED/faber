@@ -599,6 +599,9 @@ fn key_info(key: &str) -> Result<(String, String, u32, Option<&'static str>), St
         "Escape" => fixed("Escape", "Escape", 27, None),
         "Tab" => fixed("Tab", "Tab", 9, None),
         "Space" => fixed(" ", "Space", 32, Some(" ")),
+        "Home" => fixed("Home", "Home", 36, None),
+        "End" => fixed("End", "End", 35, None),
+        "ArrowUp" => fixed("ArrowUp", "ArrowUp", 38, None),
         "ArrowLeft" => fixed("ArrowLeft", "ArrowLeft", 37, None),
         "ArrowRight" => fixed("ArrowRight", "ArrowRight", 39, None),
         "." => fixed(".", "Period", 190, Some(".")),
@@ -687,6 +690,15 @@ mod tests {
     fn space_is_a_key_the_client_knows() {
         let (name, code, virtual_key, text) = key_info("Space").unwrap();
         assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (" ", "Space", 32, Some(" ")));
+    }
+
+    #[test]
+    fn settings_keyboard_navigation_keys_have_native_codes() {
+        for (key, expected) in [("Home", 36), ("End", 35), ("ArrowUp", 38)] {
+            let (name, code, virtual_key, text) = key_info(key).unwrap();
+            assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (key, key, expected, None));
+        }
+        assert!(key_info("Unknown").is_err());
     }
 
     fn mock_prefix(reader: &mut impl Read) -> [u8; 14] {

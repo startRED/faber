@@ -11,11 +11,12 @@ export type Option<T> = [T, string];
 /** Choices that exclude each other. The one that is on says so with `aria-pressed`. With `bare` it is only the buttons,
  * for a row that already carries the name; otherwise the name sits above them. */
 export function Segmented<T extends string | number>(props: { id: string; label: string; value: T | undefined; options: Option<T>[]; onPick: (v: T) => void; bare?: boolean }) {
+  // A saved snapshot can rebuild the option tuples without changing the focused choice.
   const buttons = (
-    <For each={props.options}>
-      {([v, text]) => (
+    <For each={props.options.map(([value]) => value)}>
+      {(v, index) => (
         <button type="button" aria-pressed={v === props.value} onClick={() => props.onPick(v)}>
-          {text}
+          {props.options[index()]?.[1]}
         </button>
       )}
     </For>
