@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { guard } from './electron-stable-guard.mjs';
 
 const root = new URL('../', import.meta.url);
 const workflow = readFileSync(new URL('.github/workflows/release.yml', root), 'utf8').replaceAll('\r\n', '\n');
@@ -24,7 +25,7 @@ test('only the explicit switch allows stable; previews ignore the switch', () =>
       assert.equal(run('v1.2.3-preview.1'), 0, value);
     }
     set('{"allowed":true}');
-    assert.equal(run('v1.2.3'), 0);
+    assert.notEqual(run('v1.2.3'), 0, 'unavailable release range');
     for (const tag of ['', 'v1.2', 'v1.2.3-rc.1', 'v1.2.3-preview.x']) assert.notEqual(run(tag), 0, tag);
     const committed = JSON.parse(readFileSync(new URL('release/electron-stable.json', root), 'utf8'));
     assert.deepEqual(Object.keys(committed), ['allowed']);
@@ -32,6 +33,21 @@ test('only the explicit switch allows stable; previews ignore the switch', () =>
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('stable switch must be unchanged since the previous stable tag', () => {
+  const calls = [];
+  const git = (changed, tags = 'v1.2.2\nv1.2.3\nv1.2.4-preview.1') => (...args) => {
+    calls.push(args);
+    return args[0] === 'tag' ? tags : changed;
+  };
+  const enabled = () => '{"allowed":true}';
+  assert.throws(() => guard('v1.2.3', git('release/electron-stable.json'), enabled), /changed in the release range/);
+  assert.deepEqual(calls.at(-1), ['diff', '--name-only', 'v1.2.2..v1.2.3', '--', 'release/electron-stable.json']);
+  assert.doesNotThrow(() => guard('v1.2.3', git(''), enabled));
+  assert.throws(() => guard('v1.2.3', git('', 'v1.2.3'), enabled), /previous stable tag/);
+  assert.throws(() => guard('v1.2.3', () => { throw new Error('git failed'); }, enabled), /git failed/);
+  assert.doesNotThrow(() => guard('v1.2.3-preview.1', () => { throw new Error('git called'); }, () => { throw new Error('gate read'); }));
 });
 
 function checkWorkflow(text) {
@@ -44,6 +60,7 @@ function checkWorkflow(text) {
   for (const job of [create, build, publish]) assert.doesNotMatch(job, /continue-on-error:|always\s*\(|^    if:/m);
   assert.match(publish, /make_latest=true/);
   if (/npm run dist:electron/.test(build)) {
+    assert.match(create, /uses: actions\/checkout@[^\n]+\n\s+with:\n\s+fetch-depth: 0/);
     assert.match(create, /set -euo pipefail\n[\s\S]*?kind=\$\(node scripts\/channel\.mjs kind "\$GITHUB_REF_NAME"\)\n\s*node scripts\/electron-stable-guard\.mjs "\$GITHUB_REF_NAME"\n/);
     assert.ok(create.indexOf('node scripts/electron-stable-guard.mjs') < create.indexOf('gh api -X POST'));
     assert.doesNotMatch(create, /continue-on-error:|set \+e|\|\|\s*(true|:)|^\s+if:|\btrap\b/m);
@@ -61,6 +78,7 @@ test('Electron packaging and making a release latest depend on the guard succeed
     .replace('kind=$(node scripts/channel.mjs kind "$GITHUB_REF_NAME")', '$&\n          node scripts/electron-stable-guard.mjs "$GITHUB_REF_NAME"');
   checkWorkflow(guarded);
   assert.throws(() => checkWorkflow(guarded.replace(/^\s*node scripts\/electron-stable-guard\.mjs "\$GITHUB_REF_NAME"\n/m, '')));
+  assert.throws(() => checkWorkflow(guarded.replace('fetch-depth: 0', 'fetch-depth: 1')));
   assert.throws(() => checkWorkflow(guarded.replace('needs: create', 'needs: []')));
   assert.throws(() => checkWorkflow(guarded.replace('needs: [create, build]', 'needs: build')));
   assert.throws(() => checkWorkflow(guarded.replace('node scripts/electron-stable-guard.mjs "$GITHUB_REF_NAME"', 'node scripts/electron-stable-guard.mjs "$GITHUB_REF_NAME" || true')));
