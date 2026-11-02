@@ -2455,6 +2455,8 @@ export const fr: Messages = {
   'notes.356.fixed': 'Le quota est actualisé au réveil et le transfert de la conversation indique quelle IA prend la suite sans dire que cette même IA a épuisé son quota.',
   'notes.357.better': 'Les questions qui s’ouvrent toutes seules laissent plus de place pour travailler dans les petites fenêtres, et la barre latérale des Projets vide est plus sobre.',
   'notes.358.better': 'Les réglages emploient des mots plus simples, et les choix d’accès expliquent ce que l’IA peut faire avant de choisir.',
+  'notes.359.fixed': 'Une étape du plan n’est faite que lorsque l’IA dit ce qu’elle a vérifié ; la fin d’un assistant ne la coche plus.',
+  'notes.360.fixed': 'Si une aide s’arrête soudainement, l’IA qui l’attendait peut continuer, et fermer Faber ne laisse aucune IA tout juste lancée en cours.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

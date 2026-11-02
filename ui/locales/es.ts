@@ -2455,6 +2455,8 @@ export const es: Messages = {
   'notes.356.fixed': 'La cuota se actualiza al despertar el equipo y el traspaso de la conversación indica qué IA continúa sin afirmar que esa misma IA agotó su cuota.',
   'notes.357.better': 'Las preguntas que se abren solas dejan más espacio para trabajar en ventanas pequeñas, y la barra lateral de Proyectos vacía muestra menos contenido repetido.',
   'notes.358.better': 'Los Ajustes usan palabras más sencillas, y las opciones de acceso explican qué puede hacer la IA antes de elegir.',
+  'notes.359.fixed': 'Un paso del plan solo pasa a hecho cuando la IA dice qué comprobó; que termine un ayudante ya no lo marca.',
+  'notes.360.fixed': 'Si un ayudante se cierra de repente, la IA que lo esperaba puede continuar, y cerrar Faber no deja una IA recién iniciada en marcha.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

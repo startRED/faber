@@ -16,6 +16,23 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[cfg(windows)]
+#[tokio::test]
+async fn cli_lifetime_kill_during_job_termination_is_idempotent() {
+    for _ in 0..64 {
+        let mut limits = win32job::ExtendedLimitInfo::new();
+        limits.limit_kill_on_job_close();
+        let job = win32job::Job::create_with_limit_info(&limits).unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.arg("--list");
+        let (mut child, _stdin, _stdout, _stderr) = faber_winproc::spawn_in_job(&command, job.handle(), 0).unwrap();
+        child.resume().unwrap();
+        faber_winproc::job_terminate(job.handle()).unwrap();
+        child.start_kill().expect("job termination must not make stopping its child fail");
+        child.wait().await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn visual_answers_network_uses_the_saved_web_choice_without_a_second_permission() {
     use faber_engine::model::WebSearch;
@@ -5573,9 +5590,20 @@ async fn plan_reopens_a_done_step_when_its_conversation_resumes() {
 
     member.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
     until(&engine, &child, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
-    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending","waits":["s1"]}]});
-    agent.say(call(6, "plan", &done)).await;
-    assert_eq!(mcp_answer(&agent, "r6").await["result"]["isError"], false);
+    assert_eq!(
+        engine.open(&parent).unwrap().plan.unwrap().steps[0].state,
+        faber_engine::model::StepState::Active,
+        "ending alone does not finish the step"
+    );
+    let no_evidence = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending","waits":["s1"]}]});
+    agent.say(call(6, "plan", &no_evidence)).await;
+    assert_eq!(mcp_answer(&agent, "r6").await["result"]["isError"], true, "done requires evidence");
+    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child,"evidence":"Read the completed docs page"},{"text":"Review them","state":"pending","waits":["s1"]}]});
+    agent.say(call(7, "plan", &done)).await;
+    assert_eq!(mcp_answer(&agent, "r7").await["result"]["isError"], false);
+    let finished = engine.open(&parent).unwrap().plan.unwrap();
+    assert_eq!(finished.steps[0].state, faber_engine::model::StepState::Done);
+    assert_eq!(finished.steps[0].evidence.as_deref(), Some("Read the completed docs page"));
     engine
         .send(SendRequest {
             conversation_id: Some(child.clone()),

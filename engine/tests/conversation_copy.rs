@@ -1105,6 +1105,7 @@ async fn ready_plan_steps_with_separate_files_start_together_from_the_leaders_br
     let joined = steps(&engine, &lead);
     let mut again = plan.clone();
     again["steps"][0]["state"] = "done".into();
+    again["steps"][0]["evidence"] = "Model unit tests passed.".into();
     let (said, error) = tool(&mut agent, "plan2", "plan", again).await;
     assert!(!error && said.contains("start together now: tests, docs."), "{said}");
     let now = steps(&engine, &lead);

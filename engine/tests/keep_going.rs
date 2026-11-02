@@ -898,7 +898,7 @@ async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
     assert_eq!(c.messages.last().unwrap().now.as_deref(), Some("Reading the login page"));
     let row = engine.state().running.items.into_iter().find(|r| r.conversation_id == id).expect("it runs");
     assert_eq!((row.now.as_deref(), row.plan.map(|p| (p.done, p.total))), (Some("Reading the login page"), Some((0, 2))));
-    let (said, _) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
+    let (said, _) = calls(&mut pipe, "p2", "plan", json!({ "advance": true, "evidence": "Login test passed." })).await;
     assert!(said.contains("1 of 2"), "{said}");
     // A wrong call is answered as an error the agent can read, and changes nothing.
     let (said, error) = calls(&mut pipe, "w0", "wrap_up", json!({ "ask": "Ship it?" })).await;
@@ -964,7 +964,7 @@ async fn a_job_going_half_over_its_estimate_warns_once_and_switches_to_economy_m
     echo(&mut pipe, 1).await;
     ends_costing(&mut pipe, 1.6).await;
     until(&engine, &id, |c| idle(c) && c.messages.len() == 4).await;
-    let (said, error) = calls(&mut pipe, "p2", "plan", json!({ "advance": true })).await;
+    let (said, error) = calls(&mut pipe, "p2", "plan", json!({ "advance": true, "evidence": "Built and checked." })).await;
     assert!(!error && said.contains("1 of 2") && said.contains("half as much again"), "{said}");
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
     assert!(error && said.contains("passed its estimate"), "{said}");
@@ -1047,7 +1047,12 @@ async fn the_estimate_and_economy_mode_end_with_the_job() {
     until_turns(&pipe, 2).await;
     echo(&mut pipe, 1).await;
     // Every step done, an empty list, a list again: none of them ends the job, only the closing box does.
-    let all_done = json!({ "steps": [{ "text": "Build it", "state": "done" }, { "text": "Check it", "state": "done" }] });
+    let all_done = json!({
+        "steps": [
+            { "text": "Build it", "state": "done", "evidence": "Built clean." },
+            { "text": "Check it", "state": "done", "evidence": "Tests passed." }
+        ]
+    });
     for (call, input) in
         [("p3", all_done), ("p4", json!({ "steps": [] })), ("p5", json!({ "steps": [{ "text": "More", "state": "pending" }] }))]
     {

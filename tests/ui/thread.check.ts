@@ -6,7 +6,35 @@ import { Thread } from '../../ui/Thread.tsx';
 import { api, type Message } from '../../ui/api.ts';
 import { LANGUAGES, t, templates } from '../../ui/i18n.ts';
 import { renderMarkdown } from '../../ui/markdown.tsx';
+import { helpersAtWork } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
+
+check('thread: a dead helper leaves the live count and keeps an uncertain cost while its caller continues', () => {
+  for (const vendor of ['claude', 'codex'] as const) {
+    for (const partial of ['', 'Keep these partial words.']) {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const call = { id: 'helper', name: 'Helper', input: { title: 'Check', brief: 'Check the files.' } };
+      const [message, setMessage] = createSignal<Message>({ id: 'helper-exit', role: 'assistant', at: 0,
+        status: 'streaming', vendor, text: 'Waiting for the helper.', tools: [call], costUsd: 0.01 });
+      const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0,
+        conversationId: 'helper-exit', options: [], onBranch: () => {} }), root);
+      try {
+        equal(helpersAtWork([message()]), 1);
+        equal(root.querySelector<HTMLElement>('.agents .agent')?.dataset.state, 'running');
+        setMessage({ ...message(), incomplete: true, tools: [{ ...call, ok: false, ended: 2,
+          output: `${partial}\nThe helper process ended before reporting its result.` }] });
+        equal(helpersAtWork([message()]), 0, 'the caller can continue without a ghost helper');
+        equal(root.querySelector<HTMLElement>('.agents .agent')?.dataset.state, 'failed');
+        ok(!root.querySelector('.agents .agent .live'), 'an exited helper has no live mark');
+        equal(message().status, 'streaming', 'the caller remains free to continue its own reply');
+        setMessage({ ...message(), status: 'done', text: 'The caller continued after the helper failed.' });
+        ok(root.querySelector('.cost')?.textContent?.startsWith('≈'), 'known caller spend remains visibly uncertain');
+        equal(message().tools?.[0]?.output?.includes(partial), true, 'partial words remain in the report');
+      } finally { dispose(); root.remove(); }
+    }
+  }
+});
 
 check('thread: streaming preserves the open paragraph, selection, code scroll and safe link updates', () => {
   const root = document.createElement('div'); root.className = 'md'; document.body.append(root);
