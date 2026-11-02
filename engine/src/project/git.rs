@@ -39,6 +39,7 @@ impl Invocation {
         for config in [
             format!("core.hooksPath={null}"),
             "core.fsmonitor=false".into(),
+            "core.longpaths=true".into(),
             "credential.helper=".into(),
             "protocol.allow=never".into(),
             "protocol.file.allow=never".into(),

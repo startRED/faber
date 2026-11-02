@@ -2474,6 +2474,7 @@ export const ptBR: Messages = {
   'notes.372.fixed': 'Se a instalação de uma IA falhar, você vê o que aconteceu e como tentar de novo.',
   'notes.373.better': 'Respostas encerradas deixam de iniciar verificações ou correções sozinhas; você ainda pode pedir verificações, e o Continuar sozinho para na primeira conclusão.',
   'notes.374.fixed': 'As mensagens na fila e os relatórios dos agentes seguem quando o turno termina, mesmo sem verificações.',
+  'notes.375.fixed': 'Projetos em pastas com caminhos muito longos agora funcionam.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

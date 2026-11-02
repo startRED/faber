@@ -2487,6 +2487,7 @@ export const fr: Messages = {
   'notes.372.fixed': 'Si l’installation d’une IA échoue, vous savez pourquoi et comment réessayer.',
   'notes.373.better': 'Une réponse terminée ne lance plus de vérifications ni de corrections toute seule ; vous pouvez toujours demander des vérifications, et Continuer seul s’arrête à la première conclusion.',
   'notes.374.fixed': 'Les messages en attente et les comptes rendus des agents suivent la fin du tour, même sans vérification.',
+  'notes.375.fixed': 'Les projets dans des dossiers aux chemins très longs fonctionnent désormais.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

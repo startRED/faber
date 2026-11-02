@@ -2487,6 +2487,7 @@ export const es: Messages = {
   'notes.372.fixed': 'Si falla la instalación de una IA, ves qué pasó y cómo volver a intentarlo.',
   'notes.373.better': 'Al terminar una respuesta ya no se inician comprobaciones ni correcciones por su cuenta; puedes seguir pidiendo comprobaciones y Seguir solo se detiene con la primera conclusión.',
   'notes.374.fixed': 'Los mensajes en espera y los informes de los agentes siguen al terminar el turno, aunque no se ejecuten comprobaciones.',
+  'notes.375.fixed': 'Los proyectos en carpetas con rutas muy largas ya funcionan.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

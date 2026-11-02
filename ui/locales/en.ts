@@ -2367,6 +2367,7 @@ export const en = {
   'notes.372.fixed': 'When installing an AI fails, you see what happened and how to try again.',
   'notes.373.better': 'Finished replies no longer start checks or correction turns on their own; you can still ask for checks, and Keep going stops at the first done conclusion.',
   'notes.374.fixed': 'Queued messages and child reports continue after a turn ends, even when no checks run.',
+  'notes.375.fixed': 'Projects in very long folder paths now work.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

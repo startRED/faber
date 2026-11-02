@@ -2487,6 +2487,7 @@ export const de: Messages = {
   'notes.372.fixed': 'Wenn die Installation einer KI fehlschlägt, siehst du den Grund und wie du es erneut versuchst.',
   'notes.373.better': 'Nach einer fertigen Antwort starten keine Prüfungen oder Korrekturen mehr von selbst; Prüfungen bleiben auf Wunsch möglich, und Selbst weitermachen endet beim ersten Abschluss.',
   'notes.374.fixed': 'Nach dem Ende eines Durchgangs werden wartende Nachrichten und Berichte der Agenten weitergegeben, auch wenn keine Prüfungen laufen.',
+  'notes.375.fixed': 'Projekte in Ordnern mit sehr langen Pfaden funktionieren jetzt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

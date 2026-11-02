@@ -112,6 +112,8 @@ mod project;
 mod project_budget;
 #[path = "project_git.rs"]
 mod project_git;
+#[path = "project_paths.rs"]
+mod project_paths;
 #[path = "project_proof_confirm.rs"]
 mod project_proof_confirm;
 #[path = "project_review.rs"]

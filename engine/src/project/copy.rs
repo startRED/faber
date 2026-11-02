@@ -136,11 +136,28 @@ pub fn make(
     if !valid_conversation(id) || !own_branch(branch) || from.is_some_and(|b| !own_branch(b)) || at.is_some_and(|c| !valid_oid(c)) {
         return Err("error.copy.failed");
     }
-    let Some(top) = git(exec, folder, &["rev-parse", "--show-toplevel", "--show-prefix"]) else { return Ok(None) };
+    // Git for Windows cannot start in a long cwd, even with core.longpaths enabled.
+    #[cfg(windows)]
+    let cwd = {
+        let mut cwd = folder;
+        while native_path(cwd).encode_utf16().count() >= 260 {
+            // Never cross into an outer repository when the repository itself has a long root.
+            if cwd.join(".git").exists() {
+                return Err("error.copy.failed");
+            }
+            cwd = cwd.parent().ok_or("error.copy.failed")?;
+        }
+        cwd
+    };
+    #[cfg(not(windows))]
+    let cwd = folder;
+    let Some(top) = git(exec, cwd, &["rev-parse", "--show-toplevel", "--show-prefix"]) else { return Ok(None) };
     let mut lines = top.lines();
     let root = lines.next().unwrap_or_default().trim().to_string();
-    let sub = lines.next().unwrap_or_default().trim().trim_end_matches('/').to_string();
-    let Some(head) = git(exec, folder, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).filter(|h| valid_oid(h)) else {
+    let prefix = lines.next().unwrap_or_default().trim();
+    let suffix = folder.strip_prefix(cwd).map_err(|_| "error.copy.failed")?;
+    let sub = format!("{prefix}{}", suffix.to_string_lossy().replace('\\', "/")).trim_end_matches('/').to_string();
+    let Some(head) = git(exec, cwd, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).filter(|h| valid_oid(h)) else {
         return Ok(None);
     };
     if root.is_empty() || sub.split('/').any(|part| part == ".." || part == ".git") {
@@ -148,10 +165,10 @@ pub fn make(
     }
     // A folder the repository does not hold (an untracked folder inside a home folder kept in git) would be missing from
     // the copy: it works in the folder itself.
-    if !sub.is_empty() && git(exec, folder, &["rev-parse", "--verify", "--quiet", &format!("HEAD:{sub}")]).is_none() {
+    if !sub.is_empty() && git(exec, cwd, &["rev-parse", "--verify", "--quiet", &format!("HEAD:{sub}")]).is_none() {
         return Ok(None);
     }
-    let base = git(exec, folder, &["symbolic-ref", "--quiet", "HEAD"]).filter(|r| r.starts_with("refs/heads/"));
+    let base = git(exec, cwd, &["symbolic-ref", "--quiet", "HEAD"]).filter(|r| r.starts_with("refs/heads/"));
     let path = home(data).join(id);
     let copy = WorkCopy { path: path.to_string_lossy().into_owned(), branch: branch.to_string(), root: root.clone(), sub, base };
     // No folder on the way may be a link: the copy is made, and later deleted, only inside Faber's own folder.
