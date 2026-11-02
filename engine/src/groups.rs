@@ -275,7 +275,7 @@ impl Core {
                 // Each immutable copy gets one path, so resuming never fills the chat with duplicate files.
                 let relative = format!("attachments/group-{}/{}.txt", group.id, file.id);
                 let path = cwd.join(&relative);
-                if !crate::permissions::allows(cwd, "Write", &serde_json::json!({"file_path": relative})) {
+                if !crate::permissions::host_write_allowed(cwd, &relative) {
                     return Err("error.projectSandbox".into());
                 }
                 std::fs::create_dir_all(path.parent().expect("attachment folder")).map_err(|_| "error.store.write")?;

@@ -20,6 +20,7 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     for name in [".credentials.json", "credentials.json", "auth.json"] {
         profile["filesystem"][":workspace_roots"][format!("**/{name}")] = "deny".into();
     }
+    protect_data(&mut profile, root);
     if root.is_absolute() {
         let mut dirs = vec![root.to_path_buf()];
         let mut left = 10_000usize;
@@ -66,6 +67,114 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
         config.insert("windows.sandbox".into(), "mxc".into());
     }
     config
+}
+
+fn protect_data(profile: &mut Value, root: &Path) {
+    let root = normal(&root.canonicalize().unwrap_or_else(|_| root.to_path_buf()).to_string_lossy());
+    for data in crate::store::Store::data_roots() {
+        let data = unified(&data.to_string_lossy());
+        profile["filesystem"][&data] = "read".into();
+        // A more specific workspace grant must not reopen a project nested in the data folder.
+        if inside(&root, &normal(&data)) {
+            profile["filesystem"][":workspace_roots"]["."] = "read".into();
+        }
+        for (alias, path) in [(":tmpdir", std::env::temp_dir()), (":slash_tmp", PathBuf::from("/tmp"))] {
+            let path = path.canonicalize().unwrap_or(path);
+            if profile["filesystem"][alias] != "deny" && inside(&normal(&path.to_string_lossy()), &normal(&data)) {
+                profile["filesystem"][alias] = "read".into();
+            }
+        }
+    }
+}
+
+/// Keep guarded modes' disk reads and native approvals, adding only the Store's write exclusion.
+pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
+    let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
+    let mut profile = json!({ "extends": ":workspace", "filesystem": {
+        ":root": "read", ":workspace_roots": { ".": if writable { "write" } else { "read" } }
+    } });
+    if !writable {
+        profile["filesystem"][":tmpdir"] = "read".into();
+        profile["filesystem"][":slash_tmp"] = "read".into();
+    }
+    protect_data(&mut profile, root);
+    json!({ "default_permissions": id, format!("permissions.{id}"): profile }).as_object().unwrap().clone()
+}
+
+/// File reads remain available. Command text is best effort: hidden paths need the native sandbox too.
+pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Value, cwd: Option<&str>) -> bool {
+    if mode == crate::model::Permissions::FullAccess || ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+        return false;
+    }
+    let roots: Vec<String> = crate::store::Store::data_roots().iter().map(|p| normal(&p.to_string_lossy())).collect();
+    if roots.is_empty() {
+        return false;
+    }
+    let cwd = cwd.map(|c| unified(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
+    let shell = ["Bash", "PowerShell", "item/commandExecution/requestApproval"].contains(&tool);
+    if shell {
+        let command = input.as_str().or_else(|| input["command"].as_str()).unwrap_or_default();
+        if words(&command.replace("\\\\?\\", ""), true).is_some_and(|args| {
+            let program = args[0].to_ascii_lowercase();
+            (program == "pwd" && args.len() == 1)
+                || (["cat", "type", "get-content", "ls"].contains(&program.as_str())
+                    && args.iter().skip(1).all(|arg| !arg.starts_with('-')))
+        }) {
+            return false;
+        }
+    }
+    if shell && cwd.as_deref().is_some_and(|cwd| inside_any(&normal(cwd), &roots)) {
+        return true;
+    }
+    fn names(value: &Value, cwd: Option<&str>, roots: &[String]) -> bool {
+        match value {
+            Value::String(text) => {
+                let matches = |token: &str| {
+                    let token = unified(token);
+                    let path = if absolute(&token) {
+                        let (base, tail) = token.split_once('/').unwrap_or((&token, ""));
+                        let path = resolve(base, tail);
+                        if token.starts_with("//") { format!("/{path}") } else { path }
+                    } else {
+                        resolve(cwd.unwrap_or(""), &token)
+                    };
+                    if inside_any(&normal(&path), roots) {
+                        return true;
+                    }
+                    // Resolve short names and junctions even when the requested file does not exist yet.
+                    if !absolute(&path) || path.starts_with("//") {
+                        return false;
+                    }
+                    Path::new(&path)
+                        .ancestors()
+                        .find_map(|parent| match parent.canonicalize() {
+                            Ok(real) => Some(inside_any(&normal(&real.to_string_lossy()), roots)),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                            Err(_) => Some(false),
+                        })
+                        .unwrap_or(false)
+                };
+                let normalized = normal(text);
+                matches(text)
+                    || roots.iter().any(|root| {
+                        normalized.match_indices(root).any(|(at, _)| {
+                            let before = &normalized[..at];
+                            let after = &normalized[at + root.len()..];
+                            (before.is_empty() || before.ends_with(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                                && (after.is_empty()
+                                    || after.starts_with(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                        })
+                    })
+                    || text.split(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).chain(text.split(['"', '\''])).any(matches)
+            }
+            Value::Array(items) => items.iter().any(|v| names(v, cwd, roots)),
+            Value::Object(map) => map.iter().any(|(key, v)| {
+                !["content", "old_string", "new_string", "diff", "new_source"].contains(&key.as_str()) && names(v, cwd, roots)
+            }),
+            _ => false,
+        }
+    }
+    names(input, cwd.as_deref(), &roots)
 }
 
 pub fn prepare_tmp(root: &Path) -> bool {
@@ -153,6 +262,9 @@ pub fn checked_input(
     sandbox: Option<&crate::cli::Cli>,
     resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
 ) -> Option<Value> {
+    if denies_data_write(crate::model::Permissions::Isolated, tool, input, root.to_str()) {
+        return None;
+    }
     let shell = ["Bash", "PowerShell"].contains(&tool);
     let allowed = allows(root, tool, input);
     if allowed && !shell {
@@ -179,11 +291,11 @@ pub fn command_argv(
     sandbox: Option<&crate::cli::Cli>,
     resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
 ) -> Option<Vec<String>> {
-    if !["Bash", "PowerShell"].contains(&tool) {
+    if !["Bash", "PowerShell"].contains(&tool) || denies_data_write(crate::model::Permissions::Isolated, tool, input, root.to_str()) {
         return None;
     }
     let allowed = allows(root, tool, input);
-    let mut args = words(input["command"].as_str()?)?;
+    let mut args = words(input["command"].as_str()?, false)?;
     let program = args[0].to_ascii_lowercase();
     let sub = args.get(1).map(String::as_str).unwrap_or_default();
     let build = allowed
@@ -626,7 +738,16 @@ fn probe_link(path: &Path) -> std::io::Result<Option<PathBuf>> {
 }
 
 /// Existing ancestors are resolved too, so a new file under a junction cannot escape the canonical root.
+/// Host attachments use the same path checks without treating Faber as an agent of its own Store.
+pub(crate) fn host_write_allowed(root: &Path, value: &str) -> bool {
+    local_target(root, value, true, true, false).is_some()
+}
+
 fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathBuf> {
+    local_target(root, value, writing, strict, true)
+}
+
+fn local_target(root: &Path, value: &str, writing: bool, strict: bool, agent: bool) -> Option<PathBuf> {
     if value.is_empty() || value.contains(['\0', '*', '?', '[', ']', '$', '`', '~']) {
         return None;
     }
@@ -649,11 +770,15 @@ fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathB
         return None;
     }
     let protected = |path: &Path| {
-        path.components().any(|p| {
-            let part = p.as_os_str().to_string_lossy();
-            let name = part.trim_end_matches(['.', ' ']);
-            name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".mcp.json")
-        })
+        (agent
+            && crate::store::Store::data_roots()
+                .iter()
+                .any(|data| inside(&normal(&path.to_string_lossy()), &normal(&data.to_string_lossy()))))
+            || path.components().any(|p| {
+                let part = p.as_os_str().to_string_lossy();
+                let name = part.trim_end_matches(['.', ' ']);
+                name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".mcp.json")
+            })
     };
     if writing && protected(&path) {
         return None;
@@ -684,10 +809,10 @@ fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathB
 }
 
 // shortcut: a literal argv subset, not a shell parser; refuse expansions and compound commands until an OS sandbox is available.
-fn words(command: &str) -> Option<Vec<String>> {
+fn words(command: &str, read_only: bool) -> Option<Vec<String>> {
     if command.len() > 16_384
-        || command
-            .contains(['$', '`', ';', '|', '&', '<', '>', '\n', '\r', '\0', '(', ')', '{', '}', '*', '?', '[', ']', '%', '!', ',', '~'])
+        || command.contains(['$', '`', ';', '|', '&', '<', '>', '\n', '\r', '\0', '(', ')', '{', '}', '*', '?', '[', ']', '%', '!', ','])
+        || (!read_only && command.contains('~'))
     {
         return None;
     }
@@ -825,7 +950,7 @@ fn git(root: &Path, args: &[String]) -> bool {
 }
 
 fn command(root: &Path, value: &str) -> bool {
-    let Some(args) = words(value) else { return false };
+    let Some(args) = words(value, false) else { return false };
     let rest = &args[1..];
     match args[0].to_ascii_lowercase().as_str() {
         "git" | "git.exe" => git(root, rest),

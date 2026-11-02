@@ -4830,7 +4830,7 @@ async fn r140_a_codex_chat_thread_carries_the_mode_and_the_settings() {
     for needle in [
         "\"approvalsReviewer\":\"auto_review\"",
         "\"approvalPolicy\":\"on-request\"",
-        "\"sandbox\":\"workspace-write\"",
+        "\"default_permissions\":\"faber-",
         "\"web_search\":\"cached\"",
         "\"model_reasoning_summary\":\"concise\"",
         "\"model_verbosity\":\"high\"",
@@ -5427,10 +5427,11 @@ async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() 
 #[tokio::test]
 async fn a_plan_step_names_the_conversation_doing_it_and_follows_its_state() {
     let dir = support::DataFolder::new();
+    let folder = project_folder();
     let (spawn, made) = pipes();
     let (engine, mut rx) = two_vendors_heard(&dir, spawn);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let parent = engine
         .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
         .unwrap();
@@ -6050,7 +6051,10 @@ async fn r160_codex_plan_approval_resumes_under_the_selected_mode_and_starts_def
     assert_eq!(engine.state().settings.permissions, Some(Permissions::AcceptEdits));
     let messages = resumed.wire.messages();
     let resume = messages.iter().find(|m| m["method"] == "thread/resume").unwrap();
-    assert_eq!(resume["params"]["sandbox"], "workspace-write");
+    assert!(resume["params"].get("sandbox").is_none());
+    let config = &resume["params"]["config"];
+    let profile = config["default_permissions"].as_str().unwrap();
+    assert_eq!(config[format!("permissions.{profile}")]["filesystem"][":workspace_roots"]["."], "write");
     assert_eq!(resume["params"]["approvalPolicy"], "on-request");
     let turn = messages.iter().find(|m| m["method"] == "turn/start").unwrap();
     assert_eq!(turn["params"]["input"][0]["text"], "Go ahead with the plan.");

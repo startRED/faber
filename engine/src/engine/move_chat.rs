@@ -68,7 +68,7 @@ impl Core {
                 if source.area == Area::Chat { format!("attachments/{name}") } else { format!("attachments/{}/{name}", source.id) };
             let from = inside_folder(&root, &relative).ok_or("error.projectSandbox")?;
             let relative = format!("attachments/{id}/{name}");
-            if !crate::permissions::allows(&data, "Write", &serde_json::json!({"file_path": relative})) {
+            if !crate::permissions::host_write_allowed(&data, &relative) {
                 return Err("error.projectSandbox".into());
             }
             std::fs::create_dir_all(&target).map_err(|e| crate::store::Fault::of_write(&e).key())?;

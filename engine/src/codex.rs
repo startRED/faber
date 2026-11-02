@@ -1171,7 +1171,12 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
         params["config"]["features.shell_tool"] = false.into();
     }
-    if (t.permissions == Permissions::Isolated || t.instructions.is_some()) && t.cwd.is_absolute() {
+    if t.permissions.guarded() && t.instructions.is_none() {
+        params.remove("sandbox");
+        let config = params.entry("config").or_insert_with(|| json!({})).as_object_mut().unwrap();
+        config.extend(crate::permissions::data_sandbox_config(&t.cwd, t.permissions != Permissions::Plan));
+    }
+    if (t.permissions != Permissions::FullAccess || t.instructions.is_some()) && t.cwd.is_absolute() {
         params.insert("runtimeWorkspaceRoots".into(), json!([t.cwd]));
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
@@ -1848,7 +1853,14 @@ async fn serve(
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
                                 // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
                                 // refusal is always safe, so it is written here instead of racing the engine's mode.
-                                if crate::permissions::touches_credentials(&input, params["cwd"].as_str(), &|name| std::env::var(name).ok()) {
+                                if crate::permissions::touches_credentials(&input, params["cwd"].as_str(), &|name| std::env::var(name).ok())
+                                    || crate::permissions::denies_data_write(
+                                        t.params.permissions,
+                                        method,
+                                        &input,
+                                        params["cwd"].as_str().or_else(|| t.params.cwd.to_str()),
+                                    )
+                                {
                                     t.approvals.remove(&key);
                                     let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
                                     continue;

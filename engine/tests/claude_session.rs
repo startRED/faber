@@ -1113,7 +1113,10 @@ fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edi
             assert!(deny.contains(&"Edit(//**/.git/**)".to_string()));
             for rule in &deny {
                 let (tool, rest) = rule.split_once('(').unwrap();
-                assert!(["Read", "Edit"].contains(&tool) && rest.ends_with(')') && rest.matches('(').count() == 0, "a broken rule: {rule}");
+                assert!(
+                    ["Read", "Edit", "Write"].contains(&tool) && rest.ends_with(')') && rest.matches('(').count() == 0,
+                    "a broken rule: {rule}"
+                );
             }
         }
     }

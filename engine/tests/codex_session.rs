@@ -2066,9 +2066,14 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                         "full access sends only the web search setting"
                     );
                 } else {
-                    assert_eq!(params["sandbox"], "workspace-write");
+                    assert!(params.get("sandbox").is_none());
                     assert_eq!(params["approvalPolicy"], "untrusted");
-                    assert!(params["config"] == json!({"web_search": "disabled"}), "no profile: only the web search setting");
+                    let config = &params["config"];
+                    let id = config["default_permissions"].as_str().unwrap();
+                    let fs = &config[format!("permissions.{id}")]["filesystem"];
+                    assert_eq!(fs[":root"], "read");
+                    assert_eq!(fs[":workspace_roots"]["."], "write");
+                    assert_eq!(config["web_search"], "disabled");
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
                 let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
@@ -2801,19 +2806,28 @@ async fn slash_failed_or_odd_skills_answers_are_silent_and_notes_are_bounded() {
 #[test]
 fn r140_each_mode_maps_to_the_nearest_codex_policy_sandbox_and_reviewer() {
     let table = [
-        (Permissions::Ask, "untrusted", "workspace-write", Some("user")),
-        (Permissions::AcceptEdits, "on-request", "workspace-write", Some("user")),
-        (Permissions::Plan, "on-request", "read-only", Some("user")),
-        (Permissions::Auto, "on-request", "workspace-write", Some("auto_review")),
-        (Permissions::FullAccess, "never", "danger-full-access", None),
+        (Permissions::Ask, "untrusted", Some("user")),
+        (Permissions::AcceptEdits, "on-request", Some("user")),
+        (Permissions::Plan, "on-request", Some("user")),
+        (Permissions::Auto, "on-request", Some("auto_review")),
+        (Permissions::FullAccess, "never", None),
     ];
     for area in [Area::Chat, Area::Project] {
-        for (permissions, approval, sandbox, reviewer) in table {
+        for (permissions, approval, reviewer) in table {
             for resume in [None, Some("t1".to_string())] {
                 let t = CodexThread { resume, ..mode_thread(permissions, Default::default()) };
                 let (_, params) = thread_params(area, &t);
                 assert_eq!(params["approvalPolicy"], approval, "{permissions:?} {area:?}");
-                assert_eq!(params["sandbox"], sandbox, "{permissions:?} {area:?}");
+                if permissions == Permissions::FullAccess {
+                    assert_eq!(params["sandbox"], "danger-full-access");
+                } else {
+                    assert!(params.get("sandbox").is_none());
+                    let config = &params["config"];
+                    let id = config["default_permissions"].as_str().unwrap();
+                    let fs = &config[format!("permissions.{id}")]["filesystem"];
+                    assert_eq!(fs[":root"], "read");
+                    assert_eq!(fs[":workspace_roots"]["."], if permissions == Permissions::Plan { "read" } else { "write" });
+                }
                 assert_eq!(params.get("approvalsReviewer").and_then(|r| r.as_str()), reviewer, "{permissions:?} {area:?}");
             }
         }
@@ -2844,9 +2858,11 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
         for resume in [None, Some("t1".to_string())] {
             let t = CodexThread { resume, ..mode_thread(permissions, faber_engine::model::Settings::default().tuning()) };
             let (_, params) = thread_params(Area::Chat, &t);
-            assert_eq!(params["config"], json!({"web_search": "live"}), "{permissions:?}: nothing but web search is set by default");
+            assert_eq!(params["config"]["web_search"], "live", "{permissions:?}");
+            assert!(params["config"].get("model_reasoning_summary").is_none());
+            assert!(params["config"].get("model_verbosity").is_none());
             let (_, bare) = thread_params(Area::Chat, &CodexThread { tuning: Tuning::default(), ..t });
-            assert_eq!(bare["config"], json!({"web_search": "disabled"}), "a launch nobody chose for gets no web");
+            assert_eq!(bare["config"]["web_search"], "disabled", "a launch nobody chose for gets no web");
         }
         for (web, name) in [(WebSearch::Off, "disabled"), (WebSearch::Cached, "cached"), (WebSearch::Live, "live")] {
             let (_, params) = thread_params(Area::Project, &mode_thread(permissions, Tuning { web, ..Default::default() }));
@@ -2855,7 +2871,9 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
     }
     let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, reply_style: ReplyStyle::Short, ..Default::default() };
     let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::Auto, chosen.clone()));
-    assert_eq!(params["config"], json!({"web_search": "live", "model_reasoning_summary": "detailed", "model_verbosity": "low"}));
+    assert_eq!(params["config"]["web_search"], "live");
+    assert_eq!(params["config"]["model_reasoning_summary"], "detailed");
+    assert_eq!(params["config"]["model_verbosity"], "low");
     for (summary, name) in [
         (ReasoningSummary::Auto, "auto"),
         (ReasoningSummary::Concise, "concise"),

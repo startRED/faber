@@ -241,9 +241,10 @@ async fn r_next_a_week_with_nothing_in_a_project_conversation_archives_it_but_ne
 #[tokio::test]
 async fn r_next_nothing_at_work_or_owed_to_the_person_is_archived() {
     let dir = support::DataFolder::new();
+    let folder = support::work_folder();
     let (spawn, made) = pipes();
     let (engine, _reads) = boot(&dir, spawn);
-    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let late = now() + 8 * DAY;
 
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();

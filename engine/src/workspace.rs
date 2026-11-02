@@ -41,9 +41,7 @@ pub fn save_files(root: &Path, dir: &Path, files: &[Attachment]) -> Vec<PathBuf>
     // Host-generated paths may have a trusted Windows 8.3 root (RUNNER~1). Check only the relative
     // operand, preserving the shared policy's traversal, junction and protected-file guards.
     let writable = |path: &Path| {
-        path.strip_prefix(root).is_ok_and(|relative| {
-            crate::permissions::allows(root, "Write", &serde_json::json!({ "file_path": relative.to_string_lossy() }))
-        })
+        path.strip_prefix(root).is_ok_and(|relative| crate::permissions::host_write_allowed(root, &relative.to_string_lossy()))
     };
     if !writable(dir) || fs::create_dir_all(dir).is_err() {
         return vec![];

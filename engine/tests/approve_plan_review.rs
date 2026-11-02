@@ -252,10 +252,14 @@ async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_p
             } else {
                 let messages = resumed.wire.messages();
                 let resume = messages.iter().find(|m| m["method"] == "thread/resume").unwrap();
-                assert_eq!(
-                    resume["params"]["sandbox"],
-                    if mode == Permissions::FullAccess { "danger-full-access" } else { "workspace-write" }
-                );
+                if mode == Permissions::FullAccess {
+                    assert_eq!(resume["params"]["sandbox"], "danger-full-access");
+                } else {
+                    assert!(resume["params"].get("sandbox").is_none());
+                    let config = &resume["params"]["config"];
+                    let id = config["default_permissions"].as_str().unwrap();
+                    assert_eq!(config[format!("permissions.{id}")]["filesystem"][":workspace_roots"]["."], "write");
+                }
             }
             assert!(first.mismatches.lock().unwrap().is_empty(), "{:?}", first.mismatches.lock().unwrap());
             assert!(resumed.mismatches.lock().unwrap().is_empty(), "{:?}", resumed.mismatches.lock().unwrap());
