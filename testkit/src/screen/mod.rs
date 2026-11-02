@@ -14,6 +14,7 @@ pub mod control_walk;
 pub mod draft_attachments;
 pub mod first_run;
 pub mod homes;
+pub mod killed;
 pub mod long_session;
 pub mod mcp_servers;
 pub mod menus;
@@ -66,6 +67,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(setup::scenarios())
         .chain(first_run::scenarios())
         .chain(homes::scenarios())
+        .chain(killed::scenarios())
         .chain(menus::scenarios())
         .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
