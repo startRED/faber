@@ -245,10 +245,10 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     )?;
     let shares =
         page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent)")?;
-    same(shares.to_string(), r#"["≥ 7%","≥ 47%"]"#.to_string(), "the shares of the two windows")?;
+    same(shares.to_string(), r#"["at least 7%","at least 47%"]"#.to_string(), "the shares of the two windows")?;
     let names =
         page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .uname')].map((e) => e.childNodes[0].textContent)")?;
-    same(names.to_string(), r#"["5-hour window","7-day window"]"#.to_string(), "the windows")?;
+    same(names.to_string(), r#"["5-hour limit","7-day limit"]"#.to_string(), "the windows")?;
     same(page.count(&css("[data-restore=manage]"))?, 1, "Manage accounts once in the section")?;
     ctx.shot(&mut app, "settings-accounts")?;
 
@@ -278,7 +278,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     page.wait_visible(&heading)?;
     let shares =
         "[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent).join(' ')";
-    same(page.eval(shares)?.as_str(), Some("≥ 7% ≥ 47%"), "the figures at the usage limits")?;
+    same(page.eval(shares)?.as_str(), Some("at least 7% at least 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
     page.wait_for("the quota after a reload", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")?;
@@ -288,7 +288,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
     open_settings(page)?;
     open_section(page, "set.subscriptions")?;
-    page.wait_for("the same figures", &format!("({shares}) === '≥ 7% ≥ 47%'"))
+    page.wait_for("the same figures", &format!("({shares}) === 'at least 7% at least 47%'"))
 }
 
 fn clicks_rendered_target(ctx: &mut Ctx) -> Result {

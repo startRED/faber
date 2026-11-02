@@ -37,12 +37,14 @@ check('approve-plan: the card chooses a run mode, excludes Plan, and keeps plann
     const select = root.querySelector<HTMLButtonElement>('[role=combobox]')!;
     equal(select.textContent, t('set.permissions.ask'), 'the previous mode is offered');
     select.click();
-    deepEqual([...root.querySelectorAll('[role=option] b')].map((o) => o.textContent), (['ask', 'acceptEdits', 'auto', 'dontAsk'] as const).map((m) => t(`set.permissions.${m}`)));
-    const [approve, keep] = [...root.querySelectorAll<HTMLButtonElement>('.plan-approval .btn')];
+    const options = [...root.querySelectorAll<HTMLElement>('[role=option]')];
+    deepEqual(options.map((o) => o.querySelector('b')?.textContent), (['ask', 'acceptEdits', 'auto', 'dontAsk'] as const).map((m) => t(`set.permissions.${m}`)));
+    const approve = root.querySelector<HTMLButtonElement>('.primary')!;
+    const keep = [...root.querySelectorAll('button')].find((b) => b.textContent === t('ask.plan.keep'))!;
     equal(approve.textContent, t('ask.plan.approve'));
     ok(approve.classList.contains('primary'));
     equal(keep.textContent, t('ask.plan.keep'));
-    (root.querySelectorAll('[role=option]')[2] as HTMLElement).click();
+    options[2].click();
     approve.click();
     await Promise.resolve();
     deepEqual(calls, [['conversation', 'turn', 'request', 'auto']]);
@@ -65,7 +67,7 @@ check('approve-plan: unknown plan history starts with Ask and an error keeps tha
   try {
     const select = root.querySelector<HTMLButtonElement>('[role=combobox]')!;
     equal(select.textContent, t('set.permissions.ask'));
-    root.querySelector<HTMLButtonElement>('.plan-approval .primary')!.click();
+    root.querySelector<HTMLButtonElement>('.primary')!.click();
     await Promise.resolve(); await Promise.resolve();
     equal(select.disabled, false);
     equal(select.textContent, t('set.permissions.ask'));
@@ -96,12 +98,16 @@ check('approve-plan: mode choices share the composer chip words and one-line mea
   document.body.append(root);
   const dispose = render(() => [createComponent(PermissionChip, { mode: 'ask', onMode: () => {} }), createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'ask' } } })], root);
   try {
-    const chips = root.querySelectorAll<HTMLButtonElement>('[role=combobox]');
-    chips[0]!.click(); chips[1]!.click();
-    const options = (selector: string) => [...root.querySelectorAll(selector)].map(o => [o.querySelector('b')?.textContent, o.querySelector('small')?.textContent]).filter(o => o[0] !== t('set.permissions.plan'));
-    deepEqual(options('.plan-approval [role=option]'), options(':scope > .permission-chip [role=option]'));
-    ok(options('.plan-approval [role=option]').every(o => o[1]), 'every mode has its one-line meaning');
-    equal(root.querySelector('.plan-approval .permission-chip')?.getAttribute('title'), t('set.permissions.ask.line'));
+    const pickers = [...root.querySelectorAll<HTMLButtonElement>('[role=combobox]')];
+    const options = (picker: HTMLButtonElement) => {
+      picker.click();
+      const result = [...picker.parentElement!.querySelectorAll('[role=option]')].map((o) => [o.querySelector('b')?.textContent, o.querySelector('small')?.textContent]);
+      picker.click();
+      return result;
+    };
+    deepEqual(options(pickers[1]), options(pickers[0]).filter(([name]) => name !== t('set.permissions.plan')));
+    ok(options(pickers[1]).every((o) => o[1]), 'every mode has its one-line meaning');
+    equal(pickers[1].getAttribute('aria-description'), t('set.permissions.ask.line'));
   } finally { dispose(); root.remove(); }
 });
 
@@ -179,7 +185,8 @@ check('approve-plan: a later permission choice refuses approval on the card and 
     conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'dontAsk' } },
   }), root);
   try {
-    const [approve, keep] = [...root.querySelectorAll<HTMLButtonElement>('.plan-approval .btn')];
+    const approve = root.querySelector<HTMLButtonElement>('.primary')!;
+    const keep = [...root.querySelectorAll('button')].find((b) => b.textContent === t('ask.plan.keep'))!;
     approve.click();
     await Promise.resolve(); await Promise.resolve();
     equal(root.querySelector('[role=alert]')?.textContent, t('error.permission.planChanged'));

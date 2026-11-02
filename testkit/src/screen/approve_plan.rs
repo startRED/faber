@@ -87,7 +87,7 @@ fn run(ctx: &mut Ctx, codex: bool, stop: bool) -> Result {
         || "work started before approval".into(),
     )?;
     same(
-        page.eval("document.querySelector('article .plan-approval [role=combobox]').textContent.trim()")?.as_str(),
+        page.eval("document.querySelector('article .plan-approval .mode').textContent.trim()")?.as_str(),
         Some("Ask"),
         "a conversation with unknown prior mode defaults to Ask",
     )?;

@@ -1271,7 +1271,7 @@ check('settings keyboard traversal: entry, reading order, hidden controls and vi
       }));
       try {
         const settings = view.host.querySelector<HTMLElement>('.settings')!;
-        settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px;--accent-text:#777';
         await tick();
         const nav = [...settings.querySelectorAll<HTMLButtonElement>('.s-nav button')];
         equal(document.activeElement, nav[0], 'opening puts focus on Back before the five sections');

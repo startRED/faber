@@ -206,8 +206,8 @@ check('quota: Auto never alarms about quota that is far from the limit (C002)', 
   }
 });
 
-check('quota: the French window label starts with a capital', () => {
+check('quota: the French window label uses the updated wording', () => {
   useLanguage('fr');
-  try { equal(t('quota.window', { window: '5 heures' }), 'Fenêtre de 5 heures'); }
+  try { equal(t('quota.window', { window: '5 heures' }), 'limite sur 5 heures'); }
   finally { useLanguage('en'); }
 });
