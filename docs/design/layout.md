@@ -174,3 +174,5 @@ wait while Faber looks for changed files to check; full command names and result
 with amber text and edge on failure.
 
 When closing interrupts a column's width glide, the exit temporarily fixes its currently painted box in a manual native top layer, with no DOM reparenting. Ongoing parent grid reflow cannot pull the departing real content backwards; cancelling the exit restores ordinary layout without inline geometry.
+
+- The unclean-exit home note includes when the unfinished run was detected and whether a panic was recorded, without its text.

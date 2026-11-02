@@ -1,6 +1,8 @@
 import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import type { CliSession, Project, RunningItem, Summary } from './api.ts';
+import { type CliSession, type Project, type RunningItem, type Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+
+import { CrashNote, MissingFolder } from './RecoveryNotes.tsx';
 import { greetingParts } from './greeting.ts';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
@@ -43,6 +45,11 @@ export function Welcome(props: {
   onOpen: (conversation: Summary) => void;
   /** In a project with an AI connected: its terminal sessions, asked for only when the person opens the list. */
   terminal?: { list: (projectId: string) => Promise<CliSession[]>; onPick: (projectId: string, session: CliSession) => void };
+  uncleanExit?: import('./api.ts').AppState['uncleanExit'];
+  onDismissUncleanExit?: () => void;
+  onOpenLogFolder?: () => void;
+  onFindProjectFolder?: (id: string) => void;
+  onRemoveProject?: (id: string) => void;
   children: JSX.Element;
 }) {
   const title = () => {
@@ -54,10 +61,12 @@ export function Welcome(props: {
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   // In a project every row is the project's own, so its row says only when.
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
+  const presentProject = () => (props.project && props.project.state !== 'missing' && props.project.state !== 'disconnected' ? props.project : undefined);
   return (
     <div class="welcome-grid" classList={{ project: !!props.project }} ref={animateList}>
       {/* Going between the project home and the chat home swaps the header, the lead and the suggestions: each one fades out where it was and the rest slide into place. */}
       <div class="w-main" ref={animateList}>
+        <CrashNote exit={props.uncleanExit} onDismiss={props.onDismissUncleanExit} onOpenLogs={props.onOpenLogFolder} />
         <Show when={props.project}>
           {(p) => (
             <>
@@ -87,6 +96,7 @@ export function Welcome(props: {
         <Show when={props.project}>
           <p class="lead">{t('projects.chat.lead')}</p>
         </Show>
+        <MissingFolder project={props.project} onFind={props.onFindProjectFolder} onRemove={props.onRemoveProject} />
         {props.children}
         <Show when={!props.project}>
           <Suggestions onSuggest={props.onSuggest} />
@@ -99,9 +109,9 @@ export function Welcome(props: {
             </For>
           </section>
         </Show>
-        <Show when={props.project}>{(project) => <><ProjectResults projectId={project().id} summaries={props.recent} /><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show>
+        <Show when={presentProject()}>{(project) => <><ProjectResults projectId={project().id} summaries={props.recent} /><ProjectGoals projectId={project().id} /><ProjectMemory projectId={project().id} /></>}</Show>
         {/* Keyed by the project, so another project's home never shows this one's sessions. */}
-        <Show when={props.terminal && props.project?.id} keyed>
+        <Show when={props.terminal && presentProject()?.id} keyed>
           {(id) => <FromTerminal list={() => props.terminal!.list(id)} onPick={(s) => props.terminal!.onPick(id, s)} />}
         </Show>
       </div>

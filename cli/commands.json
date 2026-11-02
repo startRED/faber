@@ -1215,6 +1215,33 @@
     "reach": "person"
   },
   {
+    "name": "repoint_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "Option<String>"
+      ]
+    ],
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_log_folder",
+    "args": [],
+    "kind": "read",
+    "reach": "person"
+  },
+  {
+    "name": "dismiss_unclean_exit",
+    "args": [],
+    "kind": "write",
+    "reach": "free"
+  },
+  {
     "name": "recents",
     "args": [],
     "kind": "read",
