@@ -1,6 +1,6 @@
 //! The catalog's skills and servers on screen (`faber_engine::tools`): what ships, what is installed, and installing or removing one.
 
-use crate::{Host, Res};
+use crate::{Host, Res, check_revoked, request_flag};
 use faber_engine::tools::{InstallError, Store, catalog, find};
 use serde::Serialize;
 
@@ -112,6 +112,7 @@ pub(crate) async fn tools_install(h: &Host, id: String) -> Res<()> {
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     // The project agent's install comes through the same function: the Node check, host list, digest and caps are one.
+    check_revoked(request_flag().as_deref())?;
     faber_engine::tools::install_checked(&store, &item, source.as_deref()).await.map_err(|why| match why {
         InstallError::Node => "error.tools.node".to_string(),
         InstallError::Held(_) => "error.tools.install".to_string(),
@@ -148,6 +149,7 @@ pub(crate) async fn tools_replace(h: &Host, plan: faber_engine::tools::Replaceme
     let data = h.data_dir.clone();
     let store = tokio::task::spawn_blocking(move || Store::new(&data)).await.map_err(|_| "error.tools.install".to_string())?;
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
+    check_revoked(request_flag().as_deref())?;
     faber_engine::tools::replace_checked(&store, &plan, source.as_deref()).await.map_err(|why| match why {
         InstallError::Node => "error.tools.node".to_string(),
         InstallError::Held(_) | InstallError::Failed(_) => "error.tools.install".to_string(),
@@ -157,28 +159,37 @@ pub(crate) async fn tools_replace(h: &Host, plan: faber_engine::tools::Replaceme
 pub(crate) async fn tools_remove(h: &Host, id: String) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
     let data = h.data_dir.clone();
-    tokio::task::spawn_blocking(move || Store::new(&data).remove(&id))
-        .await
-        .map_err(|_| "error.tools.remove".to_string())?
-        .map_err(|_| "error.tools.remove".to_string())
+    let flag = request_flag();
+    tokio::task::spawn_blocking(move || {
+        check_revoked(flag.as_deref())?;
+        Store::new(&data).remove(&id).map_err(|_| "error.tools.remove".to_string())
+    })
+    .await
+    .map_err(|_| "error.tools.remove".to_string())?
 }
 
 pub(crate) async fn tools_set_enabled(h: &Host, id: String, enabled: bool) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
     let data = h.data_dir.clone();
-    tokio::task::spawn_blocking(move || Store::new(&data).set_enabled(&id, enabled))
-        .await
-        .map_err(|_| "error.tools.toggle".to_string())?
-        .map_err(|_| "error.tools.toggle".to_string())
+    let flag = request_flag();
+    tokio::task::spawn_blocking(move || {
+        check_revoked(flag.as_deref())?;
+        Store::new(&data).set_enabled(&id, enabled).map_err(|_| "error.tools.toggle".to_string())
+    })
+    .await
+    .map_err(|_| "error.tools.toggle".to_string())?
 }
 
 pub(crate) async fn tools_restore(h: &Host, id: String) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
     let data = h.data_dir.clone();
-    tokio::task::spawn_blocking(move || Store::new(&data).restore(&id))
-        .await
-        .map_err(|_| "error.tools.restore".to_string())?
-        .map_err(|_| "error.tools.restore".to_string())
+    let flag = request_flag();
+    tokio::task::spawn_blocking(move || {
+        check_revoked(flag.as_deref())?;
+        Store::new(&data).restore(&id).map_err(|_| "error.tools.restore".to_string())
+    })
+    .await
+    .map_err(|_| "error.tools.restore".to_string())?
 }
 
 /// The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the

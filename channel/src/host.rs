@@ -30,6 +30,7 @@ impl Backend for Arc<Host> {
         Box::pin(async move {
             match Host::kind(&cmd) {
                 Some(Kind::Window) => Err("error.host.noWindow".into()),
+                // The key-only backend interface keeps its original error shape.
                 _ => host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| failure.key),
             }
         })
@@ -45,6 +46,23 @@ impl Backend for Arc<Host> {
                 return Err("error.host.noWindow".into());
             }
             host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| crate::wire::Error {
+                key: failure.key,
+                detail: failure.detail,
+                data: failure.data,
+            })
+        })
+    }
+    fn dispatch_session(&self, who: &Who, cmd: String, args: Value, revoked: Option<Arc<std::sync::atomic::AtomicBool>>) -> DetailedAnswer {
+        let host = self.clone();
+        let caller = match who {
+            Who::Person => Caller::Person,
+            Who::Agent { conversation, .. } => Caller::Agent { conversation: conversation.clone() },
+        };
+        Box::pin(async move {
+            if Host::kind(&cmd) == Some(Kind::Window) {
+                return Err("error.host.noWindow".into());
+            }
+            Host::dispatch_session(&host, &caller, &cmd, args, revoked).await.map_err(|failure| crate::wire::Error {
                 key: failure.key,
                 detail: failure.detail,
                 data: failure.data,
@@ -72,7 +90,9 @@ pub fn prepare() -> io::Result<()> {
             SECRET.get_or_init(|| fresh).clone()
         }
     };
-    faber_engine::proc::set_token_minter(Arc::new(move |id| secret.token(id)));
+    let issuer = secret.clone();
+    faber_engine::proc::set_token_minter(Arc::new(move |id| issuer.token(id).ok()));
+    faber_engine::proc::set_token_revoker(Arc::new(move |token| secret.revoke(token)));
     Ok(())
 }
 

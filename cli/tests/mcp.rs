@@ -1,6 +1,6 @@
 //! End-to-end MCP calls over the real local channel and a fake host.
 use faber_channel::server::Answer;
-use faber_channel::{Backend, Who, serve};
+use faber_channel::{Backend, Who};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
@@ -53,11 +53,9 @@ struct Run {
 async fn ready(data: &Path) {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if let Ok(secret) = faber_channel::secret::Secret::read(data) {
-                let hello = faber_channel::Hello { token: Some(secret.token("probe")), ..Default::default() };
-                if faber_channel::Client::connect(data, hello).await.is_ok() {
-                    break;
-                }
+            let hello = faber_channel::Hello { agent_depth: 1, ..Default::default() };
+            if faber_channel::Client::connect(data, hello).await.is_ok() {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -99,12 +97,13 @@ async fn mcp_call_round_trip_uses_the_callers_identity() {
     let data = tempfile::tempdir().unwrap();
     let (events, _) = broadcast::channel(64);
     let fake = Arc::new(Fake { events, calls: Mutex::default() });
+    let secret = Arc::new(faber_channel::secret::Secret::fresh().unwrap());
     let served = tokio::spawn({
-        let (dir, fake) = (data.path().to_path_buf(), fake.clone());
-        async move { serve(&dir, fake).await }
+        let (dir, fake, secret) = (data.path().to_path_buf(), fake.clone(), secret.clone());
+        async move { faber_channel::server::serve_with_secret(&dir, fake, secret).await }
     });
     ready(data.path()).await;
-    let token = faber_channel::secret::Secret::read(data.path()).unwrap().token("c1");
+    let token = secret.token("c1").unwrap();
     let input = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n",

@@ -95,6 +95,11 @@ impl Replay {
         if msg["method"] == "config/read" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "config/read") {
             return Ok(vec![serde_json::json!({"id":msg["id"],"result":{"config":{}}}).to_string()]);
         }
+        if msg["method"] == "thread/unsubscribe"
+            && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "thread/unsubscribe")
+        {
+            return Ok(vec![serde_json::json!({"id":msg["id"],"result":{"status":"notLoaded"}}).to_string()]);
+        }
         let sent = key(&msg);
         let expected = match self.entries.get(self.at) {
             Some(entry) if entry.input => key(&entry.msg),
@@ -148,6 +153,35 @@ mod tests {
         let mut current = Replay::new(vec![entry(true, request.clone()), entry(false, answer.clone())]);
         assert_eq!(current.feed(&request.to_string()).unwrap(), [answer.to_string()]);
         assert!(current.mismatches.is_empty());
+    }
+
+    #[test]
+    fn identity_refresh_can_be_recorded_or_absent_from_an_older_fixture() {
+        let request = json!({"id":"faber-unsubscribe-1","method":"thread/unsubscribe","params":{"threadId":"plan-thread"}});
+        let resume = json!({"id":2,"method":"thread/resume","params":{"threadId":"plan-thread"}});
+        let mut old = Replay::new(vec![entry(true, resume.clone())]);
+        let answer: Value = serde_json::from_str(&old.feed(&request.to_string()).unwrap()[0]).unwrap();
+        assert_eq!(answer, json!({"id":request["id"],"result":{"status":"notLoaded"}}));
+        old.feed(&resume.to_string()).unwrap();
+        assert!(old.mismatches.is_empty(), "identity refresh leaves the recorded resume untouched");
+        let answer = json!({"id":request["id"],"result":{"status":"unsubscribed"}});
+        let mut current = Replay::new(vec![entry(true, request.clone()), entry(false, answer.clone()), entry(true, resume.clone())]);
+        assert_eq!(current.feed(&request.to_string()).unwrap(), [answer.to_string()]);
+        current.feed(&resume.to_string()).unwrap();
+        assert!(current.mismatches.is_empty());
+
+        let entries = load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/codex/approve-plan-run.jsonl")).unwrap();
+        let inputs: Vec<_> = entries.iter().filter(|entry| entry.input).map(|entry| entry.msg.clone()).collect();
+        let mut approved = Replay::new(entries);
+        let mut outputs = Vec::new();
+        for input in inputs {
+            if input["method"] == "thread/resume" {
+                approved.feed(&request.to_string()).unwrap();
+            }
+            outputs.extend(approved.feed(&input.to_string()).unwrap());
+        }
+        assert!(approved.mismatches.is_empty(), "{:?}", approved.mismatches);
+        assert!(outputs.iter().any(|line| line.contains("Started the approved work.")));
     }
 
     #[test]

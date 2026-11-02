@@ -70,10 +70,11 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     assert_eq!(started, Err("error.channel.agentDepth".into()), "a turn the table marks as starting one is held");
 
     let (ours, theirs) = tokio::io::duplex(1 << 16);
-    tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), test_secret(), 0));
+    let secret = test_secret();
+    tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), secret.clone(), 0));
     let named = Client::over(
         ours,
-        Hello { client: "test".into(), secret: test_secret().hex(), token: Some(test_secret().token("c1")), ..Default::default() },
+        Hello { client: "test".into(), secret: secret.hex(), token: Some(secret.token("c1").unwrap()), ..Default::default() },
     )
     .await
     .unwrap();
@@ -114,19 +115,22 @@ async fn engine_token_is_accepted_by_the_running_host_channel() {
     let host = Arc::new(wiring.host(engine, data_dir.clone(), true, tokio::runtime::Handle::current()));
     let server_data = data_dir.clone();
     let server = tokio::spawn(async move { faber_channel::host::serve(&server_data, host).await });
-    let client = tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Some(token) = faber_engine::proc::conversation_token("conversation-1") {
-                let hello = Hello { client: "test".into(), agent_depth: 1, token: Some(token), ..Default::default() };
-                if let Ok(client) = Client::connect(&data_dir, hello).await {
-                    break client;
-                }
+            if Client::connect(&data_dir, Hello::default()).await.is_ok() {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
     .unwrap();
+    let identity = faber_engine::proc::ConversationIdentity::new("conversation-1").unwrap();
+    let hello = Hello { client: "test".into(), agent_depth: 1, token: identity.token.clone(), ..Default::default() };
+    let client = Client::connect(&data_dir, hello).await.unwrap();
     assert_eq!(client.offer["caller"], json!({"kind":"agent", "conversation":"conversation-1"}));
+    identity.revoke();
+    let hello = Hello { client: "test".into(), agent_depth: 1, token: identity.token.clone(), ..Default::default() };
+    assert_eq!(Client::connect(&data_dir, hello).await.err().unwrap().to_string(), "error.channel.revoked");
     server.abort();
 }

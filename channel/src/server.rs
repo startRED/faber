@@ -1,7 +1,7 @@
 //! Faber's side of the channel. Each connection says `hello` first, then sends commands from the command table; a
 //! `subscribe` starts the events on that connection. The answers run at once and come back as they finish, in any order.
 
-use crate::guard::Guard;
+use crate::guard::{Guard, Ticket};
 use crate::place::Address;
 use crate::secret::Secret;
 use crate::wire::{self, Request};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Semaphore, broadcast, mpsc};
 
+pub(crate) type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 pub type Answer = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 pub type DetailedAnswer = Pin<Box<dyn Future<Output = Result<Value, wire::Error>> + Send>>;
 
@@ -31,12 +32,33 @@ pub trait Backend: Send + Sync + 'static {
         let answer = self.dispatch(who, cmd, args);
         Box::pin(async move { answer.await.map_err(Into::into) })
     }
+    fn dispatch_session(
+        &self,
+        who: &Who,
+        cmd: String,
+        args: Value,
+        _revoked: Option<Arc<std::sync::atomic::AtomicBool>>,
+    ) -> DetailedAnswer {
+        self.dispatch_detailed(who, cmd, args)
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value>;
     /// Whether a connected client is a program an AI that Faber started runs, whatever its hello says: on Windows, one in
     /// a job Faber's CLIs run in, which nothing they start can leave. A backend that starts no CLI knows of none.
     #[cfg(windows)]
     fn started_by_an_ai(&self, _client: &faber_winproc::PipeClient) -> bool {
         false
+    }
+}
+
+struct Admission {
+    guard: Arc<Guard>,
+    ticket: Option<(Ticket, Value)>,
+}
+impl Drop for Admission {
+    fn drop(&mut self) {
+        if let Some((ticket, args)) = self.ticket.take() {
+            self.guard.answered(ticket, &args, None);
+        }
     }
 }
 
@@ -84,7 +106,8 @@ pub async fn serve(data: &Path, backend: Arc<dyn Backend>) -> io::Result<()> {
     serve_with_secret(data, backend, secret).await
 }
 
-pub(crate) async fn serve_with_secret(data: &Path, backend: Arc<dyn Backend>, secret: Arc<Secret>) -> io::Result<()> {
+/// Serves with a shared secret so its owner can issue and revoke session tokens.
+pub async fn serve_with_secret(data: &Path, backend: Arc<dyn Backend>, secret: Arc<Secret>) -> io::Result<()> {
     let guard = Guard::watching(backend.subscribe());
     match Address::of(data) {
         Address::Pipe(name) => serve_pipe(&name, data, backend, guard, secret).await,
@@ -193,14 +216,39 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
 ) {
     let (read, mut write) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::channel::<String>(256);
+    let writer_token = Arc::new(std::sync::Mutex::new(None::<String>));
+    let writer_identity = writer_token.clone();
+    let writer_secret = secret.clone();
     let mut writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
+            let token = writer_identity.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let revoked = || token.as_deref().is_some_and(|value| writer_secret.conversation_of(value).is_none());
+            let refusal = serde_json::from_str::<Value>(&line)
+                .is_ok_and(|value| value.get("id").is_some() && value["err"] == "error.channel.revoked");
+            if revoked() && !refusal {
+                break;
+            }
             // A peer that stopped reading must not keep a connection slot forever.
             let send = async {
                 write.write_all(line.as_bytes()).await?;
                 write.write_all(b"\n").await
             };
-            let sent = tokio::time::timeout(std::time::Duration::from_secs(5), send).await;
+            let mut changes = writer_secret.changes();
+            let wait_revoked = async {
+                loop {
+                    if revoked() && !refusal {
+                        break;
+                    }
+                    if changes.changed().await.is_err() {
+                        break;
+                    }
+                }
+            };
+            let sent = tokio::select! {
+                biased;
+                _ = wait_revoked => break,
+                sent = tokio::time::timeout(std::time::Duration::from_secs(5), send) => sent,
+            };
             if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
@@ -209,11 +257,22 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     let mut reader = BufReader::new(read);
     let mut buffer = Vec::new();
     let mut who: Option<Who> = None;
+    let mut token: Option<String> = None;
+    let mut closed: Option<tokio::sync::watch::Receiver<bool>> = None;
+    let mut revoked = false;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut events: Option<tokio::task::JoinHandle<()>> = None;
     let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
     loop {
         let line = tokio::select! {
+            _ = async {
+                match &mut closed {
+                    Some(signal) => {
+                        if !*signal.borrow() { let _ = signal.changed().await; }
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            } => { revoked = true; break; },
             line = async {
                 if who.is_none() {
                     tokio::time::timeout_at(deadline, wire::read_line(&mut reader, &mut buffer, MAX_REQUEST)).await.ok().and_then(Result::ok).flatten()
@@ -226,6 +285,10 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
         // A line that is not a request has no id to answer: the client broke the wire, so the connection ends.
         let Ok(Request { id, cmd, args }) = serde_json::from_str::<Request>(&line) else { break };
         let answer = |result: Result<Value, String>| wire::reply(id, &result);
+        if token.as_deref().is_some_and(|value| secret.conversation_of(value).is_none()) {
+            let _ = tx.send(answer(Err("error.channel.revoked".into()))).await;
+            break;
+        }
         match (cmd.as_str(), who.as_ref()) {
             ("hello", None) => {
                 let said: Hello = serde_json::from_value(args).unwrap_or_default();
@@ -234,10 +297,20 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     break;
                 }
                 let conversation = match said.token {
-                    Some(token) => match secret.conversation_of(&token) {
-                        Some(id) => Some(id),
+                    Some(value) => match secret.conversation_of(&value) {
+                        Some(id) => {
+                            closed = secret.closed(&value);
+                            if closed.is_none() {
+                                let _ = tx.send(answer(Err("error.channel.revoked".into()))).await;
+                                break;
+                            }
+                            *writer_token.lock().unwrap_or_else(|e| e.into_inner()) = Some(value.clone());
+                            token = Some(value);
+                            Some(id)
+                        }
                         None => {
-                            let _ = tx.send(answer(Err("error.channel.token".into()))).await;
+                            let key = if secret.signed(&value) { "error.channel.revoked" } else { "error.channel.token" };
+                            let _ = tx.send(answer(Err(key.into()))).await;
                             break;
                         }
                     },
@@ -258,7 +331,7 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
             }
             ("subscribe", Some(_)) => {
                 if events.is_none() {
-                    events = Some(tokio::spawn(forward(backend.subscribe(), tx.clone())));
+                    events = Some(tokio::spawn(forward(backend.subscribe(), tx.clone(), secret.clone(), token.clone())));
                 }
                 let _ = tx.send(answer(Ok(Value::Bool(true)))).await;
             }
@@ -271,6 +344,10 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     break;
                 }
                 let Ok(place) = in_flight.clone().acquire_owned().await else { break };
+                if token.as_deref().is_some_and(|value| secret.conversation_of(value).is_none()) {
+                    let _ = tx.send(answer(Err("error.channel.revoked".into()))).await;
+                    break;
+                }
                 let limited = matches!(caller, Who::Agent { .. }) && backend.starts_turn(&cmd);
                 let ticket = match limited.then(|| guard.admit(std::time::Instant::now())) {
                     Some(Err(key)) => {
@@ -280,19 +357,27 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     Some(Ok(ticket)) => Some((ticket, args.clone())),
                     None => None,
                 };
-                let (tx, guard) = (tx.clone(), guard.clone());
-                let run = backend.dispatch_detailed(caller, cmd, args);
-                tokio::spawn(async move {
-                    let result = run.await;
-                    if let Some((ticket, asked)) = ticket {
-                        if matches!(&result, Err(error) if error.key.starts_with("error.reach.") || error.key == "error.host.badArgs") {
-                            guard.refund(&ticket);
+                let admission = Admission { guard: guard.clone(), ticket };
+                let (tx, backend, secret, token, caller) = (tx.clone(), backend.clone(), secret.clone(), token.clone(), caller.clone());
+                let admitted = secret.clone();
+                let request_token = token.clone();
+                let refused = tx.clone();
+                if !admitted.spawn(request_token.as_deref(), move |revoked| {
+                    Box::pin(async move {
+                        let mut admission = admission;
+                        let result = backend.dispatch_session(&caller, cmd, args, revoked).await;
+                        if let Some((ticket, asked)) = admission.ticket.take() {
+                            if matches!(&result, Err(error) if error.key.starts_with("error.reach.") || error.key == "error.host.badArgs") {
+                                admission.guard.refund(&ticket);
+                            }
+                            admission.guard.answered(ticket, &asked, result.as_ref().ok());
                         }
-                        guard.answered(ticket, &asked, result.as_ref().ok());
-                    }
-                    let _ = tx.send(wire::reply_detailed(id, &result)).await;
-                    drop(place);
-                });
+                        let _ = tx.send(wire::reply_detailed(id, &result)).await;
+                        drop(place);
+                    })
+                }) {
+                    let _ = refused.send(answer(Err("error.channel.revoked".into()))).await;
+                }
             }
         }
     }
@@ -300,19 +385,30 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
         events.abort();
     }
     drop(tx);
-    if tokio::time::timeout(std::time::Duration::from_secs(5), &mut writer).await.is_err() {
+    if revoked || tokio::time::timeout(std::time::Duration::from_secs(5), &mut writer).await.is_err() {
         writer.abort();
     }
 }
 
 /// Sends every event to one client. A client too slow to keep up is told how many it missed, so it reads the state again.
-async fn forward(mut events: broadcast::Receiver<Value>, tx: mpsc::Sender<String>) {
+async fn forward(mut events: broadcast::Receiver<Value>, tx: mpsc::Sender<String>, secret: Arc<Secret>, token: Option<String>) {
+    let mut changes = secret.changes();
     loop {
-        let line = match events.recv().await {
+        if token.as_deref().is_some_and(|value| secret.conversation_of(value).is_none()) {
+            break;
+        }
+        let received = tokio::select! {
+            result = events.recv() => result,
+            result = changes.changed() => { if result.is_err() { break; } continue; }
+        };
+        let line = match received {
             Ok(event) => wire::event(&event),
             Err(broadcast::error::RecvError::Lagged(skipped)) => wire::event(&json!({ "type": "lagged", "skipped": skipped })),
             Err(broadcast::error::RecvError::Closed) => return,
         };
+        if token.as_deref().is_some_and(|value| secret.conversation_of(value).is_none()) {
+            break;
+        }
         if tx.send(line).await.is_err() {
             return;
         }

@@ -21,7 +21,10 @@ macro_rules! table {
         mod commands {
             #![allow(clippy::unused_async, clippy::too_many_arguments, unused_variables)]
             use super::*;
-            $( $(#[doc = $doc])* $(#[cfg($cfg)])? pub(super) async fn $name($h: &Host $(, $arg: $ty)*) -> Result<$ret, fail!($($err)?)> $body )*
+            $( $(#[doc = $doc])* $(#[cfg($cfg)])? pub(super) async fn $name($h: &Host $(, $arg: $ty)*) -> Result<$ret, fail!($($err)?)> {
+                if matches!(Kind::$kind, Kind::Write | Kind::StartsTurn) { check_revoked(request_flag().as_deref())?; }
+                $body
+            } )*
         }
 
         pub(crate) const TABLE: &[Entry] = &[$( $(#[cfg($cfg)])? Entry {

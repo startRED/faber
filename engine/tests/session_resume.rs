@@ -222,6 +222,29 @@ async fn a_warmed_process_defers_its_thread_until_the_first_turn_even_when_effor
     engine.shutdown();
 }
 
+// Replaces the dedicated-process eviction test: Codex shares one process; only Claude uses max_warm and idle expiry.
+#[tokio::test(start_paused = true)]
+async fn codex_shared_process_survives_idle_and_thread_count_above_warm_limit() {
+    let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());
+    let (engine, mut rx) = start(&dir, &disk);
+    let mut ids = Vec::new();
+    for _ in 0..4 {
+        ids.push(engine.send(send(None, "first", Effort::High)).unwrap());
+        assert_eq!(finished(&mut rx).await.status, Some(Status::Done));
+    }
+    assert_eq!(disk.lock().unwrap().initialized, 1, "more threads than max_warm still share one process");
+    tokio::time::advance(Duration::from_secs(121)).await;
+    engine.send(send(Some(&ids[0]), "again", Effort::Low)).unwrap();
+    assert_eq!(finished(&mut rx).await.text, "pong");
+    let d = disk.lock().unwrap();
+    assert_eq!(d.initialized, 1, "idle expiry and effort changes keep the shared process");
+    assert_eq!(d.started, 4, "the oldest native thread was retained");
+    assert_eq!(d.asked, ["thread/start", "thread/start", "thread/start", "thread/start", "thread/resume thread-1"]);
+    assert_eq!(d.turns, ["first", "first", "first", "first", "again"]);
+    drop(d);
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn a_lost_thread_with_no_turns_starts_a_new_one_and_runs_the_message_once() {
     let (dir, disk) = (crate::support::DataFolder::new(), Shared::default());

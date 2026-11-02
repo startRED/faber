@@ -1,5 +1,4 @@
-//! Codex driver: one shared `codex app-server` process, spoken to over JSON-RPC on stdio, with each conversation as a
-//! thread in it.
+//! Codex driver: `codex app-server` processes spoken to over JSON-RPC on stdio.
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
@@ -808,15 +807,27 @@ pub struct CodexThread {
 }
 
 enum ServerCommand {
-    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery> },
+    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery>, identity: Option<ThreadIdentity> },
     Session(u64, SessionCommand),
     Tools(crate::tools::Delivery),
     Retire,
 }
 
+struct ThreadIdentity {
+    identity: Arc<proc::ConversationIdentity>,
+    spawn: Spawner,
+}
+
+impl Drop for ThreadIdentity {
+    fn drop(&mut self) {
+        self.identity.revoke();
+    }
+}
+
 // What an answer from Codex is for.
 enum Waiting {
     Initialize,
+    Unsubscribe(u64),
     Thread(u64),
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
@@ -860,6 +871,8 @@ struct Thread {
     sink: EventSink,
     params: CodexThread,
     tools: Option<crate::tools::Delivery>,
+    identity: Option<ThreadIdentity>,
+    unsubscribed: bool,
     id: Option<String>,
     turn: Option<String>,
     queued: Vec<UserTurn>,
@@ -910,6 +923,22 @@ fn refresh_native(threads: &mut HashMap<u64, Thread>, key: u64, server: Option<&
 }
 
 impl Thread {
+    fn open_params(&self, area: Area) -> (&'static str, Value) {
+        let (method, mut params) = thread_params(area, &self.params);
+        if let Some(identity) = &self.identity
+            && let Some(token) = &identity.identity.token
+        {
+            // Merge with the sandbox's environment (HOME/TEMP), rather than replacing it.
+            let config = params["config"].as_object_mut().expect("thread config");
+            let env = config.entry("shell_environment_policy.set").or_insert_with(|| json!({}));
+            env["FABER_AGENT_TOKEN"] = token.clone().into();
+            env["FABER_AGENT_AUTH"] = token.clone().into();
+            env["FABER_CONVERSATION"] = identity.identity.id.clone().into();
+            env[proc::AGENT_MARK] = "1".into();
+        }
+        (method, params)
+    }
+
     fn native_pending(&self, key: u64, subagents: &Subagents) -> bool {
         !self.native_commands.items.is_empty()
             || self.native_commands.unknown()
@@ -1192,8 +1221,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     (method, Value::Object(params))
 }
 
-/// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
-/// conversations cost one process instead of one each (measured: about 50 MB for three threads).
+/// A shared Codex app-server; identity belongs to each thread, never its process.
 #[derive(Clone)]
 pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
@@ -1225,25 +1253,46 @@ impl CodexServer {
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
     pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
-        self.open_inner(thread, sink, None)
+        self.open_inner(thread, sink, None, None)
     }
 
     /// Uses the project's catalog choices for this launch, leaving already open conversations alone.
     pub fn open_with_tools(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery) -> Session {
-        self.open_inner(thread, sink, Some(tools))
+        self.open_inner(thread, sink, Some(tools), None)
     }
 
-    fn open_inner(&self, thread: CodexThread, sink: EventSink, tools: Option<crate::tools::Delivery>) -> Session {
+    pub(crate) fn open_identified(
+        &self,
+        thread: CodexThread,
+        sink: EventSink,
+        tools: crate::tools::Delivery,
+        identity: Arc<proc::ConversationIdentity>,
+        spawn: Spawner,
+    ) -> Session {
+        self.open_inner(thread, sink, Some(tools), Some(ThreadIdentity { identity, spawn }))
+    }
+
+    fn open_inner(
+        &self,
+        thread: CodexThread,
+        sink: EventSink,
+        tools: Option<crate::tools::Delivery>,
+        identity: Option<ThreadIdentity>,
+    ) -> Session {
+        let session_identity = identity.as_ref().map(|i| i.identity.clone());
+        let sink =
+            identity.as_ref().and_then(|i| i.identity.token.clone()).map_or_else(|| sink.clone(), |token| redact_sink(sink.clone(), token));
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) =
-            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools })
+            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, identity })
         {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
             sink(EngineEvent::WriterExit { confirmed: true });
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
-        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone())
+        let session = Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone());
+        if let Some(identity) = session_identity { session.with_identity(identity) } else { session }
     }
 
     /// The catalog's tools as the store sees them now (`crate::tools`): a store that could not be made clean takes them away
@@ -1258,12 +1307,118 @@ impl CodexServer {
     }
 }
 
+pub(crate) fn redact_sink(sink: EventSink, token: String) -> EventSink {
+    let pending = std::sync::Mutex::new((String::new(), String::new(), HashMap::<String, String>::new()));
+    let original = sink;
+    Arc::new(move |mut event| {
+        match &mut event {
+            EngineEvent::Tool { input, .. }
+            | EngineEvent::BrowseCall { input, .. }
+            | EngineEvent::ConversationCall { input, .. }
+            | EngineEvent::VerifyCall { input, .. }
+            | EngineEvent::MapCall { input, .. }
+            | EngineEvent::ToolboxCall { input, .. }
+            | EngineEvent::ProgressCall { input, .. }
+            | EngineEvent::HelperCall { input, .. }
+            | EngineEvent::Permission { input, .. }
+            | EngineEvent::Parked { input, .. } => redact_value(input, &token),
+            EngineEvent::Background(crate::background::Update::Start { command, .. }) => *command = command.replace(&token, "[redacted]"),
+            _ => {}
+        }
+        let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+        match event {
+            EngineEvent::Text(delta) => {
+                let safe = redact_delta(&mut pending.0, &delta, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::Text(safe));
+                }
+            }
+            EngineEvent::Thinking(delta) => {
+                let safe = redact_delta(&mut pending.1, &delta, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::Thinking(safe));
+                }
+            }
+            EngineEvent::Background(crate::background::Update::Output { id, text, replace }) => {
+                let buffer = pending.2.entry(id.clone()).or_default();
+                if replace {
+                    buffer.clear();
+                }
+                let safe = redact_delta(buffer, &text, &token);
+                if replace || !safe.is_empty() {
+                    original(EngineEvent::Background(crate::background::Update::Output { id, text: safe, replace }));
+                }
+            }
+            EngineEvent::Background(crate::background::Update::End { id, state }) => {
+                if let Some(words) = pending.2.remove(&id).filter(|words| !words.is_empty()) {
+                    original(EngineEvent::Background(crate::background::Update::Output { id: id.clone(), text: words, replace: false }));
+                }
+                original(EngineEvent::Background(crate::background::Update::End { id, state }));
+            }
+            EngineEvent::Error { message, fatal } => {
+                original(EngineEvent::Error { message: message.replace(&token, "[redacted]"), fatal });
+            }
+            EngineEvent::ToolResult { id, ok, declined, text } => {
+                original(EngineEvent::ToolResult { id, ok, declined, text: text.replace(&token, "[redacted]") });
+            }
+            EngineEvent::HelperDone { id, ok, text } => {
+                if let Some(words) = pending.2.remove(&format!("child:{id}")).filter(|words| !words.is_empty()) {
+                    original(EngineEvent::ChildWords { parent: id.clone(), text: words });
+                }
+                original(EngineEvent::HelperDone { id, ok, text: text.replace(&token, "[redacted]") });
+            }
+            EngineEvent::ChildWords { parent, text } => {
+                let buffer = pending.2.entry(format!("child:{parent}")).or_default();
+                let safe = redact_delta(buffer, &text, &token);
+                if !safe.is_empty() {
+                    original(EngineEvent::ChildWords { parent, text: safe });
+                }
+            }
+            other => {
+                if matches!(&other, EngineEvent::Break { .. } | EngineEvent::Done { .. } | EngineEvent::WriterExit { .. }) {
+                    if !pending.0.is_empty() {
+                        original(EngineEvent::Text(std::mem::take(&mut pending.0)));
+                    }
+                    if !pending.1.is_empty() {
+                        original(EngineEvent::Thinking(std::mem::take(&mut pending.1)));
+                    }
+                }
+                original(other);
+            }
+        }
+    })
+}
+
+fn redact_value(value: &mut Value, token: &str) {
+    match value {
+        Value::String(text) => *text = text.replace(token, "[redacted]"),
+        Value::Array(values) => values.iter_mut().for_each(|value| redact_value(value, token)),
+        Value::Object(values) => {
+            let original = std::mem::take(values);
+            for (key, mut value) in original {
+                redact_value(&mut value, token);
+                values.insert(key.replace(token, "[redacted]"), value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_delta(pending: &mut String, delta: &str, token: &str) -> String {
+    pending.push_str(delta);
+    let mut safe = pending.replace(token, "[redacted]");
+    let keep = safe.char_indices().map(|(index, _)| index).find(|&index| token.starts_with(&safe[index..])).unwrap_or(safe.len());
+    *pending = safe.split_off(keep);
+    safe
+}
+
 async fn serve(
     started: std::io::Result<proc::Proc>,
     opts: CodexServerOptions,
-    mut rx: UnboundedReceiver<ServerCommand>,
+    rx: UnboundedReceiver<ServerCommand>,
     alive: Arc<AtomicBool>,
 ) {
+    let mut rx = rx;
     let area = opts.area;
     let mut p = match started {
         Ok(p) => p,
@@ -1273,7 +1428,8 @@ async fn serve(
             rx.close();
             while let Some(cmd) = rx.recv().await {
                 if let ServerCommand::Open { sink, .. } = cmd {
-                    sink(EngineEvent::Error { message: format!("Codex could not start: {err}"), fatal: true });
+                    let message = format!("Codex could not start: {err}");
+                    sink(EngineEvent::Error { message, fatal: true });
                     sink(EngineEvent::WriterExit { confirmed: true });
                 }
             }
@@ -1289,11 +1445,14 @@ async fn serve(
     let server_tree = job.as_ref().and_then(proc::Containment::owned_tree);
     let mut shutdown_confirmed = false;
     let mut threads: HashMap<u64, Thread> = HashMap::new();
+    // Late output from a closed thread must not expose its revoked token to a peer.
+    let mut tokens = HashSet::<String>::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
     let mut subagents = Subagents::default();
     // Opened before Codex finished starting, in order, so request ids stay predictable.
     let mut pending: Vec<u64> = Vec::new();
-    let mut waiting: HashMap<u64, Waiting> = HashMap::new();
+    let mut resuming = HashSet::new();
+    let mut waiting: HashMap<String, Waiting> = HashMap::new();
     let mut exposure_pending = HashSet::new();
     let mut confirmed = VecDeque::new();
     let mut next_id = 0u64;
@@ -1304,7 +1463,7 @@ async fn serve(
     macro_rules! request {
         ($method:expr, $params:expr, $kind:expr) => {{
             next_id += 1;
-            waiting.insert(next_id, $kind);
+            waiting.insert(next_id.to_string(), $kind);
             let _ = proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
         }};
     }
@@ -1350,14 +1509,26 @@ async fn serve(
     }
     macro_rules! open_thread {
         ($key:expr, $t:expr) => {{
-            if $t.params.permissions == Permissions::Isolated || $t.params.instructions.is_some() {
+            if !$t.unsubscribed && $t.identity.as_ref().is_some_and(|i| i.identity.token.is_some()) && let Some(id) = &$t.params.resume {
+                if threads.iter().any(|(&key, old)| key != $key && old.id.as_ref() == Some(id)) {
+                    // Reloading a native thread kills its terminals; its retired owner must release its writers first.
+                    resuming.insert($key);
+                } else {
+                    // A subscribed loaded thread ignores resume overrides, including a newly minted token.
+                    let request_id = format!("faber-unsubscribe-{}", $key);
+                    waiting.insert(request_id.clone(), Waiting::Unsubscribe($key));
+                    if proc::write_line(&mut *stdin, &json!({"id":request_id,"method":"thread/unsubscribe","params":{"threadId":id}})).await.is_err() {
+                        stop!();
+                    }
+                }
+            } else if $t.params.permissions == Permissions::Isolated || $t.params.instructions.is_some() {
                 exposure_pending.insert($key);
                 if proc::write_line(&mut *stdin, &json!({"id":format!("faber-config-{}", $key), "method":"config/read",
                     "params":{"includeLayers":false,"cwd":$t.params.cwd}})).await.is_err() {
                     stop!();
                 }
             } else {
-                let (method, mut params) = thread_params(area, &$t.params);
+                let (method, mut params) = $t.open_params(area);
                 let delivery = $t.tools.as_ref().unwrap_or(&tools);
                 if area == Area::Project && $t.params.instructions.is_none() && let Some(card) = &delivery.start_card {
                     let words = params["developerInstructions"].as_str().unwrap_or_default();
@@ -1430,6 +1601,11 @@ async fn serve(
                 }
             }
         }
+        for key in std::mem::take(&mut resuming) {
+            if let Some(t) = threads.get(&key).filter(|t| !t.closing) {
+                open_thread!(key, t);
+            }
+        }
         if !stopping
             && ((emptied || retired) && threads.is_empty() && rx.is_empty()
                 || (!threads.is_empty()
@@ -1498,7 +1674,8 @@ async fn serve(
                     if !stopping {
                         let code = tokio::time::timeout(Duration::from_secs(1), proc::exit_code(&mut child))
                             .await.unwrap_or_else(|_| "unknown".into());
-                        let message = format!("Codex stopped (exit {code}). {}", tail.lock().unwrap()).trim().to_string();
+                        let tail = if !tokens.is_empty() { String::new() } else { tail.lock().unwrap().clone() };
+                        let message = format!("Codex stopped (exit {code}). {tail}").trim().to_string();
                         for t in threads.values() {
                             (t.sink)(EngineEvent::Writers { active: vec![], unknown: true });
                             (t.sink)(EngineEvent::Error { message: message.clone(), fatal: true });
@@ -1506,6 +1683,7 @@ async fn serve(
                     }
                     break;
                 };
+                let line = tokens.iter().fold(line, |line, token| line.replace(token, "[redacted]"));
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -1518,7 +1696,7 @@ async fn serve(
                         (t.sink)(EngineEvent::Error { message: "error.projectSandbox".into(), fatal: true });
                         continue;
                     };
-                    let (method, mut params) = thread_params(area, &t.params);
+                    let (method, mut params) = t.open_params(area);
                     if area == Area::Project && t.params.instructions.is_none()
                         && let Some(card) = t.tools.as_ref().and_then(|delivery| delivery.start_card.as_deref()) {
                         let words = params["developerInstructions"].as_str().unwrap_or_default();
@@ -1547,7 +1725,20 @@ async fn serve(
                 match (method, msg.get("id")) {
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
-                        let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
+                        let Some(kind) = waiting.remove(&id.as_str().map_or_else(|| id.to_string(), str::to_owned)) else { continue };
+                        if let Waiting::Unsubscribe(key) = kind {
+                            if matches!(msg["result"]["status"].as_str(), Some("unsubscribed" | "notSubscribed" | "notLoaded")) {
+                                if let Some(t) = threads.get_mut(&key) { t.unsubscribed = true; }
+                            } else if let Some(t) = threads.remove(&key) {
+                                if let Some(identity) = &t.identity { identity.identity.revoke(); }
+                                (t.sink)(EngineEvent::Error { message: "error.channel.token".into(), fatal: true });
+                                (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                            }
+                            if let Some(t) = threads.get(&key).filter(|t| t.unsubscribed && !t.closing) {
+                                open_thread!(key, t);
+                            }
+                            continue;
+                        }
                         if let Waiting::McpStatus { thread, reply, mut rows, mut cursors } = kind {
                             if reply.is_closed() { continue; }
                             let result = &msg["result"];
@@ -1588,6 +1779,7 @@ async fn serve(
                                 Waiting::Other(key, m) => (vec![key], m, false),
                                 Waiting::Steer(..) => unreachable!("handled above"),
                                 Waiting::McpStatus { .. } => unreachable!("handled above"),
+                                Waiting::Unsubscribe(_) => unreachable!("handled above"),
                                 Waiting::NativeStop(key, ..) | Waiting::NativeGone(key, ..) => (vec![key], "thread/backgroundTerminals/terminate", false),
                             };
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
@@ -1607,6 +1799,7 @@ async fn serve(
                             continue;
                         }
                         match kind {
+                            Waiting::Unsubscribe(_) => unreachable!("handled above"),
                             Waiting::NativeStop(key, thread, item, process) => {
                                 // A cancellation acknowledgement alone does not prove the writer has exited.
                                 let params = json!({"threadId":thread});
@@ -1799,19 +1992,26 @@ async fn serve(
                             let mut accepted = false;
                             if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
-                                if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
+                                let own_command = proc::cli_binary().and_then(|path| crate::permissions::faber_command(input, &path));
+                                if let Some(argv) = own_command.or_else(|| crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli)) {
                                     let key = top.expect("registered command thread");
-                                    let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
+                                    let (spawn, cwd, tx, id) = (t.identity.as_ref().map_or_else(|| opts.spawn.clone(), |i| i.spawn.clone()), t.params.cwd.clone(), command_tx.clone(), id.clone());
+                                    let identity = t.identity.as_ref().map(|i| i.identity.clone());
                                     let command = id.to_string();
                                     let (cancel, cancelled) = tokio::sync::oneshot::channel();
                                     // The task cannot start until its writer is visible to the engine.
                                     let (admit, admitted) = tokio::sync::oneshot::channel();
                                     let job = tokio::spawn(async move {
                                         if admitted.await.is_err() { return; }
-                                        let result = match spawn(&argv[0], &argv[1..], &cwd) {
+                                        let run = || spawn(&argv[0], &argv[1..], &cwd);
+                                        let started = if let Some(identity) = &identity { proc::as_conversation(identity, run) } else { run() };
+                                        let mut result = match started {
                                             Ok(p) => proc::command_output(p, cancelled).await,
                                             Err(_) => proc::CommandOutput { success: false, text: "error.projectSandbox".into(), confirmed: true, unresolved: None },
                                         };
+                                        if let Some(token) = identity.as_ref().and_then(|identity| identity.token.as_deref()) {
+                                            result.text = result.text.replace(token, "[redacted]");
+                                        }
                                         let _ = tx.send((key, id, result));
                                     });
                                     t.commands.insert(command, (Some(cancel), job));
@@ -2018,9 +2218,10 @@ async fn serve(
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
-                Some(ServerCommand::Open { key, thread, sink, tools }) => {
+                Some(ServerCommand::Open { key, thread, sink, tools, identity }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: *thread, tools, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    if let Some(token) = identity.as_ref().and_then(|i| i.identity.token.clone()) { tokens.insert(token); }
+                    let t = Thread { sink, params: *thread, tools, identity, unsubscribed: false, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -2029,6 +2230,11 @@ async fn serve(
                     threads.insert(key, t);
                     #[cfg(unix)]
                     refresh_writers!(key);
+                }
+                Some(ServerCommand::Session(key, SessionCommand::Close | SessionCommand::Retire))
+                    if resuming.remove(&key) || waiting.values().any(|w| matches!(w, Waiting::Unsubscribe(k) if *k == key)) => {
+                    // No native thread was opened for this replacement, so it owns no writer to stop.
+                    if let Some(t) = threads.remove(&key) { (t.sink)(EngineEvent::WriterExit { confirmed: true }); }
                 }
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
                     SessionCommand::McpStatus { reply } => {
@@ -2164,6 +2370,7 @@ async fn serve(
                     // Keep an active thread until completion acknowledges the stop; its peers keep running.
                     SessionCommand::Close => {
                         pending.retain(|k| *k != key);
+                        resuming.remove(&key);
                         // A subagent can outlive its reply; closing the conversation stops it either way.
                         for (thread, turn) in subagents.at_work(key) {
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
@@ -2421,9 +2628,303 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
 mod rewind_tests {
     use super::*;
 
+    #[test]
+    fn streamed_secret_is_redacted_across_deltas() {
+        let mut pending = String::new();
+        let mut output = redact_delta(&mut pending, "answer fa", "fa1.secret");
+        output.push_str(&redact_delta(&mut pending, "1.sec", "fa1.secret"));
+        output.push_str(&redact_delta(&mut pending, "ret done", "fa1.secret"));
+        output.push_str(&pending);
+        assert_eq!(output, "answer [redacted] done");
+    }
+
+    #[test]
+    fn streamed_secrets_remain_redacted_across_other_events_and_background_output() {
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let capture = recorded.clone();
+        let sink = redact_sink(Arc::new(move |event| capture.lock().unwrap().push(event)), "fa1.secret".into());
+        sink(EngineEvent::Text("fa1.".into()));
+        sink(EngineEvent::Quota { window: "test".into(), used: 0.0, resets_at: 0.0 });
+        sink(EngineEvent::Text("secret".into()));
+        for text in ["fa1.", "secret"] {
+            sink(EngineEvent::Background(crate::background::Update::Output { id: "cmd".into(), text: text.into(), replace: false }));
+        }
+        sink(EngineEvent::Permission {
+            request_id: "r".into(),
+            tool: "Bash".into(),
+            input: json!({"command":"echo fa1.secret", "fa1.secret":"x"}),
+        });
+        sink(EngineEvent::ToolResult { id: "r".into(), ok: true, declined: false, text: "fa1.secret".into() });
+        sink(EngineEvent::Text("off".into()));
+        sink(EngineEvent::Break { final_answer: false });
+        sink(EngineEvent::Text("next".into()));
+        let events = recorded.lock().unwrap();
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::Text(text) if text == "[redacted]")));
+        assert!(events.iter().any(
+            |e| matches!(e, EngineEvent::Permission { input, .. } if input["command"] == "echo [redacted]" && input["[redacted]"] == "x")
+        ));
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::ToolResult { text, .. } if text == "[redacted]")));
+        let words: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(words, ["[redacted]", "of", "f", "next"]);
+        let boundary = events.iter().position(|event| matches!(event, EngineEvent::Break { .. })).unwrap();
+        assert!(matches!(&events[boundary - 1], EngineEvent::Text(text) if text == "f"));
+        assert!(matches!(&events[boundary + 1], EngineEvent::Text(text) if text == "next"));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::Background(crate::background::Update::Output { text, .. }) if text == "[redacted]"))
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_threads_keep_separate_identity_and_refresh_it_before_resume() {
+        use tokio::io::AsyncWriteExt;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read).lines();
+            let (tx, rx) = unbounded_channel();
+            let spawn: Spawner = Arc::new(|_, _, _| panic!("threads must reuse the shared process"));
+            let opts = CodexServerOptions {
+                permissions: Permissions::Ask,
+                cli: crate::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: PathBuf::new(),
+                area: Area::Chat,
+                user_hooks: false,
+                windows: false,
+                spawn: spawn.clone(),
+                tools: Default::default(),
+            };
+            let root = proc::ProcessIdentity { pid: 100, created: 1 };
+            let stopped = Arc::new(AtomicBool::new(false));
+            let query = stopped.clone();
+            let stop = stopped.clone();
+            let container = proc::Containment::scripted_descendants(root,
+                move || Ok(if query.load(Ordering::Acquire) { vec![] } else { vec![root] }),
+                move || { stop.store(true, Ordering::Release); });
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: Some(container) };
+            let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+            let init: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+            input.write_all(format!("{}\n", json!({"id":init["id"],"result":{}})).as_bytes()).await.unwrap();
+            let initialized: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(initialized["method"], "initialized");
+            for (key, conversation, token, resume) in
+                [(1, "one", "key-one", None), (2, "two", "key-two", None), (3, "one", "key-new", Some("native-one"))]
+            {
+                let sink: EventSink = Arc::new(|_| {});
+                let mut params = thread(sink.clone()).params;
+                params.resume = resume.map(String::from);
+                let identity = Some(ThreadIdentity {
+                    identity: Arc::new(proc::ConversationIdentity { id: conversation.into(), token: Some(token.into()) }),
+                    spawn: spawn.clone(),
+                });
+                if resume.is_some() {
+                    tx.send(ServerCommand::Session(1, SessionCommand::Retire)).unwrap();
+                    for (cancel_key, cancel) in [(5, SessionCommand::Close), (6, SessionCommand::Retire)] {
+                        let (events, mut received) = unbounded_channel();
+                        let sink: EventSink = Arc::new(move |event| { let _ = events.send(event); });
+                        let identity = Some(ThreadIdentity {
+                            identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some(format!("key-cancel-{cancel_key}")) }),
+                            spawn: spawn.clone(),
+                        });
+                        tx.send(ServerCommand::Open { key: cancel_key, thread: Box::new(params.clone()), sink, tools: None, identity }).unwrap();
+                        assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err());
+                        tx.send(ServerCommand::Session(cancel_key, cancel)).unwrap();
+                        loop {
+                            if let EngineEvent::WriterExit { confirmed } = received.recv().await.unwrap() { assert!(confirmed); break; }
+                        }
+                    }
+                }
+                tx.send(ServerCommand::Open { key, thread: Box::new(params), sink, tools: None, identity }).unwrap();
+                if resume.is_some() {
+                    assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err(), "a native writer must survive token rotation until it finishes");
+                    input.write_all(format!("{}\n",json!({"method":"item/completed","params":{"threadId":"native-one","item":{"id":"background","type":"commandExecution","processId":"terminal-one","exitCode":0}}})).as_bytes()).await.unwrap();
+                }
+                let mut open: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                if let Some(id) = resume {
+                    assert_eq!(open["method"], "thread/unsubscribe");
+                    assert_eq!(open["id"], format!("faber-unsubscribe-{key}"));
+                    assert_eq!(open["params"]["threadId"], id);
+                    assert!(
+                        tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err(),
+                        "resume must wait for unsubscribe acknowledgement"
+                    );
+                    input.write_all(format!("{}\n", json!({"id":open["id"],"result":{"status":"unsubscribed"}})).as_bytes()).await.unwrap();
+                    open = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                }
+                assert_eq!(open["method"], if resume.is_some() { "thread/resume" } else { "thread/start" });
+                let env = &open["params"]["config"]["shell_environment_policy.set"];
+                assert_eq!(env["FABER_AGENT_TOKEN"], token);
+                assert_eq!(env["FABER_AGENT_AUTH"], token);
+                assert_eq!(env["FABER_CONVERSATION"], conversation);
+                assert_eq!(env[proc::AGENT_MARK], "1");
+                for other in ["key-one", "key-two", "key-new"].into_iter().filter(|other| *other != token) {
+                    assert!(!open.to_string().contains(other));
+                }
+                if key == 1 {
+                    input.write_all(format!("{}\n", json!({"id":open["id"],"result":{"thread":{"id":"native-one"}}})).as_bytes()).await.unwrap();
+                    let skills: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+                    assert_eq!(skills["method"], "skills/list");
+                    input.write_all(format!("{}\n",json!({"method":"item/started","params":{"threadId":"native-one","item":{"id":"background","type":"commandExecution","processId":"terminal-one"}}})).as_bytes()).await.unwrap();
+                }
+            }
+            let (events, mut received) = unbounded_channel();
+            let sink: EventSink = Arc::new(move |event| {
+                let _ = events.send(event);
+            });
+            let mut params = thread(sink.clone()).params;
+            params.resume = Some("native-one".into());
+            let identity = Some(ThreadIdentity {
+                identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("key-failed".into()) }),
+                spawn,
+            });
+            tx.send(ServerCommand::Open { key: 4, thread: Box::new(params), sink, tools: None, identity }).unwrap();
+            let unsubscribe: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(unsubscribe["method"], "thread/unsubscribe");
+            input.write_all(format!("{}\n", json!({"id":unsubscribe["id"],"error":{"message":"unsupported"}})).as_bytes()).await.unwrap();
+            loop {
+                if let EngineEvent::Error { fatal, .. } = received.recv().await.unwrap() {
+                    assert!(fatal);
+                    break;
+                }
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err(),
+                "a rejected unsubscribe cannot resume with stale identity"
+            );
+            server.abort();
+        })
+        .await
+        .expect("shared identity handshake stalled");
+    }
+
+    #[test]
+    fn thread_identity_preserves_sandbox_environment_on_start_and_resume() {
+        for resume in [None, Some("native-one".into())] {
+            let mut t = thread(Arc::new(|_| {}));
+            t.params.cwd = PathBuf::from("project");
+            t.params.permissions = Permissions::Isolated;
+            t.params.resume = resume;
+            t.identity = Some(ThreadIdentity {
+                identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("key-one".into()) }),
+                spawn: Arc::new(|_, _, _| unreachable!()),
+            });
+            let (_, params) = t.open_params(Area::Project);
+            let env = &params["config"]["shell_environment_policy.set"];
+            for (key, value) in crate::permissions::child_env(&t.params.cwd).as_object().unwrap() {
+                assert_eq!(&env[key], value, "sandbox variable {key} was replaced");
+            }
+            assert_eq!(env["FABER_AGENT_TOKEN"], "key-one");
+            assert_eq!(env["FABER_CONVERSATION"], "one");
+        }
+    }
+
+    #[tokio::test]
+    async fn isolated_fake_server_passes_identity_to_the_sandboxed_command() {
+        use tokio::io::AsyncWriteExt;
+        async fn read(lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>) -> Value {
+            loop {
+                let message: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                if message["method"] != "skills/list" {
+                    return message;
+                }
+            }
+        }
+        async fn write(pipe: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, value: Value) {
+            pipe.write_all(format!("{value}\n").as_bytes()).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let root = tempfile::tempdir().unwrap();
+            let (driver, script) = tokio::io::duplex(65536);
+            let (stdout, stdin) = tokio::io::split(driver);
+            let (read_pipe, mut input) = tokio::io::split(script);
+            let mut output = BufReader::new(read_pipe).lines();
+            let (tx, rx) = unbounded_channel();
+            let (captured, mut commands) = unbounded_channel();
+            let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+                let command = proc::marked(bin, args, cwd);
+                let env = command.as_std().get_envs().filter_map(|(k,v)| v.map(|v| (k.to_owned(),v.to_owned())))
+                    .collect::<HashMap<_,_>>();
+                captured.send((bin.to_owned(), args.to_vec(), env)).unwrap();
+                Err(std::io::Error::other("fake"))
+            });
+            let opts = CodexServerOptions {
+                permissions: Permissions::Isolated,
+                cli: crate::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: root.path().into(), area: Area::Chat, user_hooks: false, windows: false,
+                spawn: spawn.clone(), tools: Default::default(),
+            };
+            let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
+            let p = proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None };
+            let server = tokio::spawn(serve(Ok(p), opts, rx, Arc::new(AtomicBool::new(true))));
+            let init = read(&mut output).await;
+            write(&mut input, json!({"id":init["id"],"result":{}})).await;
+            assert_eq!(read(&mut output).await["method"], "initialized");
+            let sink: EventSink = Arc::new(|_| {});
+            let mut params = thread(sink.clone()).params;
+            params.cwd = root.path().into();
+            params.permissions = Permissions::Isolated;
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None, identity: Some(ThreadIdentity { identity, spawn }) }).unwrap();
+            let config = read(&mut output).await;
+            assert_eq!(config["method"], "config/read");
+            write(&mut input, json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
+            let open = read(&mut output).await;
+            assert_eq!(open["method"], "thread/start");
+            write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner","model":"test"}}})).await;
+            write(&mut input, json!({"id":"call","method":"item/tool/call","params":{"threadId":"owner","tool":"run_command","arguments":{"command":"cargo test"}}})).await;
+            let (bin, args, env) = commands.recv().await.unwrap();
+            assert_eq!(bin, "codex");
+            assert!(args.iter().all(|arg| !arg.contains("test-key")));
+            assert!(args.iter().any(|arg| arg == "shell_environment_policy.ignore_default_excludes=false"));
+            assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
+            assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).map(|value| value.as_os_str()), Some(std::ffi::OsStr::new("test-key")));
+            server.abort();
+        }).await.expect("the isolated fake command was never dispatched");
+    }
+
+    #[tokio::test]
+    async fn shared_server_does_not_receive_a_conversations_key() {
+        let recorded = Arc::new(std::sync::Mutex::new(None));
+        let capture = recorded.clone();
+        let spawn: Spawner = Arc::new(move |bin, args, cwd| {
+            let command = proc::marked(bin, args, cwd);
+            let env = command.as_std().get_envs().filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned()))).collect::<HashMap<_, _>>();
+            *capture.lock().unwrap() = Some((args.to_vec(), env));
+            Err(std::io::Error::other("fake"))
+        });
+        let opts = CodexServerOptions {
+            permissions: Permissions::Ask,
+            cli: crate::cli::Cli { command: "fake".into(), prefix: vec![] },
+            cwd: PathBuf::new(),
+            area: Area::Chat,
+            user_hooks: false,
+            windows: false,
+            spawn: spawn.clone(),
+            tools: Default::default(),
+        };
+        let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
+        let server = CodexServer::start(opts);
+        let _session = server.open_identified(thread(Arc::new(|_| {})).params, Arc::new(|_| {}), Default::default(), identity, spawn);
+        let recorded = recorded.lock().unwrap();
+        let (args, env) = recorded.as_ref().unwrap();
+        assert!(args.iter().all(|arg| !arg.contains("test-key")));
+        for name in ["FABER_AGENT_TOKEN", "FABER_AGENT_AUTH", "FABER_CONVERSATION"] {
+            assert!(!env.contains_key(std::ffi::OsStr::new(name)));
+        }
+    }
+
     fn thread(sink: EventSink) -> Thread {
         Thread {
             sink,
+            identity: None,
+            unsubscribed: false,
             params: CodexThread {
                 cwd: PathBuf::new(),
                 model: None,
@@ -2733,7 +3234,8 @@ mod rewind_tests {
             let init = read(&mut output).await;
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, identity: None })
+                .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2842,7 +3344,7 @@ mod rewind_tests {
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
             for (key, id) in [(1, "owner"), (2, "peer")] {
-                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, identity: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                 while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -2951,7 +3453,7 @@ mod rewind_tests {
                 write(&mut input, json!({"id":init["id"],"result":{}})).await;
                 assert_eq!(read(&mut output).await["method"], "initialized");
                 for (key, id) in [(1, "owner"), (2, "peer")] {
-                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None }).unwrap();
+                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, identity: None }).unwrap();
                     let open = read(&mut output).await;
                     write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                     while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
@@ -2971,7 +3473,7 @@ mod rewind_tests {
                 while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
                 let mut next = thread(sink(3)).params;
                 next.effort = Some("high".into());
-                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None }).unwrap();
+                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, identity: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
                 while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
@@ -3032,7 +3534,8 @@ mod rewind_tests {
             assert_eq!(init["method"], "initialize");
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, identity: None })
+                .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}

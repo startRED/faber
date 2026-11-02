@@ -53,6 +53,14 @@ use tokio::sync::broadcast;
 
 pub type Res<T> = Result<T, String>;
 
+tokio::task_local! { static REQUEST_REVOKED: Option<Arc<AtomicBool>>; }
+fn request_flag() -> Option<Arc<AtomicBool>> {
+    REQUEST_REVOKED.try_with(Clone::clone).ok().flatten()
+}
+fn check_revoked(flag: Option<&AtomicBool>) -> Res<()> {
+    if flag.is_some_and(|flag| flag.load(Ordering::Acquire)) { Err("error.channel.revoked".into()) } else { Ok(()) }
+}
+
 /// What every window-only answer says when the front end has no window.
 pub const NO_WINDOW: &str = "error.host.noWindow";
 
@@ -430,6 +438,17 @@ impl Host {
 
     /// Runs one command for `caller`, after the rule of who may send it ([`reach::check`]): the screen's own `dispatch` is
     /// this for [`Caller::Screen`]. A name not in the table is `error.host.unknownCommand` whoever asks.
+    pub async fn dispatch_session(
+        &self,
+        caller: &Caller,
+        command: &str,
+        args: Value,
+        revoked: Option<Arc<AtomicBool>>,
+    ) -> Result<Value, Failure> {
+        let revoked = if matches!(Self::kind(command), Some(Kind::Write | Kind::StartsTurn)) { revoked } else { None };
+        REQUEST_REVOKED.scope(revoked, self.dispatch_as(caller, command, args)).await
+    }
+
     pub async fn dispatch_as(&self, caller: &Caller, command: &str, args: Value) -> Result<Value, Failure> {
         if *caller != Caller::Screen {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
@@ -443,6 +462,7 @@ impl Host {
                     && let Caller::Agent { conversation: Some(id) } = caller
                 {
                     let pending = {
+                        check_revoked(request_flag().as_deref()).map_err(Failure::from)?;
                         let mut book = lock(&self.asks);
                         allowed = book.spend(id, command, &args);
                         if !allowed {

@@ -33,6 +33,7 @@ pub enum Unreached {
     NotRunning,
     /// The channel exists but refused or broke.
     Broken,
+    Revoked,
 }
 
 impl Unreached {
@@ -41,6 +42,7 @@ impl Unreached {
             Unreached::NoData => "cli.error.noData",
             Unreached::NotRunning => "cli.error.noFaber",
             Unreached::Broken => "cli.error.channel",
+            Unreached::Revoked => "error.channel.revoked",
         }
     }
 }
@@ -50,6 +52,7 @@ pub async fn connect(args: &Args, client: &str) -> Result<Client, Unreached> {
     let data = data_dir(args).ok_or(Unreached::NoData)?;
     match Client::connect(&data, hello(client)).await {
         Ok(client) => return Ok(client),
+        Err(e) if e.to_string() == "error.channel.revoked" => return Err(Unreached::Revoked),
         Err(e) if !absent(&e) => return Err(Unreached::Broken),
         // An AI inside Faber reaches the Faber that started it, or none: it never starts one with its own environment.
         Err(_) if args.on("no-start") || agent_depth() > 0 => return Err(Unreached::NotRunning),
@@ -61,6 +64,7 @@ pub async fn connect(args: &Args, client: &str) -> Result<Client, Unreached> {
         tokio::time::sleep(Duration::from_millis(150)).await;
         match Client::connect(&data, hello(client)).await {
             Ok(client) => return Ok(client),
+            Err(e) if e.to_string() == "error.channel.revoked" => return Err(Unreached::Revoked),
             Err(e) if !absent(&e) => return Err(Unreached::Broken),
             Err(_) => {}
         }

@@ -45,7 +45,13 @@ const MARKDOWN_FILES: Filter = Filter { name: "Markdown", extensions: &["md"] };
 
 /// Runs `work` off the async threads. `lost` is the error key if the work panicked.
 async fn off<T: Send + 'static>(lost: &str, work: impl FnOnce() -> T + Send + 'static) -> Res<T> {
-    tokio::task::spawn_blocking(work).await.map_err(|_| lost.to_string())
+    let flag = request_flag();
+    tokio::task::spawn_blocking(move || {
+        check_revoked(flag.as_deref())?;
+        Ok(work())
+    })
+    .await
+    .map_err(|_| lost.to_string())?
 }
 
 /// What a dialog gave, as the error key of the command that asked: `not_local` for a path that is not on this computer.
@@ -1028,5 +1034,36 @@ table! {
     #[cfg(all(windows, feature = "test-hooks"))]
     Window Screen fn test_site_refuse_once(h) -> () {
         Err(NO_WINDOW.into())
+    }
+}
+
+#[cfg(test)]
+mod revoke_tests {
+    use super::*;
+    #[test]
+    fn revoked_blocking_operation_does_not_mutate() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().max_blocking_threads(1).build().unwrap();
+        runtime.block_on(async {
+            let (started, waiting) = std::sync::mpsc::channel();
+            let (release, blocked) = std::sync::mpsc::channel();
+            let occupied = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                blocked.recv().unwrap();
+            });
+            waiting.recv().unwrap();
+            let flag = Arc::new(AtomicBool::new(false));
+            let changed = Arc::new(AtomicBool::new(false));
+            let value = changed.clone();
+            let request = tokio::spawn(
+                REQUEST_REVOKED
+                    .scope(Some(flag.clone()), async move { off("error.test", move || value.store(true, Ordering::Release)).await }),
+            );
+            tokio::task::yield_now().await;
+            flag.store(true, Ordering::Release);
+            release.send(()).unwrap();
+            occupied.await.unwrap();
+            assert_eq!(request.await.unwrap().unwrap_err(), "error.channel.revoked");
+            assert!(!changed.load(Ordering::Acquire));
+        });
     }
 }

@@ -376,6 +376,7 @@ pub enum SessionCommand {
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
     tree: Option<crate::proc::OwnedTree>,
+    identity: Option<std::sync::Arc<crate::proc::ConversationIdentity>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -400,7 +401,11 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), tree: None }
+        Session { send: std::sync::Arc::new(send), tree: None, identity: None }
+    }
+    pub(crate) fn with_identity(mut self, identity: std::sync::Arc<crate::proc::ConversationIdentity>) -> Self {
+        self.identity = Some(identity);
+        self
     }
     pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
         self.tree = tree;
@@ -444,9 +449,47 @@ impl Session {
         (self.send)(SessionCommand::Interrupt);
     }
     pub fn close(&self) {
+        if let Some(identity) = &self.identity {
+            identity.revoke();
+        }
         (self.send)(SessionCommand::Close);
     }
     pub fn retire(&self) {
+        if let Some(identity) = &self.identity {
+            identity.revoke();
+        }
         (self.send)(SessionCommand::Retire);
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn retiring_a_session_revokes_before_sending_retire() {
+        let registry = Arc::new(Mutex::new(std::collections::HashSet::from(["retire-test".to_string()])));
+        let record = registry.clone();
+        crate::proc::set_token_revoker(Arc::new(move |token| {
+            record.lock().unwrap().remove(token);
+        }));
+        let identity = Arc::new(crate::proc::ConversationIdentity { id: "one".into(), token: Some("retire-test".into()) });
+        let command = || crate::proc::marked("faber", &[], std::path::Path::new("."));
+        crate::proc::as_conversation(&identity, || {
+            for _ in 0..2 {
+                let cmd = command();
+                assert_eq!(cmd.as_std().get_envs().find(|(key, _)| *key == "FABER_AGENT_TOKEN").unwrap().1.unwrap(), "retire-test");
+            }
+        });
+        let seen = registry.clone();
+        let session = Session::from_fn(move |command| {
+            if matches!(command, SessionCommand::Retire) {
+                assert!(seen.lock().unwrap().is_empty());
+            }
+        })
+        .with_identity(identity);
+        session.retire();
+        assert!(registry.lock().unwrap().is_empty());
     }
 }

@@ -309,6 +309,16 @@ async fn markdown_read_matches_file_export_builder() {
     assert_eq!(value["markdown"], expected);
 }
 
+#[tokio::test]
+async fn revoked_before_first_poll_refuses_mutation() {
+    let (host, _dir) = host().await;
+    let flag = Arc::new(AtomicBool::new(false));
+    let call = host.dispatch_session(&Caller::Person, "create_chat_group", json!({"name":"must not exist"}), Some(flag.clone()));
+    flag.store(true, Ordering::Release);
+    assert_eq!(call.await.unwrap_err().key, "error.channel.revoked");
+    assert!(host.engine.state().groups.iter().all(|group| group.name != "must not exist"));
+}
+
 fn seed_conversation(host: &Host, id: &str, started_by: Option<&str>, waiting_on: Option<faber_engine::model::WaitingOn>) {
     let mut conv: faber_engine::model::Conversation =
         serde_json::from_value(json!({ "id": id, "title": id, "area": "chat", "createdAt": 1, "updatedAt": 2, "messages": [] })).unwrap();

@@ -235,40 +235,68 @@ pub const AGENT_MARK: &str = "FABER_AGENT_DEPTH";
 
 static CLI: OnceLock<PathBuf> = OnceLock::new();
 /// Mints the token a conversation's AI carries (set once by the channel).
-pub type TokenMinter = Arc<dyn Fn(&str) -> String + Send + Sync>;
+pub type TokenMinter = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 static TOKEN_MINTER: OnceLock<TokenMinter> = OnceLock::new();
+type TokenRevoker = Arc<dyn Fn(&str) + Send + Sync>;
+static TOKEN_REVOKER: OnceLock<TokenRevoker> = OnceLock::new();
 
 thread_local! {
-    static CONVERSATION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static IDENTITY: std::cell::RefCell<Option<Arc<ConversationIdentity>>> = const { std::cell::RefCell::new(None) };
+}
+
+pub struct ConversationIdentity {
+    pub id: String,
+    pub token: Option<String>,
+}
+
+impl ConversationIdentity {
+    pub fn new(id: &str) -> Result<Arc<Self>, &'static str> {
+        let token = TOKEN_MINTER.get().map(|mint| mint(id).ok_or("error.channel.token")).transpose()?;
+        Ok(Arc::new(Self { id: id.into(), token }))
+    }
+
+    pub fn revoke(&self) {
+        if let (Some(token), Some(revoke)) = (&self.token, TOKEN_REVOKER.get()) {
+            revoke(token);
+        }
+    }
+}
+
+impl Drop for ConversationIdentity {
+    fn drop(&mut self) {
+        self.revoke();
+    }
+}
+
+pub fn set_token_revoker(f: TokenRevoker) {
+    let _ = TOKEN_REVOKER.set(f);
+}
+
+pub fn as_conversation<T>(identity: &Arc<ConversationIdentity>, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<ConversationIdentity>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            IDENTITY.with(|current| *current.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = IDENTITY.with(|current| current.replace(Some(identity.clone())));
+    let _restore = Restore(previous);
+    f()
 }
 
 /// Installs the current channel's token minter once for this process.
-pub fn set_token_minter(f: Arc<dyn Fn(&str) -> String + Send + Sync>) {
+pub fn set_token_minter(f: TokenMinter) {
     let _ = TOKEN_MINTER.set(f);
-}
-
-/// Mints a token using the running channel's secret, if its minter is installed.
-pub fn conversation_token(id: &str) -> Option<String> {
-    TOKEN_MINTER.get().map(|mint| mint(id))
-}
-
-/// Runs a synchronous session start with its conversation identity, restoring it even on panic.
-pub fn as_conversation<T>(id: &str, f: impl FnOnce() -> T) -> T {
-    struct Restore(Option<String>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            CONVERSATION.with(|current| *current.borrow_mut() = self.0.take());
-        }
-    }
-    let previous = CONVERSATION.with(|current| current.replace(Some(id.to_owned())));
-    let _restore = Restore(previous);
-    f()
 }
 
 /// Sets the command line shipped with this Faber, once at startup.
 pub fn set_cli(path: PathBuf) {
     let _ = CLI.set(path);
+}
+
+pub(crate) fn cli_binary() -> Option<PathBuf> {
+    CLI.get().cloned()
 }
 
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
@@ -298,17 +326,18 @@ pub fn real_spawner() -> Spawner {
 }
 
 pub(crate) fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
-    marked_with_minter(bin, args, cwd, TOKEN_MINTER.get().map(Arc::as_ref))
-}
-
-fn marked_with_minter(bin: &str, args: &[String], cwd: &Path, mint: Option<&(dyn Fn(&str) -> String + Send + Sync)>) -> Command {
     let mut cmd = Command::new(bin);
-    cmd.args(args).current_dir(cwd).env(AGENT_MARK, "1").env_remove("FABER_AGENT_TOKEN").env_remove("FABER_CONVERSATION");
-    CONVERSATION.with(|current| {
-        if let Some(id) = current.borrow().as_deref()
-            && let Some(mint) = mint
+    cmd.args(args)
+        .current_dir(cwd)
+        .env(AGENT_MARK, "1")
+        .env_remove("FABER_AGENT_TOKEN")
+        .env_remove("FABER_AGENT_AUTH")
+        .env_remove("FABER_CONVERSATION");
+    IDENTITY.with(|current| {
+        if let Some(identity) = current.borrow().as_ref()
+            && let Some(token) = &identity.token
         {
-            cmd.env("FABER_AGENT_TOKEN", mint(id)).env("FABER_CONVERSATION", id);
+            cmd.env("FABER_AGENT_TOKEN", token).env("FABER_AGENT_AUTH", token).env("FABER_CONVERSATION", &identity.id);
         }
     });
     if let Some(cli) = CLI.get()
@@ -1137,10 +1166,21 @@ mod tests {
     }
 
     #[test]
+    fn isolated_command_inherits_exact_session_identity() {
+        let identity = Arc::new(ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
+        let command = as_conversation(&identity, || marked("faber", &[], Path::new(".")));
+        let env: std::collections::HashMap<_, _> = command.as_std().get_envs().filter_map(|(k, v)| v.map(|v| (k, v))).collect();
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).copied(), Some(std::ffi::OsStr::new("test-key")));
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_AGENT_AUTH")).copied(), Some(std::ffi::OsStr::new("test-key")));
+        assert_eq!(env.get(std::ffi::OsStr::new("FABER_CONVERSATION")).copied(), Some(std::ffi::OsStr::new("one")));
+    }
+
+    #[test]
     fn conversation_without_a_minter_gets_no_identity() {
-        as_conversation("one", || {
-            let cmd = marked_with_minter("cli", &[], Path::new("."), None);
-            for name in ["FABER_AGENT_TOKEN", "FABER_CONVERSATION"] {
+        let identity = Arc::new(ConversationIdentity { id: "one".into(), token: None });
+        as_conversation(&identity, || {
+            let cmd = marked("cli", &[], Path::new("."));
+            for name in ["FABER_AGENT_TOKEN", "FABER_AGENT_AUTH", "FABER_CONVERSATION"] {
                 assert_eq!(cmd.as_std().get_envs().find(|(key, _)| *key == name).unwrap().1, None);
             }
         });
@@ -1148,7 +1188,8 @@ mod tests {
 
     #[test]
     fn conversation_identity_is_scoped_to_the_starting_thread() {
-        set_token_minter(Arc::new(|id| format!("test-{id}")));
+        let one = Arc::new(ConversationIdentity { id: "one".into(), token: Some("test-one".into()) });
+        let two = Arc::new(ConversationIdentity { id: "two".into(), token: Some("test-two".into()) });
         let env = || {
             let cmd = marked("cli", &[], Path::new("."));
             cmd.as_std()
@@ -1157,12 +1198,12 @@ mod tests {
                 .collect::<std::collections::HashMap<_, _>>()
         };
         assert!(!env().contains_key(std::ffi::OsStr::new("FABER_AGENT_TOKEN")));
-        as_conversation("one", || {
+        as_conversation(&one, || {
             let values = env();
             assert_eq!(values.get(std::ffi::OsStr::new("FABER_AGENT_TOKEN")).unwrap(), "test-one");
             assert_eq!(values.get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "one");
             assert!(!std::thread::spawn(env).join().unwrap().contains_key(std::ffi::OsStr::new("FABER_AGENT_TOKEN")));
-            as_conversation("two", || assert_eq!(env().get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "two"));
+            as_conversation(&two, || assert_eq!(env().get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "two"));
             assert_eq!(env().get(std::ffi::OsStr::new("FABER_CONVERSATION")).unwrap(), "one");
         });
         assert!(!env().contains_key(std::ffi::OsStr::new("FABER_CONVERSATION")));

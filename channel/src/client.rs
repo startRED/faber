@@ -39,7 +39,7 @@ impl Client {
             hello.secret = crate::secret::Secret::read(data).map_err(|e| io::Error::new(io::ErrorKind::NotFound, e))?.hex();
         }
         if hello.token.is_none() {
-            hello.token = std::env::var("FABER_AGENT_TOKEN").ok();
+            hello.token = std::env::var("FABER_AGENT_AUTH").or_else(|_| std::env::var("FABER_AGENT_TOKEN")).ok();
         }
         match Address::of(data) {
             Address::Pipe(name) => Client::over(open_pipe(&name).await?, hello).await,

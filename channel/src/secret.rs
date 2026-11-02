@@ -5,24 +5,46 @@
 //! client can read Faber's own data folder in this run, so a process that only finds the channel's name (another account, a
 //! sandboxed or lower-integrity process, a page in a browser) gets nothing, and a secret copied yesterday opens nothing today.
 //!
-//! An AI's token is `fa1.<conversation id in base64url>.<HMAC-SHA256 of it under the secret, base64url>`: Faber gives it to
-//! the CLI that runs a conversation, and the channel reads from it which conversation, and so which family, the AI acts for.
-//! Any program of the same user can read the secret file and so make a token; the rules of who may do what keep a well-meant
+//! An AI's token contains 256 random bits, independent of the conversation and channel secret, and a tag.
+//! The in-memory registry associates it with the conversation, and so the family the AI acts for.
+//! Any program of the same user may copy a live token from another process; the rules of who may do what keep a well-meant
 //! AI on its own work, and are no wall against a program of the person's that sets out to break them.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use subtle::ConstantTimeEq;
 
 /// The file of the secret inside the data folder.
 pub fn file(data: &Path) -> PathBuf {
     data.join("channel").join("secret")
 }
 
+struct Session {
+    conversation: String,
+    revoked: Arc<AtomicBool>,
+    closed: tokio::sync::watch::Sender<bool>,
+    tasks: Mutex<HashMap<u64, tokio::task::AbortHandle>>,
+    next: AtomicU64,
+    changed: tokio::sync::Notify,
+    runtime: Mutex<Option<tokio::runtime::Handle>>,
+}
+
+struct RequestGuard(Arc<Session>, u64);
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        self.0.tasks.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+        self.0.changed.notify_one();
+    }
+}
+
 #[derive(Clone)]
-pub struct Secret([u8; 32]);
+pub struct Secret([u8; 32], Arc<Mutex<HashMap<String, Arc<Session>>>>, tokio::sync::watch::Sender<u64>);
 
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,7 +57,7 @@ impl Secret {
     pub fn fresh() -> io::Result<Secret> {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
-        Ok(Secret(bytes))
+        Ok(Secret(bytes, Arc::default(), tokio::sync::watch::channel(0).0))
     }
 
     pub fn hex(&self) -> String {
@@ -52,7 +74,7 @@ impl Secret {
         for (i, byte) in bytes.iter_mut().enumerate() {
             *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16).ok()?;
         }
-        Some(Secret(bytes))
+        Some(Secret(bytes, Arc::default(), tokio::sync::watch::channel(0).0))
     }
 
     /// Whether a client said this secret, compared in a time that does not depend on where the two first differ.
@@ -81,17 +103,137 @@ impl Secret {
     }
 
     /// The token of an AI that works in `conversation`.
-    pub fn token(&self, conversation: &str) -> String {
-        format!("fa1.{}.{}", URL_SAFE_NO_PAD.encode(conversation), URL_SAFE_NO_PAD.encode(self.tag(conversation)))
+    pub fn token(&self, conversation: &str) -> io::Result<String> {
+        let mut random = [0u8; 32];
+        getrandom::fill(&mut random).map_err(|e| io::Error::other(e.to_string()))?;
+        let payload = URL_SAFE_NO_PAD.encode(random);
+        let token = format!("fa1.{}.{}", payload, URL_SAFE_NO_PAD.encode(self.tag(&payload)));
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            token.clone(),
+            Arc::new(Session {
+                conversation: conversation.into(),
+                revoked: Arc::new(AtomicBool::new(false)),
+                closed: tokio::sync::watch::channel(false).0,
+                tasks: Mutex::default(),
+                next: AtomicU64::new(0),
+                changed: tokio::sync::Notify::new(),
+                runtime: Mutex::new(None),
+            }),
+        );
+        Ok(token)
     }
 
     /// The conversation a token names, when this secret made it.
     pub fn conversation_of(&self, token: &str) -> Option<String> {
+        if !self.signed(token) {
+            return None;
+        }
+        self.session(token).map(|session| session.conversation.clone())
+    }
+
+    fn session(&self, token: &str) -> Option<Arc<Session>> {
+        let active = self.1.lock().unwrap_or_else(|e| e.into_inner());
+        let mut found = None;
+        for (key, session) in active.iter() {
+            if same(key.as_bytes(), token.as_bytes()) {
+                found = Some(session.clone());
+            }
+        }
+        found
+    }
+
+    pub(crate) fn closed(&self, token: &str) -> Option<tokio::sync::watch::Receiver<bool>> {
+        self.session(token).map(|session| session.closed.subscribe())
+    }
+
+    /// Registers the task before it can run, under the same lock that closes admission.
+    pub(crate) fn spawn(
+        &self,
+        token: Option<&str>,
+        run: impl FnOnce(Option<Arc<AtomicBool>>) -> super::server::Task + Send + 'static,
+    ) -> bool {
+        let Some(token) = token else {
+            tokio::spawn(run(None));
+            return true;
+        };
+        let active = self.1.lock().unwrap_or_else(|e| e.into_inner());
+        let mut session = None;
+        for (key, value) in active.iter() {
+            if same(key.as_bytes(), token.as_bytes()) {
+                session = Some(value.clone());
+            }
+        }
+        let Some(session) = session else { return false };
+        *session.runtime.lock().unwrap_or_else(|e| e.into_inner()) = Some(tokio::runtime::Handle::current());
+        let id = session.next.fetch_add(1, Ordering::Relaxed);
+        let (start, ready) = tokio::sync::oneshot::channel();
+        let guard = RequestGuard(session.clone(), id);
+        let flag = session.revoked.clone();
+        let task = tokio::spawn(async move {
+            let _guard = guard;
+            if ready.await.is_ok() {
+                run(Some(flag)).await;
+            }
+        });
+        session.tasks.lock().unwrap_or_else(|e| e.into_inner()).insert(id, task.abort_handle());
+        let _ = start.send(());
+        true
+    }
+
+    pub(crate) fn signed(&self, token: &str) -> bool {
         let mut parts = token.trim().split('.');
-        let (Some("fa1"), Some(id), Some(tag), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return None };
-        let id = String::from_utf8(URL_SAFE_NO_PAD.decode(id).ok()?).ok()?;
-        let tag = URL_SAFE_NO_PAD.decode(tag).ok()?;
-        (!id.is_empty() && same(&tag, &self.tag(&id))).then_some(id)
+        let (Some("fa1"), Some(id), Some(tag), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return false };
+        if !URL_SAFE_NO_PAD.decode(id).is_ok_and(|bytes| bytes.len() == 32) {
+            return false;
+        }
+        let Some(tag) = URL_SAFE_NO_PAD.decode(tag).ok() else { return false };
+        same(&tag, &self.tag(id))
+    }
+
+    /// Revokes exactly this session's token, including after its conversation resumes.
+    pub fn revoke(&self, token: &str) {
+        let session = {
+            let mut active = self.1.lock().unwrap_or_else(|e| e.into_inner());
+            let mut key = None;
+            for candidate in active.keys() {
+                if same(candidate.as_bytes(), token.as_bytes()) {
+                    key = Some(candidate.clone());
+                }
+            }
+            let session = key.and_then(|key| active.remove(&key));
+            if let Some(session) = &session {
+                session.revoked.store(true, Ordering::Release);
+                session.closed.send_replace(true);
+            }
+            session
+        };
+        if let Some(session) = session {
+            let runtime = session.runtime.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let Some(runtime) = runtime {
+                runtime.spawn(async move {
+                    let drain = async {
+                        loop {
+                            let notified = session.changed.notified();
+                            if session.tasks.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+                                break;
+                            }
+                            notified.await;
+                        }
+                    };
+                    if tokio::time::timeout(std::time::Duration::from_secs(5), drain).await.is_err() {
+                        let tasks: Vec<_> = session.tasks.lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect();
+                        for task in tasks {
+                            task.abort();
+                        }
+                    }
+                });
+            }
+        }
+        self.2.send_modify(|generation| *generation = generation.wrapping_add(1));
+    }
+
+    pub(crate) fn changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.2.subscribe()
     }
 
     /// HMAC-SHA256 (RFC 2104) of the conversation id under the secret, with a label so the tag means nothing else.
@@ -107,7 +249,7 @@ impl Secret {
 
 /// Equal bytes, compared without stopping at the first difference.
 fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    bool::from(a.ct_eq(b))
 }
 
 #[cfg(windows)]
@@ -177,7 +319,7 @@ mod tests {
     #[test]
     fn a_token_names_its_conversation_only_under_the_secret_that_made_it() {
         let (secret, other) = (Secret::fresh().unwrap(), Secret::fresh().unwrap());
-        let token = secret.token("c-1.é/x");
+        let token = secret.token("c-1.é/x").unwrap();
         assert_eq!(secret.conversation_of(&token).as_deref(), Some("c-1.é/x"));
         assert_eq!(other.conversation_of(&token), None, "a token from another run");
         let forged = format!("fa1.{}.{}", URL_SAFE_NO_PAD.encode("c-2"), token.rsplit('.').next().unwrap());
@@ -185,6 +327,52 @@ mod tests {
         for bad in ["", "fa1", "fa1..", "fa2.YQ.YQ", &format!("{token}.x"), &token.replace("fa1", "fa0")] {
             assert_eq!(secret.conversation_of(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn session_tokens_are_random_and_cannot_be_reconstructed_from_the_channel_secret() {
+        let secret = Secret::fresh().unwrap();
+        let first = secret.token("one").unwrap();
+        let second = secret.token("one").unwrap();
+        let id = first.split('.').nth(1).unwrap();
+        let random = URL_SAFE_NO_PAD.decode(id).unwrap();
+        assert_eq!(random.len(), 32);
+        assert_ne!(first, second);
+        let old_payload = "0:one";
+        let forged = format!("fa1.{}.{}", URL_SAFE_NO_PAD.encode(old_payload), URL_SAFE_NO_PAD.encode(secret.tag(old_payload)));
+        assert_eq!(secret.conversation_of(&forged), None);
+        assert_eq!(secret.conversation_of(&first).as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn revoking_one_session_does_not_restore_it_when_the_conversation_reopens() {
+        let secret = Secret::fresh().unwrap();
+        let first = secret.token("one").unwrap();
+        let next = secret.token("one").unwrap();
+        assert_ne!(first, next);
+        secret.revoke(&first);
+        assert!(secret.signed(&first));
+        assert_eq!(secret.conversation_of(&first), None);
+        assert_eq!(secret.conversation_of(&next).as_deref(), Some("one"));
+    }
+
+    #[tokio::test]
+    async fn revoke_returns_immediately_and_aborts_a_stuck_request() {
+        let secret = Secret::fresh().unwrap();
+        let token = secret.token("one").unwrap();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (dropped, done) = tokio::sync::oneshot::channel::<()>();
+        assert!(secret.spawn(Some(&token), move |_| Box::pin(async move {
+            let _dropped = dropped;
+            let _ = started.send(());
+            std::future::pending::<()>().await;
+        })));
+        ready.await.unwrap();
+        let before = std::time::Instant::now();
+        secret.revoke(&token);
+        assert!(before.elapsed() < std::time::Duration::from_secs(1));
+        assert!(!secret.spawn(Some(&token), |_| Box::pin(async {})));
+        assert!(tokio::time::timeout(std::time::Duration::from_secs(7), done).await.unwrap().is_err());
     }
 
     #[test]
