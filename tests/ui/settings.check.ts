@@ -1251,6 +1251,42 @@ check('reply_style: Escape saves the focused words before Settings closes and re
   }
 });
 
+check('settings keyboard traversal: saved snapshots retain focused web choices and their Tab order', async () => {
+  const [snapshot, setSnapshot] = createSignal({ settings: SHOWN, vendors: ['claude'] as Vendor[] });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return snapshot().settings; }, get vendors() { return snapshot().vendors; },
+    quotas: {}, now: 0, start: 'general', onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const choices = () => [...view.host.querySelectorAll<HTMLButtonElement>('#set-web-pick button')];
+    const original = choices();
+    equal(original.length, 2);
+    for (const button of original) {
+      button.focus();
+      setSnapshot({ ...snapshot(), settings: { ...snapshot().settings, notificationSound: !snapshot().settings.notificationSound } });
+      await tick();
+      deepEqual(choices(), original, 'an unrelated save keeps both native Tab stops');
+      equal(document.activeElement, button, 'the focused choice survives the saved snapshot');
+    }
+    // A newly connected AI inserts Stored copy before Live without moving focus to the new choice.
+    setSnapshot({ ...snapshot(), vendors: ['claude', 'codex'] });
+    await tick();
+    equal(choices().length, 3);
+    equal(choices()[0], original[0]);
+    equal(choices()[2], original[1]);
+    equal(document.activeElement, original[1]);
+    useLanguage('pt-BR');
+    await tick();
+    equal(choices()[2], original[1], 'translated labels keep the same focused choice');
+    equal(choices()[2]!.textContent, ptBR['set.webSearch.live']);
+    equal(document.activeElement, original[1]);
+  } finally {
+    view.stop();
+    useLanguage('en');
+    forgetSection();
+  }
+});
+
 check('settings keyboard traversal: entry, reading order, hidden controls and visible rings at 720 px', () => signedIn(async () => {
   const motion = document.documentElement.dataset.motion;
   document.documentElement.dataset.motion = 'none';
