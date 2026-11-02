@@ -192,6 +192,7 @@ check('setup: closing the cards while an AI installs and opening them again show
   document.body.append(host);
   const dispose = render(() => createComponent(Setup, { mode: 'manage', onFinish: () => {} }), host);
   try {
+    ok(!host.querySelector('.accounts-scene'), 'account management does not show the first-run drawing');
     const codex = [...host.querySelectorAll<HTMLButtonElement>('.pick')].find((b) => b.textContent!.includes('Codex'))!;
     equal(codex.getAttribute('aria-pressed'), 'true', 'the AI still installing is picked already');
     ok(host.querySelector('.setup-card[data-vendor="codex"] .setup-badge.installing'), 'its card says it is installing');
@@ -208,6 +209,7 @@ check('setup first run: "None for now" sits beside the two AIs, and the line say
   document.body.append(host);
   const dispose = render(() => createComponent(Setup, { mode: 'firstRun', onFinish: () => {} }), host);
   try {
+    ok(host.querySelector('.fr-col > .accounts-scene[data-scene="accounts"]'), 'first run shows the accounts drawing');
     const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
     equal(picks.length, 3);
     equal(picks[2]!.textContent!.trim(), t('setup.none'));

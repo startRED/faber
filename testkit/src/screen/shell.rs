@@ -579,9 +579,11 @@ fn gives_way_to_no_ai(ctx: &mut Ctx) -> Result {
     page.wait_visible(&title)?;
     same(page.count(&css(".hello"))?, 0, "a greeting with no AI")?;
     same(page.count(&css(".try"))?, 0, "suggestions with no AI")?;
-    same(page.count(&css(".empty svg"))?, 1, "Curioso")?;
+    same(page.count(&css(".empty .peek > svg:not(.scene)"))?, 1, "Curioso")?;
+    same(page.count(&css(".empty .peek > svg.scene"))?, 1, "the no-AI drawing")?;
+    same(page.count(&css(".empty .peek > svg.scene[data-scene='noAi']"))?, 1, "the disconnected plug")?;
     let size = page.eval(
-        "(() => { const r = document.querySelector('.empty svg').getBoundingClientRect(); return { w: r.width, h: r.height }; })()",
+        "(() => { const r = document.querySelector('.empty .peek > svg:not(.scene)').getBoundingClientRect(); return { w: r.width, h: r.height }; })()",
     )?;
     same((size["w"].as_f64(), size["h"].as_f64()), (Some(64.0), Some(64.0)), "Curioso's size")?;
     let connect = page.named("button", "empty.noAiButton")?;

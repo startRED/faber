@@ -2489,6 +2489,7 @@ export const es: Messages = {
   'notes.374.fixed': 'Los mensajes en espera y los informes de los agentes siguen al terminar el turno, aunque no se ejecuten comprobaciones.',
   'notes.375.fixed': 'Los proyectos en carpetas con rutas muy largas ya funcionan.',
   'notes.376.fixed': 'Una IA que espera a una ayudante recibe su informe aunque la conversación de la ayudante no pueda compactarse.',
+  'notes.377.better': 'Nuevos dibujos ayudan a reconocer las pantallas vacías y el primer paso de cuentas.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

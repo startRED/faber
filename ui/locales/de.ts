@@ -2489,6 +2489,7 @@ export const de: Messages = {
   'notes.374.fixed': 'Nach dem Ende eines Durchgangs werden wartende Nachrichten und Berichte der Agenten weitergegeben, auch wenn keine Prüfungen laufen.',
   'notes.375.fixed': 'Projekte in Ordnern mit sehr langen Pfaden funktionieren jetzt.',
   'notes.376.fixed': 'Eine KI erhält den Bericht einer Helferin auch dann, wenn deren Unterhaltung nicht komprimiert werden kann.',
+  'notes.377.better': 'Neue Zeichnungen machen leere Ansichten und den ersten Kontoschritt leichter erkennbar.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

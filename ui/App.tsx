@@ -2255,13 +2255,14 @@ function NoAiOrProject(props: {
     <Switch>
       <Match when={props.vendors === 0}>
         <Empty
+          scene="noAi"
           title={t('empty.noAiTitle')}
           line={t(props.area === 'project' ? 'empty.noAiProjectsBody' : 'empty.noAiBody')}
           button={{ label: t('empty.noAiButton'), onClick: props.onConnect, restore: 'connect' }}
         />
       </Match>
       <Match when={props.area === 'project'}>
-        <Empty title={props.project?.name ?? ''} line={t('empty.projectBody', { path: props.project?.path ?? '' })} />
+        <Empty scene="emptyProject" title={props.project?.name ?? ''} line={t('empty.projectBody', { path: props.project?.path ?? '' })} />
       </Match>
     </Switch>
   );

@@ -46,8 +46,8 @@ export const SCENES: Record<SceneName, Drawing> = {
   catalogEmpty: {
     viewBox: '0 0 64 44', width: 64, height: 44, draw: () => (
       <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 43h56M9 39V25h11v14M44 39V25h11v14M12 29h5M47 29h5" />
-        <path stroke-dasharray="2 3" d="M26 39V27h4c-2-5 6-5 4 0h4v12Z" />
+        <path d="M8 40h48M12 40V12h40v28M12 27h40M17 22h8" />
+        <path stroke-dasharray="2 3" d="M29 15h10v10H29z" />
       </g>
     ),
   },

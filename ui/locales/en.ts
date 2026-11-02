@@ -2369,6 +2369,7 @@ export const en = {
   'notes.374.fixed': 'Queued messages and child reports continue after a turn ends, even when no checks run.',
   'notes.375.fixed': 'Projects in very long folder paths now work.',
   'notes.376.fixed': 'An agent waiting for a helper now receives its report even if the helper cannot compact its conversation.',
+  'notes.377.better': 'New drawings make empty screens and the first account step easier to recognize.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

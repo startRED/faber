@@ -2489,6 +2489,7 @@ export const fr: Messages = {
   'notes.374.fixed': 'Les messages en attente et les comptes rendus des agents suivent la fin du tour, même sans vérification.',
   'notes.375.fixed': 'Les projets dans des dossiers aux chemins très longs fonctionnent désormais.',
   'notes.376.fixed': 'Une IA qui attend une assistante reçoit son rapport même si la conversation de celle-ci ne peut pas être compactée.',
+  'notes.377.better': 'De nouveaux dessins rendent les écrans vides et la première étape des comptes plus faciles à reconnaître.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

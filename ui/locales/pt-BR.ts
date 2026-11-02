@@ -2476,6 +2476,7 @@ export const ptBR: Messages = {
   'notes.374.fixed': 'As mensagens na fila e os relatórios dos agentes seguem quando o turno termina, mesmo sem verificações.',
   'notes.375.fixed': 'Projetos em pastas com caminhos muito longos agora funcionam.',
   'notes.376.fixed': 'Uma IA que espera por uma ajudante recebe o relatório mesmo quando a conversa da ajudante não pode ser compactada.',
+  'notes.377.better': 'Novos desenhos ajudam a reconhecer as telas vazias e a primeira etapa de contas.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

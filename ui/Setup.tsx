@@ -3,6 +3,7 @@ import { api, errorText, type Vendor } from './api.ts';
 import { Stage, Title } from './FirstRun.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
+import { Scene } from './illustrations/index.tsx';
 import { Peek } from './Mark.tsx';
 import { animateList } from './motion.ts';
 import {
@@ -138,6 +139,7 @@ export function Setup(props: SetupProps) {
       <div class="fr-col">
         <Show when={first()}>
           <Peek />
+          <Scene name="accounts" class="accounts-scene" />
         </Show>
         <Title id="setup-heading" text={t('setup.title')} />
         <p class="sub">{t('setup.body')}</p>
