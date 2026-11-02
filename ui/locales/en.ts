@@ -2375,6 +2375,7 @@ export const en = {
   'notes.379.fixed': 'The custom color picker in Settings shows its keyboard focus ring on macOS too.',
   'notes.380.fixed': 'On macOS and Linux, Chat can save its work and ask for permission while Faber’s own data stays protected.',
   'notes.381.better': 'The areas guide now explains project conversations and unattended work as they exist today.',
+  'notes.382.fixed': 'Controls and selections stay visible with Windows contrast themes.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

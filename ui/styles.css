@@ -1932,3 +1932,20 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .faber-act-sent { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 
 .project-summary { margin: 0; color: var(--ink-3); font-size: var(--fs-sm); }
+
+/* Windows contrast themes replace backgrounds and shadows, so state and boundaries need real edges. */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; }
+  .search:focus-within, .composer:focus-within, .dot.custom:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+  .st-card, .ask, .composer, .preset .thumb, .contrast div { border: 1px solid CanvasText; }
+  .item[aria-current='true'], .preset[aria-pressed='true'] .thumb, .dot[aria-pressed='true'], .dot.custom.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .meter { border: 1px solid CanvasText; }
+  .meter i { border: 2px solid Highlight; box-sizing: border-box; }
+  .urow .expected { border-left: 2px solid CanvasText; z-index: 1; }
+  .run-dot, .item .unseen, .site-busy, .mk, .catalog-state::before { border: 1px solid CanvasText; box-sizing: border-box; }
+  .dot { border: 1px solid ButtonText; }
+  .ask .btn, .ask .q-opt, .q-mark { border: 1px solid ButtonText; }
+  .ask .btn.primary, .ask .q-opt.on { border: 2px solid Highlight; }
+  .q-opt.on .q-mark { border-color: Highlight; color: Highlight; }
+  .ask .btn:disabled { border-color: GrayText; }
+}

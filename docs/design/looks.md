@@ -77,6 +77,8 @@ draw. A look with any failing pair is never applied, and the preview names the p
 accent the user picks, the accent ink is pure black or pure white, whichever reads better. The factory looks keep their
 own inks.
 
+Windows contrast themes use system colours and visible edges for cards, the composer, selected rows and looks, quota bars and pace marks, status dots, switches and permission choices. Keyboard focus retains a system-colour outline. `tests/ui/styles.check.ts` checks these forced-colour rules.
+
 ### Type
 
 - **Text fonts:** Archivo, IBM Plex Sans and Atkinson Hyperlegible. The interface font belongs to each theme.

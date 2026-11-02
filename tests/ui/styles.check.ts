@@ -78,3 +78,30 @@ check('first run: the primary button stays inside the stage at 1440x900 and at t
     );
   }
 });
+
+check('forced colors: boundaries, selection and status remain visible', () => {
+  const groups = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])
+    .filter((rule): rule is CSSMediaRule => rule instanceof CSSMediaRule && rule.media.mediaText === '(forced-colors: active)');
+  ok(groups.length > 0, 'forced-colors rules exist');
+  const original = groups.map((group) => group.media.mediaText);
+  try {
+    for (const group of groups) group.media.mediaText = 'all';
+    onPage('<div class="st-card"></div><div class="composer"></div><div class="ask"><button class="btn primary">Allow</button><button class="q-opt on"><span class="q-mark"></span></button></div><button class="item" aria-current="true">Selected</button><div class="urow"><span class="meter"><i></i><b class="expected"></b></span></div><input class="sw2" type="checkbox" checked><span class="run-dot"></span><span class="catalog-state"></span><button class="dot" aria-pressed="true"></button><button class="preset" aria-pressed="true"><span class="thumb"></span></button>', (root) => {
+      for (const selector of ['.st-card', '.composer', '.ask', '.ask .btn', '.q-opt', '.q-mark', '.meter', '.meter i', '.expected', '.run-dot', '.dot']) {
+        const style = getComputedStyle(root.querySelector(selector)!);
+        ok(parseFloat(style.borderTopWidth) > 0 || parseFloat(style.borderLeftWidth) > 0, selector + ' has a visible edge');
+      }
+      for (const selector of ['.item', '.dot', '.preset .thumb']) {
+        const style = getComputedStyle(root.querySelector(selector)!);
+        ok(parseFloat(style.outlineWidth) >= 2 && style.outlineStyle !== 'none', selector + ' has a selected outline');
+      }
+      equal(getComputedStyle(root.querySelector('.sw2')!).appearance, 'auto', 'switch uses the native control');
+      ok(parseFloat(getComputedStyle(root.querySelector('.catalog-state')!, '::before').borderTopWidth) > 0, 'status dot has an edge');
+      const rules = groups.flatMap((group) => [...group.cssRules]).filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+      ok(rules.some((rule) => rule.selectorText === ':focus-visible' && rule.style.outline.toLowerCase().includes('highlight')), 'keyboard focus uses a system highlight');
+      ok(rules.some((rule) => rule.selectorText.includes('.composer:focus-within') && rule.style.outline.toLowerCase().includes('highlight')), 'composer focus remains visible');
+    });
+  } finally {
+    groups.forEach((group, i) => group.media.mediaText = original[i]!);
+  }
+});

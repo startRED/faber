@@ -2482,6 +2482,7 @@ export const ptBR: Messages = {
   'notes.379.fixed': 'O seletor de cor personalizada nas Configurações mostra o contorno de foco do teclado também no macOS.',
   'notes.380.fixed': 'No macOS e no Linux, o Chat consegue salvar o trabalho e pedir permissão, mantendo os dados do Faber protegidos.',
   'notes.381.better': 'O guia das áreas explica como funcionam hoje as conversas de projeto e o trabalho sem acompanhamento.',
+  'notes.382.fixed': 'Os controles e as seleções continuam visíveis com os temas de contraste do Windows.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

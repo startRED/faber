@@ -2495,6 +2495,7 @@ export const fr: Messages = {
   'notes.379.fixed': 'Le sélecteur de couleur personnalisée des Réglages affiche aussi son contour de focus clavier sur macOS.',
   'notes.380.fixed': 'Sur macOS et Linux, le Chat peut enregistrer son travail et demander votre accord tout en protégeant les données de Faber.',
   'notes.381.better': 'Le guide des espaces explique le fonctionnement actuel des conversations de projet et du travail sans surveillance.',
+  'notes.382.fixed': 'Les commandes et les sélections restent visibles avec les thèmes contrastés de Windows.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -2495,6 +2495,7 @@ export const de: Messages = {
   'notes.379.fixed': 'Die eigene Farbauswahl in den Einstellungen zeigt auch unter macOS den Tastaturfokus an.',
   'notes.380.fixed': 'Unter macOS und Linux kann der Chat seine Arbeit speichern und um Erlaubnis fragen. Fabers eigene Daten bleiben geschützt.',
   'notes.381.better': 'Die Bereichsübersicht erklärt, wie Projektgespräche und unbeaufsichtigte Arbeit heute funktionieren.',
+  'notes.382.fixed': 'Steuerelemente und Auswahl bleiben mit den Windows-Kontrastdesigns sichtbar.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
