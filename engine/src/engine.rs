@@ -1271,6 +1271,18 @@ impl Engine {
     pub fn remove(&self, id: &str) {
         let _ = self.remove_with(id, false);
     }
+
+    pub fn damaged_conversation(&self, id: &str) -> Result<PathBuf, String> {
+        self.with(|c| c.store.damaged_conversation(id).map_err(|f| f.key().into()))
+    }
+
+    pub fn remove_damaged_conversation(&self, id: &str) -> Result<(), String> {
+        self.with(|c| {
+            c.store.remove_damaged_conversation(id).map_err(|f| f.key().to_string())?;
+            c.list_changed();
+            Ok(())
+        })
+    }
     /// `@` in the composer (parity T4): the entries of the working folder of conversation `id`, or of a new conversation's
     /// project, that match `query`. A new chat has no folder yet, so it has none. The folder is checked and git runs outside
     /// the engine's lock, since either may wait on a slow disk.

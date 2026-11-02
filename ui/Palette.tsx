@@ -65,6 +65,7 @@ export function Palette(props: Props) {
   const conversations = (): Item[] => {
     const names = new Map(props.projects.map((p) => [p.id, p.name]));
     return [...props.conversations]
+      .filter((c) => !c.reason)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((c): Item => ({
         id: c.id,

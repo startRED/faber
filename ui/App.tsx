@@ -971,6 +971,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [childUpdates, setChildUpdates] = createSignal<Record<string, Partial<Summary>>>({});
   const linkedConversations = () => state().conversations.map((c) => ({ ...c, ...childUpdates()[c.id] }));
   const openSummary = (c: Summary) => {
+    if (c.reason) return;
     closeSettings();
     closeSide(false);
     void go(openPlace(place(), c));
@@ -2127,7 +2128,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           }
                         >
                           <Welcome
-                            recent={state().conversations}
+                            recent={state().conversations.filter((c) => !c.reason)}
                             name={state().settings.userName}
                             running={items()}
                             projects={state().projects}
@@ -2191,7 +2192,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   <Projects
                     vendors={state().vendors}
                     projects={state().projects}
-                    recent={state().conversations}
+                    recent={state().conversations.filter((c) => !c.reason)}
                     running={items()}
                     onOpen={openSummary}
                     onAdd={() => void addProject().catch(fail)}

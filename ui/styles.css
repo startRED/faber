@@ -150,6 +150,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crow .x { position: absolute; right: 2px; top: 0; bottom: 0; display: grid; place-items: center; padding: 0 6px; color: var(--ink-3); border-radius: var(--r-xs); opacity: 0; }
 .crow .x.confirm { color: var(--ink); font-weight: 580; }
 .crow:hover .x, .crow:focus-within .x { opacity: 1; }
+.damaged-conversation { display: grid; gap: 6px; padding: 8px 10px; color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.damaged-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .side-empty { display: grid; gap: 6px; justify-items: start; padding: 4px 10px 0; color: var(--ink-3); font-size: var(--fs-sm); }
 /* Projects home already explains the folder action; its sidebar keeps only the quiet empty label. */
 .projects .side-empty > :is(p, .peek) { display: none; }

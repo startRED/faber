@@ -1278,6 +1278,8 @@ impl Project {
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub title: String,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]

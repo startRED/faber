@@ -157,6 +157,8 @@ pub struct Store {
     /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
     /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
     summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
+    /// Failed reads, and whether the person dismissed this exact file for this app run.
+    unreadable: Mutex<HashMap<PathBuf, (Stamp, bool)>>,
     /// How many times a conversation record was written, so a test can tell one write from a hundred.
     writes: std::sync::atomic::AtomicU64,
 }
@@ -171,6 +173,7 @@ fn stamp(path: &Path) -> Option<Stamp> {
 /// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
 fn summary(c: &Conversation) -> Summary {
     Summary {
+        reason: None,
         keep_going: c.keep_going.is_some(),
         archived: c.archived_at.is_some(),
         pinned_at: c.pinned_at,
@@ -261,6 +264,7 @@ impl Store {
             recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
             summaries: Mutex::default(),
+            unreadable: Mutex::default(),
             writes: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -334,20 +338,66 @@ impl Store {
             .filter(|p| p.extension().is_some_and(|x| x == "json"))
             .collect();
         let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut unreadable = self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.retain(|path, _| paths.contains(path));
+        unreadable.retain(|path, _| paths.contains(path));
         let mut list: Vec<Summary> = paths
             .into_iter()
             .filter_map(|path| {
                 let now_stamp = stamp(&path)?;
                 match cache.get(&path) {
-                    Some((kept, row)) if *kept == now_stamp => Some(row.clone()),
+                    Some((kept, row)) if *kept == now_stamp => {
+                        unreadable.remove(&path);
+                        Some(row.clone())
+                    }
                     // A file that cannot be read now (locked by a scanner, half copied) is tried again at the next list.
                     _ => {
                         let row = read::<Conversation>(&path).as_ref().map(summary);
                         if let Some(row) = &row {
+                            unreadable.remove(&path);
                             cache.insert(path, (now_stamp, row.clone()));
+                            return Some(row.clone());
                         }
-                        row
+                        let previous = unreadable.insert(path.clone(), (now_stamp, false));
+                        let (failed_stamp, dismissed) = previous?;
+                        if dismissed && failed_stamp == now_stamp {
+                            unreadable.insert(path, (now_stamp, true));
+                            return None;
+                        }
+                        let id = path.file_stem()?.to_str()?;
+                        let copy = self.damaged_file(id)?;
+                        // Create exclusively: later failures never overwrite the first preserved bytes.
+                        if let Ok(mut source) = fs::File::open(&path)
+                            && let Ok(mut target) = fs::OpenOptions::new().write(true).create_new(true).open(&copy)
+                            && io::copy(&mut source, &mut target).and_then(|_| target.sync_all()).is_err()
+                        {
+                            drop(target);
+                            drop(fs::remove_file(&copy));
+                        }
+                        Some(Summary {
+                            id: id.into(),
+                            reason: Some("reason.conversation_damaged".into()),
+                            title: id.into(),
+                            area: crate::model::Area::Chat,
+                            project_id: None,
+                            updated_at: now_stamp
+                                .1
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map_or(0, |d| d.as_millis() as u64),
+                            keep_going: false,
+                            archived: false,
+                            pinned_at: None,
+                            started_by: None,
+                            waiting_on: None,
+                            child_state: None,
+                            child_choice: None,
+                            child_line: None,
+                            ended: None,
+                            state: None,
+                            plan: None,
+                            results: None,
+                            stuck: false,
+                        })
                     }
                 }
             })
@@ -358,6 +408,34 @@ impl Store {
             .collect();
         list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
         list
+    }
+
+    fn damaged_file(&self, id: &str) -> Option<PathBuf> {
+        (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| self.file(id).with_extension("json.damaged"))
+    }
+
+    /// Only the preserved copy can be selected; callers never supply a path.
+    pub fn damaged_conversation(&self, id: &str) -> Result<PathBuf, Fault> {
+        let path = self.damaged_file(id).ok_or(Fault::Read)?;
+        if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink()) {
+            return Err(Fault::Read);
+        }
+        Ok(path)
+    }
+
+    /// The original stays untouched. Dismissal lasts until this file changes or Faber restarts.
+    pub fn remove_damaged_conversation(&self, id: &str) -> Result<(), Fault> {
+        let copy = self.damaged_file(id).ok_or(Fault::Write)?;
+        match crate::tools::retry_busy(|| fs::remove_file(&copy)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Fault::of_write(&e)),
+        }
+        let path = self.file(id);
+        if let Some(stamp) = stamp(&path) {
+            self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (stamp, true));
+        }
+        Ok(())
     }
 
     /// Which conversation branched from which (child, parent). Only the files that mention a branch are parsed, and only for
@@ -413,6 +491,7 @@ impl Store {
         let path = self.file(id);
         let before = stamp(&path);
         let mut c: Conversation = read(&path)?;
+        self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
         // Pages and helper steps reach disk before the record counts them: see `TranscriptStore::recover`.
         self.transcripts.recover(id, &mut c.messages);
         // Known as read, unless it changed while it was being read: `unchanged` then says so.
@@ -449,6 +528,7 @@ impl Store {
 
     /// The file just written is the conversation in hand, so the next list need not read it back, and `unchanged` knows it.
     fn written(&self, path: PathBuf, conversation: &Conversation) {
+        self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
         if let Some(now_stamp) = stamp(&path) {
             self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, summary(conversation)));
         }

@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "reason.conversation_damaged": "Não foi possível ler esta conversa.",
+  "damaged.showFile": "Mostrar o arquivo",
+  "damaged.remove": "Remover",
+  "damaged.confirmRemove": "Remover a cópia danificada?",
   "child.working": "Trabalhando",
   "child.waiting": "Aguardando",
   "child.stopped": "Parada",
@@ -2458,6 +2462,7 @@ export const ptBR: Messages = {
   'notes.367.better': 'Conversas novas ganham um título curto no idioma da sua mensagem depois da primeira resposta, sem mudar os nomes que você escolheu.',
   'notes.368.better': 'O foco do teclado entra nas Configurações ao abrir, fica na sua escolha ao salvar e volta ao fechar.',
   'notes.369.better': 'Sem Git, as conversas do projeto trabalham na sua pasta; a tela inicial explica o motivo e mostra onde baixar.',
+  'notes.370.fixed': 'Conversas que não podem ser lidas continuam na lista com uma cópia que você pode mostrar ou remover; o original fica intacto.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

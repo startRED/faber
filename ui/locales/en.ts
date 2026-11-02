@@ -1,6 +1,10 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "reason.conversation_damaged": "This conversation could not be read.",
+  "damaged.showFile": "Show the file",
+  "damaged.remove": "Remove",
+  "damaged.confirmRemove": "Remove the damaged copy?",
   "child.working": "Working",
   "child.waiting": "Waiting",
   "child.stopped": "Stopped",
@@ -2351,6 +2355,7 @@ export const en = {
   'notes.367.better': "New conversations get a short title in your message's language after the first answer, while names you choose stay yours.",
   'notes.368.better': 'Keyboard focus enters Settings when opened, stays on your choice when settings save, and returns when closed.',
   'notes.369.better': 'Without Git, project conversations work in your folder; the project home explains why and links to the download.',
+  'notes.370.fixed': 'Unreadable conversations stay in your list with a preserved copy you can show or remove; the original stays untouched.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

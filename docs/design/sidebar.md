@@ -72,3 +72,7 @@ remain usable from the keyboard in both areas.
   tooltip of the Settings button.
 - Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
   come with the progress view in Phase 3.
+
+## Damaged conversations
+
+An unreadable conversation stays in the sidebar as one quiet line, “This conversation could not be read.” Show the file reveals its preserved copy. Remove changes to “Remove the damaged copy?” and needs a separate activation; Escape or leaving the row cancels. A failed removal keeps the row. Both buttons remain visible and wrap within the sidebar, including its narrow-window overlay, without new motion. The original record stays untouched; dismissal lasts for the app run or until that record changes. Its unknown area falls back to Chat. It is absent from the homes’ pick-up lists and command search.

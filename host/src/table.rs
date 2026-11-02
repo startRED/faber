@@ -690,6 +690,15 @@ table! {
         let Some(source) = h.engine.folder_file(&id, &path) else { return Ok(()) };
         h.shell.reveal(source)
     }
+    Read Screen fn show_damaged_conversation(h, id: String) -> () {
+        let engine = h.engine.clone();
+        let source = off("error.file.show", move || engine.damaged_conversation(&id)).await??;
+        h.shell.reveal(source)
+    }
+    Write Screen fn remove_damaged_conversation(h, id: String) -> () {
+        let engine = h.engine.clone();
+        off("error.chat.deleteFailed", move || engine.remove_damaged_conversation(&id)).await?
+    }
     /// Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only
     /// revealed, never opened: if something else took its place, the file manager selects it and starts nothing.
     Read Ask fn show_project(h, id: String) -> () {

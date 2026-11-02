@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "reason.conversation_damaged": "Diese Unterhaltung konnte nicht gelesen werden.",
+  "damaged.showFile": "Datei anzeigen",
+  "damaged.remove": "Entfernen",
+  "damaged.confirmRemove": "Beschädigte Kopie entfernen?",
   "child.working": "Arbeitet",
   "child.waiting": "Wartet",
   "child.stopped": "Gestoppt",
@@ -2471,6 +2475,7 @@ export const de: Messages = {
   'notes.367.better': 'Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten.',
   'notes.368.better': 'Der Tastaturfokus wechselt beim Öffnen in die Einstellungen, bleibt beim Speichern auf deiner Auswahl und kehrt beim Schließen zurück.',
   'notes.369.better': 'Ohne Git arbeiten Projektunterhaltungen in deinem Ordner; die Projektstartseite erklärt den Grund und bietet einen Link zum Herunterladen.',
+  'notes.370.fixed': 'Unlesbare Unterhaltungen bleiben mit einer Kopie in deiner Liste, die du anzeigen oder entfernen kannst; das Original bleibt unverändert.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

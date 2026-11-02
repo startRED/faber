@@ -296,6 +296,22 @@ export function Sidebar(props: Props) {
 
   const Row = (row: { c: Summary; child?: boolean }) => {
     let rowEl: HTMLDivElement | undefined;
+    const [confirmDamaged, setConfirmDamaged] = createSignal<number>();
+    const [removingDamaged, setRemovingDamaged] = createSignal(false);
+    const removeDamaged = async () => {
+      const askedAt = confirmDamaged();
+      if (askedAt === undefined) return void setConfirmDamaged(Date.now());
+      if (Date.now() - askedAt < 500 || removingDamaged()) return;
+      setRemovingDamaged(true);
+      try {
+        await api.removeDamagedConversation(row.c.id);
+      } catch (err) {
+        props.onError?.(err);
+      } finally {
+        setRemovingDamaged(false);
+        setConfirmDamaged(undefined);
+      }
+    };
     onCleanup(() => {
       // Focus on any control of the row (its title or its ×) goes back to the recreated row's title.
       if (!rowEl || !rowEl.contains(document.activeElement)) return;
@@ -303,6 +319,17 @@ export function Sidebar(props: Props) {
       if (list) followRowFocus(list, row.c.id);
     });
     return (
+    <Show when={!row.c.reason} fallback={
+      <div class="damaged-conversation" data-conversation-id={row.c.id} onMouseLeave={() => setConfirmDamaged(undefined)} onKeyDown={(e) => {
+        if (e.key === 'Escape') setConfirmDamaged(undefined);
+      }}>
+        <span>{t('reason.conversation_damaged')}</span>
+        <div class="damaged-actions">
+          <button class="quiet sm" onClick={() => void api.showDamagedConversation(row.c.id).catch((err) => props.onError?.(err))}>{t('damaged.showFile')}</button>
+          <button class="quiet sm" disabled={removingDamaged()} onClick={() => void removeDamaged()}>{t(confirmDamaged() === undefined ? 'damaged.remove' : 'damaged.confirmRemove')}</button>
+        </div>
+      </div>
+    }>
     <div
       ref={(el) => (rowEl = el)}
       class="crow"
@@ -393,6 +420,7 @@ export function Sidebar(props: Props) {
         {losing() === row.c.id ? t('side.confirmDiscard') : confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
+    </Show>
     );
   };
 

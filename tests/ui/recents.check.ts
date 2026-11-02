@@ -1,12 +1,13 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
-import { api, type AppState, type FolderView, type RecentsView } from '../../ui/api.ts';
+import { api, type AppState, type FolderView, type RecentsView, type Summary } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { shortPath } from '../../ui/Recents.tsx';
+import { Sidebar } from '../../ui/Sidebar.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,6 +22,64 @@ const removeVia = async (row: HTMLElement) => {
 };
 
 const folder = (name: string, reason?: string): FolderView => ({ path: `X:/work/${name}`, name, parent: 'X:/work', reason });
+
+check('recents: a damaged conversation stays in the sidebar with show and confirmed copy removal, including failure and retry', async () => {
+  const original = { ...api };
+  const language = lang();
+  useLanguage('en');
+  const root = document.createElement('div');
+  root.style.width = '288px';
+  document.body.append(root);
+  const [rows, setRows] = createSignal<Summary[]>([{ id: 'broken', title: 'broken', area: 'chat', updatedAt: Date.now(), reason: 'reason.conversation_damaged' }]);
+  const calls: string[] = [];
+  const errors: unknown[] = [];
+  let fail = true;
+  api.showDamagedConversation = async (id) => { calls.push(`show ${id}`); };
+  api.removeDamagedConversation = async (id) => {
+    calls.push(`remove ${id}`);
+    if (fail) throw 'error.store.write';
+    setRows([]);
+  };
+  const dispose = render(() => createComponent(Sidebar, {
+    get conversations() { return rows(); }, projects: [], vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now: Date.now(),
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => { throw new Error('a damaged row cannot open'); },
+    onRemove: () => { throw new Error('the original cannot be removed'); }, onSettings: () => {}, onError: (err) => errors.push(err),
+  }), root);
+  try {
+    await settle();
+    const row = () => root.querySelector<HTMLElement>('[data-conversation-id="broken"]');
+    ok(row()?.textContent?.includes('This conversation could not be read.'));
+    const buttons = row()!.querySelectorAll('button');
+    deepEqual([...buttons].map((b) => b.textContent), ['Show the file', 'Remove']);
+    buttons[0].focus();
+    equal(document.activeElement, buttons[0]);
+    buttons[0].click();
+    await settle();
+    deepEqual(calls, ['show broken']);
+    buttons[1].click();
+    equal(buttons[1].textContent, 'Remove the damaged copy?');
+    buttons[1].click();
+    deepEqual(calls, ['show broken'], 'a double click never confirms removal');
+    await settle(560);
+    buttons[1].click();
+    await settle();
+    deepEqual(errors, ['error.store.write']);
+    ok(row(), 'a failed removal keeps the row');
+    equal(buttons[1].textContent, 'Remove');
+    fail = false;
+    buttons[1].click();
+    buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    equal(buttons[1].textContent, 'Remove', 'Escape cancels confirmation');
+    buttons[1].click();
+    await settle(560);
+    buttons[1].click();
+    await settle();
+    equal(row(), null);
+    deepEqual(calls, ['show broken', 'remove broken', 'remove broken']);
+  } finally {
+    dispose(); root.remove(); Object.assign(api, original); useLanguage(language);
+  }
+});
 
 check('recents: a long parent path keeps the drive and the last two folders, and short ones stay whole', () => {
   equal(shortPath('E:\\Documentos\\ProjetosIA\\faber'), 'E:\\…\\ProjetosIA\\faber');

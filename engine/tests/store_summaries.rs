@@ -105,3 +105,68 @@ fn a_big_conversation_file_is_smaller_compact() {
     println!("store: pretty {pretty} bytes in {pretty_time:?}, compact {compact} bytes in {compact_time:?}");
     assert!(compact < pretty, "compact {compact} bytes, pretty {pretty}");
 }
+
+#[test]
+fn unreadable_conversation_is_listed_and_kept_until_it_reads_again() {
+    let dir = support::tempdir();
+    let store = Store::new(dir.path());
+    let file = dir.path().join("conversations").join("x.json");
+    std::fs::write(&file, b"{\"id\":").unwrap();
+    assert!(store.list().is_empty(), "one failure can be a temporary lock");
+    let rows = store.list();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "x");
+    assert_eq!(serde_json::to_value(&rows[0]).unwrap()["reason"], "reason.conversation_damaged");
+    assert_eq!(std::fs::read(file.with_extension("json.damaged")).unwrap(), b"{\"id\":");
+    std::fs::write(&file, b"{\"title\":").unwrap();
+    assert_eq!(store.list().len(), 1);
+    assert_eq!(std::fs::read(file.with_extension("json.damaged")).unwrap(), b"{\"id\":", "the first copy is never overwritten");
+    std::fs::write(&file, conversation("x", "Recovered").to_string()).unwrap();
+    let rows = store.list();
+    assert_eq!(rows[0].title, "Recovered");
+    assert!(serde_json::to_value(&rows[0]).unwrap().get("reason").is_none());
+}
+
+#[test]
+fn removing_a_damaged_copy_keeps_the_original_and_rejects_paths() {
+    let dir = support::tempdir();
+    let store = Store::new(dir.path());
+    let file = dir.path().join("conversations/x.json");
+    std::fs::write(&file, b"{").unwrap();
+    store.list();
+    store.list();
+    assert_eq!(store.damaged_conversation("x").unwrap(), file.with_extension("json.damaged"));
+    for id in ["", "../x", "x/../x", "x\\..\\x", "C:x"] {
+        assert!(store.damaged_conversation(id).is_err());
+        assert!(store.remove_damaged_conversation(id).is_err());
+    }
+    store.remove_damaged_conversation("x").unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"{");
+    assert!(!file.with_extension("json.damaged").exists());
+    assert!(store.list().is_empty(), "the unchanged row stays dismissed for this run");
+    assert!(!file.with_extension("json.damaged").exists());
+    std::fs::write(&file, conversation("x", "Recovered").to_string()).unwrap();
+    assert_eq!(titles(&store), ["Recovered"]);
+}
+
+#[test]
+fn a_successful_read_or_save_resets_consecutive_failures() {
+    for save in [false, true] {
+        let dir = support::tempdir();
+        let store = Store::new(dir.path());
+        let file = dir.path().join("conversations/x.json");
+        std::fs::write(&file, b"{").unwrap();
+        assert!(store.list().is_empty());
+        let good = conversation("x", "Readable");
+        if save {
+            store.save_checked(&serde_json::from_value(good).unwrap()).unwrap();
+        } else {
+            std::fs::write(&file, good.to_string()).unwrap();
+            assert!(store.get("x").is_some());
+        }
+        std::fs::write(&file, b"{").unwrap();
+        assert!(store.list().is_empty(), "a successful read starts the failure count over");
+        assert!(!file.with_extension("json.damaged").exists());
+        assert_eq!(store.list().len(), 1);
+    }
+}

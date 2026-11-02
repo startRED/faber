@@ -388,6 +388,7 @@ export interface Stuck { noticedAt: number; since: number; turns: number; usd: n
 export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
 
 export interface Summary {
+  reason?: 'reason.conversation_damaged';
   results?: Results;
   stuck?: boolean;
   id: string;
@@ -1041,6 +1042,8 @@ export const api = {
   },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
+  showDamagedConversation: (id: string) => invoke<void>('show_damaged_conversation', { id }),
+  removeDamagedConversation: (id: string) => invoke<void>('remove_damaged_conversation', { id }),
   /** Pending rewind recovery always refuses deletion; `discard` only overrides `error.copy.unsaved`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
