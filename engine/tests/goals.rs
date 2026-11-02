@@ -1006,35 +1006,6 @@ async fn until_reply(r: &Rig, id: &str) -> faber_engine::model::Message {
     panic!("the waiting reply never ended: {:?}", r.engine.open(id).map(|c| c.messages.last().cloned()));
 }
 
-#[tokio::test]
-async fn failed_checks_of_a_fix_over_the_days_money_ask_nothing_and_the_reply_says_the_limit_is_why() {
-    let r = rig(false).await;
-    // The check keeps failing, so Faber's own checks of the fix's reply fail too and would ask the agent to fix them.
-    let mut agent = break_it(&r).await;
-    let id = r.conversations().remove(0);
-    // Its copy declares the same checks as the project.
-    let copy = r.engine.open(&id).unwrap().copy.unwrap().path;
-    let checks = format!("## Proof commands\n\n```\n{CHECK}\n```\n");
-    std::fs::write(std::path::Path::new(&copy).join("AGENTS.md"), checks).unwrap();
-    // The agent edits a file in its copy during the turn, so its reply is checked.
-    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
-    let edit = json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"w1","name":"Write",
-        "input":{"file_path":"src/lib.rs","content":"fn main() {}"}}]}});
-    agent.say(edit).await;
-    let wrote = json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"w1","content":"ok","is_error":false}]}});
-    agent.say(wrote).await;
-    finish(&mut agent, DAILY_CAP_USD + 0.5).await;
-    until(|| r.engine.open(&id).is_some_and(|c| c.messages.last().is_some_and(|m| m.halt.as_deref() == Some("reason.goal.cap")))).await;
-    let last = r.engine.open(&id).unwrap().messages.last().cloned().unwrap();
-    assert_eq!(
-        last.checks.map(|k| k.state),
-        Some(faber_engine::model::ChecksState::NeedsYou),
-        "the person decides what the failed checks mean"
-    );
-    assert_eq!(user_lines(&agent), 1, "and the agent was asked nothing");
-    r.engine.shutdown();
-}
-
 // ---- Standing goals, phase 2: the crash file as a goal's source ----
 
 impl Rig {

@@ -113,7 +113,7 @@ impl Core {
                 continue;
             }
             let owed = self.load(&child).is_some_and(|c| c.pending_parent_report);
-            self.tell_parent(&child);
+            self.turn_ended(&child);
             let pending = self.convs.get(&child).is_some_and(|c| {
                 if c.started_by.as_deref() == Some(parent) {
                     c.pending_parent_report
@@ -345,7 +345,7 @@ impl Core {
         }
         let Some(lead) = c.started_by.clone() else { return };
         if self.edit_worker_step(&lead, child, |s| (s.state, s.worker) = (StepState::Pending, None)) {
-            self.tell_parent(child);
+            self.turn_ended(child);
         }
     }
 
@@ -487,7 +487,7 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return };
         let Some(parent) = c.started_by.clone() else { return };
         let state = state_of(busy, c);
-        if c.keep_going.is_some() || state == State::Working || state == State::Waiting {
+        if c.keep_going.is_some() || c.compacting || state == State::Working || state == State::Waiting {
             return;
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
@@ -515,6 +515,16 @@ impl Core {
     }
 
     fn deliver_child_report(&mut self, conv: &str, parent: String, text: String, report_id: String) {
+        let direct = self.convs.get(conv).is_some_and(|c| c.started_by.as_deref() == Some(parent.as_str()));
+        let reported = self
+            .convs
+            .get(conv)
+            .and_then(|c| c.messages.iter().rev().find(|m| m.role == Role::Assistant))
+            .is_some_and(|m| self.live.get(conv).is_some_and(|l| l.parent_reported.as_deref() == Some(&m.id)));
+        if direct && reported {
+            self.finish_parent_report(conv, &parent);
+            return;
+        }
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
             self.finish_parent_report(conv, &parent);
             return;
@@ -549,6 +559,12 @@ impl Core {
     }
 
     fn finish_parent_report(&mut self, child: &str, parent: &str) {
+        if self.convs.get(child).is_some_and(|c| c.started_by.as_deref() == Some(parent))
+            && let Some(l) = self.live.get_mut(child)
+        {
+            l.parent_reported =
+                self.convs.get(child).and_then(|c| c.messages.iter().rev().find(|m| m.role == Role::Assistant)).map(|m| m.id.clone());
+        }
         if self.convs.get(parent).and_then(|p| p.waiting_on.as_ref()).is_some_and(|w| w.ids.iter().any(|id| id == child)) {
             let previous = self.convs.get_mut(parent).unwrap().waiting_on.take();
             if self.try_save(parent).is_err() {

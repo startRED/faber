@@ -32,8 +32,6 @@ export interface LiveInput {
   messages: Message[];
   /** The reply to read, by index; the newest reply when absent. */
   at?: number;
-  /** Faber asks git whether the reply changed files, before its checks would start. */
-  weighing?: boolean;
   /** "Keep going" waits to send the next turn. */
   keepWait?: RunningItem['keepWait'];
 }
@@ -69,7 +67,7 @@ export function liveWork(input: LiveInput): LiveWork | undefined {
   const quota = newest && quotaPending(m);
   if ((m.status === 'error' && !quota) || m.status === 'stopped' || m.checks?.state === 'failed' || follow === 'failed') return { kind: 'failed', ...base };
   const agentWorks = streaming && m.finishedAt === undefined;
-  const faberWorks = follow === 'running' || (newest && (quota || !!input.weighing || m.checks?.state === 'running' || !!input.keepWait));
+  const faberWorks = follow === 'running' || (newest && (quota || m.checks?.state === 'running' || !!input.keepWait));
   if (!agentWorks && !faberWorks) return { kind: 'done', ...base };
   return { kind: 'working', ...base, what: agentWorks ? whatOf(m) : undefined };
 }

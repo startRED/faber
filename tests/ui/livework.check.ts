@@ -6,7 +6,7 @@ import { check, deepEqual, equal } from './check.ts';
 const START = 1_700_000_000_000;
 const reply = (over: Partial<Message> = {}): Message => ({ id: 'r', role: 'assistant', at: START, status: 'streaming', text: '', ...over });
 const ask: Message = { id: 'u', role: 'user', at: START, text: 'Go' };
-const kind = (m: Partial<Message>, extra: { weighing?: boolean; keepWait?: { why: 'retry' | 'question'; until: number } } = {}) =>
+const kind = (m: Partial<Message>, extra: { keepWait?: { why: 'retry' | 'question'; until: number } } = {}) =>
   liveWork({ messages: [ask, reply(m)], ...extra })?.kind;
 
 check('live work: the person needed comes first, then a failure, then work, then done', () => {
@@ -14,11 +14,10 @@ check('live work: the person needed comes first, then a failure, then work, then
   equal(kind({ status: 'stopped', permissions: [permission] }), 'needs', 'a question beats a stop');
   equal(kind({ status: 'done', needsYou: true }), 'needs', "the engine's needs-you counts");
   equal(kind({ status: 'done' }, { keepWait: { why: 'question', until: 0 } }), 'needs', 'keep going waits on a question');
-  equal(kind({ status: 'done', checks: { state: 'failed', passed: 0 } }, { weighing: true }), 'failed', 'a failed check beats Faber still at work');
+  equal(kind({ status: 'done', checks: { state: 'failed', passed: 0 } }), 'failed', 'a failed check beats Faber still at work');
   equal(kind({ status: 'error', error: 'error.spawn' }), 'failed');
   equal(kind({ status: 'streaming' }), 'working');
   equal(kind({ status: 'streaming', finishedAt: START + 1 }), 'done', 'the agent finished while the CLI closes its turn');
-  equal(kind({ status: 'done' }, { weighing: true }), 'working', 'Faber looks for changes before its checks');
   equal(kind({ status: 'done' }, { keepWait: { why: 'retry', until: 0 } }), 'working', 'keep going waits to send the next turn');
   equal(kind({ status: 'error', error: 'error.quotaWait' }), 'working', 'a wait for quota is not a failure');
   equal(kind({ status: 'error', error: 'error.quotaWait', checks: { state: 'failed', passed: 0 } }), 'failed', 'a failed check is not hidden by a quota wait');
@@ -32,9 +31,9 @@ check('live work: the person needed comes first, then a failure, then work, then
 
 check('live work: a state belongs to its own answer, never to a newer turn', () => {
   const messages = [reply({ id: 'old', status: 'stopped' }), ask, reply({ id: 'new', at: START + 5 })];
-  deepEqual(liveWork({ messages, weighing: true }), { kind: 'working', answer: 'new', since: START + 5, what: undefined, helpers: [] });
-  deepEqual(liveWork({ messages, at: 0, weighing: true }), { kind: 'failed', answer: 'old', since: START, helpers: [] }, 'the old stop stays its own');
-  equal(liveWork({ messages: [reply({ id: 'old', status: 'done' }), ask, reply({ id: 'new' })], at: 0, weighing: true })?.kind, 'done', "the newer turn's work is not the old answer's");
+  deepEqual(liveWork({ messages }), { kind: 'working', answer: 'new', since: START + 5, what: undefined, helpers: [] });
+  deepEqual(liveWork({ messages, at: 0 }), { kind: 'failed', answer: 'old', since: START, helpers: [] }, 'the old stop stays its own');
+  equal(liveWork({ messages: [reply({ id: 'old', status: 'done' }), ask, reply({ id: 'new' })], at: 0 })?.kind, 'done', "the newer turn's work is not the old answer's");
 });
 
 check('live work: what it does is in plain words, and never a shell line', () => {
@@ -47,7 +46,7 @@ check('live work: what it does is in plain words, and never a shell line', () =>
   equal(what([{ id: 'm', name: 'mcp__terminal__run', input: { command: 'Remove-Item C:/demo' } }]), undefined, "a tool server's terminal gives no words");
   equal(what([{ ...read, ok: true }]), undefined, 'nothing open, nothing to say');
   equal(what([read, bash], 'Checking the build'), 'Checking the build', "the agent's own words come first");
-  equal(liveWork({ messages: [reply({ status: 'done', tools: [read] })], weighing: true })?.what, undefined, "Faber's own work is not a step");
+  equal(liveWork({ messages: [reply({ status: 'done', tools: [read] })] })?.what, undefined, "Faber's own work is not a step");
 });
 
 check('live work: helpers list in the order they started, each with its own state', () => {

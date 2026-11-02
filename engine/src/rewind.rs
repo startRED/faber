@@ -279,7 +279,6 @@ impl SavedConversation {
         c.queued.clone_from(&self.queued);
         c.queued.iter_mut().for_each(|q| q.sending = false);
         c.compacting = false;
-        c.weighing = None;
         c.rewind_notice = Some("note.rewind.savedMessages".into());
         c.rewind_summary.clone_from(&self.summary);
     }

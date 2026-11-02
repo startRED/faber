@@ -29,6 +29,7 @@ impl Engine {
                     .any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed"));
                 conv.ended = Some(Ended { at: now(), kind: EndKind::Interrupted, work_ms: 0, line: ended::conclusion_line(conv) });
                 c.save(&row.id);
+                c.turn_ended(&row.id);
                 if !was_loaded && !c.save_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(&row.id) {
                     c.convs.remove(&row.id);
                 }
@@ -55,7 +56,7 @@ impl Engine {
                         || conv.keep_going.is_some()
                         || conv.stopped
                         || !conv.queued.iter().map(|q| &q.id).eq(queued.iter())
-                        || verifying::checking(conv)
+                        || conv.compacting
                         || !conv.messages.last().is_some_and(|m| m.id == last && m.closed)
                         || c.live.get(&id).is_some_and(|l| l.turn.is_some())
                     {
@@ -78,6 +79,7 @@ impl Engine {
                     }
                     c.save(&id);
                     c.emit_queue(&id);
+                    c.turn_ended(&id);
                 }
             });
         });

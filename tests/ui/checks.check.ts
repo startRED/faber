@@ -60,28 +60,3 @@ check('checks: a reply that changed files shows Faber checking it, then what pas
     needs.close();
   }
 });
-
-check('checks: while Faber asks git whether a reply changed files, the newest reply says so, and only it', () => {
-  const done: Message = { id: 'a', role: 'assistant', text: 'Ran the script.', at: 1, status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5' };
-  const root = document.createElement('div');
-  document.body.append(root);
-  const dispose = render(
-    () => createComponent(Thread, { messages: [question, { ...done, id: 'old' }, question, done], from: 0, conversationId: 'checks-check', options: [], onBranch: () => {}, weighing: true }),
-    root,
-  );
-  try {
-    const lines = root.querySelectorAll('.checks[data-state="weighing"]');
-    equal(lines.length, 1, 'one line, on the newest reply');
-    equal(lines[0]!.textContent, t('checks.weighing'));
-    ok(root.querySelectorAll('article.ai')[1]!.contains(lines[0]!));
-  } finally {
-    dispose();
-    root.remove();
-  }
-  const quiet = mount([question, done]);
-  try {
-    equal(quiet.root.querySelector('.checks'), null, 'nothing once git answered');
-  } finally {
-    quiet.close();
-  }
-});

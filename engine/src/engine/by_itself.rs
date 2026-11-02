@@ -25,11 +25,11 @@ impl Core {
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
-        // Faber's checks of the last reply count as a turn that runs (`verifying.rs`).
+        // Compaction owns the session until its continuation can start.
         if busy
             || c.stopped
             || !c.queued.is_empty()
-            || verifying::checking(c)
+            || c.compacting
             || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
         {
             if c.queued.len() >= MAX_QUEUED {

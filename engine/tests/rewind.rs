@@ -1416,7 +1416,9 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
     .await;
     pipe.say(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"edit","content":"ok","is_error":false}]}}))
         .await;
-    pipe.say(json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
+    pipe.say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_v","name":"mcp__faber__verify","input":{}}]}})).await;
+    pipe.say(json!({"type":"control_request","request_id":"r2","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"verify","arguments":{"level":"full"},"_meta":{"claudecode/toolUseId":"toolu_v"}}}}})).await;
     tokio::time::timeout(crate::support::DEADLINE, checks.started.notified()).await.expect("the check starts");
     let point = engine.rewind_points(CONVERSATION).unwrap().pop().unwrap();
     assert!(!point.coverage.unavailable, "the test needs a real baseline: {point:?}; Git calls: {:?}", s.git.0.lock().unwrap().calls);
@@ -1426,6 +1428,7 @@ async fn rewind_stopped_checks_seal_only_after_confirmed_completion_and_release_
     let overlapping =
         RestoreRequest { conversation_id: other.id, message_id: "other-cut".into(), mode: Mode::Conversation, saved_versions: vec![] };
     engine.interrupt(CONVERSATION);
+    pipe.say(json!({"type":"result","subtype":"error_during_execution","is_error":true,"usage":{}})).await;
     assert!(!engine.rewind_preview(request.clone()).unwrap().running.is_empty());
     assert_eq!(engine.rewind_restore(overlapping.clone()).unwrap_err(), "error.rewind.running");
     s.write("file", b"late check write");

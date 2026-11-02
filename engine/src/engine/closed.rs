@@ -43,7 +43,7 @@ impl Core {
         let conv = self.load(id).ok_or("error.conversationGone")?;
         // Only a turn that goes out now: one that would wait in the queue leaves this reply last, and a second click would
         // queue another.
-        let waits = conv.stopped || !conv.queued.is_empty() || verifying::checking(conv);
+        let waits = conv.stopped || !conv.queued.is_empty() || conv.compacting;
         if !conv.messages.last().is_some_and(|m| m.id == turn_id && m.closed)
             || waits
             || self.live.get(id).is_some_and(|l| l.turn.is_some())
@@ -58,6 +58,7 @@ impl Core {
         }
         self.send_by_itself(id, CONTINUE.into(), crate::model::Wake::of("wake.closed"))?;
         self.closed_continues.entry(id.to_string()).or_default().push(at);
+        self.turn_ended(id);
         Ok(())
     }
 
