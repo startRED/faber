@@ -401,6 +401,9 @@ impl Core {
             EngineEvent::SteerFailed { tag } => self.helper_took(call, Some(tag), false),
             EngineEvent::Quota { window, used, resets_at } => self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => self.apply_signals(vendor, s),
+            EngineEvent::WriterExit { .. } => {
+                self.end_helper(call, false, Some("the helper process ended before reporting its result"), None, true);
+            }
             EngineEvent::Done {
                 ok,
                 cost_total_usd,
@@ -472,8 +475,13 @@ impl Core {
         self.never_read(&h.conv, call, &h.waiting);
         let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid) else { return };
         l.session.helper_reply(call, ok, text);
-        if let (Some(cost), Some(m)) = (cost, self.turn(&h.conv)) {
-            m.cost_usd = Some(m.cost_usd.unwrap_or(0.0) + cost);
+        if let Some(m) = self.turn(&h.conv) {
+            if incomplete {
+                m.incomplete = Some(true);
+            }
+            if let Some(cost) = cost {
+                m.cost_usd = Some(m.cost_usd.unwrap_or(0.0) + cost);
+            }
         }
     }
 
@@ -546,5 +554,108 @@ impl Core {
                 self.expire_helper(&call, hsid, STOP_GRACE, "it was stopped");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::SessionCommand;
+
+    async fn helper_exit(vendor: Vendor, partial: bool) {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let replies = Arc::new(Mutex::new(Vec::new()));
+        let sent = replies.clone();
+        let caller = Session::from_fn(move |command| {
+            if let SessionCommand::HelperReply { id, ok, text, .. } = command {
+                sent.lock().unwrap().push((id, ok, text));
+            }
+        });
+        let conv = super::super::answer::tests::seed(&engine, caller, &[("turn", &[])]);
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = closed.clone();
+        let session = Session::from_fn(move |command| {
+            if matches!(command, SessionCommand::Close) {
+                stopped.store(true, std::sync::atomic::Ordering::Release);
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            engine.with(|core| {
+                let sid = core.live[&conv].sid;
+                core.live.get_mut(&conv).unwrap().vendor = helper::other(vendor);
+                core.handle(
+                    &conv,
+                    sid,
+                    EngineEvent::Tool {
+                        id: "call".into(),
+                        name: "Helper".into(),
+                        input: serde_json::json!({"title":"Check", "brief":"Check the files"}),
+                        parent: None,
+                    },
+                );
+                core.turn(&conv).unwrap().cost_usd = Some(0.01);
+                core.helpers.insert(
+                    "call".into(),
+                    Run {
+                        conv: conv.clone(),
+                        sid,
+                        hsid: 42,
+                        vendor,
+                        model: "unknown-test-model".into(),
+                        session,
+                        started: core.secs(),
+                        report: String::new(),
+                        kept: 0,
+                        new_block: false,
+                        refused: vec![],
+                        waiting: vec!["pending-message".into()],
+                        told: vec![],
+                        held: None,
+                        earlier_turn: false,
+                        stopping: false,
+                    },
+                );
+                if partial {
+                    core.helper_event("call", 42, EngineEvent::Text("Keep these partial words.".into()));
+                }
+                core.helper_event("call", 41, EngineEvent::WriterExit { confirmed: true });
+                assert!(core.helpers.contains_key("call"), "a replaced process cannot end the current helper");
+                core.helper_event("call", 42, EngineEvent::WriterExit { confirmed: true });
+                assert!(core.helpers.is_empty(), "process death must not wait for the helper timeout or a pending message");
+                assert!(closed.load(std::sync::atomic::Ordering::Acquire), "the helper session is closed");
+                let replies = replies.lock().unwrap();
+                assert_eq!(replies.len(), 1, "the caller is answered immediately");
+                let (call, ok, text) = &replies[0];
+                assert_eq!(call, "call");
+                assert!(!ok);
+                assert_eq!(text.contains("Keep these partial words."), partial);
+                let reply = core.turn(&conv).unwrap();
+                assert_eq!(reply.incomplete, Some(true), "unknown helper spend must not make the caller's known cost look exact");
+                assert_eq!(reply.cost_usd, Some(0.01));
+                core.helper_event("call", 42, EngineEvent::WriterExit { confirmed: true });
+                assert_eq!(replies.len(), 1, "duplicate exits cannot answer twice");
+            });
+        })
+        .await
+        .expect("a dead helper must release its caller within two seconds");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn cli_lifetime_codex_helper_exit_without_words_releases_its_claude_caller() {
+        helper_exit(Vendor::Codex, false).await;
+    }
+    #[tokio::test]
+    async fn cli_lifetime_codex_helper_exit_keeps_partial_words_and_releases_its_claude_caller() {
+        helper_exit(Vendor::Codex, true).await;
+    }
+    #[tokio::test]
+    async fn cli_lifetime_claude_helper_exit_without_words_releases_its_codex_caller() {
+        helper_exit(Vendor::Claude, false).await;
+    }
+    #[tokio::test]
+    async fn cli_lifetime_claude_helper_exit_keeps_partial_words_and_releases_its_codex_caller() {
+        helper_exit(Vendor::Claude, true).await;
     }
 }

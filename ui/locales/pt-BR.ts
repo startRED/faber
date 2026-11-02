@@ -2443,6 +2443,7 @@ export const ptBR: Messages = {
   'notes.357.better': 'As perguntas que abrem sozinhas deixam mais espaço pra trabalhar em janelas pequenas, e a barra lateral de Projetos ficou mais limpa quando está vazia.',
   'notes.358.better': 'As Configurações usam palavras mais simples, e as opções de acesso explicam o que a IA pode fazer antes da escolha.',
   'notes.359.fixed': 'Um passo do plano só vira concluído quando a IA diz o que conferiu; um ajudante que termina não o marca mais.',
+  'notes.360.fixed': 'Quando um ajudante para de repente, a IA que esperava por ele pode seguir, e fechar o Faber não deixa uma IA recém-aberta rodando.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

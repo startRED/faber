@@ -2336,6 +2336,7 @@ export const en = {
   'notes.357.better': 'Questions that open by themselves leave more room to work in small windows, and the empty Projects sidebar is quieter.',
   'notes.358.better': 'Settings uses simpler words, and access choices explain what the AI can do before you choose.',
   'notes.359.fixed': 'A plan step now turns done only when the AI says what it checked; a helper finishing no longer ticks it.',
+  'notes.360.fixed': 'Helpers that stop unexpectedly release the waiting AI, and closing Faber leaves no newly started AI process behind.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2456,6 +2456,7 @@ export const de: Messages = {
   'notes.357.better': 'Von selbst geöffnete Fragen lassen in kleinen Fenstern mehr Platz zum Arbeiten, und die leere Projekte-Seitenleiste zeigt weniger doppelte Inhalte.',
   'notes.358.better': 'Die Einstellungen verwenden einfachere Wörter, und die Zugriffsoptionen erklären vor der Auswahl, was die KI tun darf.',
   'notes.359.fixed': 'Ein Planschritt gilt erst als erledigt, wenn die KI sagt, was sie geprüft hat; das Ende eines Helfers hakt ihn nicht mehr ab.',
+  'notes.360.fixed': 'Wird ein Helfer unerwartet beendet, kann die wartende KI fortfahren; beim Schließen von Faber bleibt keine gerade gestartete KI zurück.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

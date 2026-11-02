@@ -16,6 +16,23 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[cfg(windows)]
+#[tokio::test]
+async fn cli_lifetime_kill_during_job_termination_is_idempotent() {
+    for _ in 0..64 {
+        let mut limits = win32job::ExtendedLimitInfo::new();
+        limits.limit_kill_on_job_close();
+        let job = win32job::Job::create_with_limit_info(&limits).unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.arg("--list");
+        let (mut child, _stdin, _stdout, _stderr) = faber_winproc::spawn_in_job(&command, job.handle(), 0).unwrap();
+        child.resume().unwrap();
+        faber_winproc::job_terminate(job.handle()).unwrap();
+        child.start_kill().expect("job termination must not make stopping its child fail");
+        child.wait().await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn visual_answers_network_uses_the_saved_web_choice_without_a_second_permission() {
     use faber_engine::model::WebSearch;
