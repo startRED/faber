@@ -2494,6 +2494,7 @@ export const de: Messages = {
   'notes.378.fixed': 'Codex kann in seiner eigenen Unterhaltung um Erlaubnis bitten und beginnt ohne zusätzliche Wartezeit zu antworten.',
   'notes.379.fixed': 'Die eigene Farbauswahl in den Einstellungen zeigt auch unter macOS den Tastaturfokus an.',
   'notes.380.fixed': 'Unter macOS und Linux kann der Chat seine Arbeit speichern und um Erlaubnis fragen. Fabers eigene Daten bleiben geschützt.',
+  'notes.381.better': 'Die Bereichsübersicht erklärt, wie Projektgespräche und unbeaufsichtigte Arbeit heute funktionieren.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

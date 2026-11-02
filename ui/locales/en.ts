@@ -2374,6 +2374,7 @@ export const en = {
   'notes.378.fixed': 'Codex can ask for permission in its own conversation and starts answering without an extra wait.',
   'notes.379.fixed': 'The custom color picker in Settings shows its keyboard focus ring on macOS too.',
   'notes.380.fixed': 'On macOS and Linux, Chat can save its work and ask for permission while Faber’s own data stays protected.',
+  'notes.381.better': 'The areas guide now explains project conversations and unattended work as they exist today.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

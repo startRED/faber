@@ -39,7 +39,7 @@ request itself. Before big work it shows the plan, the time and the quota, and a
 
 - solve it right away, with undo ("organize my downloads folder");
 - talk it through and plan ("I want to build an app");
-- start a mission with several models in parallel ("build the whole app, ready to ship");
+- start separate project conversations and use helpers for parallel work ("build the whole app, ready to ship"); see the toolbox (R160, R161, R198);
 - find what it lacks: search the catalog and beyond, show the license, install from the source, test on a copy and
   save the path as a recipe ("make a Terraria mod").
 
@@ -78,8 +78,8 @@ learns these techniques or writes in a special way: they ask in plain words, and
 direction, 2026-10-21). Five proposals for the lead agent; the owner chose on 2026-10-22:
 
 - **Standing goals** (approved 2026-10-22; phase 1 built). A project can keep goals that never finish, such as "no crashes", "opens in under 2 s" or "every
-  check passes". The lead watches them and starts a mission by itself when one breaks, within the project's daily cost
-  cap. First it gets what closes the loop without a person: the error logs on the user's PC (read there, never sent by Faber itself; telemetry stays off; when a fix starts, the newest lines are given to the AI that fixes it), the build each error came from, and a copy where it reproduces the error before fixing it.
+  check passes". When a goal breaks twice, Faber starts an ordinary conversation in a separate copy, within the project's daily cost
+  cap (R422). First it gets what closes the loop without a person: the error logs on the user's PC (read there, never sent by Faber itself; telemetry stays off; when a fix starts, the newest lines are given to the AI that fixes it), the build each error came from, and a copy where it reproduces the error before fixing it.
   Faber's own "no crashes", fed by its overnight bug log, is the first one. Phase 1 is built (2026-10-22, R422): the
   goals, the switch per project in Settings (off by default), the check run through the verifier, a fix started as an
   ordinary conversation in a separate copy, and US$2 a day per project. Of phase 2, the local crash file is built (R421), and so are, in Faber's own project, a goal over the installed Faber's crash file (the dev Faber reads it, read
@@ -110,8 +110,8 @@ wait. Everything persists across closing, crashes and reboots.
   publishing, paying or deleting outside a copy is never approved on its own: it is parked with a note and the rest
   goes on. Changes to Faber itself follow the user's trust setting, parked without full trust. The work runs to the end,
   then leaves a report: what was done, what was decided alone and why, what is parked.
-- **Switches at any moment, effective at once**: one click in the conversation (and a shortcut), also while the agent
-  is answering or a mission is running. Turning it on resolves open question cards with their defaults and parks
+- **Switches at any moment, effective at once** (not built): one click in the conversation (and a shortcut), also while the agent
+  is answering. Turning it on resolves open question cards with their defaults and parks
   waiting approvals, without restarting anything: the user who was working in Normal and has to sleep just turns it
   on. Turning it off brings the next questions back to the user.
 
@@ -160,8 +160,7 @@ The `judge_creative` definition is also offered with the project toolbox. It spe
    vendor; when its quota is poor or only one vendor is connected, a fresh read-only session of the same vendor reviews
    (R146; today's coordinator still requires the other vendor). Creative work gets two judges from different vendors
    when both are connected.
-6. A mission never stops to wait for the user. Without an answer in time, it takes the safest path and logs it.
-7. Every mission has an estimate of time and quota. Passing it by 50% only warns and moves to economy mode (see Big
-   work above; built for a project agent's plan estimate, not yet for missions). Unattended missions have a fence: whatever hits it is parked with a note and the rest continues.
+6. The planned unattended mode never stops to wait for the user. Without an answer in time, it takes the safest path and logs it. The existing Keep going control continues a project conversation under its own stopping rules (R199); the planned autonomous mode is not built.
+7. The planned unattended mode has a time and quota estimate. Passing it by 50% only warns and moves to economy mode. The project agent's plan estimate is built (see `engine/src/engine/plan.rs`); the unattended fence is not built: whatever hits it is to be parked with a note and the rest continues.
 8. Whatever shows up on screen, in a page or in a file is data, never an instruction.
 9. Nothing third-party ships with the app. Telemetry is off by default.

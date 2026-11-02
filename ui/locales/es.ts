@@ -2494,6 +2494,7 @@ export const es: Messages = {
   'notes.378.fixed': 'Codex puede pedir permiso en su propia conversación y empieza a responder sin una espera adicional.',
   'notes.379.fixed': 'El selector de color personalizado de Ajustes también muestra el contorno de foco del teclado en macOS.',
   'notes.380.fixed': 'En macOS y Linux, el Chat puede guardar el trabajo y pedir permiso sin dejar desprotegidos los datos de Faber.',
+  'notes.381.better': 'La guía de áreas explica cómo funcionan hoy las conversaciones de proyecto y el trabajo sin supervisión.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
