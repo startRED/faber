@@ -32,8 +32,7 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
     // Calm: no permission sentence over the conversation, whatever the mode.
     page.wait_visible(&css("article .ai, article.ai"))?;
@@ -77,8 +76,7 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
         ..Launch::default()
     })?;
     let page = &mut app.page;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "check policy")?;
     // Every request is answered for the person; only the agent's own question waits, as a card to tap (R160).
     let question = css("article [data-testid=question-card]");
@@ -126,8 +124,7 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     page.click(&back)?;
     // Projects run only missions, so the mode is a Chat matter: a chat says it over its thread.
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
     ensure(page.count(&css(".col .hint[role=status]"))? == 0, || "a permission sentence sits over the thread".into())?;
 

@@ -2,3 +2,6 @@
 tests/fixtures/projects/canary/** -text
 # The export fixture is compared byte for byte too.
 tests/fixtures/conversation-export.* -text
+
+# The updater's signed test file and its signature are checked byte for byte.
+update/tests/fixtures/** -text

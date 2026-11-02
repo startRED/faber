@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { Composer } from '../../ui/Composer.tsx';
 import { api, type AppState, type Choice, type Conversation } from '../../ui/api.ts';
-import { lang, useLanguage } from '../../ui/i18n.ts';
+import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -22,30 +22,31 @@ check('effort: only a manual model shows low, medium and high; medium is the def
     get choice() { return choice(); }, busy: true, placeholder: '',
     onChoice: setChoice, onSend: () => { sends++; }, onWarm: () => { warms++; }, onStop: () => {}, onPause: () => {},
   }), root);
+  const open = async () => { await settle(); root.querySelector<HTMLButtonElement>('.model-chip')!.click(); await settle(); };
+  const pick = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('.model-option')].find((button) => button.textContent === label)!.click();
   try {
     await settle();
-    equal(root.querySelector('.effort'), null);
-    const model = root.querySelector<HTMLSelectElement>('.choose select')!;
-    model.value = '1';
-    model.dispatchEvent(new Event('change', { bubbles: true }));
-    const effort = root.querySelector<HTMLSelectElement>('.effort select')!;
-    equal(effort.value, 'medium');
-    deepEqual([...effort.options].map((option) => option.value), ['low', 'medium', 'high']);
-    effort.value = 'high';
-    effort.dispatchEvent(new Event('change', { bubbles: true }));
+    await open();
+    equal(root.querySelector('.model-efforts'), null);
+    pick('Haiku');
+    await open();
+    const efforts = () => [...root.querySelectorAll<HTMLButtonElement>('.model-efforts button')];
+    equal(efforts().find((button) => button.getAttribute('aria-pressed') === 'true')?.textContent, t('effort.medium'));
+    deepEqual(efforts().map((button) => button.textContent), (['low', 'medium', 'high'] as const).map((value) => t(`effort.${value}`)));
+    efforts().find((button) => button.textContent === t('effort.high'))!.click();
     equal(choice().effort, 'high');
     equal(root.querySelector('.effort-hint'), null, 'no permanent sentence under the composer: the choice is for the next message and the menu does not say so');
     equal(warms, 0, 'changing the choice alone never launches a session');
     equal(sends, 0);
-    model.value = '2';
-    model.dispatchEvent(new Event('change', { bubbles: true }));
+    pick('Sonnet');
     equal(choice().effort, 'medium', 'another model starts again at the default');
-    model.value = '0';
-    model.dispatchEvent(new Event('change', { bubbles: true }));
-    equal(root.querySelector('.effort'), null);
+    await open();
+    pick('Auto');
+    await open();
+    equal(root.querySelector('.model-efforts'), null);
     equal(root.querySelector('.effort-hint'), null);
     setChoice({ vendor: 'claude', model: 'haiku' });
-    equal(root.querySelector<HTMLSelectElement>('.effort select')!.value, 'medium', 'a legacy manual choice defaults to medium');
+    equal(efforts().find((button) => button.getAttribute('aria-pressed') === 'true')?.textContent, t('effort.medium'), 'a legacy manual choice defaults to medium');
   } finally {
     dispose();
     root.remove();
@@ -88,13 +89,14 @@ check('effort: choices restore independently; review 8: successful deletion remo
       const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
       try {
         await settle();
-        const effort = root.querySelector<HTMLSelectElement>('.composer .effort select');
+        root.querySelector<HTMLButtonElement>('.composer .model-chip')!.click();
+        await settle();
+        const effort = root.querySelector('.model-efforts [aria-pressed="true"]');
         if (id === 'effort-one') {
           const expected = localStorage.getItem('faber.choice.effort-one') ? 'low' : 'high';
-          equal(effort?.value, expected);
+          equal(effort?.textContent, t(`effort.${expected}`));
           equal(root.querySelector('.effort-hint'), null);
-          effort!.value = 'low';
-          effort!.dispatchEvent(new Event('change', { bubbles: true }));
+          [...root.querySelectorAll<HTMLButtonElement>('.model-efforts button')].find((button) => button.textContent === t('effort.low'))!.click();
           equal(JSON.parse(localStorage.getItem('faber.choice.effort-one')!).effort, 'low');
         } else {
           equal(effort, null, 'another conversation and a new chat retain Auto');

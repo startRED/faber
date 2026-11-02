@@ -10,10 +10,18 @@
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Faber" "InstallLocation"
   StrCmp $R0 "" done
 
+  ; The key is only a hint a process of the same account could have rewritten: it is used when it is an absolute folder
+  ; (drive letter), its quotes balance, and a Faber program is really there. Anything else installs where the installer
+  ; would by default.
   StrCpy $R1 $R0 1
-  StrCmp $R1 '$\"' 0 useLocation
+  StrCmp $R1 '$\"' 0 absolute
+  StrCpy $R2 $R0 1 -1
+  StrCmp $R2 '$\"' 0 done
   StrCpy $R0 $R0 -1 1
-  useLocation:
+  absolute:
+  StrCpy $R1 $R0 1 1
+  StrCmp $R1 ":" 0 done
+  IfFileExists "$R0aber.exe" 0 done
   StrCpy $INSTDIR $R0
   done:
 !macroend

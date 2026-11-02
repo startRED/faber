@@ -14,7 +14,7 @@
 //! The agent acts by the words a person sees (`act.js`, run inside the page); on a page that asks for a login, a captcha
 //! or a payment it may read and scroll but never click or type.
 
-pub(crate) mod firefox;
+pub(crate) use faber_host::pane::firefox;
 pub(crate) mod native;
 
 use base64::Engine as _;

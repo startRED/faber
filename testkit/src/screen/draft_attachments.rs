@@ -134,8 +134,7 @@ fn refused_send(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(launch)?;
     app.page.click(&css(".list .item").has_text("Blocked send fixture"))?;
     app.page.wait_count(&css("article.ai"), 1)?;
-    let model = app.page.labelled("composer.model")?;
-    app.page.select_option(&model, "Claude Haiku")?;
+    super::select_model(&mut app.page, "Claude Haiku")?;
     let cpu_before = ctx.cpu_ms(app.id)?;
     let started = Instant::now();
     app.page.fill(&css(".composer textarea"), WORDS)?;
@@ -314,8 +313,7 @@ fn restart(ctx: &mut Ctx) -> Result {
     app.page.wait_count(&css(".composer .attach-row .thumb"), 1)?;
     committed(&mut app.page, false)?;
     // The recording contains a chat answer, not Auto's separate routing question.
-    let model = app.page.labelled("composer.model")?;
-    app.page.select_option(&model, "Claude Haiku")?;
+    super::select_model(&mut app.page, "Claude Haiku")?;
     let send = app.page.named("button", "composer.send")?;
     app.page.wait_enabled(&send)?;
     app.page.click(&send)?;

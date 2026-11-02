@@ -30,6 +30,7 @@ const MAX_SITES: usize = 500;
 /// At most this many cookies come back from one import.
 const MAX_COOKIES: usize = 10_000;
 /// Hosts per query, under SQLite's limit of 999 parameters.
+#[cfg(windows)]
 const CHUNK: usize = 500;
 /// A name is shown on screen, so it is cut.
 const MAX_NAME: usize = 64;
@@ -39,7 +40,9 @@ const MAX_AGE: i64 = 30 * 24 * 60 * 60;
 const MILLISECONDS: i64 = 10_000_000_000;
 
 const MISSING: &str = "error.cookies.missing";
+#[cfg(windows)]
 const LOCKED: &str = "error.cookies.locked";
+#[cfg(windows)]
 const TOO_BIG: &str = "error.cookies.tooBig";
 
 /// The expiry of a row in seconds, whichever unit it was stored in.
@@ -55,6 +58,7 @@ pub struct Profile {
     pub name: String,
     /// The profile Firefox opened most recently; exactly one across every root when there is any.
     pub last_used: bool,
+    #[cfg_attr(not(windows), allow(dead_code))]
     db: PathBuf,
     /// Firefox names it as the default of an installation (or, with none named, marks it `Default=1`).
     candidate: bool,
@@ -628,6 +632,21 @@ mod store {
 
     pub(super) fn rows(_: &Profile, _: &[String], _: i64) -> Result<Vec<Raw>, &'static str> {
         Err(MISSING)
+    }
+}
+
+#[cfg(test)]
+impl Profile {
+    /// A profile that reads nothing, for tests of what uses the list (the pane's own).
+    pub(crate) fn stand_in(id: &str, name: &str) -> Profile {
+        Profile {
+            id: id.into(),
+            name: name.into(),
+            last_used: true,
+            db: PathBuf::new(),
+            candidate: false,
+            modified: SystemTime::UNIX_EPOCH,
+        }
     }
 }
 

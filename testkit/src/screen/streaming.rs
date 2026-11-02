@@ -107,8 +107,7 @@ fn streaming(ctx: &mut Ctx) -> Result {
         "(() => { window.__long = { n: 0, ms: 0 }; new PerformanceObserver((list) => { for (const e of list.getEntries()) { window.__long.n++; window.__long.ms += e.duration; } }).observe({ type: 'longtask' }); return true; })()",
     )?;
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
-    let model = app.page.labelled("composer.model")?;
-    app.page.select_option(&model, "Claude Haiku")?;
+    super::select_model(&mut app.page, "Claude Haiku")?;
     let cpu_before = ctx.cpu_ms(app.id)?;
     let started = Instant::now();
     ask(&mut app.page, ASK)?;

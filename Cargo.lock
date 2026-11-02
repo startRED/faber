@@ -1091,7 +1091,6 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "regex",
- "rusqlite",
  "semver",
  "serde",
  "serde_json",
@@ -1177,12 +1176,18 @@ dependencies = [
  "base64 0.23.1",
  "dirs",
  "faber-engine",
+ "faber-update",
  "faber-winproc",
+ "junction",
  "png",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
+ "url",
+ "uuid",
  "winsafe",
 ]
 
@@ -1193,6 +1198,7 @@ dependencies = [
  "faber-channel",
  "faber-engine",
  "faber-host",
+ "faber-update",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1219,6 +1225,22 @@ dependencies = [
  "winreg",
  "winsafe",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "faber-update"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "junction",
+ "minisign-verify",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
