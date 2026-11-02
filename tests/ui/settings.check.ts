@@ -1371,8 +1371,18 @@ check('settings keyboard traversal: entry, reading order, hidden controls and vi
               equal(el.tabIndex, 0, `native Tab order: ${el.outerHTML}`);
               el.focus();
               equal(document.activeElement, el, `reachable control: ${el.outerHTML}`);
-              const ring = getComputedStyle(el.matches('input[type=color]') ? el.parentElement! : el);
-              if (el.matches(':focus-visible') || el.matches('input[type=color]')) ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+              const color = el.matches('input[type=color]');
+              if (color && !document.hasFocus()) {
+                // Hidden WebKit cannot activate :focus-within; inspect the explicit rule as styles.check.ts does.
+                const rules = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+                const rule = rules.find((rule) => rule.selectorText.includes('.dot.custom:has(input:focus-visible)') && rule.selectorText.includes('.dot.custom input:focus-visible'));
+                ok(rule, 'the custom color wheel and its input have an explicit keyboard focus rule');
+                equal(rule.style.getPropertyValue('outline'), '2px solid var(--accent-text)', 'the color wheel uses the shared focus ring');
+                equal(rule.style.getPropertyValue('outline-offset'), '2px', 'the color wheel ring stays outside the control');
+              } else {
+                const ring = getComputedStyle(color ? el.parentElement! : el);
+                if (el.matches(':focus-visible') || color) ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+              }
             }
           };
           inspect();

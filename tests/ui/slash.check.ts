@@ -66,7 +66,10 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     root.querySelector<HTMLButtonElement>('.composer .model-chip')!.click();
     await settle();
     [...root.querySelectorAll<HTMLButtonElement>('.model-option')].find((button) => button.textContent?.includes(model))!.click();
+    ok(root.querySelector('.model-label')?.textContent?.includes(model), 'the model menu applies the requested model');
     field().focus();
+    // Hidden WebKit updates activeElement without focusin; return to the field as a person does.
+    field().click();
     await settle();
   };
   const type = (text: string) => {

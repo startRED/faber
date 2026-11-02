@@ -2492,6 +2492,7 @@ export const es: Messages = {
   'notes.376.fixed': 'Una IA que espera a una ayudante recibe su informe aunque la conversación de la ayudante no pueda compactarse.',
   'notes.377.better': 'Nuevos dibujos ayudan a reconocer las pantallas vacías y el primer paso de cuentas.',
   'notes.378.fixed': 'Codex puede pedir permiso en su propia conversación y empieza a responder sin una espera adicional.',
+  'notes.379.fixed': 'El selector de color personalizado de Ajustes también muestra el contorno de foco del teclado en macOS.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

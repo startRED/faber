@@ -4,7 +4,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 ## Settings
 
-- Keyboard: Back takes focus; closing restores the opener (composer, Settings or quota). Tab and rings cover enabled controls; choices keep focus through saves and translations. Checked at 720 px.
+- Keyboard: Back takes focus; closing restores the opener (composer, Settings or quota). Tab and rings cover enabled controls; the custom color input explicitly carries the shared focus-visible ring to its wheel on macOS too. Choices keep focus through saves and translations. Checked at 720 px.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
   the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. With a native options

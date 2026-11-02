@@ -2372,6 +2372,7 @@ export const en = {
   'notes.376.fixed': 'An agent waiting for a helper now receives its report even if the helper cannot compact its conversation.',
   'notes.377.better': 'New drawings make empty screens and the first account step easier to recognize.',
   'notes.378.fixed': 'Codex can ask for permission in its own conversation and starts answering without an extra wait.',
+  'notes.379.fixed': 'The custom color picker in Settings shows its keyboard focus ring on macOS too.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

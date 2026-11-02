@@ -2479,6 +2479,7 @@ export const ptBR: Messages = {
   'notes.376.fixed': 'Uma IA que espera por uma ajudante recebe o relatório mesmo quando a conversa da ajudante não pode ser compactada.',
   'notes.377.better': 'Novos desenhos ajudam a reconhecer as telas vazias e a primeira etapa de contas.',
   'notes.378.fixed': 'O Codex pode pedir permissão na própria conversa e começa a responder sem uma espera extra.',
+  'notes.379.fixed': 'O seletor de cor personalizada nas Configurações mostra o contorno de foco do teclado também no macOS.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

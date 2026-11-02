@@ -2492,6 +2492,7 @@ export const de: Messages = {
   'notes.376.fixed': 'Eine KI erhält den Bericht einer Helferin auch dann, wenn deren Unterhaltung nicht komprimiert werden kann.',
   'notes.377.better': 'Neue Zeichnungen machen leere Ansichten und den ersten Kontoschritt leichter erkennbar.',
   'notes.378.fixed': 'Codex kann in seiner eigenen Unterhaltung um Erlaubnis bitten und beginnt ohne zusätzliche Wartezeit zu antworten.',
+  'notes.379.fixed': 'Die eigene Farbauswahl in den Einstellungen zeigt auch unter macOS den Tastaturfokus an.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
