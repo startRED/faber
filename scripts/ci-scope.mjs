@@ -48,6 +48,22 @@ export function toCheck(files) {
   return SUITES.filter((suite) => needed[suite]);
 }
 
+/**
+ * The cheap checks the PC runs before queueing a change to `files`, so a lint error never costs a queue round: the format
+ * check and Clippy for Rust and its manifests, oxlint for the screen's code, the type check for TypeScript, and always the
+ * docs check, which also reads the page links in code. Checks only: CI runs its own lints anyway, and `faber/verify` never
+ * names them. `test:scripts` stays out: its timing tests fail on a busy PC, and a lane runs it before each commit.
+ */
+export function lintsFor(files) {
+  const rust = files.some((f) => /\.rs$|(^|\/)(Cargo\.(toml|lock)|clippy\.toml|rustfmt\.toml)$|^\.cargo\//.test(f));
+  return [
+    ...(rust ? ['fmt', 'clippy'] : []),
+    ...(files.some((f) => /^(ui|tests\/ui)\/.*\.(tsx?|js)$/.test(f)) ? ['lint'] : []),
+    ...(files.some((f) => /\.tsx?$|(^|\/)tsconfig[^/]*\.json$/.test(f)) ? ['typecheck'] : []),
+    'docs',
+  ];
+}
+
 /** The commit status the PC posts when its full check of a queued tree passed (R190 V2). */
 export const STATUS = 'faber/verify';
 

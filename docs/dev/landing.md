@@ -41,7 +41,7 @@ none runs. A workflow change never rides: it is checked alone and landed with `-
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
 (`faber-wt-landing` beside the main checkout, marked as its own and building into `target/landing`, one landing at a
-time, on Windows only, where the screen suite runs). When they pass, it
+time, on Windows only, where the screen suite runs). First it runs the cheap checks the change needs: formatting and Clippy for Rust, lint and typecheck for the screen, and the docs check. CI still runs its own. When they pass, it
 posts the commit status `faber/verify` with the owner's own `gh` sign-in, saying the tree and the suites
 (`tree <hash> covers rust ui screen`), and only then pushes the queue branch. The `changes` job takes that status only
 from the repository's owner, only on a queue branch and only for the tree it names, and leaves those suites out: the
@@ -51,4 +51,3 @@ run again on a new base), no `cargo` on the PATH or another landing checking at 
 and CI runs every suite. The status is only as trusted as the owner's PC: any program there can post it with the
 owner's sign-in, as the spec accepts, and the daily run on `main` catches a false green within a day. Every suite still runs on `main` once a day and before a commit becomes stable, which is also
 where macOS runs its Rust suite now (Erick, 2026-10-17): the PC proves macOS through Clippy only (R166).
-
