@@ -4679,9 +4679,10 @@ impl Core {
             ),
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
+                let title = self.convs.get(conv).map(|c| c.title.clone());
                 self.codex_server(area, user_hooks, permissions, &cli).open_identified(
                     CodexThread {
-                        title: self.convs.get(conv).map(|c| c.title.clone()),
+                        title,
                         helper,
                         browse,
                         conversations,
