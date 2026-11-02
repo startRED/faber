@@ -85,6 +85,7 @@ impl Router {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let (model, effort, instructions) = (Some(model.to_string()), Some(effort.to_string()), Some(INSTRUCTIONS.to_string()));
         let session = match vendor {
+            Vendor::Gemini => return None,
             Vendor::Codex => {
                 let (_, server) = self.codex.as_ref()?;
                 server.open(

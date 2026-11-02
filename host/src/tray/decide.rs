@@ -58,6 +58,8 @@ fn default_stopped() -> BTreeMap<String, String> {
         ("quota", "{title}: stopped keeping going until {ai} has quota again"),
         ("billed", "{title}: stopped keeping going, {ai} may be billed per use"),
         ("goal", "{title}: Faber could not fix this goal by itself"),
+        ("stage", "{title}: done, come and look"),
+        ("decision", "{title}: needs a decision from you"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -303,6 +305,7 @@ pub fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendo
     let ai = match ai {
         Some(Vendor::Claude) => "Claude",
         Some(Vendor::Codex) => "Codex",
+        Some(Vendor::Gemini) => "Gemini",
         None => "AI",
     };
     fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)
@@ -642,6 +645,13 @@ mod tests {
             stopped_text(&english, "every check passes", "reason.goal.needsYou", None),
             "every check passes: Faber could not fix this goal by itself"
         );
+    }
+
+    #[test]
+    fn a_leading_agent_that_finished_or_needs_a_decision_says_which() {
+        let english = ShellTexts::default();
+        assert_eq!(stopped_text(&english, "New site", "reason.keepGoing.stage", None), "New site: done, come and look");
+        assert_eq!(stopped_text(&english, "New site", "reason.keepGoing.decision", None), "New site: needs a decision from you");
     }
 
     #[test]

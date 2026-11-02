@@ -82,6 +82,7 @@ mod session;
 mod settings_change;
 mod siblings;
 mod silence;
+mod stage;
 mod stuck_watch;
 mod title;
 mod toolbox;
@@ -146,7 +147,8 @@ pub enum AppEvent {
         conversation_id: String,
         parts: Vec<crate::model::ContextPart>,
     },
-    /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
+    /// "Keep going" stopped by itself in a conversation, or a leading agent's job ended on its closing box, and why (a
+    /// `reason.keepGoing.*` key): the tray tells the person.
     Halted {
         conversation_id: String,
         title: String,
@@ -250,6 +252,8 @@ pub(crate) fn child_line(c: &Conversation) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppState {
+    #[serde(rename = "gitReason", skip_serializing_if = "Option::is_none")]
+    pub git_reason: Option<&'static str>,
     pub background: crate::background::List,
     pub conversations: Vec<Summary>,
     pub projects: Vec<Project>,
@@ -485,6 +489,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// The closing box each leading agent last told the tray about (`stage.rs`), so one box is told once. Never saved: after a
+    /// restart only a new run ends.
+    stage_told: HashMap<String, String>,
     /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
     /// (`resume_cut_leaders`, which takes them once).
     quiet_teams: HashMap<String, Vec<String>>,
@@ -493,6 +500,7 @@ struct Core {
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
+    git_missing: bool,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
@@ -725,6 +733,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                stage_told: HashMap::new(),
                 quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
@@ -805,6 +814,7 @@ impl Engine {
                 test_items: Vec::new(),
                 before: HashMap::new(),
                 git: None,
+                git_missing: false,
                 rewind,
                 unclean_exit,
                 project_states: Mutex::new(HashMap::new()),
@@ -900,6 +910,8 @@ impl Engine {
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
                 Vendor::Claude => claude_quota = self.check_claude_plan(timeout).await,
+                // Not yet: no CLI is discovered for it, so no job is made.
+                Vendor::Gemini => {}
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
                     self.with(|c| {
@@ -1266,6 +1278,18 @@ impl Engine {
     /// Deletes a conversation, unless its copy holds work found nowhere else (see `remove_with`).
     pub fn remove(&self, id: &str) {
         let _ = self.remove_with(id, false);
+    }
+
+    pub fn damaged_conversation(&self, id: &str) -> Result<PathBuf, String> {
+        self.with(|c| c.store.damaged_conversation(id).map_err(|f| f.key().into()))
+    }
+
+    pub fn remove_damaged_conversation(&self, id: &str) -> Result<(), String> {
+        self.with(|c| {
+            c.store.remove_damaged_conversation(id).map_err(|f| f.key().to_string())?;
+            c.list_changed();
+            Ok(())
+        })
     }
     /// `@` in the composer (parity T4): the entries of the working folder of conversation `id`, or of a new conversation's
     /// project, that match `query`. A new chat has no folder yet, so it has none. The folder is checked and git runs outside
@@ -2202,6 +2226,7 @@ impl Core {
             }
         }
         AppState {
+            git_reason: self.git_missing.then_some("reason.git_missing"),
             background: self.background.list(),
             conversations: self.listed(),
             projects,
@@ -4090,6 +4115,7 @@ impl Core {
             self.reopen_busy_plan_steps(&lead, true);
         }
         let items = self.running_items();
+        self.tell_stages(&items);
         self.mark_ended(&items);
         // A conversation that started, ended or now waits for the person moves a step of the plan that names it.
         let moved: HashSet<String> = self.running.items.iter().chain(&items).map(|i| i.conversation_id.clone()).collect();
@@ -4634,6 +4660,8 @@ impl Core {
         let progress = area == Area::Project;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
+            // Not yet: no CLI is discovered for it, so the lookup above already refused it.
+            Vendor::Gemini => return Err("error.notConnected".into()),
             Vendor::Claude => start_conversation_claude(
                 conv,
                 ClaudeOptions {
@@ -5368,6 +5396,7 @@ impl Core {
         let resume = match vendor {
             Vendor::Claude => vec!["--resume".to_string(), session],
             Vendor::Codex => vec!["resume".to_string(), session],
+            Vendor::Gemini => return None,
         };
         Some(TerminalCommand { command: cli.command, args: cli.prefix.into_iter().chain(resume).collect(), cwd: self.cwd_of(&c).ok()? })
     }

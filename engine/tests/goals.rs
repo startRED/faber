@@ -255,7 +255,7 @@ async fn build(billed: bool, both: bool, crash: bool) -> Rig {
         data_dir: data.path().into(),
         #[cfg(windows)]
         chat_dir: data.chat_path().into(),
-        clis: BTreeMap::from(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })))
+        clis: BTreeMap::from(Vendor::RUNNABLE.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })))
             .into_iter()
             .filter(|(v, _)| both || *v == Vendor::Claude)
             .collect(),

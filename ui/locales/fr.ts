@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  "reason.conversation_damaged": "Cette conversation n’a pas pu être lue.",
+  "damaged.showFile": "Afficher le fichier",
+  "damaged.remove": "Supprimer",
+  "damaged.confirmRemove": "Supprimer la copie endommagée ?",
   "child.working": "En cours",
   "child.waiting": "En attente",
   "child.stopped": "Arrêtée",
@@ -298,6 +302,8 @@ export const fr: Messages = {
   'tray.stopped.quota': '{title} : a cessé de continuer jusqu’à ce que {ai} ait du quota',
   'tray.stopped.billed': '{title} : a cessé de continuer, {ai} est peut-être facturé à l’usage',
   'tray.stopped.goal': '{title} : Faber n’a pas pu réparer cet objectif tout seul',
+  'tray.stopped.stage': '{title} : c’est fini, venez voir',
+  'tray.stopped.decision': '{title} : a besoin d’une décision de votre part',
   'toast.dismiss': 'Ignorer',
   'group.groups': "Groupes",
   'group.create': "Nouveau groupe",
@@ -1958,6 +1964,8 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "L'opération Git a échoué.",
+  "reason.git_missing": "Git n’est pas installé, donc chaque conversation travaille dans votre dossier.",
+  "projects.gitDownload": "Télécharger Git",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "Le binaire Git natif n'est pas disponible ou n'a pas pu être vérifié.",
   "reason.remote.ghMissing": "La CLI GitHub (gh) n'est pas installée. Votre travail reste local tant qu'elle ne l'est pas.",
@@ -2468,6 +2476,9 @@ export const fr: Messages = {
   'notes.366.better': 'Vous pouvez ouvrir les conversations lancées par commande par l’agent et voir leur état.',
   'notes.367.better': 'Les nouvelles conversations reçoivent un titre court dans la langue de votre message après la première réponse, sans changer les noms que vous avez choisis.',
   'notes.368.better': 'Le focus entre dans les réglages à leur ouverture, reste sur votre choix à l’enregistrement et revient à la fermeture.',
+  'notes.369.better': 'Sans Git, les conversations du projet travaillent dans votre dossier ; la page du projet explique pourquoi et propose de le télécharger.',
+  'notes.370.fixed': 'Les conversations illisibles restent dans votre liste avec une copie à afficher ou supprimer ; l’original reste intact.',
+  'notes.371.new': 'Faber vous prévient une fois quand un gros travail est fini ou a besoin de vous.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "reason.conversation_damaged": "Diese Unterhaltung konnte nicht gelesen werden.",
+  "damaged.showFile": "Datei anzeigen",
+  "damaged.remove": "Entfernen",
+  "damaged.confirmRemove": "Beschädigte Kopie entfernen?",
   "child.working": "Arbeitet",
   "child.waiting": "Wartet",
   "child.stopped": "Gestoppt",
@@ -298,6 +302,8 @@ export const de: Messages = {
   'tray.stopped.quota': '{title}: hat aufgehört, bis {ai} wieder Kontingent hat',
   'tray.stopped.billed': '{title}: hat aufgehört, {ai} wird vielleicht nach Nutzung abgerechnet',
   'tray.stopped.goal': '{title}: Faber konnte dieses Ziel nicht von selbst reparieren',
+  'tray.stopped.stage': '{title}: fertig, schau es dir an',
+  'tray.stopped.decision': '{title}: braucht eine Entscheidung von dir',
   'toast.dismiss': 'Ausblenden',
   'group.groups': "Gruppen",
   'group.create': "Neue Gruppe",
@@ -1958,6 +1964,8 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "Die Git-Operation ist fehlgeschlagen.",
+  "reason.git_missing": "Git ist nicht installiert. Deshalb arbeitet jede Unterhaltung in deinem Ordner.",
+  "projects.gitDownload": "Git herunterladen",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "Natives Git ist nicht verfügbar oder konnte nicht geprüft werden.",
   "reason.remote.ghMissing": "Die GitHub-CLI (gh) ist nicht installiert. Deine Arbeit bleibt lokal, bis sie es ist.",
@@ -2468,6 +2476,9 @@ export const de: Messages = {
   'notes.366.better': 'Du kannst Gespräche öffnen, die der Agent per Befehl startet, und ihren Status sehen.',
   'notes.367.better': 'Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten.',
   'notes.368.better': 'Der Tastaturfokus wechselt beim Öffnen in die Einstellungen, bleibt beim Speichern auf deiner Auswahl und kehrt beim Schließen zurück.',
+  'notes.369.better': 'Ohne Git arbeiten Projektunterhaltungen in deinem Ordner; die Projektstartseite erklärt den Grund und bietet einen Link zum Herunterladen.',
+  'notes.370.fixed': 'Unlesbare Unterhaltungen bleiben mit einer Kopie in deiner Liste, die du anzeigen oder entfernen kannst; das Original bleibt unverändert.',
+  'notes.371.new': 'Faber sagt dir einmal Bescheid, wenn eine große Arbeit fertig ist oder dich braucht.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

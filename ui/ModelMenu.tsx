@@ -13,7 +13,7 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
   let position = () => {};
   const selected = (option: Option) => option.choice.vendor === props.choice.vendor && option.choice.model === props.choice.model;
   const models = createMemo(() => props.options.filter((option) => option.choice.vendor !== 'auto'));
-  const groups = createMemo(() => (['claude', 'codex'] as Vendor[]).filter((vendor) => models().some((option) => option.choice.vendor === vendor)));
+  const groups = createMemo(() => (['claude', 'codex', 'gemini'] as Vendor[]).filter((vendor) => models().some((option) => option.choice.vendor === vendor)));
   const matches = (option: Option) => option.label.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase());
   const label = () => props.choice.vendor === 'auto' ? t('model.autoChoose') : props.options.find(selected)?.label ?? prettyModel(props.choice.model);
   const close = () => { if (panel?.matches(':popover-open')) panel.hidePopover(); setOpen(false); };

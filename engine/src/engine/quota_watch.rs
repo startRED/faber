@@ -130,6 +130,8 @@ impl Core {
                         }
                         c.emit_usage();
                     }
+                    // Not yet: no CLI is discovered for it, so the loop above skipped it.
+                    Vendor::Gemini => {}
                 }
             });
             break;
@@ -221,6 +223,7 @@ impl Engine {
     /// The window was shown, hidden or focused (the screen says). Gaining focus reads at once; while hidden, readings slow down.
     pub fn set_attention(&self, visible: bool, focused: bool) {
         if focused {
+            self.refresh_git();
             self.refresh_project_folders();
         }
         self.with(|c| {

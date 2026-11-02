@@ -338,25 +338,25 @@ fn catalog_switch_remove_and_undo_apply_to_next_kits_and_preserve_held_sessions(
     let kit = |vendor| store.kit_for(vendor, task, None, Area::Project, Permissions::Ask, &[]);
     let (held, _) = kit(Vendor::Claude);
     let held_path = held.skills.as_ref().unwrap().join("careful/SKILL.md");
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         assert_eq!(kit(vendor).1.ids, ["careful"]);
     }
     store.set_enabled("careful", false).unwrap();
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         assert!(kit(vendor).1.ids.is_empty(), "a switched-off item never enters the next session");
     }
     store.remove("careful").unwrap();
     store.restore("careful").unwrap();
     assert!(!store.enabled("careful"), "Undo preserves the disabled switch");
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         assert!(kit(vendor).1.ids.is_empty());
     }
     store.set_enabled("careful", true).unwrap();
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         assert_eq!(kit(vendor).1.ids, ["careful"]);
     }
     store.remove("careful").unwrap();
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         assert!(kit(vendor).1.ids.is_empty(), "an uninstalled item never enters the next session");
     }
     assert_eq!(std::fs::read(held_path).unwrap(), SKILL, "a running session retains its verified snapshot");

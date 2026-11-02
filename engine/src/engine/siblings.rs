@@ -224,6 +224,7 @@ impl Core {
                     crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, &model))
                 }
                 Vendor::Codex => self.codex_models.contains(&model),
+                Vendor::Gemini => false,
             };
             if !valid {
                 return Err("unknown model; choose a model available for this AI");
@@ -632,6 +633,7 @@ impl Core {
                 let valid: Vec<String> = match vendor {
                     Vendor::Claude => crate::route::PROFILES.iter().filter(|p| p.vendor == vendor).map(|p| p.model.to_string()).collect(),
                     Vendor::Codex => self.codex_models.clone(),
+                    Vendor::Gemini => Vec::new(),
                 };
                 if !valid.iter().any(|m| m == crate::router::pinned(vendor, model)) {
                     return Err(format!("unknown model; valid models are: {}", valid.join(", ")));

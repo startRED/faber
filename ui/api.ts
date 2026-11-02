@@ -1,7 +1,7 @@
 import { invoke, listen } from './shell.ts';
 
 // The shapes the engine sends (engine/src/model.rs).
-export type Vendor = 'claude' | 'codex';
+export type Vendor = 'claude' | 'codex' | 'gemini';
 
 /**
  * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole
@@ -388,6 +388,7 @@ export interface Stuck { noticedAt: number; since: number; turns: number; usd: n
 export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
 
 export interface Summary {
+  reason?: 'reason.conversation_damaged';
   results?: Results;
   stuck?: boolean;
   id: string;
@@ -651,6 +652,7 @@ export interface VendorUsage {
   ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
+  gitReason?: 'reason.git_missing';
   uncleanExit?: { at: number; started?: number; panic: boolean };
   conversations: Summary[];
   projects: Project[];
@@ -902,7 +904,7 @@ export interface Plural {
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
 /** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
-export const STOPS = ['done', 'silent', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal'] as const;
+export const STOPS = ['done', 'silent', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal', 'stage', 'decision'] as const;
 
 /** A sign that the agent's own work seems stuck: a step with no news (`quiet`), a long compaction, or the same step again
  * and again. `minutes` without news for the first two. It never stops anything by itself. */
@@ -1040,6 +1042,8 @@ export const api = {
   },
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
+  showDamagedConversation: (id: string) => invoke<void>('show_damaged_conversation', { id }),
+  removeDamagedConversation: (id: string) => invoke<void>('remove_damaged_conversation', { id }),
   /** Pending rewind recovery always refuses deletion; `discard` only overrides `error.copy.unsaved`. */
   remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),

@@ -37,6 +37,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
   const latest: Record<Vendor, Command[]> = {
     claude: [{ vendor: 'claude', name: 'review', skill: false }],
     codex: [{ vendor: 'codex', name: 'review-notes', skill: true }],
+    gemini: [],
   };
   api.open = async () => conversation;
   api.state = async () => initial;

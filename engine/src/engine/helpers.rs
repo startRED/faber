@@ -175,6 +175,7 @@ impl Core {
         let effort = Some(effort);
         let resources = (vendor == Vendor::Claude).then(|| super::kits::claude_resources(Area::Project, &tools)).flatten();
         let session = match vendor {
+            Vendor::Gemini => return Err("error.notConnected"),
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),

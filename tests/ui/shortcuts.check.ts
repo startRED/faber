@@ -146,3 +146,11 @@ check('shortcuts: Alt Up and Down skip chats that sit in a group, as the sidebar
   const all = ['a', 'b', 'c'].map((id, i) => ({ id, area: 'chat', updatedAt: now - i * 3_600_000 }));
   equal(neighbour(all, { id: 'a', area: 'chat' }, 1, now, new Set(['b']))?.id, 'c');
 });
+
+check('shortcuts: Alt Up and Down skip damaged conversations in both areas', () => {
+  for (const area of ['chat', 'project']) {
+    const all = ['a', 'broken', 'c'].map((id, i) => ({ id, area, projectId: 'p', updatedAt: 3 - i, reason: id === 'broken' ? 'reason.conversation_damaged' : undefined }));
+    equal(neighbour(all, { id: 'a', area, projectId: 'p' }, 1, 4)?.id, 'c');
+    equal(neighbour(all, { id: 'c', area, projectId: 'p' }, -1, 4)?.id, 'a');
+  }
+});

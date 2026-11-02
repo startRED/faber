@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "reason.conversation_damaged": "Não foi possível ler esta conversa.",
+  "damaged.showFile": "Mostrar o arquivo",
+  "damaged.remove": "Remover",
+  "damaged.confirmRemove": "Remover a cópia danificada?",
   "child.working": "Trabalhando",
   "child.waiting": "Aguardando",
   "child.stopped": "Parada",
@@ -458,6 +462,8 @@ export const ptBR: Messages = {
   'tray.stopped.quota': '{title}: parou de continuar até o {ai} ter cota de novo',
   'tray.stopped.billed': '{title}: parou de continuar, o {ai} pode ser cobrado por uso',
   'tray.stopped.goal': '{title}: o Faber não conseguiu consertar esta meta sozinho',
+  'tray.stopped.stage': '{title}: pronto, venha ver',
+  'tray.stopped.decision': '{title}: precisa de uma decisão sua',
   'toast.dismiss': 'Dispensar',
   'group.groups': "Grupos",
   'group.create': "Novo grupo",
@@ -1955,6 +1961,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "A operação do Git falhou.",
+  "reason.git_missing": "O Git não está instalado, então cada conversa trabalha na sua pasta.",
+  "projects.gitDownload": "Baixar Git",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "O Git nativo não está disponível ou não pôde ser verificado.",
   "reason.remote.ghMissing": "O GitHub CLI (gh) não está instalado. Seu trabalho fica só no computador até ele estar.",
@@ -2455,6 +2463,9 @@ export const ptBR: Messages = {
   'notes.366.better': 'Você pode abrir as conversas que o agente inicia por comandos e acompanhar o estado delas.',
   'notes.367.better': 'Conversas novas ganham um título curto no idioma da sua mensagem depois da primeira resposta, sem mudar os nomes que você escolheu.',
   'notes.368.better': 'O foco do teclado entra nas Configurações ao abrir, fica na sua escolha ao salvar e volta ao fechar.',
+  'notes.369.better': 'Sem Git, as conversas do projeto trabalham na sua pasta; a tela inicial explica o motivo e mostra onde baixar.',
+  'notes.370.fixed': 'Conversas que não podem ser lidas continuam na lista com uma cópia que você pode mostrar ou remover; o original fica intacto.',
+  'notes.371.new': 'O Faber avisa uma vez quando um trabalho grande termina ou precisa de você.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

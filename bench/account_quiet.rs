@@ -46,6 +46,7 @@ impl Accounts {
             let lag = match vendor {
                 Vendor::Claude => LAG_CLAUDE,
                 Vendor::Codex => LAG_CODEX,
+                Vendor::Gemini => continue,
             };
             account.quiet.own_work_ended(now, lag);
             account.next = now + lag;
@@ -71,6 +72,7 @@ impl Accounts {
                 }
                 let spawn = status_spawner(*vendor, cli, proc::real_spawner());
                 let events = match vendor {
+                    Vendor::Gemini => continue,
                     Vendor::Claude => match claude_usage(
                         cli,
                         &spawn,

@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const es: Messages = {
+  "reason.conversation_damaged": "No se pudo leer esta conversación.",
+  "damaged.showFile": "Mostrar el archivo",
+  "damaged.remove": "Eliminar",
+  "damaged.confirmRemove": "¿Eliminar la copia dañada?",
   "child.working": "Trabajando",
   "child.waiting": "En espera",
   "child.stopped": "Detenida",
@@ -459,6 +463,8 @@ export const es: Messages = {
   'tray.stopped.quota': '{title}: dejó de seguir hasta que {ai} vuelva a tener cuota',
   'tray.stopped.billed': '{title}: dejó de seguir, {ai} puede cobrarse por uso',
   'tray.stopped.goal': '{title}: Faber no pudo arreglar esta meta por sí solo',
+  'tray.stopped.stage': '{title}: listo, ven a verlo',
+  'tray.stopped.decision': '{title}: necesita que tomes una decisión',
   'toast.dismiss': 'Descartar',
   'group.groups': "Grupos",
   'group.create': "Nuevo grupo",
@@ -1958,6 +1964,8 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "La operación de Git ha fallado.",
+  "reason.git_missing": "Git no está instalado, así que cada conversación trabaja en tu carpeta.",
+  "projects.gitDownload": "Descargar Git",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "El Git nativo no está disponible o no se pudo comprobar.",
   "reason.remote.ghMissing": "La CLI de GitHub (gh) no está instalada. Tu trabajo se queda en local hasta que lo esté.",
@@ -2468,6 +2476,9 @@ export const es: Messages = {
   'notes.366.better': 'Puedes abrir las conversaciones que el agente inicia mediante comandos y ver su estado.',
   'notes.367.better': 'Las conversaciones nuevas reciben un título corto en el idioma de tu mensaje tras la primera respuesta, sin cambiar los nombres que elegiste.',
   'notes.368.better': 'El foco del teclado entra en Ajustes al abrirlos, sigue en tu opción al guardar y vuelve al cerrarlos.',
+  'notes.369.better': 'Sin Git, las conversaciones del proyecto trabajan en tu carpeta; la pantalla inicial explica por qué y ofrece el enlace de descarga.',
+  'notes.370.fixed': 'Las conversaciones ilegibles siguen en tu lista con una copia que puedes mostrar o eliminar; el original queda intacto.',
+  'notes.371.new': 'Faber te avisa una vez cuando un trabajo grande termina o te necesita.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

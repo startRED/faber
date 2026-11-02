@@ -114,6 +114,30 @@ fn only_the_browser_pane_the_page_server_and_the_first_paint_are_the_windows() {
 struct Quiet;
 impl Shell for Quiet {}
 
+#[tokio::test]
+async fn damaged_conversation_commands_only_accept_screen_ids_and_keep_the_original() {
+    let (host, dir) = host().await;
+    let file = dir.path().join("data/conversations/x.json");
+    let copy = file.with_extension("json.damaged");
+    std::fs::write(&file, b"{").unwrap();
+    host.engine.state();
+    host.engine.state();
+    assert!(copy.exists());
+    for command in ["show_damaged_conversation", "remove_damaged_conversation"] {
+        for caller in [Caller::Person, Caller::Agent { conversation: Some("x".into()) }] {
+            assert_eq!(key(host.dispatch_as(&caller, command, json!({ "id": "x" })).await), "error.reach.screen");
+        }
+        assert!(host.dispatch(command, json!({ "id": "../x" })).await.is_err());
+        assert!(copy.exists());
+    }
+    // A valid copy reaches the shell; this headless shell can only report that it has no window.
+    assert_eq!(key(host.dispatch("show_damaged_conversation", json!({ "id": "x" })).await), NO_WINDOW);
+    host.dispatch("remove_damaged_conversation", json!({ "id": "x" })).await.unwrap();
+    assert!(!copy.exists());
+    assert_eq!(std::fs::read(file).unwrap(), b"{");
+    assert!(!host.engine.state().conversations.iter().any(|c| c.id == "x"));
+}
+
 /// A host over a real engine in a temporary data folder, with no CLI, no window and a hidden run's rules.
 async fn host() -> (Host, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

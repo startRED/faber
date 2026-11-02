@@ -159,7 +159,7 @@ mod tests {
         let profiles = crate::route::PROFILES;
         let selected = select_profiles(&profiles, false).unwrap();
         assert_ne!(selected[0].vendor, selected[1].vendor);
-        for vendor in Vendor::ALL {
+        for vendor in Vendor::RUNNABLE {
             let only: Vec<_> = profiles.into_iter().filter(|p| p.vendor == vendor).collect();
             let selected = select_profiles(&only, false).unwrap();
             assert_eq!(selected[0].vendor, selected[1].vendor);
@@ -287,7 +287,7 @@ mod tests {
         let commands = Arc::new(Mutex::new(Vec::new()));
         let mut held = Vec::new();
         engine.with(|c| {
-            let spares = Vendor::ALL
+            let spares = Vendor::RUNNABLE
                 .into_iter()
                 .map(|vendor| {
                     let mut spare = judge(vendor, None, commands.clone());

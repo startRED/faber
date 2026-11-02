@@ -47,12 +47,13 @@ fn fences(markdown: &str) -> Vec<(String, String)> {
 
 #[tokio::test]
 async fn conversation_export_keeps_all_piece_content_and_current_choices_after_reopening_for_both_clis() {
-    for vendor in Vendor::ALL {
+    for vendor in Vendor::RUNNABLE {
         let mut state = CodexTurnState::default();
         let events = support::fixture(vendor.name(), "visual-pieces")
             .into_iter()
             .filter(|entry| !entry.input)
             .flat_map(|entry| match vendor {
+                Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
                 Vendor::Claude => faber_engine::claude::parse_claude_message(&entry.msg),
                 Vendor::Codex => parse_codex_notification(&entry.msg, &mut state),
             })

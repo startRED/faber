@@ -28,6 +28,8 @@ pub fn login_args(vendor: Vendor) -> &'static [&'static str] {
     match vendor {
         Vendor::Claude => &["auth", "login"],
         Vendor::Codex => &["login"],
+        // Not yet: no CLI is discovered for it, so nothing signs in.
+        Vendor::Gemini => &[],
     }
 }
 
@@ -35,6 +37,7 @@ pub fn status_args(vendor: Vendor) -> &'static [&'static str] {
     match vendor {
         Vendor::Claude => &["auth", "status"],
         Vendor::Codex => &["login", "status"],
+        Vendor::Gemini => &[],
     }
 }
 
@@ -455,6 +458,7 @@ async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<S
 
 fn verdict(vendor: Vendor, output: &str, code: Option<i32>) -> AccountStatus {
     let said = match vendor {
+        Vendor::Gemini => return AccountStatus::Unknown,
         Vendor::Claude => serde_json::from_str::<serde_json::Value>(output).ok().and_then(|v| v["loggedIn"].as_bool()),
         // ponytail: Codex documents only its exit code; the wording is matched for replays, which have none.
         Vendor::Codex => output.lines().map(str::trim).find_map(|l| {

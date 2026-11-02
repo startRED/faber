@@ -55,7 +55,7 @@ impl List {
 }
 
 fn unavailable(project: bool) -> Vec<List> {
-    Vendor::ALL
+    Vendor::RUNNABLE
         .into_iter()
         .map(|vendor| {
             let mut list = List { vendor, rows: Vec::new(), issues: Vec::new() };
@@ -303,7 +303,7 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
     let store = Store::new(data);
     let statuses = store.checked_statuses();
     let installed = store.installed();
-    Vendor::ALL
+    Vendor::RUNNABLE
         .into_iter()
         .map(|vendor| {
             let mut list = List { vendor, rows: Vec::new(), issues: Vec::new() };
@@ -328,6 +328,7 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
             let roots: &[&str] = match vendor {
                 Vendor::Claude => &[".claude/skills"],
                 Vendor::Codex => &[".agents/skills", ".codex/skills"],
+                Vendor::Gemini => &[],
             };
             if let Some(home) = home {
                 for root in roots {

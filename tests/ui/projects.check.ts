@@ -14,6 +14,51 @@ import { check, equal, ok } from './check.ts';
 const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/fixture/review' };
 const settle = (ms: number = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
+check('project home: missing Git explains in-place work and opens the official download', async () => {
+  const original = api.openLink;
+  const opened: string[] = [];
+  api.openLink = async (url) => { opened.push(url); };
+  useLanguage('en');
+  const [reason, setReason] = createSignal<'reason.git_missing'>();
+  const [project, setProject] = createSignal<Project | undefined>(demo);
+  const root = document.createElement('div');
+  root.style.width = '720px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const dispose = render(() => createComponent(Welcome, {
+    recent: [], running: [], projects: [demo],
+    get project() { return project(); },
+    get gitReason() { return reason(); },
+    onSuggest: () => {}, onOpen: () => {}, children: null,
+  }), root);
+  try {
+    equal(root.querySelector('[data-testid="git-missing"]'), null, 'no notice while Git is available');
+    setReason('reason.git_missing');
+    await settle();
+    const card = root.querySelector('[data-testid="git-missing"]');
+    ok(card?.textContent?.includes('Git is not installed, so each conversation works in your folder.'), 'explains what keeps working');
+    equal(root.querySelectorAll('[data-testid="git-missing"]').length, 1, 'one quiet card');
+    equal(card?.getAttribute('role'), 'status', 'a calm notice, not an error');
+    equal(card?.querySelectorAll('button').length, 1, 'one action');
+    equal(card?.querySelector('button')?.textContent, 'Download Git');
+    await click(card?.querySelector('button'));
+    equal(opened.join('|'), 'https://git-scm.com/downloads', 'uses the existing system-browser path');
+    setReason(undefined);
+    await settle();
+    equal(root.querySelector('[data-testid="git-missing"]'), null, 'the refreshed engine state removes the card');
+    setReason('reason.git_missing');
+    setProject(undefined);
+    await settle();
+    equal(root.querySelector('[data-testid="git-missing"]'), null, 'Chat has no Git notice');
+    setProject({ ...demo, state: 'missing' });
+    await settle();
+    equal(root.querySelector('[data-testid="git-missing"]'), null, 'a missing folder keeps its own recovery notice');
+    setProject({ ...demo, state: 'disconnected' });
+    await settle();
+    equal(root.querySelector('[data-testid="git-missing"]'), null, 'a disconnected drive keeps its own recovery notice');
+  } finally { dispose(); root.remove(); api.openLink = original; }
+});
+
 // A project is an agent chat, never a mission (R160): the only screens of the Projects area are its settings (here) and the
 // small "Open a project" screen (tests/ui/recents.check.ts, tests/ui/grammar.check.ts).
 // The checks a project declares are confirmed in Settings, Projects.

@@ -1,6 +1,10 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "reason.conversation_damaged": "This conversation could not be read.",
+  "damaged.showFile": "Show the file",
+  "damaged.remove": "Remove",
+  "damaged.confirmRemove": "Remove the damaged copy?",
   "child.working": "Working",
   "child.waiting": "Waiting",
   "child.stopped": "Stopped",
@@ -459,6 +463,8 @@ export const en = {
   'tray.stopped.quota': '{title}: stopped keeping going until {ai} has quota again',
   'tray.stopped.billed': '{title}: stopped keeping going, {ai} may be billed per use',
   'tray.stopped.goal': '{title}: Faber could not fix this goal by itself',
+  'tray.stopped.stage': '{title}: done, come and look',
+  'tray.stopped.decision': '{title}: needs a decision from you',
   'toast.dismiss': 'Dismiss',
   'group.groups': "Groups",
   'group.create': "New group",
@@ -1869,6 +1875,8 @@ export const en = {
   "error.store.corrupt": "Saved records are damaged.",
 
   "reason.git.command": "The Git operation failed.",
+  "reason.git_missing": "Git is not installed, so each conversation works in your folder.",
+  "projects.gitDownload": "Download Git",
   "reason.git.unknown": "Native Git is unavailable or could not be checked.",
   "reason.remote.ghMissing": "The GitHub CLI (gh) is not installed. Your work stays local until it is.",
   "reason.remote.ghLoggedOut": "The GitHub CLI is not signed in. Run gh auth login, then try again.",
@@ -2348,6 +2356,9 @@ export const en = {
   'notes.366.better': 'You can open conversations the agent starts from its command steps and see their current state.',
   'notes.367.better': "New conversations get a short title in your message's language after the first answer, while names you choose stay yours.",
   'notes.368.better': 'Keyboard focus enters Settings when opened, stays on your choice when settings save, and returns when closed.',
+  'notes.369.better': 'Without Git, project conversations work in your folder; the project home explains why and links to the download.',
+  'notes.370.fixed': 'Unreadable conversations stay in your list with a preserved copy you can show or remove; the original stays untouched.',
+  'notes.371.new': 'Faber tells you once when a big job is finished or needs you.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
