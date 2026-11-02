@@ -2428,6 +2428,7 @@ export const de: Messages = {
   'notes.346.new': 'Der Agent kann von ihm gestartete Unterhaltungen jetzt stoppen, fortsetzen und archivieren sowie auf sie warten, ohne seinen Zug als fertig zu beenden.',
   'notes.347.better': 'Beim Starten einer Unterhaltung kann der Agent jetzt die KI, das Modell und den Aufwand wählen.',
   'notes.348.new': 'Sie können Unterhaltungen über die Befehlszeile exportieren, durchsuchen und öffnen.',
+  'notes.349.better': 'In der Unterhaltung erkennst du Schritte und ihren Status überall an denselben Symbolen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

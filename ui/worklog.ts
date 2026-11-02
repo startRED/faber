@@ -522,15 +522,6 @@ export function changeOf(tool: ToolUse): Change | undefined {
   return { added, removed: changed.length - added, lines: changed };
 }
 
-/** What a kind of step is called on its row's icon: the kind it acts on, one per family of tools. */
-export type StepIcon = 'read' | 'change' | 'command' | 'search' | 'web' | 'tool' | 'thought';
-export function stepIcon(tool: ToolUse): StepIcon {
-  const kind = GROUPED[tool.name];
-  if (kind === 'page' || kind === 'web' || tool.name === 'Browser') return 'web';
-  if (kind) return kind;
-  return 'tool';
-}
-
 /** A run of steps that ended, as one short line: a phrase with a count per kind, in the order the kinds first came ("Read 3
  * files · Ran 2 commands"), and the rest counted as other steps. Empty when none ended. */
 export function stepsSummary(tools: ToolUse[]): string {

@@ -211,7 +211,7 @@ check('thread: running steps stay visible alone and in a fold', () => {
   const [message, setMessage] = createSignal<Message>({ id: 'once', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [running('a', 'cargo build')] });
   const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'once', options: [], onBranch: () => {} }), root);
   try {
-    ok(root.querySelector('.steps.one .step .live'));
+    ok(root.querySelector('.steps.one .step[data-state="running"] .step-icon .st-working svg'));
     ok(root.querySelector('.step-line')!.textContent!.includes('cargo build'));
     setMessage({ ...message(), tools: [{ ...running('a', 'cargo build'), ok: true }, running('b', 'cargo test')] });
     const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
@@ -219,6 +219,7 @@ check('thread: running steps stay visible alone and in a fold', () => {
     head.click();
     equal(root.querySelectorAll('.steps-list .step').length, 2);
     ok(root.querySelector('.steps-list .step[data-state="running"]')!.textContent!.includes('cargo test'));
+    ok(root.querySelector('.steps-list .step[data-state="running"] .step-icon .st-working svg'));
     equal(root.querySelector('.activity-latest'), null);
   } finally { dispose(); root.remove(); }
 });

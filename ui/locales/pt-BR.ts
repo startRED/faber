@@ -2415,6 +2415,7 @@ export const ptBR: Messages = {
   'notes.346.new': 'O agente agora pode parar, retomar e arquivar as conversas que iniciou, e esperar por elas sem encerrar a sua vez como pronto.',
   'notes.347.better': 'Ao iniciar uma conversa, o agente agora pode escolher a IA, o modelo e o esforço.',
   'notes.348.new': 'Você pode exportar, buscar e abrir conversas pela linha de comando.',
+  'notes.349.better': 'Você vê os mesmos ícones para identificar as etapas e seus estados na conversa.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -2308,6 +2308,7 @@ export const en = {
   'notes.346.new': 'The agent can now stop, resume and archive the conversations it started, and wait for them without ending its turn as if done.',
   'notes.347.better': 'When starting a conversation, the agent can now choose the AI, model and effort.',
   'notes.348.new': 'You can export, search and open conversations from the command line.',
+  'notes.349.better': 'You can recognize steps and their states by the same icons throughout the conversation.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

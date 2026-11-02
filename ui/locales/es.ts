@@ -2428,6 +2428,7 @@ export const es: Messages = {
   'notes.346.new': 'El agente ahora puede detener, reanudar y archivar las conversaciones que inició, y esperar por ellas sin cerrar su turno como terminado.',
   'notes.347.better': 'Al iniciar una conversación, el agente ahora puede elegir la IA, el modelo y el esfuerzo.',
   'notes.348.new': 'Puedes exportar, buscar y abrir conversaciones desde la línea de comandos.',
+  'notes.349.better': 'Puedes reconocer los pasos y sus estados por los mismos iconos en toda la conversación.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

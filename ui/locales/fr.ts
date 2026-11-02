@@ -2428,6 +2428,7 @@ export const fr: Messages = {
   'notes.346.new': 'L’agent peut désormais arrêter, reprendre et archiver les conversations qu’il a lancées, et les attendre sans clore son tour comme terminé.',
   'notes.347.better': 'Au lancement d’une conversation, l’agent peut désormais choisir l’IA, le modèle et l’effort.',
   'notes.348.new': 'Vous pouvez exporter, rechercher et ouvrir des conversations depuis la ligne de commande.',
+  'notes.349.better': 'Dans la conversation, les étapes et leurs états utilisent les mêmes icônes pour être plus faciles à reconnaître.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

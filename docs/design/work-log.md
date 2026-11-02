@@ -14,8 +14,7 @@ and a useful file location is allowed when the person needs to find or open an a
 - Words, thinking and steps appear in the order they happened (`ui/timeline.ts`): the engine records where each top-level
   tool call started in the reply's text (`ToolUse.at`) and where each piece of thinking fell (`Message.thinkingMarks`). The
   agent's words never fold. Old replies saved before `at` keep `activityEnd`, so their steps sit above the words.
-- Each step is a thin row (`div.step` > `button.step-line`): a small icon for its family (`stepIcon`: sheet, edit,
-  terminal, search, globe, plug; or the live dot while running), a verb in bold (present tense while running like
+- Each step is a thin row (`div.step` > `button.step-line`): the shared family icon (`toolKind` and `ToolGlyph`), or the shared state mark while running, failed, refused or stopped, a verb in bold (present tense while running like
   "Reading", "Running"; past tense once ended like "Read", "Ran"), what it acted on in the mono face cut in the middle
   to one line (`middle`), `+N −N` line counts on file changes, "failed" in the error ink when it failed, and elapsed time
   (`· 2 min`) past half a minute while running. Unknown tools keep their name; an MCP tool reads "Using a tool" (or
@@ -23,12 +22,12 @@ and a useful file location is allowed when the person needs to find or open an a
 - A click on a step row (`aria-expanded`) opens `div.step-detail` below it: for a file change, the changed lines
   (`ChangedLines`, up to 40 lines, then "N more lines"); otherwise the full command or path (`code.step-what`) and what
   it returned (`pre.step-out`, up to 30 lines, then "N more lines").
-- Thinking (`Thought`, `div.step.thought`) is a quiet row in its place among the steps: a feather icon (or the live dot
+- Thinking (`Thought`, `div.step.thought`) is a quiet row in its place among the steps: the shared thought icon (or the working ring
   while thinking), "Thought" (or "Thinking" while live) in bold, and its first line (or latest line while live) in one
   middle-cut line. A click opens `div.step-detail.thought-text` with all of its paragraphs (`thinkingParts`).
 - One step or thought between two stretches of words stands directly as its own row (`div.steps.one`). Two or more steps
   or thoughts between two stretches of words fold into one counted line (`div.steps` > `button.steps-head`): a right
-  chevron (or the live dot while working), a summary by kind in the order they first came (`stepsSummary`:
+  chevron (or the working ring while working), a summary by kind in the order they first came (`stepsSummary`:
   "Read 3 files · Ran 2 commands", "Thought", a file counted once however many steps touch it), the step or thinking it
   is on now while working, how many failed (`1 failed` in the error ink), and elapsed time past half a minute. A click
   opens `div.steps-list` with every row in order. The folded line aligns with the prose edge, with equal space above and below.
