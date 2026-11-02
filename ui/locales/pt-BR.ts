@@ -2442,6 +2442,7 @@ export const ptBR: Messages = {
   'notes.356.fixed': 'A cota é atualizada depois que o PC acorda, e a transferência da conversa mostra qual IA assumiu sem dizer que a mesma IA ficou sem cota.',
   'notes.357.better': 'As perguntas que abrem sozinhas deixam mais espaço pra trabalhar em janelas pequenas, e a barra lateral de Projetos ficou mais limpa quando está vazia.',
   'notes.358.better': 'As Configurações usam palavras mais simples, e as opções de acesso explicam o que a IA pode fazer antes da escolha.',
+  'notes.359.fixed': 'Um passo do plano só vira concluído quando a IA diz o que conferiu; um ajudante que termina não o marca mais.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

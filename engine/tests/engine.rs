@@ -5573,9 +5573,20 @@ async fn plan_reopens_a_done_step_when_its_conversation_resumes() {
 
     member.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
     until(&engine, &child, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
-    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending","waits":["s1"]}]});
-    agent.say(call(6, "plan", &done)).await;
-    assert_eq!(mcp_answer(&agent, "r6").await["result"]["isError"], false);
+    assert_eq!(
+        engine.open(&parent).unwrap().plan.unwrap().steps[0].state,
+        faber_engine::model::StepState::Active,
+        "ending alone does not finish the step"
+    );
+    let no_evidence = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child},{"text":"Review them","state":"pending","waits":["s1"]}]});
+    agent.say(call(6, "plan", &no_evidence)).await;
+    assert_eq!(mcp_answer(&agent, "r6").await["result"]["isError"], true, "done requires evidence");
+    let done = json!({"steps":[{"text":"Write the docs","state":"done","conversation":child,"evidence":"Read the completed docs page"},{"text":"Review them","state":"pending","waits":["s1"]}]});
+    agent.say(call(7, "plan", &done)).await;
+    assert_eq!(mcp_answer(&agent, "r7").await["result"]["isError"], false);
+    let finished = engine.open(&parent).unwrap().plan.unwrap();
+    assert_eq!(finished.steps[0].state, faber_engine::model::StepState::Done);
+    assert_eq!(finished.steps[0].evidence.as_deref(), Some("Read the completed docs page"));
     engine
         .send(SendRequest {
             conversation_id: Some(child.clone()),
