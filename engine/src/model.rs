@@ -342,6 +342,8 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_retry: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolUse>>,
@@ -409,6 +411,8 @@ pub struct Message {
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<Recovery>,
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
@@ -929,6 +933,7 @@ impl Message {
             model: None,
             effort: None,
             reason: None,
+            overload_retry: None,
             thinking: None,
             tools: None,
             commits: vec![],
@@ -951,6 +956,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            moved_from_model: None,
             mode: None,
             note: None,
             rewind: None,
@@ -1286,6 +1292,13 @@ pub struct Summary {
     pub started_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<WaitingOn>,
+    /// Details for a conversation started by an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_choice: Option<crate::router::Choice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_line: Option<String>,
     /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,

@@ -9,6 +9,8 @@ import {
   type QueuedTurn,
   type RewindRedoInfo,
   type ToolUse,
+  type Summary,
+  type RunningItem,
   type VendorUsage,
   type VersionAt,
   type Versions,
@@ -213,8 +215,17 @@ function stepState(tool: ToolUse, working: boolean): 'running' | 'done' | 'faile
 
 /** One step the agent took, as a thin row: what it did ("Read", "Running" while it works), what it acted on, the lines it
  * changed. A click opens what it ran and what came back, and closes it again; nothing else moves. */
-function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string; workingFolder?: string; preview?: boolean }) {
+function Step(props: { conversationId: string; conversations?: Summary[]; running?: RunningItem[]; onOpenChild?: (c: Summary) => void; tool: Accessor<ToolUse>; working: boolean; long?: string; workingFolder?: string; preview?: boolean }) {
   const [open, setOpen] = createSignal(false);
+  const childId = createMemo(() => {
+    const tool = props.tool();
+    const action = (tool.input as { action?: string } | undefined)?.action;
+    if (tool.name !== 'Conversation' || tool.ok !== true || (action && action !== 'start') || !tool.output) return undefined;
+    try { return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId; } catch { return undefined; }
+  });
+  const child = createMemo(() => props.conversations?.find((c) => c.id === childId() && c.startedBy === props.conversationId));
+  const running = () => props.running?.find((r) => r.conversationId === child()?.id);
+  const childState = () => child()?.archived ? 'archived' : child()?.childState ?? (running()?.state === 'needsYou' ? 'waiting' : running() ? 'working' : 'done');
   const state = () => stepState(props.tool(), props.working);
   const row = () => toolRow(props.tool(), state() !== 'running', props.workingFolder ?? '');
   const fullDetail = () => toolRow(props.tool(), state() !== 'running').detail;
@@ -235,6 +246,12 @@ function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string;
         <Show when={state() === 'failed'}><em class="step-failed">{t('agent.failed')}</em></Show>
         <Show when={state() === 'running' && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
       </button>
+      <Show when={child() && props.onOpenChild}>
+        <button type="button" class="btn child-conversation" onClick={() => props.onOpenChild?.(child()!)}>
+          <b>{child()!.title}</b>
+          <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child()!.childChoice?.vendor === 'auto' ? t('model.auto') : child()!.childChoice?.vendor ? vendorName(child()!.childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child()!.childChoice?.model), t(`child.${childState()}`), child()!.waitingOn?.note, running()?.now ?? child()!.childLine].filter(Boolean).join(' · ')}</span>
+        </button>
+      </Show>
       {/* The newest edit shows a few of its lines under its own row until the next step or words (R161 step 9). */}
       <Show when={props.preview && !open() && change()}>{(c) => <ChangedLines change={c()} />}</Show>
       <Show when={open()}>
@@ -280,7 +297,7 @@ function Thought(props: { text: string; live: boolean }) {
 /** Steps and thinking that came together between two stretches of words. One is its own row; two or more fold into one
  * line that counts them ("Read 3 files · Ran 2 commands") and, while the agent is on them, says the step it is on now.
  * Opened, every row in order. The words before and after never fold. */
-function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean; long?: string; workingFolder?: string; previewId?: string }) {
+function Steps(props: { conversationId: string; conversations?: Summary[]; running?: RunningItem[]; onOpenChild?: (c: Summary) => void; items: Accessor<Item[]>; working: boolean; last: boolean; long?: string; workingFolder?: string; previewId?: string }) {
   const [open, setOpen] = createSignal(false);
   const tools = createMemo(() => props.items().flatMap((item) => (item.kind === 'tool' ? [item.tool] : [])));
   const running = createMemo(() => (props.working ? tools().findLast((tool) => tool.ok === undefined && !tool.interrupted) : undefined));
@@ -313,7 +330,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
     };
     return (
       <Show when={it()?.kind === 'tool'} fallback={<Thought text={words()} live={thinkingNow() && i === props.items().length - 1} />}>
-        <Step tool={tool} working={props.working} workingFolder={props.workingFolder} preview={tool().id === props.previewId} long={tool().id === running()?.id ? props.long : undefined} />
+        <Step conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={props.onOpenChild} tool={tool} working={props.working} workingFolder={props.workingFolder} preview={tool().id === props.previewId} long={tool().id === running()?.id ? props.long : undefined} />
       </Show>
     );
   };
@@ -342,6 +359,9 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  conversations?: Summary[];
+  running?: RunningItem[];
+  onOpenChild?: (c: Summary) => void;
   workingFolder?: string;
   endState?: import('./api.ts').RunStateName;
   pieceRevision?: number;
@@ -528,8 +548,19 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // quota is said once, by the card under it.
   const standIn = () => !m().model || m().model === 'codex';
   const shown = () => (m().vendor ? (standIn() ? vendorName(m().vendor!) : prettyModel(m().model)) : t('model.auto'));
-  const reason = () =>
-    m().reason ? fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' }) : '';
+  const reason = () => {
+    const message = m();
+    if (!message.reason) return '';
+    const moved = message.reason === 'reason.moved.full' || message.reason === 'reason.moved.summary';
+    const key = moved && (!message.movedFrom || message.movedFrom === message.vendor)
+      ? (message.reason === 'reason.moved.full' ? 'reason.moved.same.full' : 'reason.moved.same.summary') : message.reason;
+    const from = message.movedFrom ? vendorName(message.movedFrom) : '';
+    return fromEngine(key, {
+      when: message.waitUntil ? untilReset(message.waitUntil) : t('quota.unknown'),
+      from: message.movedFromModel ? `${from} (${prettyModel(message.movedFromModel)})` : from,
+      to: message.vendor ? vendorName(message.vendor) : '',
+    });
+  };
   const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
   const wokeWhy = () => {
     const wake = woke();
@@ -621,7 +652,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 </div>
               </Match>
               <Match when={part().kind === 'steps'}>
-                <Steps items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
+                <Steps conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={props.onOpenChild} items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
               </Match>
               <Match when={step()}>
                 <div class="agents" role="list" aria-label={t('agent.label')}>
@@ -693,6 +724,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
+      <Show when={working() && m().overloadRetry}>
+        <div class="note" role="status">{t('answer.overloadRetry', { n: m().overloadRetry!, total: 5 })}</div>
+      </Show>
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
         <div class="faber-act note"><div class="faber-act-line"><StateGlyph state="stopped" small /><span>{t('answer.stopped')}</span></div></div>
       </Show>

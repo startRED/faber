@@ -345,7 +345,7 @@ impl Core {
                 spare.session.send(UserTurn::text(prompt));
                 let (me, id, reply) = (self.me.clone(), id.to_string(), t.reply.clone());
                 tokio::spawn(async move {
-                    let answer = tokio::time::timeout(auto::ROUTE_BUDGET, spare.answer).await.ok().and_then(|r| r.ok()).flatten();
+                    let answer = tokio::time::timeout(Duration::from_secs(30), spare.answer).await.ok().and_then(|r| r.ok()).flatten();
                     spare.session.close();
                     let Some(core) = me.upgrade() else { return };
                     let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
@@ -373,6 +373,7 @@ impl Core {
     fn resume_move(&mut self, id: &str, reply: &str, pick: Pick, text: String, summary: bool) {
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
             m.moved_from = m.vendor;
+            m.moved_from_model = m.model.clone();
             m.reason = Some(if summary { "reason.moved.summary" } else { "reason.moved.full" }.into());
             m.acts.push(crate::act::FaberAct::recovery("act.recovery.moved", Some(pick.vendor)));
         }
@@ -392,6 +393,7 @@ impl Core {
             m.model = t.pick.model.clone();
             m.reason = Some(t.pick.reason.clone());
             m.moved_from = None;
+            m.moved_from_model = None;
             if m.acts.last().is_some_and(|act| act.what == "act.recovery.moved") {
                 m.acts.pop();
             }
@@ -598,6 +600,8 @@ mod tests {
                     running: None,
                     capabilities: Default::default(),
                     ended: None,
+                    overload_retries: 0,
+                    overload_wait: None,
                     effort: "medium".into(),
                     sid: 1,
                     session: Session::from_fn(|_| {}),

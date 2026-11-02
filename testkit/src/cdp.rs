@@ -692,6 +692,15 @@ mod tests {
         assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (" ", "Space", 32, Some(" ")));
     }
 
+    #[test]
+    fn settings_keyboard_navigation_keys_have_native_codes() {
+        for (key, expected) in [("Home", 36), ("End", 35), ("ArrowUp", 38)] {
+            let (name, code, virtual_key, text) = key_info(key).unwrap();
+            assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (key, key, expected, None));
+        }
+        assert!(key_info("Unknown").is_err());
+    }
+
     fn mock_prefix(reader: &mut impl Read) -> [u8; 14] {
         let mut head = [0; 14];
         reader.read_exact(&mut head).unwrap();

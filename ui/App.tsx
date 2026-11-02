@@ -878,6 +878,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // One object for the home's terminal list: the home does not get a new one on every state change.
   const fromTerminal = { list: api.cliSessions, onPick: (projectId: string, s: CliSession) => void pickUpSession(projectId, s) };
   const terminalHere = () => area() === 'project' && !!project() && state().vendors.length > 0;
+  const [childUpdates, setChildUpdates] = createSignal<Record<string, Partial<Summary>>>({});
+  const linkedConversations = () => state().conversations.map((c) => ({ ...c, ...childUpdates()[c.id] }));
   const openSummary = (c: Summary) => {
     closeSettings();
     closeSide(false);
@@ -936,10 +938,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
         setCommandsVersion((n) => n + 1);
       }
-      if (e.type === 'list') void refresh();
+      if (e.type === 'list') { setChildUpdates({}); void refresh(); }
       if (e.type === 'saveFailed') setSaveError(failureText({ key: e.key }));
       if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
       if (e.type === 'settings') setState((s) => ({ ...s, settings: e.settings }));
+      if (e.type === 'message' && e.message.role === 'assistant') {
+        const row = state().conversations.find((c) => c.id === e.conversationId && c.startedBy === current()?.id);
+        if (row) {
+          const message = e.message;
+          const line = (message.now || message.text?.trim().split('\n').filter(Boolean).at(-1) || '').slice(0, 200);
+          setChildUpdates((held) => ({ ...held, [row.id]: { childLine: line || row.childLine, childChoice: message.vendor ? { vendor: message.vendor, model: message.model } : row.childChoice } }));
+        }
+      }
       if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
@@ -1968,6 +1978,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                               >
                                 {(c) => (
                                   <Thread
+                                    conversations={linkedConversations()}
+                                    running={items()}
+                                    onOpenChild={openSummary}
                                     workingFolder={c().workingFolder}
                                     messages={c().messages}
                                     endState={state().conversations.find((conversation) => conversation.id === c().id)?.state}

@@ -427,7 +427,7 @@ fn overlays_the_stage(ctx: &mut Ctx) -> Result {
     let seen = page.eval(SHELL)?;
     ensure(seen["modal"].is_null(), || "a column that opens by itself is not a dialog at any width".to_string())?;
     ensure(seen["focusIn"] == false, || "it does not take focus".to_string())?;
-    ensure(num(&seen, &["over", "b"]) <= num(&seen, &["composer", "y"]) + 0.5, || format!("it lies over the composer: {}", seen["over"]))?;
+    ensure(num(&seen, &["composer", "b"]) <= num(&seen, &["over", "y"]) + 0.5, || format!("it lies below the composer: {}", seen["over"]))?;
     // Esc closes it only while focus is inside it: the composer has focus, so the column stays.
     let composer = page.labelled("composer.message")?;
     page.click(&composer)?;
@@ -618,12 +618,12 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
     // The tightest window of the vendor: 47 % of the 7-day one, not 7 % of the 5-hour one.
-    page.wait_for("the quota to show", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")?;
+    page.wait_for("the quota to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     ctx.shot(&mut app, "quota")?;
     let page = &mut app.page;
     // A screen that loads again asks the engine and shows the same reading.
     page.reload()?;
-    page.wait_for("the quota after a reload", "(document.querySelector('.usage .share')?.textContent ?? '').includes('47%')")
+    page.wait_for("the quota after a reload", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")
 }
 
 // ---- Seeded conversations and the checks of the second pass of the review.
@@ -736,7 +736,7 @@ fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
         pause(0.3);
         check_shell(&at, &page.eval(SHELL)?, width, false)?;
         let found = page.eval(
-            "(() => { const c = document.querySelector('.composer').getBoundingClientRect(); const k = document.querySelector('.work > .runcol').getBoundingClientRect(); return { apart: c.right <= k.left + 0.5, wide: c.width }; })()",
+            "(() => { const c = document.querySelector('.composer').getBoundingClientRect(); const k = document.querySelector('.work > .runcol').getBoundingClientRect(); return { apart: c.bottom <= k.top + 0.5, wide: c.width }; })()",
         )?;
         ensure(found["apart"] == true, || format!("{at}: the column covers the composer: {found}"))?;
         ensure(num(&found, &["wide"]) >= 240.0, || format!("{at}: the composer is only {} px wide", found["wide"]))?;

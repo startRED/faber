@@ -157,6 +157,7 @@ export interface Message {
   vendor?: Vendor;
   model?: string;
   reason?: string;
+  overloadRetry?: number;
   effort?: Effort;
   thinking?: string;
   tools?: ToolUse[];
@@ -193,6 +194,7 @@ export interface Message {
   rewind?: RewindPoint;
   waitUntil?: number;
   movedFrom?: Vendor;
+  movedFromModel?: string;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
   /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine/src/look.rs`). */
@@ -390,6 +392,10 @@ export interface Summary {
   pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
+  waitingOn?: { ids?: string[]; note?: string };
+  childState?: 'working' | 'waiting' | 'stopped' | 'done' | 'failed';
+  childChoice?: Choice;
+  childLine?: string;
   /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
   ended?: Ended;
   /** Where the conversation stands now (engine `State`): the sidebar and the running list read the same word. */

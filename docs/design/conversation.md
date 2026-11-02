@@ -6,7 +6,9 @@ and the running column are in [layout.md](layout.md); helper rows, memory waits 
 
 ## Faber's decision rows
 
-A quiet labeled row records each decision or message Faber made on its own. It is never the person's voice or the AI's reply. The row names its actor, decision and reason, with a Change action where available; the exact words sent to an AI stay selectable inside a closed disclosure. Wake rows omit a separate reason when their sentence already explains it; helper rows disclose the brief sent to the helper. Rows wrap in narrow windows.
+A quiet labeled row records each decision or message Faber made on its own. It is never the person's voice or the AI's reply. The row names its actor, decision and reason, with a Change action where available; the exact words sent to an AI stay selectable inside a closed disclosure. Wake rows explain why a question or child result was passed on and omit a separate reason when their sentence already explains it; helper rows disclose the brief sent to the helper. Rows wrap in narrow windows.
+
+Quota handoff reasons name the exhausted AI and its saved model, then the AI taking over, retaining whether previous messages or a summary were carried. A move within the same AI, or an old message with no source AI, only says where the conversation continued and what history it carried. Recovery decision rows say where work continued without claiming that a whole AI ran out. The existing header tooltip and quiet reason wrap at 720 px; no animation or new control is added.
 
 ## Answers
 

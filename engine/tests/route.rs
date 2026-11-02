@@ -159,3 +159,22 @@ fn a_line_without_a_check_reads_as_glance() {
     assert_eq!(asked(&line(",\"check\":\"blind\"")).unwrap().check, "blind");
     assert_eq!(read(&line(""), &all()).unwrap().profile, checked("research", "medium", "glance", 0.9));
 }
+
+#[test]
+fn handoff_keeps_the_exhausted_model_and_loads_older_messages() {
+    use faber_engine::model::{Message, Role};
+    let mut message = Message::new("reply".into(), Role::Assistant, "Answer".into(), 1);
+    message.vendor = Some(Vendor::Codex);
+    message.model = Some("gpt-6.1-sol".into());
+    message.moved_from = Some(Vendor::Claude);
+    message.moved_from_model = Some("claude-sonnet-4-6".into());
+    let mut saved = serde_json::to_value(&message).unwrap();
+    assert_eq!(saved["movedFromModel"], "claude-sonnet-4-6");
+    let loaded: Message = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(loaded.moved_from_model, message.moved_from_model);
+    assert_eq!(loaded.moved_from, Some(Vendor::Claude));
+    saved.as_object_mut().unwrap().remove("movedFromModel");
+    let old: Message = serde_json::from_value(saved).unwrap();
+    assert_eq!(old.moved_from_model, None);
+    assert_eq!(old.moved_from, Some(Vendor::Claude));
+}
