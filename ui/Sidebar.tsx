@@ -118,7 +118,7 @@ interface Props {
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
   onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
-  onSettings: (section?: 'usage') => void;
+  onSettings: (section?: 'usage', from?: HTMLElement) => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
   onError?: (err: unknown) => void;
   /** The person skipped the account cards and one AI is still not connected: a quiet line offers it until the cards close. */
@@ -613,7 +613,7 @@ export function Sidebar(props: Props) {
           <Show when={props.userName}>
             <div class="who">{props.userName}</div>
           </Show>
-          <button class="area" onClick={() => props.onSettings()} title={`${t('settings.open')} (${keysOf('settings')}) · ${t('side.version', { version: props.version })}`}>
+          <button class="area" data-restore="settings" onClick={(e) => props.onSettings(undefined, e.currentTarget)} title={`${t('settings.open')} (${keysOf('settings')}) · ${t('side.version', { version: props.version })}`}>
             <Icon name="sliders" />
             <span>{t('settings.open')}</span>
           </button>
@@ -640,7 +640,7 @@ export function Sidebar(props: Props) {
                     ]
                   : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('quota.unavailable')];
               return (
-                <button class="vendor" classList={{ low: low(), unread: !q() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
+                <button class="vendor" data-restore={`quota-${v}`} classList={{ low: low(), unread: !q() }} onClick={(e) => props.onSettings('usage', e.currentTarget)} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
                   <span class="name">{vendorName(v)}</span>
                   <Show when={q()}>

@@ -1251,6 +1251,55 @@ check('reply_style: Escape saves the focused words before Settings closes and re
   }
 });
 
+check('settings keyboard traversal: App restores the recreated opener after keyboard, Settings and quota entry', () => signedIn(async () => {
+  const original = { setClock: api.setClock, recents: api.recents };
+  const place = localStorage.getItem('faber.place');
+  const initial: AppState = {
+    vendors: ['claude'], models: [], quotas: [], projects: [], conversations: [], version: '0.0.0', running: { revision: 0, items: [] },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    look: look({ motion: 'none', effects: { ambient: false, texture: false, glow: false } }),
+  };
+  api.setClock = async () => {};
+  api.recents = async () => ({ folders: [], environments: [] });
+  const key = (key: string, ctrlKey = false) => window.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }));
+  try {
+    for (const area of ['chat', 'project']) {
+      localStorage.setItem('faber.place', JSON.stringify({ area }));
+      const view = mount(() => createComponent(App, { initial, inbox: { take: () => {} } }));
+      try {
+        await tick();
+        const entries = [['settings', '[data-restore="settings"]'], ['quota-claude', '[data-restore="quota-claude"]']];
+        if (area === 'chat') entries.unshift(['composer', '.composer textarea'], ['model', '.composer .model-chip']);
+        for (const [source, selector] of entries) {
+          const opener = view.host.querySelector<HTMLElement>(selector)!;
+          ok(opener, `${area}: ${source} exists`);
+          if (source === 'composer' || source === 'model') { opener.focus(); key(',', true); }
+          else {
+            view.host.querySelector<HTMLButtonElement>('.topbar .menu')?.click();
+            await tick();
+            opener.click(); // Clicks need not focus their button on every platform.
+          }
+          await tick();
+          equal(opener.isConnected, false, 'entry removes the old shell');
+          equal(document.activeElement, view.host.querySelector('.s-nav button'), 'Back receives entry focus');
+          if (source.startsWith('quota-')) ok(view.host.querySelector('.s-nav button[aria-current="true"]')?.textContent?.includes(en['set.subscriptions']));
+          key(',', true); // Repeating the shortcut must not replace the original opener with Back.
+          if (source === 'settings') view.host.querySelector<HTMLButtonElement>('.s-nav button')!.click();
+          else key('Escape');
+          await tick();
+          equal(view.host.querySelector('.settings'), null);
+          equal(document.activeElement, view.host.querySelector(selector), `${area}: closing restores ${source} in the new shell`);
+        }
+      } finally { view.stop(); }
+    }
+  } finally {
+    Object.assign(api, original);
+    forgetSection();
+    if (place === null) localStorage.removeItem('faber.place');
+    else localStorage.setItem('faber.place', place);
+  }
+}));
+
 check('settings keyboard traversal: saved snapshots retain focused web choices and their Tab order', async () => {
   const [snapshot, setSnapshot] = createSignal({ settings: SHOWN, vendors: ['claude'] as Vendor[] });
   const view = mount(() => createComponent(Settings, {
