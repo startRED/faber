@@ -17,6 +17,16 @@ check('thread: 300 messages open at the newest 40, prepend without a jump and lo
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;inset:0;z-index:100';
   document.body.append(root);
+  const OriginalResizeObserver = window.ResizeObserver;
+  let afterResize: (() => void) | undefined;
+  window.ResizeObserver = class extends OriginalResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      super((entries, observer) => {
+        callback(entries, observer);
+        if (entries.some((entry) => entry.target === root.querySelector('.thread > .col'))) afterResize?.();
+      });
+    }
+  };
   let dispose = () => {};
   const id = 'paged-300';
   let messages: Message[] = Array.from({ length: 300 }, (_, i) => ({
@@ -80,9 +90,28 @@ check('thread: 300 messages open at the newest 40, prepend without a jump and lo
     const before = thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top;
     release!();
     await waitFor(() => !!thread.querySelector('[data-message-index="220"]'), 'the previous 40 are prepended');
+    await frames(4);
     equal(thread.querySelectorAll('[data-message-index]').length, 80, 'loaded messages are retained');
     const after = thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top;
     ok(Math.abs(after - before) < 3, `prepending keeps the reading position: ${before} -> ${after}`);
+    let resized = false;
+    afterResize = () => {
+      afterResize = undefined;
+      // Model a browser scroll adjustment after ResizeObserver, before the next rendering frame.
+      thread.scrollTop += 8;
+      thread.dispatchEvent(new Event('scroll'));
+      resized = true;
+    };
+    thread.querySelector<HTMLElement>('[data-message-index="220"]')!.style.paddingBottom = '31px';
+    await waitFor(() => resized, 'a late height change resizes the prepended page');
+    await frames(4);
+    const settled = thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top;
+    ok(Math.abs(settled - before) < 3, `a late resize keeps the original reading anchor: ${before} -> ${settled}`);
+    thread.scrollTop = thread.scrollHeight;
+    thread.dispatchEvent(new Event('scroll'));
+    thread.querySelector<HTMLElement>('[data-message-index="220"]')!.style.paddingBottom = '61px';
+    await frames(4);
+    ok(thread.scrollHeight - thread.scrollTop - thread.clientHeight < 3, 'reaching the end releases the prepend anchor and follows resizing content');
     const search = root.querySelector<HTMLInputElement>('.search input')!;
     search.value = 'needle'; search.dispatchEvent(new InputEvent('input', { bubbles: true }));
     await waitFor(() => !!root.querySelector('.message-hits button'), 'search provides a link to an unloaded message');
@@ -103,6 +132,7 @@ check('thread: 300 messages open at the newest 40, prepend without a jump and lo
     await waitFor(() => restored.length === 1 && !!thread.querySelector('[data-message-index="3"]') && !thread.querySelector('[data-message-index="4"]'), 'rewind refreshes the shortened conversation');
     equal(restored[0]!.messageId, 'paged-4', 'rewind reaches message 5 rather than page position 5');
   } finally {
+    window.ResizeObserver = OriginalResizeObserver;
     release?.(); closeMenu(); dispose(); root.remove(); Object.assign(api, original);
     for (const [key, value] of storage) { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); }
   }

@@ -381,9 +381,27 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const panes = recall<Record<string, Pane>>('faber.column', {});
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
+  let prependReading: Reading | undefined;
+  let prependResizeFrame: number | undefined;
+  const clearPrependReading = () => {
+    prependReading = undefined;
+    if (prependResizeFrame !== undefined) cancelAnimationFrame(prependResizeFrame);
+    prependResizeFrame = undefined;
+  };
+  const holdingPrepend = () => !!prependReading && reading === prependReading && !stick && !restoringReading;
+  onCleanup(clearPrependReading);
   const tailWatch = () => (tail ??= new ResizeObserver(() => {
     if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
-    else holdReading();
+    else {
+      holdReading();
+      if (!holdingPrepend()) return;
+      // Only a prepend keeps its captured anchor through the browser's later scroll adjustment.
+      if (prependResizeFrame !== undefined) cancelAnimationFrame(prependResizeFrame);
+      prependResizeFrame = requestAnimationFrame(() => {
+        prependResizeFrame = undefined;
+        if (holdingPrepend()) holdReading();
+      });
+    }
   }));
   let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
@@ -815,6 +833,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (!older?.length) return;
         keepReading();
         const point = reading;
+        prependReading = !stick ? point : undefined;
         const el = thread;
         const height = el?.scrollHeight ?? 0;
         const marked = searchMark?.classList.contains('search-focus');
@@ -1244,6 +1263,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (restoringReading) return;
     const below = el.scrollHeight - el.scrollTop - el.clientHeight;
     const end = until();
+    if (holdingPrepend() && below >= 40) return;
     if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
     else if (el.scrollTop < lastScrollTop - 1) stick = false;
     lastScrollTop = el.scrollTop;
@@ -2054,7 +2074,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           el.addEventListener('scrollend', saveReading);
                           onCleanup(() => { tailWatch().unobserve(el); el.removeEventListener('scrollend', saveReading); });
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} onClick={openedHere} inert={trapped() || (colShown() && wide())}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} onPointerDown={clearPrependReading} onPointerMove={(e) => { if (e.buttons) clearPrependReading(); }} onWheel={clearPrependReading} onKeyDown={clearPrependReading} onFocusIn={() => { if (!restoringReading) clearPrependReading(); }} onClick={openedHere} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
