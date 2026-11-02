@@ -13,9 +13,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{Semaphore, broadcast, mpsc, watch};
+use tokio::sync::{Semaphore, broadcast, mpsc};
 
 pub type Answer = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
+pub type DetailedAnswer = Pin<Box<dyn Future<Output = Result<Value, wire::Error>> + Send>>;
 
 /// Whatever hosts Faber's commands: the same table, names and arguments the screen uses.
 pub trait Backend: Send + Sync + 'static {
@@ -26,6 +27,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Whether a command starts a turn of an AI (the table's `StartsTurn`).
     fn starts_turn(&self, cmd: &str) -> bool;
     fn dispatch(&self, who: &Who, cmd: String, args: Value) -> Answer;
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> DetailedAnswer {
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value>;
     /// Whether a connected client is a program an AI that Faber started runs, whatever its hello says: on Windows, one in
     /// a job Faber's CLIs run in, which nothing they start can leave. A backend that starts no CLI knows of none.
@@ -76,6 +81,10 @@ const MAX_REQUEST: usize = 1024 * 1024;
 /// Faber on the same data) is an error at once.
 pub async fn serve(data: &Path, backend: Arc<dyn Backend>) -> io::Result<()> {
     let secret = Arc::new(Secret::fresh()?);
+    serve_with_secret(data, backend, secret).await
+}
+
+pub(crate) async fn serve_with_secret(data: &Path, backend: Arc<dyn Backend>, secret: Arc<Secret>) -> io::Result<()> {
     let guard = Guard::watching(backend.subscribe());
     match Address::of(data) {
         Address::Pipe(name) => serve_pipe(&name, data, backend, guard, secret).await,
@@ -166,7 +175,7 @@ fn accept<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             tokio::spawn(async move {
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
-                    stream.write_all(b"{\"id\":0,\"err\":\"error.channel.busy\"}\n"),
+                    stream.write_all(format!("{{\"id\":0,\"err\":\"{}\"}}\n", "error.channel.busy").as_bytes()),
                 )
                 .await;
             });
@@ -184,7 +193,6 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
 ) {
     let (read, mut write) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::channel::<String>(256);
-    let (closing, mut closed) = watch::channel(false);
     let mut writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
             // A peer that stopped reading must not keep a connection slot forever.
@@ -192,15 +200,7 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                 write.write_all(line.as_bytes()).await?;
                 write.write_all(b"\n").await
             };
-            tokio::pin!(send);
-            let sent = if *closed.borrow() {
-                tokio::time::timeout(std::time::Duration::from_secs(5), &mut send).await
-            } else {
-                tokio::select! {
-                    result = &mut send => Ok(result),
-                    _ = closed.changed() => tokio::time::timeout(std::time::Duration::from_secs(5), &mut send).await,
-                }
-            };
+            let sent = tokio::time::timeout(std::time::Duration::from_secs(5), send).await;
             if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
@@ -213,16 +213,15 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     let mut events: Option<tokio::task::JoinHandle<()>> = None;
     let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
     loop {
-        let line = if who.is_none() {
-            match tokio::time::timeout_at(deadline, wire::read_line(&mut reader, &mut buffer, MAX_REQUEST)).await {
-                Ok(Ok(Some(line))) => line,
-                _ => break,
-            }
-        } else {
-            match wire::read_line(&mut reader, &mut buffer, MAX_REQUEST).await {
-                Ok(Some(line)) => line,
-                _ => break,
-            }
+        let line = tokio::select! {
+            line = async {
+                if who.is_none() {
+                    tokio::time::timeout_at(deadline, wire::read_line(&mut reader, &mut buffer, MAX_REQUEST)).await.ok().and_then(Result::ok).flatten()
+                } else {
+                    wire::read_line(&mut reader, &mut buffer, MAX_REQUEST).await.ok().flatten()
+                }
+            } => match line { Some(line) => line, None => break },
+            _ = tx.closed() => break,
         };
         // A line that is not a request has no id to answer: the client broke the wire, so the connection ends.
         let Ok(Request { id, cmd, args }) = serde_json::from_str::<Request>(&line) else { break };
@@ -282,16 +281,16 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
                     None => None,
                 };
                 let (tx, guard) = (tx.clone(), guard.clone());
-                let run = backend.dispatch(caller, cmd, args);
+                let run = backend.dispatch_detailed(caller, cmd, args);
                 tokio::spawn(async move {
                     let result = run.await;
                     if let Some((ticket, asked)) = ticket {
-                        if matches!(&result, Err(key) if key.starts_with("error.reach.") || key == "error.host.badArgs") {
+                        if matches!(&result, Err(error) if error.key.starts_with("error.reach.") || error.key == "error.host.badArgs") {
                             guard.refund(&ticket);
                         }
                         guard.answered(ticket, &asked, result.as_ref().ok());
                     }
-                    let _ = tx.send(wire::reply(id, &result)).await;
+                    let _ = tx.send(wire::reply_detailed(id, &result)).await;
                     drop(place);
                 });
             }
@@ -300,7 +299,6 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     if let Some(events) = events {
         events.abort();
     }
-    closing.send_replace(true);
     drop(tx);
     if tokio::time::timeout(std::time::Duration::from_secs(5), &mut writer).await.is_err() {
         writer.abort();

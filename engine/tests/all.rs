@@ -136,6 +136,8 @@ mod route_pacing;
 mod running;
 #[path = "search.rs"]
 mod search;
+#[path = "session_control.rs"]
+mod session_control;
 #[path = "session_resume.rs"]
 mod session_resume;
 #[path = "settings_change_retire.rs"]

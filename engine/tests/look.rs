@@ -47,13 +47,13 @@ fn result(id: &str, ok: bool) -> Value {
 }
 
 async fn reply_until(engine: &Engine, id: &str, what: &str, done: impl Fn(&Message) -> bool) -> Message {
-    for _ in 0..300 {
-        if let Some(m) = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| done(m)) {
-            return m;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{what}: {:?}", engine.open(id).and_then(|c| c.messages.last().cloned()));
+    let mut found = None;
+    support::until(what, || {
+        found = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| done(m));
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 
 fn write(root: &Path, path: &str, text: &str) {
@@ -149,15 +149,14 @@ async fn r369_text_a_change_removed_that_is_still_elsewhere_is_offered_on_its_ow
 // Step 4: the local count (`look.jsonl`). The lines are written on a blocking thread, so the tests wait for them.
 
 async fn lines(dir: &Path, want: usize) -> Vec<Value> {
-    for _ in 0..300 {
+    let mut found = vec![];
+    support::until(&format!("fewer than {want} lines in look.jsonl"), || {
         let text = std::fs::read_to_string(dir.join("look.jsonl")).unwrap_or_default();
-        let found: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-        if found.len() >= want {
-            return found;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("fewer than {want} lines in look.jsonl");
+        found = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        found.len() >= want
+    })
+    .await;
+    found
 }
 
 fn event(e: &str, sign: &str, area: &str) -> Value {

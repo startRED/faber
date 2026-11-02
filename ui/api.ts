@@ -1,5 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, listen } from './shell.ts';
 
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';
@@ -368,7 +367,18 @@ export interface ContextPart {
   key: string;
   tokens: number;
 }
+export interface Results {
+  delivered: { files: number; edits: number; checksRun: number; checksPassed: number; checksFailed: number; commits: number; prs: number; artifacts: number; answers: number; concluded: boolean };
+  cost: { turns: number; workMs: number; spanMs: number; usd: number; inputTokens: number; outputTokens: number; unpriced: number; byVendor: Partial<Record<Vendor, { turns: number; workMs: number; usd: number; outputTokens: number }>> };
+  lastDelivery?: number | null;
+  dry: { turns: number; byItself: number; since?: number | null; workMs: number; usd: number };
+}
+export interface Stuck { noticedAt: number; since: number; turns: number; usd: number; askedAt?: number | null; askTurns: number }
+export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
+
 export interface Summary {
+  results?: Results;
+  stuck?: boolean;
   id: string;
   title: string;
   area: Area;
@@ -417,6 +427,7 @@ export interface CliSession {
 }
 
 export interface Project {
+  state?: 'present' | 'missing' | 'disconnected';
   id: string;
   name: string;
   path: string;
@@ -625,6 +636,7 @@ export interface VendorUsage {
   ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
+  uncleanExit?: { at: number; started?: number; panic: boolean };
   conversations: Summary[];
   projects: Project[];
   // Absent in an older engine's state: no groups.
@@ -954,6 +966,8 @@ export type CookieSite = { name: string; cookies: number; kind: 'money' | 'email
 
 export const api = {
   state: () => invoke<AppState>('state'),
+  results: (id: string) => invoke<Results | null>('results', { id }),
+  projectResults: (projectId: string) => invoke<ProjectResultsView>('project_results', { projectId }),
   createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
   saveChatGroup: (id: string, name?: string, instructions?: string) => invoke<ChatGroup>('save_chat_group', { id, name, instructions }),
   addChatGroupFiles: (id: string, files: Attachment[]) => invoke<ChatGroup>('add_chat_group_files', { id, files }),
@@ -1041,6 +1055,9 @@ export const api = {
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
+  repointProject: (id: string, path?: string) => invoke<Project | null>('repoint_project', { id, path: path ?? null }),
+  dismissUncleanExit: () => invoke<void>('dismiss_unclean_exit'),
+  openLogFolder: () => invoke<string>('open_log_folder'),
   chatFolder: (id: string | undefined, scratch = false, path?: string) =>
     invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),
   recents: () => invoke<RecentsView>('recents'),
@@ -1116,7 +1133,8 @@ export const api = {
   setMcpServer: (projectId: string, name: string, enabled: boolean) => invoke<void>('set_mcp_server', { projectId, name, enabled }),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
-  screenReady: () => invoke<void>('screen_ready'),
+  screenReady: () => invoke<string | null>('screen_ready'),
+  onShowConversation: (listener: (id: string) => void) => listen<string>('faber:show-conversation', (e) => listener(e.payload)),
   updateRestart: () => invoke<void>('update_restart'),
   inputSeen: () => invoke<void>('input_seen'),
   /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */

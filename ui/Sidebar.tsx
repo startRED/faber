@@ -1,3 +1,4 @@
+import { confirmProjectRemoval } from './RecoveryNotes.tsx';
 import { createComputed, createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
@@ -109,6 +110,8 @@ interface Props {
   /** A new conversation in this project. */
   onNewIn: (id: string) => void;
   onAddProject: () => void;
+  onFindProjectFolder?: (id: string) => void;
+  onRemoveProject?: (id: string) => void;
   onOpen: (conversation: Summary) => void;
   onMoved?: (conversation: Conversation) => void;
   onMessage?: (hit: MessageHit) => void;
@@ -449,16 +452,28 @@ export function Sidebar(props: Props) {
                 const tail = () => tailOf(props.running, p.id);
                 const here = () => props.place.area === 'project' && props.place.projectId === p.id;
                 const shown = keepForExit(() => expanded(p));
+                const gone = () => p.state === 'missing' || p.state === 'disconnected';
+                const findFolder = () => (props.onFindProjectFolder ? props.onFindProjectFolder(p.id) : void api.repointProject(p.id).catch((err) => props.onError?.(err)));
+                const removeFromFaber = () => (props.onRemoveProject ? props.onRemoveProject(p.id) : void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)));
                 return (
-                  <div class="proj">
+                  <div class="proj" data-project-id={p.id} data-folder-state={p.state ?? 'present'}>
                     <div
                       class="prow"
+                      classList={{ gone: gone() }}
                       onContextMenu={(e) =>
-                        openMenu(e, [
-                          { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
-                          { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
-                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
-                        ])
+                        openMenu(
+                          e,
+                          gone()
+                            ? [
+                                { id: 'find', label: t('projects.findFolder'), run: findFolder },
+                                { id: 'remove', label: t('projects.removeFromFaber'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: removeFromFaber },
+                              ]
+                            : [
+                                { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
+                                { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
+                                { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
+                              ],
+                        )
                       }
                     >
                       <button
@@ -488,6 +503,19 @@ export function Sidebar(props: Props) {
                         <Icon name="plus" small />
                       </button>
                     </div>
+                    <Show when={gone()}>
+                      <div class="proj-missing" role="status">
+                        <p>{t(p.state === 'disconnected' ? 'projects.disconnectedNote' : 'projects.missingNote', { path: p.path })}</p>
+                        <div class="proj-missing-actions">
+                          <button type="button" class="btn" data-action="find-folder" onClick={findFolder}>
+                            {t('projects.findFolder')}
+                          </button>
+                          <button type="button" class="btn ghost" data-action="remove-project" disabled={tail().running} onClick={(e) => confirmProjectRemoval(e, removeFromFaber)}>
+                            {t('projects.removeFromFaber')}
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
                     <div class="fold" classList={{ open: expanded(p) }} inert={!expanded(p)}>
                       <div class="fold-inner">
                         <Show when={shown()}>
@@ -513,8 +541,8 @@ export function Sidebar(props: Props) {
         </section>
         </Show>
         <Show when={inChat()}>
-          <section class="chat-groups" aria-labelledby="side-chat-groups">
-            <div class="group-h"><span id="side-chat-groups">{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
+          <section class="chat-groups" classList={{ "no-groups": groups().length === 0 }} aria-labelledby="side-chat-groups">
+            <div class="group-h"><span id="side-chat-groups" classList={{ sr: groups().length === 0 }}>{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
             <Show when={newGroup()}><RenameBox title="" onDone={(name) => {
               setNewGroup(false);
               if (name?.trim()) void api.createChatGroup(name).then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));

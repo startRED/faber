@@ -328,6 +328,14 @@ impl Shell for SidecarShell {
         self.0.ask(PickMode::Save, filter, Some(name))
     }
 
+    fn show_conversation(&self, id: &str) -> Res<()> {
+        if self.0.hidden {
+            return Err(crate::NO_WINDOW.into());
+        }
+        (self.0.send)(Order::ShowConversation { id: id.into() });
+        Ok(())
+    }
+
     fn reveal(&self, path: PathBuf) -> Res<()> {
         (self.0.send)(Order::Reveal { path: path.to_string_lossy().into_owned() });
         Ok(())
@@ -389,6 +397,16 @@ mod tests {
 
     fn taken(sink: &Sink) -> Vec<Order> {
         std::mem::take(&mut *lock(sink))
+    }
+
+    #[tokio::test]
+    async fn show_conversation_reaches_the_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, sink) = attached(dir.path(), false, normal);
+        shell.show_conversation("c1").unwrap();
+        assert_eq!(taken(&sink), vec![Order::ShowConversation { id: "c1".into() }]);
+        let (hidden, _) = attached(dir.path(), true, normal);
+        assert_eq!(hidden.show_conversation("c1"), Err(crate::NO_WINDOW.into()));
     }
 
     fn item(conversation: &str, turn: &str, title: &str, ask: bool) -> RunningItem {

@@ -10,6 +10,8 @@ A quiet labeled row records each decision or message Faber made on its own. It i
 
 ## Answers
 
+The newest reply has a quiet, wrapping line of what the conversation delivered and its work time and API-price cost; a second, quieter line names a run of at least three turns with nothing delivered. The project home lists the same facts by conversation, most spent first, with the total above them. Neither needs motion or a card.
+
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
@@ -42,9 +44,8 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   where a message waits in the queue. More words after that undo it. The age ticks once a minute on the newest reply only,
   never while the window is hidden; older replies run no timer. A reply from before times were kept, a stop and an error
   say nothing here. Nothing animates.
-- A reply Faber was closed under (still running when Faber closed or crashed) says so in the quiet note style in place
-  of "Stopped.", with "Files it already changed stay changed." in a project; the newest such reply has one plain Continue
-  button under it, which sends Faber's own turn (`wake.closed`) and, when refused, says why in the red note.
+- An unconcluded latest reply says so in a quiet decision-style row. A closing request appears as its own row in the thread. A reply Faber was closed under (still running when Faber closed or crashed) says so in the same row in place
+  of "Stopped.", with the existing project files note; the newest such reply has a Continue action beside it, which sends Faber's own turn (`wake.closed`) and, when refused, says why in the red note.
 - A reply that stopped on its own says why in one line under its words, and never beside "Stopped." (that word is only the
   person's own Stop, which says nothing more). A limit (`reason.turnLimit`, `reason.budget`) is told in the quiet note
   style; a failure (`reason.failed`, and `reason.other` for an unknown ending) keeps the red note (C001).
@@ -57,7 +58,7 @@ A quiet labeled row records each decision or message Faber made on its own. It i
   text change, never while a step runs). When nothing in the reply already shows the agent at work (no running step, live
   thought, running helper or arriving words, and no question or quota card waiting), one quiet live line
   (`div.activity-latest.live-line`) under the reply says what the agent is doing now (its `status` words, else
-  "Thinking…"). Older messages without decision rows keep the loop mark after the next reply's model (R241; the
+  "Thinking…" followed by the latest thinking headline when there is one). Older messages without decision rows keep the loop mark after the next reply's model (R241; the
   product map's Work log and Faber's own message say the rest).
 - A project agent's plan (R248) sits under the newest reply, above its files, while the agent works and until every step
   is done: a quiet head "Plan · 2 of 5" in the small size, then one line per step, a small square mark before it: a check

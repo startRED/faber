@@ -8,7 +8,7 @@ import './icons.css';
 // from here, so the same thing looks the same everywhere. Decoration only: the words beside a drawing carry the meaning.
 
 /** The kinds of step a work log shows. */
-export type ToolKind = 'read' | 'edit' | 'write' | 'run' | 'search' | 'web' | 'subagent' | 'helper' | 'decision' | 'plan' | 'ask' | 'skill' | 'mcp' | 'conversation' | 'other';
+export type ToolKind = 'read' | 'edit' | 'write' | 'run' | 'search' | 'web' | 'subagent' | 'helper' | 'decision' | 'plan' | 'ask' | 'skill' | 'mcp' | 'conversation' | 'thought' | 'other';
 
 const GLYPH_OF_TOOL: Record<ToolKind, GlyphName> = {
   read: 'read',
@@ -25,6 +25,7 @@ const GLYPH_OF_TOOL: Record<ToolKind, GlyphName> = {
   skill: 'wand',
   mcp: 'plug',
   conversation: 'chat',
+  thought: 'feather',
   other: 'bolt',
 };
 

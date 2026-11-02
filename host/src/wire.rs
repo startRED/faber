@@ -79,6 +79,8 @@ pub enum Order {
         /// The file name a save dialog offers.
         name: Option<String>,
     },
+    /// Bring the window to a conversation.
+    ShowConversation { id: String },
     /// Show a file or folder in the file manager, selected and never opened. The host checked the path already.
     Reveal { path: String },
 }

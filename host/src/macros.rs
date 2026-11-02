@@ -19,7 +19,7 @@ macro_rules! fail {
 macro_rules! table {
     ($( $(#[doc = $doc:literal])* $(#[cfg($cfg:meta)])? $kind:ident $reach:ident $(($target:literal))? fn $name:ident($h:ident $(, $arg:ident: $ty:ty)* $(,)?) -> $ret:ty $([$err:ty])? $body:block )*) => {
         mod commands {
-            #![allow(clippy::unused_async, unused_variables)]
+            #![allow(clippy::unused_async, clippy::too_many_arguments, unused_variables)]
             use super::*;
             $( $(#[doc = $doc])* $(#[cfg($cfg)])? pub(super) async fn $name($h: &Host $(, $arg: $ty)*) -> Result<$ret, fail!($($err)?)> $body )*
         }

@@ -38,6 +38,20 @@ pub fn state(running: Option<RunState>, last_reply: Option<&Message>) -> &'stati
     }
 }
 
+/// What a conversation that called `mark_waiting` waits for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingOn {
+    pub ids: Vec<String>,
+    pub note: String,
+}
+
+impl From<&faber_engine::model::WaitingOn> for WaitingOn {
+    fn from(w: &faber_engine::model::WaitingOn) -> Self {
+        Self { ids: w.ids.clone(), note: w.note.clone() }
+    }
+}
+
 /// One conversation in a list.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +67,8 @@ pub struct Row {
     /// The first conversation of its family: an AI acts freely within its own.
     pub family: String,
     pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
     /// How its last run ended, while the person has not opened it since (`done`, `needsYou`, `failed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended: Option<Value>,
@@ -84,7 +100,8 @@ fn families(summaries: &[Summary]) -> impl Fn(&str) -> Option<String> + '_ {
     move |id| crate::reach::root(id, |at| starters.get(at).map(|s| s.map(String::from)))
 }
 
-/// The conversations, running ones first, then pinned, then the newest; a list reads no conversation's file.
+/// The conversations, running ones first, then pinned, then the newest; a list reads no conversation's file. One that called
+/// `mark_waiting` reads as `waiting` while nothing runs in it.
 pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
     let running: HashMap<&str, RunState> = state.running.items.iter().map(|i| (i.conversation_id.as_str(), i.state)).collect();
     let family = families(&state.conversations);
@@ -100,9 +117,11 @@ pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
         .filter(|s| filter.project_id.as_deref().is_none_or(|p| s.project_id.as_deref() == Some(p)))
         .filter(|s| query.as_deref().is_none_or(|q| s.title.to_lowercase().contains(q)))
         .map(|s| {
+            let waiting_on = s.waiting_on.as_ref().map(WaitingOn::from);
             let state = match running.get(s.id.as_str()) {
                 Some(RunState::Working) => "working",
                 Some(RunState::NeedsYou) => "waiting",
+                None if waiting_on.is_some() => "waiting",
                 None => "idle",
             };
             Row {
@@ -113,6 +132,7 @@ pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
                 started_by: s.started_by.clone(),
                 family: family(&s.id).unwrap_or_else(|| s.id.clone()),
                 state,
+                waiting_on,
                 ended: s.ended.as_ref().and_then(|e| serde_json::to_value(e.kind).ok()),
                 archived: s.archived,
                 pinned: s.pinned_at.is_some(),
@@ -184,6 +204,8 @@ pub struct Read {
     pub title: String,
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     /// How many messages it has; `messages` holds the last ones asked for.
     pub count: usize,
@@ -208,10 +230,16 @@ pub fn read(conversation: &Conversation, running: Option<RunState>, last: Option
             ask: w.ask.clone(),
         })
     });
+    let waiting_on = conversation.waiting_on.as_ref().map(WaitingOn::from);
+    let state = match running {
+        None if waiting_on.is_some() => "waiting",
+        _ => state(running, last_reply),
+    };
     Read {
         id: conversation.id.clone(),
         title: conversation.title.clone(),
-        state: state(running, last_reply),
+        state,
+        waiting_on,
         project_id: conversation.project_id.clone(),
         count: messages.len(),
         messages: messages[from..].iter().map(said).collect(),

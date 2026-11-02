@@ -382,19 +382,29 @@ check('calm: a helper sent to the background is a ring and a running one a dot, 
   useLanguage('en');
   const agent = { id: 'a1', name: 'Agent', input: { description: 'Audit the docs', subagent_type: 'general-purpose', run_in_background: true } };
   const view = thread([question, answer({ status: 'streaming', text: '', tools: [{ id: 'b1', name: 'Bash', input: { command: 'ls' }, ok: true }, agent] })]);
+  const running = thread([question, answer({ status: 'streaming', text: '', tools: [{ ...agent, input: { ...agent.input, run_in_background: false } }] })]);
   try {
     const row = view.root.querySelector<HTMLElement>('.agent')!;
     equal(row.dataset.state, 'background');
-    const mark = row.querySelector<HTMLElement>('.agent-mark .live')!;
+    const mark = row.querySelector<HTMLElement>('.agent-mark .st-working')!;
     const style = getComputedStyle(mark);
     equal(style.borderRadius, '50%', 'round, not square');
     equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', 'hollow while it works in the background');
+    ok(parseFloat(style.borderTopWidth) > 0, 'the ring has a visible outline');
     equal(row.querySelector('.agent-meta')!.textContent, [t('agent.kind.general'), t('agent.background'), t('activity.steps', { n: 0 })].join(' · '));
     const step = view.root.querySelector<HTMLElement>('.step-line .step-icon')!;
     ok(step.getBoundingClientRect().left >= view.root.getBoundingClientRect().left, 'the step stays inside the conversation');
     ok(row.getBoundingClientRect().left >= view.root.getBoundingClientRect().left, 'the helper stays inside the conversation');
+    equal(row.querySelector('.st-stopped'), null, 'background is never a stop square');
+    const runningRow = running.root.querySelector<HTMLElement>('.agent')!;
+    equal(runningRow.dataset.state, 'running');
+    const dot = runningRow.querySelector<HTMLElement>('.agent-mark .st-working')!;
+    equal(getComputedStyle(dot).borderRadius, '50%', 'running is round');
+    ok(getComputedStyle(dot).backgroundColor !== 'rgba(0, 0, 0, 0)', 'running is a filled dot');
+    equal(runningRow.querySelector('.st-stopped'), null, 'running is never a stop square');
   } finally {
     view.close();
+    running.close();
   }
 });
 

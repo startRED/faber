@@ -52,7 +52,7 @@ fn request(vendor: Vendor, area: Area, project: Option<String>, id: Option<Strin
 }
 
 async fn until(app: &Engine, id: &str, ready: impl Fn(&Conversation) -> bool) -> Conversation {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             let c = app.open(id).unwrap();
             if ready(&c) {
@@ -66,7 +66,7 @@ async fn until(app: &Engine, id: &str, ready: impl Fn(&Conversation) -> bool) ->
 }
 
 async fn wire(pipe: &Pipe, ready: impl Fn(&Value) -> bool) -> Value {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| ready(m)).cloned() {
                 return m;
@@ -79,7 +79,7 @@ async fn wire(pipe: &Pipe, ready: impl Fn(&Value) -> bool) -> Value {
 }
 
 async fn closed(pipe: &Pipe) {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while !pipe.closed.load(SeqCst) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }

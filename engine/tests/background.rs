@@ -41,7 +41,7 @@ fn request(vendor: &str) -> SendRequest {
 }
 
 async fn rows(rx: &mut UnboundedReceiver<AppEvent>, accept: impl Fn(&[Command]) -> bool) -> Vec<Command> {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while let Some(event) = rx.recv().await {
             if let AppEvent::Background { items, .. } = event
                 && accept(&items)
@@ -191,7 +191,7 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
         support::emit(&mut output, recorded[4].clone()).await;
         support::emit(&mut output, json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
         if !owed_helper {
-            tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::time::timeout(crate::support::DEADLINE, async {
                 while let Some(event) = rx.recv().await {
                     if let AppEvent::Message { message, .. } = event
                         && message.status == Some(faber_engine::model::Status::Done)
@@ -261,7 +261,7 @@ async fn move_chat_to_project_refuses_background_writers_after_the_reply_until_t
     let recorded = fixture("claude");
     support::emit(&mut output, recorded[4].clone()).await;
     support::emit(&mut output, json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         while let Some(event) = rx.recv().await {
             if let AppEvent::Message { message, .. } = event
                 && message.status == Some(faber_engine::model::Status::Done)
@@ -417,7 +417,7 @@ async fn background_codex_child_command_can_print_and_finish_after_its_parent_tu
         let parent_end = json!({"method":"turn/completed","params":{"threadId":"background-thread","turn":{"id":"background-turn","status":"completed"}}});
         if starts_after_end {
             support::emit(&mut output, parent_end.clone()).await;
-            tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::time::timeout(crate::support::DEADLINE, async {
                 while let Some(event) = rx.recv().await {
                     if let AppEvent::Message { message, .. } = event
                         && message.status == Some(faber_engine::model::Status::Done)

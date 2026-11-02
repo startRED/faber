@@ -171,6 +171,7 @@ fn summary(c: &Conversation) -> Summary {
         archived: c.archived_at.is_some(),
         pinned_at: c.pinned_at,
         started_by: c.started_by.clone(),
+        waiting_on: c.waiting_on.clone(),
         ended: c.ended.clone(),
         state: (!c.messages.is_empty()).then(|| crate::engine::run_state(c)),
         plan: c.plan.as_ref().map(crate::model::Plan::count),
@@ -495,7 +496,15 @@ impl Store {
     }
 
     pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
-        self.write(&self.projects, &projects)?;
+        let mut raw = serde_json::to_value(projects).map_err(|_| Fault::Corrupt)?;
+        if let Some(items) = raw.as_array_mut() {
+            for item in items {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.remove("state");
+                }
+            }
+        }
+        self.write(&self.projects, &raw)?;
         // A project that left the list takes its local method count with it (`method_log`).
         if let Some(dir) = self.projects.parent() {
             crate::method_log::forget(dir, &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>());

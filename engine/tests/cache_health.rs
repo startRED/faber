@@ -57,7 +57,7 @@ async fn turn(engine: &Engine, rx: &mut UnboundedReceiver<AppEvent>, id: Option<
         SendRequest { conversation_id: id, area: Area::Chat, project_id: None, text: text.into(), images: vec![], files: vec![], choice };
     let id = engine.send(request).unwrap();
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
+        let e = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e
             && message.role == Role::Assistant
             && message.status != Some(Status::Streaming)

@@ -140,8 +140,58 @@ impl Core {
 }
 
 impl Engine {
+    pub(super) fn refresh_project_folders(&self) {
+        let start = self.with(|c| {
+            c.project_refresh_generation = c.project_refresh_generation.wrapping_add(1);
+            if c.project_refresh_running {
+                return false;
+            }
+            c.project_refresh_running = true;
+            true
+        });
+        if !start {
+            return;
+        }
+        let weak = std::sync::Arc::downgrade(&self.core);
+        self.runtime.spawn_blocking(move || {
+            loop {
+                let Some(core) = weak.upgrade() else { return };
+                let (generation, projects, previous) = {
+                    let c = core.lock().unwrap_or_else(|e| e.into_inner());
+                    let previous = c.project_states.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    (c.project_refresh_generation, c.store.projects(), previous)
+                };
+                let checked = crate::project::with_folder_states(projects);
+                let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                if generation != c.project_refresh_generation {
+                    continue;
+                }
+                let current = c.store.projects();
+                let mut states = c.project_states.lock().unwrap_or_else(|e| e.into_inner());
+                let mut changed = false;
+                for project in checked {
+                    if current.iter().any(|p| p.id == project.id && p.path == project.path)
+                        && states.get(&project.id) == previous.get(&project.id)
+                    {
+                        changed |= states.insert(project.id.clone(), project.state()) != Some(project.state());
+                    }
+                }
+                states.retain(|id, _| current.iter().any(|p| &p.id == id));
+                drop(states);
+                c.project_refresh_running = false;
+                if changed {
+                    c.list_changed();
+                }
+                return;
+            }
+        });
+    }
+
     /// The window was shown, hidden or focused (the screen says). Gaining focus reads at once; while hidden, readings slow down.
     pub fn set_attention(&self, visible: bool, focused: bool) {
+        if focused {
+            self.refresh_project_folders();
+        }
         self.with(|c| {
             if !c.watching {
                 return;

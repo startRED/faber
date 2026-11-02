@@ -10,6 +10,7 @@
 
 #[macro_use]
 mod macros;
+mod ask;
 pub mod autostart;
 pub mod awake;
 mod failure;
@@ -152,6 +153,10 @@ pub trait Shell: Send + Sync + 'static {
     fn pick_save(&self, _filter: Option<Filter>, _name: String) -> BoxFuture<'_, Picked> {
         Box::pin(async { Err(PickError::NoWindow) })
     }
+    /// Opens a conversation in the window.
+    fn show_conversation(&self, _id: &str) -> Res<()> {
+        Err(NO_WINDOW.into())
+    }
     /// Shows a file or folder in the file manager, selected and never opened.
     fn reveal(&self, _path: PathBuf) -> Res<()> {
         Err(NO_WINDOW.into())
@@ -283,6 +288,7 @@ impl Wiring {
             runtime,
             models: Arc::default(),
             loading_models: Arc::default(),
+            asks: Mutex::default(),
         }
     }
 }
@@ -304,6 +310,7 @@ pub struct Host {
     /// enough.
     loading_models: Arc<AtomicBool>,
     voice: Voice,
+    asks: Mutex<ask::Book>,
 }
 
 impl Host {
@@ -354,8 +361,40 @@ impl Host {
     pub async fn dispatch_as(&self, caller: &Caller, command: &str, args: Value) -> Result<Value, Failure> {
         if *caller != Caller::Screen {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
-            reach::check(caller, command, reach, &args, |id| self.family_of(id)).map_err(Failure::key)?;
+            if command == "send" && matches!(caller, Caller::Agent { .. }) {
+                return Err(Failure::key("error.session.useSession"));
+            }
+            if let Err(key) = reach::check(caller, command, reach, &args, |id| self.family_of(id)) {
+                let mut allowed = false;
+                let mut request = None;
+                if key == reach::ASK_PERSON
+                    && let Caller::Agent { conversation: Some(id) } = caller
+                {
+                    let pending = {
+                        let mut book = lock(&self.asks);
+                        allowed = book.spend(id, command, &args);
+                        if !allowed {
+                            request = Some(book.record(id, command, args.clone(), ask::label(command)));
+                        }
+                        book.pending()
+                    };
+                    self.announce(&json!({"type": "asks", "asks": pending}));
+                }
+                if !allowed {
+                    let mut failure = Failure::key(key);
+                    failure.data = request.map(|id| json!({"request": id}));
+                    return Err(failure);
+                }
+            }
         }
+        if command == "asks" && *caller != Caller::Screen {
+            let requests = match caller {
+                Caller::Agent { conversation: Some(id) } => lock(&self.asks).for_conversation(id),
+                _ => Vec::new(),
+            };
+            return serde_json::to_value(requests).map_err(|_| Failure::key("error.host.badReply"));
+        }
+        let args = with_by(caller, args);
         self.dispatch(command, args).await
     }
 
@@ -404,6 +443,27 @@ impl Host {
         self.shell.shut_down();
         self.engine.shutdown();
     }
+}
+
+/// The arguments with `by` set to the conversation of an AI that Faber started, and removed for every other caller, so a caller
+/// can never act in the name of another conversation.
+fn with_by(caller: &Caller, mut args: Value) -> Value {
+    match caller {
+        Caller::Agent { conversation: Some(id) } => {
+            if args.is_null() {
+                args = Value::Object(Default::default());
+            }
+            if let Some(map) = args.as_object_mut() {
+                map.insert("by".into(), Value::String(id.clone()));
+            }
+        }
+        _ => {
+            if let Some(map) = args.as_object_mut() {
+                map.remove("by");
+            }
+        }
+    }
+    args
 }
 
 /// `turn_id` as the screen sends it: `turnId`.

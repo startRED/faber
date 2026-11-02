@@ -1,7 +1,7 @@
 //! The channel over Faber's own command table (`faber_host::Host`), for the process that runs the engine. Behind the
 //! `host` feature, so the command line itself never builds the engine.
 
-use crate::server::{Answer, Backend, Who};
+use crate::server::{Answer, Backend, DetailedAnswer, Who};
 use faber_host::{Caller, Host, Kind};
 use serde_json::Value;
 use std::io;
@@ -30,9 +30,25 @@ impl Backend for Arc<Host> {
         Box::pin(async move {
             match Host::kind(&cmd) {
                 Some(Kind::Window) => Err("error.host.noWindow".into()),
-                // The command line shows the key; the field a look error names (its detail) stays with the screen.
                 _ => host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| failure.key),
             }
+        })
+    }
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> DetailedAnswer {
+        let host = self.clone();
+        let caller = match who {
+            Who::Person => Caller::Person,
+            Who::Agent { conversation, .. } => Caller::Agent { conversation: conversation.clone() },
+        };
+        Box::pin(async move {
+            if Host::kind(&cmd) == Some(Kind::Window) {
+                return Err("error.host.noWindow".into());
+            }
+            host.dispatch_as(&caller, &cmd, args).await.map_err(|failure| crate::wire::Error {
+                key: failure.key,
+                detail: failure.detail,
+                data: failure.data,
+            })
         })
     }
     #[cfg(windows)]
@@ -45,8 +61,24 @@ impl Backend for Arc<Host> {
     }
 }
 
-/// Serves the channel of `data` over `host` until the process ends. Only one Faber per data folder may: a second one gets
-/// an error here.
+static SECRET: std::sync::OnceLock<Arc<crate::secret::Secret>> = std::sync::OnceLock::new();
+
+/// Prepares the run's identity before the engine can resume conversations.
+pub fn prepare() -> io::Result<()> {
+    let secret = match SECRET.get() {
+        Some(secret) => secret.clone(),
+        None => {
+            let fresh = Arc::new(crate::secret::Secret::fresh()?);
+            SECRET.get_or_init(|| fresh).clone()
+        }
+    };
+    faber_engine::proc::set_token_minter(Arc::new(move |id| secret.token(id)));
+    Ok(())
+}
+
+/// Serves the channel of `data` over `host` until the process ends.
 pub async fn serve(data: &Path, host: Arc<Host>) -> io::Result<()> {
-    crate::serve(data, Arc::new(host)).await
+    prepare()?;
+    let secret = SECRET.get().expect("prepared channel secret").clone();
+    crate::server::serve_with_secret(data, Arc::new(host), secret).await
 }

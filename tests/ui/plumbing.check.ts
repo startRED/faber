@@ -133,3 +133,24 @@ check('plumbing: Keep going\'s stop line never shows, not even while it arrives'
     view.close();
   }
 });
+
+check('end rows: an unconcluded reply, closing request and interrupted reply stay distinct', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [messages, setMessages] = createSignal<Message[]>([mine, reply('a1')]);
+  const [endState, setEndState] = createSignal<'unconcluded' | 'interrupted' | 'concluded'>('unconcluded');
+  const dispose = render(() => createComponent(Thread, { get messages() { return messages(); }, get endState() { return endState(); }, from: 0, conversationId: 'ending', options: [], onBranch: () => {} }), root);
+  try {
+    await settle();
+    equal(root.querySelector('.ai .faber-act-line')?.textContent, t('run.unconcluded'));
+    setEndState('concluded');
+    setMessages([mine, reply('a1'), { ...wake('w1'), wake: { why: 'wake.conclusion' } }, reply('a2')]);
+    await settle();
+    equal([...root.querySelectorAll('.faber-act-line')].filter((row) => row.textContent?.includes(t('wake.conclusion'))).length, 1);
+    setEndState('interrupted');
+    setMessages([mine, reply('a1', { status: 'stopped', closed: true })]);
+    await settle();
+    ok(root.querySelector('.ai .faber-act-line')?.textContent?.includes(t('answer.closed')));
+    equal(root.querySelector('.ai .faber-act-line button')?.textContent, t('answer.closedContinue'));
+  } finally { dispose(); root.remove(); }
+});

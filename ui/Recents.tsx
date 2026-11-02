@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api, type FolderView, type Project } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
@@ -44,6 +44,11 @@ export function Recents(props: {
   disabled?: boolean;
 }) {
   const [data, { refetch }] = createResource(() => api.recents());
+  onMount(() => {
+    const onFocus = () => void refetch();
+    window.addEventListener('focus', onFocus);
+    onCleanup(() => window.removeEventListener('focus', onFocus));
+  });
   const sameFolders = steady<FolderView>((f) => f.path);
   const sameEnvironments = steady<NonNullable<ReturnType<typeof data>>['environments'][number]>((e) => e.id);
   const folders = createMemo(() => sameFolders(data()?.folders));

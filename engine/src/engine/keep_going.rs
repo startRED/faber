@@ -438,6 +438,9 @@ impl Core {
             return None;
         }
         c.keep_going.as_ref()?;
+        if c.waiting_on.is_some() {
+            return None;
+        }
         let last_idx = c.messages.len().saturating_sub(1);
         let silent_twice = last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
         let halt_id = if silent_twice {
@@ -510,7 +513,7 @@ impl Core {
     /// wakes drain after Error. With an empty queue Faber sends its own next turn.
     pub(super) fn keep_going_after(&mut self, conv: &str, reply_id: Option<String>) {
         let Some(reply_id) = reply_id else { return };
-        let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };
+        let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some() && c.waiting_on.is_none()) else { return };
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some())
             || c.messages
                 .last()
@@ -591,7 +594,8 @@ impl Core {
     /// call this while it runs).
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         let Some(c) = self.convs.get(conv) else { return };
-        if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
+        if c.waiting_on.is_some()
+            || c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
             || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
         {
             return;
@@ -845,7 +849,7 @@ impl Core {
         let Some(c) = self.convs.get_mut(conv) else { return };
         let current = c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_some_and(|w| w.until == until);
         let at_rest = c.messages.last().is_some_and(|m| m.id == reply_id && m.status != Some(Status::Streaming));
-        if !current || !at_rest || self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
+        if c.waiting_on.is_some() || !current || !at_rest || self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
             return;
         }
         if let Some(kg) = c.keep_going.as_mut() {

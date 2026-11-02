@@ -43,6 +43,8 @@ impl Backend for Fake {
                 "conversation" => {
                     Ok(json!({"id":args["id"],"state":if working {"working"} else {"concluded"},"conclusion":{"recap":"Done","done":true}}))
                 }
+                "conversation_markdown" => Ok(json!({"markdown":"# Example\n"})),
+                "search_messages" => Ok(json!({"ready":true,"hits":[{"conversationId":"c1","title":"Example","snippet":"hello"}]})),
                 "send" => {
                     if !asks {
                         tokio::spawn(async move {
@@ -52,15 +54,46 @@ impl Backend for Fake {
                     }
                     Ok(json!("c1"))
                 }
+                "show_conversation" if args["id"] == "missing-window" => Err("error.host.noWindow".into()),
+                "show_conversation" => Ok(Value::Null),
                 "refuse" => Err("error.test.refused".into()),
                 "ask" => Err("error.reach.ask".into()),
                 _ => Ok(json!({"cmd":cmd,"args":args})),
             }
         })
     }
+    fn dispatch_detailed(&self, who: &Who, cmd: String, args: Value) -> faber_channel::server::DetailedAnswer {
+        if cmd == "detailed_refusal" {
+            return Box::pin(async {
+                Err(faber_channel::wire::Error {
+                    key: "error.test.refused".into(),
+                    detail: Some("The request cannot go ahead.".into()),
+                    data: None,
+                })
+            });
+        }
+        if cmd == "ask" {
+            return Box::pin(async {
+                Err(faber_channel::wire::Error { key: "error.reach.ask".into(), detail: None, data: Some(json!({"request":"abcd1234"})) })
+            });
+        }
+        let answer = self.dispatch(who, cmd, args);
+        Box::pin(async move { answer.await.map_err(Into::into) })
+    }
     fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refusal_detail_reaches_json_and_human_output() {
+    let (json, _) = faber(false, &["call", "detailed_refusal", "--json"], "", &[]).await;
+    assert_eq!(json.code, 1);
+    assert_eq!(lines(&json.stdout)[0]["error"], "error.test.refused");
+    assert_eq!(lines(&json.stdout)[0]["detail"], "The request cannot go ahead.");
+    let (human, _) = faber(false, &["call", "detailed_refusal", "--human"], "", &[]).await;
+    assert_eq!(human.code, 1);
+    assert!(human.stderr.contains("The request cannot go ahead."));
 }
 
 struct Run {
@@ -154,6 +187,11 @@ async fn errors_use_the_contract_exit_codes() {
         let (r, _) = faber(false, &["call", cmd], "", &[]).await;
         assert_eq!(r.code, code, "{}", r.stdout);
     }
+    let (r, _) = faber(false, &["call", "ask"], "", &[]).await;
+    assert_eq!(lines(&r.stdout), vec![json!({"error":"error.reach.ask", "request":"abcd1234"})]);
+    let (r, fake) = faber(false, &["asks"], "", &[]).await;
+    assert_eq!(r.code, 0);
+    assert!(fake.calls.lock().unwrap().iter().any(|(cmd, _)| cmd == "asks"));
     let (r, _) = faber(true, &["wait", "c1", "--timeout", "1"], "", &[]).await;
     assert_eq!(r.code, 5);
     assert_eq!(lines(&r.stdout)[0]["state"], "working");
@@ -242,4 +280,26 @@ async fn human_overrides_json_and_the_end_of_flags_is_respected() {
     assert_eq!(lines(&r.stdout)[0], "c1");
     let calls = fake.calls.lock().unwrap();
     assert_eq!(calls.iter().find(|(cmd, _)| cmd == "send").unwrap().1["req"]["text"], "--human");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn open_reaches_the_window_and_reports_when_it_is_missing() {
+    let (result, fake) = faber(false, &["open", "c1"], "", &[]).await;
+    assert_eq!(result.code, 0);
+    assert_eq!(fake.calls.lock().unwrap()[0], ("show_conversation".into(), json!({"id":"c1"})));
+    let (result, _) = faber(false, &["open", "missing-window"], "", &[]).await;
+    assert_eq!(result.code, 1);
+    assert_eq!(lines(&result.stdout)[0]["error"], "error.host.noWindow");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn export_and_search_use_the_host_commands() {
+    let (export, fake) = faber(false, &["export", "c1"], "", &[]).await;
+    assert_eq!(export.code, 0);
+    assert_eq!(lines(&export.stdout)[0]["markdown"], "# Example\n");
+    assert_eq!(fake.calls.lock().unwrap()[0], ("conversation_markdown".into(), json!({"id":"c1"})));
+    let (search, fake) = faber(false, &["search", "hello", "world", "--area", "projects"], "", &[]).await;
+    assert_eq!(search.code, 0);
+    assert_eq!(lines(&search.stdout)[0]["hits"][0]["conversationId"], "c1");
+    assert_eq!(fake.calls.lock().unwrap()[0], ("search_messages".into(), json!({"query":"hello world","area":"project"})));
 }

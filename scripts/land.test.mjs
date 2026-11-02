@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, half, parseThen, pickRiders, thenMessage, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { areas, BATCH, conflicts, dropped, eligibleStack, half, parseThen, pickRiders, remainingRiders, thenMessage, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -257,6 +257,17 @@ test('a train takes the oldest queued riders that still stand, never a workflow 
   const many = Array.from({ length: TRAIN + 3 }, (_, i) => rider(String(i + 10), i));
   assert.equal(riders(many).length, TRAIN);
   assert.equal(riders(many).at(-1).pr, String(TRAIN + 9), 'the newest ones wait for the next train');
+});
+
+test('a train skips riders blamed on the base and takes the next waiting group', () => {
+  const view = (oid) => ({ state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false, headRefOid: oid });
+  const entries = ['1', '2', '3', '4', '5', '6', '7'].map((pr, time) => ({ pr, oid: 'h' + pr, files: [], time, red: false, view: view('h' + pr) }));
+  const first = riders(entries, ['1', '2', '3', '4']);
+  const left = remainingRiders(entries, first);
+  assert.deepEqual(riders(left, pickRiders(left, [['1', '2', '3', '4'], ['5', '6']], null).only).map((e) => e.pr), ['4']);
+  const afterGroup = remainingRiders(left, riders(left, ['4']));
+  assert.deepEqual(riders(afterGroup, pickRiders(afterGroup, [['1', '2', '3', '4'], ['5', '6']], null).only).map((e) => e.pr), ['5', '6']);
+  assert.deepEqual(remainingRiders(entries, entries), []);
 });
 
 test('a red train rides again with its first half, down to one rider who answers alone', () => {

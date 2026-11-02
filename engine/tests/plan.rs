@@ -186,12 +186,7 @@ async fn watching_the_accounts_checks_at_once() {
     let (engine, _, _) = start(&dir, spawn, None);
     engine.set_utc_offset(0);
     engine.watch_accounts();
-    for _ in 0..50 {
-        if engine.ledger().claude.plan.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    support::until("the Claude plan was never read", || engine.ledger().claude.plan.is_some()).await;
     assert_eq!(engine.ledger().claude.plan.as_deref(), Some("max"));
     assert_eq!(
         calls.lock().unwrap().iter().filter(|(_, args)| args == &["auth", "status"]).count(),
@@ -226,12 +221,7 @@ async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
     let before_clock = f.args.lock().unwrap().len();
     assert!(engine.ledger().codex.own_spend.is_empty());
     engine.set_utc_offset(-10800);
-    for _ in 0..50 {
-        if engine.ledger().codex.readings["five_hour"].used == 0.13 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    support::until("the Codex five-hour reading never reached 0.13", || engine.ledger().codex.readings["five_hour"].used == 0.13).await;
     let account = engine.ledger().codex;
     let local_bin = faber_engine::budget::bin((WHEN - 60) as f64, -10800);
     assert_eq!(account.learned.mass[local_bin], 3.0, "the startup drop belongs to the local weekday and hour");

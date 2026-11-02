@@ -88,7 +88,7 @@ impl faber_engine::browser::Browser for Tabbed {
 }
 
 async fn wire(pipe: &support::Pipe, ready: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(crate::support::DEADLINE, async {
         loop {
             if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| ready(m)).cloned() {
                 return m;

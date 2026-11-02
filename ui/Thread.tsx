@@ -17,8 +17,10 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { StallNote } from './StallNote.tsx';
+import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
@@ -40,7 +42,7 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepIcon, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep, type StepIcon } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -170,7 +172,6 @@ function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
 function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conversationId: string; messageId: string }) {
   const step = () => props.step();
   const state = () => agentState(step(), props.streaming);
-  const live = () => ['running', 'background', 'waiting', 'stuck'].includes(state());
   const open = () => showAgent({ conversationId: props.conversationId, messageId: props.messageId, callId: step().call.id });
   const shown = () => {
     const agent = openedAgent();
@@ -180,9 +181,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
     <div class="agent-item" role="listitem" data-parent={step().parent?.id}>
       <button type="button" class="agent" data-state={state()} title={step().parent ? `${step().parent!.title} › ${step().title}` : undefined} aria-controls="running" aria-current={shown() ? 'true' : undefined} onClick={open}>
         <span class="agent-mark" aria-hidden="true">
-          <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
-            <span class="live" />
-          </Show>
+          <StateGlyph state={state() === 'done' && !(step().call.facts?.checks && !step().call.facts?.failed) ? 'ended' : stateKind(state())} small />
         </span>
         <b>{step().title || t('agent.untitled')}</b>
         <span class="agent-meta">{agentMeta(step(), props.streaming)}</span>
@@ -202,15 +201,6 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
   );
 }
 
-const ICONS: Record<StepIcon, Parameters<typeof Icon>[0]['name']> = {
-  read: 'sheet',
-  change: 'edit',
-  command: 'terminal',
-  search: 'search',
-  web: 'globe',
-  tool: 'plug',
-  thought: 'feather',
-};
 /** Lines of a step's output shown once it is opened; the rest is counted. */
 const OUTPUT_LINES = 30;
 
@@ -237,9 +227,7 @@ function Step(props: { tool: Accessor<ToolUse>; working: boolean; long?: string;
     <div class="step" data-state={state()} role="listitem">
       <button type="button" class="step-line" aria-expanded={open()} title={fullDetail() || undefined} onClick={() => setOpen((on) => !on)}>
         <span class="step-icon" aria-hidden="true">
-          <Show when={state() === 'running'} fallback={<Icon name={ICONS[stepIcon(props.tool())]} small />}>
-            <span class="live" />
-          </Show>
+          <Show when={state() === 'done'} fallback={<StateGlyph state={stateKind(state())} small />}><ToolGlyph kind={toolKind(props.tool().name)} small /></Show>
         </span>
         <b>{row().label}</b>
         <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
@@ -275,7 +263,7 @@ function Thought(props: { text: string; live: boolean }) {
     <div class="step thought" data-state={props.live ? 'running' : 'done'} role="listitem">
       <button type="button" class="step-line" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
         <span class="step-icon" aria-hidden="true">
-          <Show when={props.live} fallback={<Icon name="feather" small />}><span class="live" /></Show>
+          <Show when={props.live} fallback={<ToolGlyph kind="thought" small />}><StateGlyph state="working" small /></Show>
         </span>
         <b>{t(props.live ? 'step.thinking' : 'step.thought')}</b>
         <Show when={line()}><i>{line()}</i></Show>
@@ -334,7 +322,7 @@ function Steps(props: { items: Accessor<Item[]>; working: boolean; last: boolean
       <div class="steps" data-state={running() || thinkingNow() ? 'running' : 'done'}>
         <button type="button" class="steps-head" aria-expanded={open()} onClick={() => setOpen((on) => !on)}>
           <span class="step-icon" aria-hidden="true">
-            <Show when={running() || thinkingNow()} fallback={<Icon name="right" small />}><span class="live" /></Show>
+            <Show when={running() || thinkingNow()} fallback={<Icon name="right" small />}><StateGlyph state="working" small /></Show>
           </span>
           <b>{[summary(), now()].filter(Boolean).join(' · ')}</b>
           <Show when={failed()}><span class="sr-only">, </span><em class="step-failed">{t('agent.facts.failed', { n: failed() })}</em></Show>
@@ -355,6 +343,7 @@ type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
   workingFolder?: string;
+  endState?: import('./api.ts').RunStateName;
   pieceRevision?: number;
   visuals?: VisualAnswer[];
   conversationId: string;
@@ -384,7 +373,7 @@ interface Shared {
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // Older automatic messages without acts keep their loop mark in the reply header.
-  const woke = () => props.prompt?.acts?.length ? undefined : props.prompt?.wake;
+  const woke = () => props.prompt?.acts?.length || props.prompt?.wake?.why === 'wake.conclusion' ? undefined : props.prompt?.wake;
   const m = () => props.m();
   // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
   // changed only the tools never touches the text, and one that changed only the text never touches the tools.
@@ -521,7 +510,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   };
   const liveLine = () => {
     if (!working() || waiting().length || m().waitUntil || shownLive()) return '';
-    return nowLine() || t('activity.thinkingNow');
+    const headline = thinking().findLast((part) => part.title)?.text;
+    return nowLine()?.trim() || [t('activity.thinkingNow'), headline && middle(headline)].filter(Boolean).join(' ');
   };
   const planNow = () => {
     if (!working()) return undefined;
@@ -673,12 +663,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       {/* Nothing above shows the agent at work: it is thinking, said in its own words when it gave some. */}
       <Show when={liveLine()}>
         <div class="activity-latest live-line" role="status" aria-live="polite" aria-atomic="true">
-          <span class="live" aria-hidden="true" />
+          <StateGlyph state="working" small />
           <span class="step">{liveLine()}</span>
         </div>
       </Show>
       {/* The agent's own work seems stuck (a step with no news, a long compaction, the same step again): said where the eye is, with Stop. */}
       <StallNote conversationId={props.conversationId} m={m()} />
+      <Show when={props.last && props.area === 'project'}><ResultsNote conversationId={props.conversationId} message={m()} /></Show>
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
       <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
         {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
@@ -703,21 +694,16 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
       <Show when={m().status === 'stopped' && !m().closed && !m().error?.startsWith('reason.') && props.prompt && !props.prompt.wake}>
-        <div class="note">{t('answer.stopped')}</div>
+        <div class="faber-act note"><div class="faber-act-line"><StateGlyph state="stopped" small /><span>{t('answer.stopped')}</span></div></div>
       </Show>
-      {/* Faber was closed while this ran: said in place of "Stopped.", and the newest such reply offers to go on (R477). */}
+      <Show when={props.last && m().id === props.messages?.at(-1)?.id && props.endState === 'unconcluded'}>
+        <div class="faber-act"><div class="faber-act-line"><StateGlyph state="ended" small /><span>{t('run.unconcluded')}</span></div></div>
+      </Show>
+      {/* A reply cut by closing keeps its recovery action (R477). */}
       <Show when={m().status === 'stopped' && m().closed}>
-        <div class="note">{t('answer.closed')}</div>
-        <Show when={props.area === 'project'}>
-          <div class="note">{t('answer.closedFiles')}</div>
-        </Show>
-        <Show when={props.last && !closedRefused()}>
-          <div>
-            <button type="button" class="btn" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>
-              {t('answer.closedContinue')}
-            </button>
-          </div>
-        </Show>
+        <div class="faber-act"><div class="faber-act-line"><StateGlyph state="interrupted" small /><span>{t('answer.closed')}<Show when={props.area === 'project'}> {t('answer.closedFiles')}</Show></span>
+          <Show when={props.last && !closedRefused()}><button type="button" onClick={() => api.continueClosed(props.conversationId, m().id).catch((e: unknown) => setClosedRefused(failureText(e)))}>{t('answer.closedContinue')}</button></Show>
+        </div></div>
         <Show when={closedRefused()}>{(text) => <div class="note err" role="alert">{text()}</div>}</Show>
       </Show>
       <Show when={m().error && !quotaPending(m())}>
@@ -1064,7 +1050,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
-  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m));
+  const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m) && !(at === props.messages.length - 1 && (props.endState === 'unconcluded' || m.closed)));
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header,
   // and if the newest turns had nothing for the person, the last turn of the run with content stays open below the header.
   const runs = createMemo(() => runsOf(props.messages, drawn));
@@ -1118,6 +1104,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             }
           >
             <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
+            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><ToolGlyph kind="decision" small /><span>{t('wake.conclusion')}</span></div></div></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (

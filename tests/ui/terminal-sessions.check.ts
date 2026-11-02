@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { CliSession, Project } from '../../ui/api.ts';
-import { t, useLanguage } from '../../ui/i18n.ts';
+import { LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
 import { Welcome } from '../../ui/Welcome.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -35,6 +35,23 @@ function home(terminal?: { list: (projectId: string) => Promise<CliSession[]>; o
   return { root, done: () => (dispose(), root.remove()) };
 }
 
+check('project home: every description fits one line in a narrow column', () => {
+  const language = lang();
+  const { root, done } = home({ list: async () => [], onPick: () => {} });
+  try {
+    for (const { code } of LANGUAGES) {
+      useLanguage(code);
+      const summaries = [...root.querySelectorAll<HTMLElement>('.project-summary')];
+      equal(summaries.length, 3);
+      for (const summary of summaries) {
+        summary.style.width = '320px';
+        const range = document.createRange(); range.selectNodeContents(summary);
+        equal(range.getClientRects().length, 1, code + ': description stays on one line');
+      }
+    }
+  } finally { done(); useLanguage(language); }
+});
+
 check('terminal sessions: asked for only on a click, then a row opens the session', async () => {
   useLanguage('en');
   let asked = 0;
@@ -46,8 +63,11 @@ check('terminal sessions: asked for only on a click, then a row opens the sessio
     equal(asked, 0, 'nothing starts the CLI before the person asks');
     const open = root.querySelector<HTMLButtonElement>('.from-terminal')!;
     ok(open, 'one quiet button');
+    equal(open.tagName, 'BUTTON'); ok(!open.disabled && open.tabIndex >= 0, 'native keyboard activation stays available');
+    equal(open.getAttribute('aria-describedby'), 'terminal-summary');
     equal(open.textContent, t('s1.terminal'));
-    equal(open.title, t('s1.terminal.hint'));
+    equal(root.querySelector('.terminal .project-summary')?.textContent, t('s1.terminal.summary'));
+    equal(open.getAttribute('aria-expanded'), 'false');
     open.click();
     equal(asked, 1);
     const section = root.querySelector<HTMLElement>('.resume.terminal')!;
@@ -56,7 +76,13 @@ check('terminal sessions: asked for only on a click, then a row opens the sessio
     answer([session('t1', 'Fix the login form'), session('t2', '')]);
     await settle();
     equal(section.getAttribute('aria-busy'), null);
-    equal(section.querySelector('h2')?.textContent, t('s1.terminal'));
+    equal(open.getAttribute('aria-expanded'), 'true');
+    equal(section.querySelector('#terminal-summary')?.textContent, t('s1.terminal.summary'));
+    open.click(); equal(open.getAttribute('aria-expanded'), 'false');
+    equal(section.querySelector('#terminal-summary')?.textContent, t('s1.terminal.summary'));
+    equal(section.querySelector('.rrow'), null);
+    open.click(); equal(open.getAttribute('aria-expanded'), 'true');
+    equal(asked, 1, 'reopening does not start another read');
     const rows = [...section.querySelectorAll<HTMLButtonElement>('.rrow')];
     deepEqual(rows.map((r) => r.querySelector('.t')?.textContent), ['Fix the login form', t('run.untitled')]);
     ok(rows[0]!.querySelector('.s')?.textContent?.startsWith('Codex · '), 'the CLI and when');

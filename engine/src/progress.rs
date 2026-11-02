@@ -44,19 +44,18 @@ pub const NO_TEXT: &str = "error.plan.noText";
 pub const RUNNING: &str = "error.plan.running";
 
 const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a short checklist, kept with the conversation \
-across turns. Send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
-while you work) with the first tool call of a task that has more than one step, in the same message, never in a message of its \
-own. Then send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
-next pending one. Send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
+across turns. You can send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
+while you work). You can send {\"advance\": true} together with the call that starts the next step: it finishes the current step and starts the \
+next pending one. You can send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
 conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
-work, also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
+work, you can also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
 spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words, what you are doing now (at most 50 characters), in their \
-language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". Call it when substantial \
-work starts and again only when the phase of the work changes, together with another tool call, never on a timer.";
+language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". You can use it when substantial \
+work starts or the phase changes.";
 
-const WRAP_UP_DESCRIPTION: &str = "Concludes your task: the only way a task counts as finished. Call it once, as your last tool call, when the task the person asked for ends or stops, then write your closing message to the person in your own words (what you did, the result, what is not done, what you checked) and end your turn. outcome: done when the person's whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: what you did, one or two sentences. result: what is now true. not_done: what is left or not verified (leave it out when nothing is). verified: what you ran or looked at that shows the result (required for done, and it must be something you saw, never something you expect). Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. A task that ends without this call shows as ended without a conclusion and you are asked once to conclude it. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
+const WRAP_UP_DESCRIPTION: &str = "You can record the outcome when the task the person asked for ends or stops and write a closing message in your own words. outcome: done when the person's whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: what you did, one or two sentences. result: what is now true. not_done: what is left or not verified (leave it out when nothing is). verified: what you ran or looked at that shows the result (required for done, and it must be something you saw, never something you expect). Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. Some project turns without this call show as ended without a conclusion and may prompt one follow-up. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
 
 fn plan_schema() -> Value {
     json!({

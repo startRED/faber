@@ -402,8 +402,7 @@ async fn a_send_that_cannot_start_ends_the_reply_with_an_error_instead_of_leavin
     let error = engine.send(request(Area::Project, Some("no-such-project"), SKY, "claude")).unwrap_err();
     assert_eq!(error, "error.projectGone");
     assert!(engine.state().running.items.is_empty(), "a reply that never started must not stay in the list");
-    let saved = engine.open(&engine.state().conversations[0].id).unwrap();
-    assert_eq!((saved.messages[1].status, saved.messages[1].error.as_deref()), (Some(Status::Error), Some("error.projectGone")));
+    assert!(engine.state().conversations.is_empty(), "a refused send does not create a conversation");
     engine.shutdown();
 }
 

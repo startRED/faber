@@ -16,6 +16,10 @@ on:
   schedule:
     - cron: '17 6 * * *'
 
+# Most jobs do not start Electron, so npm ci skips its 100 MB binary.
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
 # A newer push to the same pull request or queue branch makes its older run pointless. Pushes to the shared branches keep
 # every run, so main can follow the newest green commit of phase-1-base (R127) even while pushes keep coming.
 concurrency:
@@ -270,6 +274,99 @@ jobs:
             target/faber-test/debug/faber.exe
           if-no-files-found: error
 
+  # Electron follows the app plan and keeps its own cache and artifact.
+  electron-app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: windows-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ''
+      FABER_TEST_SHELL: electron
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: electron-app
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - run: cargo t --build-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: electron-test-app
+          retention-days: 1
+          path: |
+            target/debug/faber-test.exe
+            target/debug/fake-cli.exe
+            target/debug/examples/cache_probe.exe
+            target/faber-test/debug/faber-sidecar.exe
+            out/electron/
+            dist-test/
+          if-no-files-found: error
+
+  electron:
+    needs: [changes, electron-app]
+    if: always() && needs.changes.outputs.app == 'true' && needs.electron-app.result == 'success'
+    runs-on: windows-latest
+    # Reports without blocking until the Electron checks are steady (R459); remove with ELECTRON_BLOCKS_GATE.
+    continue-on-error: true
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ''
+      FABER_TEST_SHELL: electron
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - uses: actions/download-artifact@v8
+        with:
+          name: electron-test-app
+          path: .
+      - id: ui
+        continue-on-error: true
+        run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: log-electron-ui
+          path: |
+            target/faber-test/shots/
+            target/faber-test/run.log
+          if-no-files-found: ignore
+      - id: memory
+        if: always()
+        continue-on-error: true
+        run: rustup run stable ./target/debug/faber-test.exe --suite screen --filter 'with no CLI running, Faber stays within its memory budget' --prebuilt
+      - name: Electron memory summary
+        if: always()
+        shell: pwsh
+        run: |
+          '### Electron memory (R125)' >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path target/faber-test/run.log) {
+            $lines = Select-String -Path target/faber-test/run.log -Pattern 'idle on the new conversation|MB is over the'
+            if ($lines) { $lines.Line | ForEach-Object { "- $_" >> $env:GITHUB_STEP_SUMMARY } }
+            else { 'No memory measurement was recorded.' >> $env:GITHUB_STEP_SUMMARY }
+          } else { 'No memory log was recorded.' >> $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: log-electron-memory
+          path: |
+            target/faber-test/shots/
+            target/faber-test/run.log
+          if-no-files-found: ignore
+      - if: always() && (steps.ui.outcome != 'success' || steps.memory.outcome != 'success')
+        shell: pwsh
+        run: exit 1
+
   # How long each screen scenario took in the newest green runs, so the parts are dealt by today's seconds and not by a
   # table that ages (scripts/screen-costs.mjs, R165). It never fails: without the runs it hands on the table in the repo.
   costs:
@@ -354,6 +451,7 @@ jobs:
           - { os: windows-latest, cache: rust }
           - { os: macos-latest, cache: rust }
           - { os: windows-latest, cache: app }
+          - { os: windows-latest, cache: electron-app }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -379,6 +477,7 @@ jobs:
             lints-ui) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings; cargo t --build-only ;;
             rust) cargo test --workspace --no-run; cargo build -p faber-testkit --bin faber-test ;;
             app) cargo t --build-only ;;
+            electron-app) ELECTRON_SKIP_BINARY_DOWNLOAD= node node_modules/electron/install.js; FABER_TEST_SHELL=electron cargo t --build-only ;;
           esac
 
   # The living documents stay small, listed in docs/README.md and linked right (scripts/docs.mjs). It runs for every
@@ -396,7 +495,7 @@ jobs:
   # for main below: every job passed, or the plan left it out on purpose.
   # A waiting queue run tested nothing, so it has no gate at all: a green one would let `land.mjs --finish` land it.
   gate:
-    needs: [changes, docs, check, app, screen]
+    needs: [changes, docs, check, app, screen, electron-app, electron]
     if: always() && needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -406,6 +505,10 @@ jobs:
           CHECK: ${{ needs.check.result }}
           APP: ${{ needs.app.result }}
           SCREEN: ${{ needs.screen.result }}
+          ELECTRON_APP: ${{ needs.electron-app.result }}
+          ELECTRON: ${{ needs.electron.result }}
+          # Electron coverage is still being brought up; report failures until its gaps are fixed.
+          ELECTRON_BLOCKS_GATE: 'false'
           PLAN_CHECK: ${{ needs.changes.outputs.check }}
           PLAN_APP: ${{ needs.changes.outputs.app }}
           PLAN_TESTED: ${{ needs.changes.outputs.tested }}
@@ -417,7 +520,11 @@ jobs:
           ok "$CHECK" "$PLAN_CHECK" || { echo "::error::check: $CHECK"; exit 1; }
           ok "$APP" "$PLAN_APP" || { echo "::error::app: $APP"; exit 1; }
           ok "$SCREEN" "$PLAN_TESTED" || { echo "::error::screen: $SCREEN"; exit 1; }
-          echo "Every part the plan chose passed."
+          if [ "$ELECTRON_BLOCKS_GATE" = true ]; then
+            ok "$ELECTRON_APP" "$PLAN_APP" || { echo "::error::electron-app: $ELECTRON_APP"; exit 1; }
+            ok "$ELECTRON" "$PLAN_APP" || { echo "::error::electron: $ELECTRON"; exit 1; }
+          fi
+          echo "Every required part the plan chose passed."
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.

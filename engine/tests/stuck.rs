@@ -67,13 +67,13 @@ fn signs(rx: &mut UnboundedReceiver<AppEvent>, seen: &mut Vec<Sign>) {
 }
 
 async fn reply_until(engine: &Engine, id: &str, what: &str, done: impl Fn(&Message) -> bool) -> Message {
-    for _ in 0..300 {
-        if let Some(m) = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| done(m)) {
-            return m;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{what}: {:?}", engine.open(id).and_then(|c| c.messages.last().cloned()));
+    let mut found = None;
+    support::until(what, || {
+        found = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| done(m));
+        found.is_some()
+    })
+    .await;
+    found.unwrap()
 }
 
 fn call_sign(m: &Message) -> Option<Sign> {
@@ -98,7 +98,9 @@ async fn r161_no_recorded_subagent_turn_ever_looks_stuck() {
         let (engine, mut rx) = engine(&dir, v, f.spawn.clone());
         let id = send(&engine, vendor, model, text);
         let (mut seen, mut answered) = (vec![], vec![]);
-        for _ in 0..500 {
+        // Each pass reads the signs and answers permission cards (an await `support::until` cannot hold); real time bounds it.
+        let start = std::time::Instant::now();
+        while start.elapsed() < crate::support::DEADLINE {
             signs(&mut rx, &mut seen);
             let c = engine.open(&id).unwrap();
             let reply = c.messages.last().unwrap();

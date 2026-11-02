@@ -38,7 +38,14 @@ check('project goals: the fold reads only when opened, shows each goal with its 
     api.projectGoals = async (id) => { equal(id, 'goal-project'); reads++; return view({ goals: [row(), row({ id: 'g2', words: 'No crashes', state: 'needsYou', reason: 'reason.goal.fixTried', lastRun: undefined })] }); };
   }, async (root) => {
     equal(reads, 0, 'a closed fold reads nothing');
-    button(root, 'goals.title').click(); await settle();
+    const fold = button(root, 'goals.title');
+    equal(fold.tagName, 'BUTTON'); ok(!fold.disabled && fold.tabIndex >= 0, 'native keyboard activation stays available');
+    const summary = () => root.querySelector('#goals-summary');
+    equal(summary()?.textContent, t('goals.summary'));
+    equal(fold.getAttribute('aria-describedby'), 'goals-summary');
+    fold.click(); await settle();
+    equal(fold.getAttribute('aria-expanded'), 'true');
+    equal(summary()?.textContent, t('goals.summary'));
     equal(reads, 1);
     const text = root.textContent!;
     ok(text.includes('Every check passes') && text.includes(t('goals.state.holding')));
@@ -47,6 +54,9 @@ check('project goals: the fold reads only when opened, shows each goal with its 
     equal(root.querySelectorAll('.goal code')[0].textContent, 'npm run lint');
     equal(root.querySelectorAll('.goal')[0].querySelector('[class~="btn"]:not(.danger)'), null, 'a holding goal offers only Remove');
     ok(button(root, 'goals.resume'), 'a goal that needs the person can be watched again');
+    fold.click(); await settle();
+    equal(fold.getAttribute('aria-expanded'), 'false');
+    equal(summary()?.textContent, t('goals.summary'));
   });
 });
 

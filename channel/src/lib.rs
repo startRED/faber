@@ -4,7 +4,7 @@
 //! signed-in user can open it: never a network port.
 //!
 //! The wire: one JSON object per line. A request is `{"id":1,"cmd":"state","args":{}}`, its reply `{"id":1,"ok":...}` or
-//! `{"id":1,"err":"error.key"}`, and an event `{"event":{...}}`. Two commands belong to the channel itself and never to the
+//! `{"id":1,"err":"error.key"}` with an optional `detail` field, and an event `{"event":{...}}`. Two commands belong to the channel itself and never to the
 //! command table: `hello` (who is asking, and what Faber offers) and `subscribe` (events start on this connection).
 
 pub mod client;

@@ -91,6 +91,17 @@ Object.assign(window, { __faberCatalogReplacementPreview: async () => {
   return true;
 } });
 
+check('catalog: search comes before the select shown action', async () => {
+  const view = await panel();
+  try {
+    const search = view.root.querySelector('.catalog-search')!;
+    const pick = view.root.querySelector('[data-catalog-pick-shown]')!;
+    const cards = view.root.querySelector('.catalog-group')!;
+    ok(!!(search.compareDocumentPosition(pick) & Node.DOCUMENT_POSITION_FOLLOWING));
+    ok(!!(cards.compareDocumentPosition(pick) & Node.DOCUMENT_POSITION_FOLLOWING), 'select shown follows the results');
+  } finally { view.close(); }
+});
+
 check('catalog manual replacement: a quick repair opens details before any installation', async () => {
   const rows = sample();
   rows[1].status = 'error.tools.reinstall';

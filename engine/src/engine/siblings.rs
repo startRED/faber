@@ -31,7 +31,21 @@ const MAX_LISTED: usize = 12;
 
 /// Where a conversation stands; `busy` is whether its CLI runs a turn now.
 fn state_of(busy: bool, c: &Conversation) -> State {
-    ended::run_state(c, busy)
+    if !busy && c.waiting_on.is_some() {
+        return State::Waiting;
+    }
+    let state = ended::run_state(c, busy);
+    if matches!(state, State::Working | State::Stuck)
+        && !busy
+        && !c.compacting
+        && c.messages.last().is_some_and(|m| {
+            m.role == Role::Assistant && (m.status == Some(Status::Stopped) || (c.stopped && m.status != Some(Status::Streaming)))
+        })
+    {
+        if c.messages.last().is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped }
+    } else {
+        state
+    }
 }
 
 /// Where a plan step's conversation stands (task 040), in a subagent row's words.
@@ -70,6 +84,16 @@ impl Core {
                 pending.entry(parent).or_default().insert(id);
             }
         }
+        for parent in store.mentioning("\"waitingOn\"") {
+            let Some(waiting) = store.get(&parent).and_then(|c| c.waiting_on) else { continue };
+            for id in waiting.ids {
+                let Some(mut child) = store.get(&id) else { continue };
+                child.messages.iter_mut().for_each(settle);
+                if child.keep_going.is_none() && !matches!(state_of(false, &child), State::Working | State::Waiting) {
+                    pending.entry(parent.clone()).or_default().insert(id);
+                }
+            }
+        }
         let quiet = teams.into_iter().filter(|(_, (woken, _))| !woken).map(|(leader, (_, members))| (leader, members)).collect();
         (pending, quiet)
     }
@@ -90,7 +114,14 @@ impl Core {
             }
             let owed = self.load(&child).is_some_and(|c| c.pending_parent_report);
             self.tell_parent(&child);
-            if self.convs.get(&child).is_some_and(|c| c.pending_parent_report) {
+            let pending = self.convs.get(&child).is_some_and(|c| {
+                if c.started_by.as_deref() == Some(parent) {
+                    c.pending_parent_report
+                } else {
+                    self.convs.get(parent).and_then(|p| p.waiting_on.as_ref()).is_some_and(|w| w.ids.contains(&child))
+                }
+            });
+            if pending {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
             } else if !owed {
                 // A crash left its reply streaming on disk: saved settled, it is not found again at the next start.
@@ -104,10 +135,9 @@ impl Core {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
         let (ok, text) = match sibling::request(&input) {
             Err(why) => (false, format!("Nothing was done: {why}.")),
-            Ok(Request::Start { title, brief, ai, keep_going, step }) => {
-                match self.start_sibling(conv, &title, &brief, ai, keep_going, step) {
-                    Ok((id, true)) => (true, sibling::started(&title, &id)),
-                    Ok((id, false)) => (false, sibling::failed(&title, &id)),
+            Ok(Request::Start { title, brief, ai, model, effort, keep_going, step }) => {
+                match self.session_start(conv, NewSession { title: title.clone(), brief, ai, model, effort, keep_going, step }) {
+                    Ok(id) => (true, sibling::started(&title, &id)),
                     Err(why) => (false, format!("No conversation was started: {why}.")),
                 }
             }
@@ -119,10 +149,10 @@ impl Core {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing to list: {why}.")),
             },
-            Ok(Request::Ask { id, message }) => match self.ask_sibling(conv, &id, &message) {
-                Ok(text) => (true, text),
-                Err(why) => (false, format!("Nothing was sent: {why}.")),
-            },
+            Ok(Request::Ask { id, message }) => result(self.session_message(conv, &id, &message)),
+            Ok(Request::Stop { id }) => result(self.session_stop(conv, &id)),
+            Ok(Request::Resume { id, message }) => result(self.session_resume(conv, &id, message.as_deref())),
+            Ok(Request::Wait { on, note }) => result(self.session_wait(conv, on, note)),
             Ok(Request::Context) => (true, self.context_answer(conv)),
             Ok(Request::Compact { next }) => match self.plan_compaction(conv, next) {
                 Ok(text) => (true, text),
@@ -132,9 +162,10 @@ impl Core {
                 Ok(()) => (true, sibling::CLEAR_PLANNED.to_string()),
                 Err(why) => (false, format!("Nothing was scheduled: {why}.")),
             },
-            Ok(Request::Archive) => match self.set_archived(conv, true) {
+            Ok(Request::Archive { id: Some(id) }) => result(self.session_archive(conv, &id)),
+            Ok(Request::Archive { id: None }) => match self.archive_itself(conv) {
                 Ok(()) => (true, sibling::ARCHIVED.to_string()),
-                Err(_) => (false, "Nothing was archived: the conversation is gone.".to_string()),
+                Err(why) => (false, format!("Nothing was archived: {why}.")),
             },
         };
         // The answer goes back only to the process that asked.
@@ -143,15 +174,8 @@ impl Core {
         }
     }
 
-    fn start_sibling(
-        &mut self,
-        conv: &str,
-        title: &str,
-        brief: &str,
-        ai: Ai,
-        keep_going: bool,
-        step: Option<String>,
-    ) -> Result<(String, bool), &'static str> {
+    fn start_sibling(&mut self, conv: &str, new: NewSession) -> Result<(String, bool), &'static str> {
+        let NewSession { title, brief, ai, keep_going, step, model, effort } = new;
         if self.goal_out_of_money(conv) {
             return Err(GOAL_CAP);
         }
@@ -172,7 +196,7 @@ impl Core {
         }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
         // A named AI overrides the person's pin for this background work only, never for the conversation that asked.
-        let choice = match ai {
+        let mut choice = match ai {
             Ai::Same => parent.choice.clone().ok_or("this conversation has no model chosen")?,
             Ai::Auto => Choice { vendor: "auto".into(), model: None, effort: None },
             Ai::Named(vendor) if self.opts.clis.contains_key(&vendor) => {
@@ -180,6 +204,35 @@ impl Core {
             }
             Ai::Named(_) => return Err("that AI is not connected on this computer; choose another, or leave ai out"),
         };
+        if matches!(ai, Ai::Same) && choice.vendor == "auto" && (model.is_some() || effort.is_some()) {
+            let vendor = self.live.get(conv).map(|l| l.vendor).ok_or("the current AI is not known yet")?;
+            choice.vendor = vendor.name().into();
+        }
+        if choice.vendor == "auto" && (model.is_some() || effort.is_some()) {
+            return Err("model and effort cannot be used with auto; choose an AI");
+        }
+        let selected_model = model.clone();
+        if let Some(model) = model {
+            let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor).ok_or("choose a named AI for a model")?;
+            let valid = match vendor {
+                Vendor::Claude => {
+                    crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, &model))
+                }
+                Vendor::Codex => self.codex_models.contains(&model),
+            };
+            if !valid {
+                return Err("unknown model; choose a model available for this AI");
+            }
+            choice.model = Some(model);
+        }
+        if let Some(effort) = effort {
+            choice.effort = Some(match effort.as_str() {
+                "low" => crate::router::Effort::Low,
+                "medium" => crate::router::Effort::Medium,
+                "high" => crate::router::Effort::High,
+                _ => return Err("effort must be low, medium or high"),
+            });
+        }
         self.sibling_room(&project)?;
         // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold, for the AI that
         // runs it. Auto is held to them once it has routed the brief, like any turn nobody sent by hand.
@@ -192,6 +245,10 @@ impl Core {
                 let model = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models).model;
                 Some((vendor, model.as_deref().and_then(family_of).map(str::to_string)))
             }
+        };
+        let gate = match (gate, selected_model) {
+            (Some((vendor, _)), Some(model)) => Some((vendor, family_of(crate::router::pinned(vendor, &model)).map(str::to_string))),
+            (gate, _) => gate,
         };
         self.sibling_allowed(&gate)?;
         let id = self.blank(Area::Project, Some(project.clone()));
@@ -209,7 +266,7 @@ impl Core {
             conversation_id: Some(id.clone()),
             area: Area::Project,
             project_id: Some(project),
-            text: sibling::prompt(title, brief),
+            text: sibling::prompt(&title, &brief),
             images: vec![],
             files: vec![],
             choice,
@@ -417,7 +474,7 @@ impl Core {
         Ok(sibling::list(&folder, &rows))
     }
 
-    /// A conversation an agent started stopped working (its turn ended, nothing is queued, Keep going is off): its report
+    /// A conversation an agent started stopped working (its turn ended, or it was stopped with messages queued): its report
     /// goes to the agent that started it by itself, so no agent waits or polls. An archived or gone parent hears nothing.
     pub(super) fn tell_parent(&mut self, conv: &str) {
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
@@ -436,6 +493,22 @@ impl Core {
         let text = sibling::finished(&c.title, conv, state, &last);
         // Stopped working: the plan step waits for its work to be joined.
         self.edit_worker(conv, |w| w.joining = true);
+        let mut recipients = vec![parent.clone()];
+        let mut cursor = parent;
+        let mut seen = HashSet::new();
+        while seen.insert(cursor.clone()) {
+            let Some(next) = self.load(&cursor).and_then(|c| c.started_by.clone()) else { break };
+            if self.load(&next).and_then(|c| c.waiting_on.as_ref()).is_some_and(|w| w.ids.iter().any(|id| id == conv)) {
+                recipients.push(next.clone());
+            }
+            cursor = next;
+        }
+        for parent in recipients {
+            self.deliver_child_report(conv, parent, text.clone(), report_id.clone());
+        }
+    }
+
+    fn deliver_child_report(&mut self, conv: &str, parent: String, text: String, report_id: String) {
         if self.load(&parent).is_none_or(|p| p.archived_at.is_some()) {
             self.finish_parent_report(conv, &parent);
             return;
@@ -448,8 +521,10 @@ impl Core {
             return;
         }
         if p.queued.len() >= MAX_QUEUED {
-            self.convs.get_mut(conv).expect("child exists").pending_parent_report = true;
-            self.save(conv);
+            if self.convs.get(conv).is_some_and(|c| c.started_by.as_deref() == Some(parent.as_str())) {
+                self.convs.get_mut(conv).expect("child exists").pending_parent_report = true;
+                self.save(conv);
+            }
             self.parent_reports.entry(parent).or_default().insert(conv.into());
             return;
         }
@@ -468,7 +543,16 @@ impl Core {
     }
 
     fn finish_parent_report(&mut self, child: &str, parent: &str) {
-        if let Some(c) = self.convs.get_mut(child).filter(|c| c.pending_parent_report) {
+        if self.convs.get(parent).and_then(|p| p.waiting_on.as_ref()).is_some_and(|w| w.ids.iter().any(|id| id == child)) {
+            let previous = self.convs.get_mut(parent).unwrap().waiting_on.take();
+            if self.try_save(parent).is_err() {
+                self.convs.get_mut(parent).unwrap().waiting_on = previous;
+                self.parent_reports.entry(parent.into()).or_default().insert(child.into());
+                return;
+            }
+            self.list_changed();
+        }
+        if let Some(c) = self.convs.get_mut(child).filter(|c| c.pending_parent_report && c.started_by.as_deref() == Some(parent)) {
             c.pending_parent_report = false;
             self.save(child);
         }
@@ -502,12 +586,199 @@ impl Core {
         let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
         self.sibling_allowed(&ai)?;
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some()) || state_of(false, target) == State::Working;
+        let stopped =
+            target.stopped || (!target.queued.is_empty() && matches!(state_of(false, target), State::Stopped | State::Interrupted));
         let wake = Wake::of("wake.asked");
         self.send_by_itself(id, sibling::ask_prompt(&from, conv, message), wake).map_err(|why| match why.as_str() {
             "error.queueFull" => "the conversation's inbox is full; it cannot take another message yet",
             _ => "it could not take the message now",
         })?;
-        Ok(sibling::asked(&title, id, busy))
+        if stopped {
+            Ok(format!(
+                "Sent to \"{title}\". It will read the message when it resumes. Call this tool with {{\"action\": \"read\", \"id\": \"{id}\"}} later to read its answer."
+            ))
+        } else {
+            Ok(sibling::asked(&title, id, busy))
+        }
+    }
+}
+
+fn result(value: Result<String, String>) -> (bool, String) {
+    match value {
+        Ok(text) => (true, text),
+        Err(why) => (false, format!("Nothing was done: {why}.")),
+    }
+}
+
+impl Core {
+    pub(super) fn session_start(&mut self, by: &str, new: NewSession) -> Result<String, String> {
+        if new.title.trim().is_empty() || new.brief.trim().is_empty() {
+            return Err("start needs a title and a brief".into());
+        }
+        if let Some(model) = new.model.as_deref() {
+            let vendor = match new.ai {
+                Ai::Named(vendor) => Some(vendor),
+                Ai::Same => self.live.get(by).map(|l| l.vendor).or_else(|| {
+                    self.load(by).and_then(|c| c.choice.as_ref()).and_then(|c| Vendor::ALL.into_iter().find(|v| v.name() == c.vendor))
+                }),
+                Ai::Auto => None,
+            };
+            if let Some(vendor) = vendor {
+                let valid: Vec<String> = match vendor {
+                    Vendor::Claude => crate::route::PROFILES.iter().filter(|p| p.vendor == vendor).map(|p| p.model.to_string()).collect(),
+                    Vendor::Codex => self.codex_models.clone(),
+                };
+                if !valid.iter().any(|m| m == crate::router::pinned(vendor, model)) {
+                    return Err(format!("unknown model; valid models are: {}", valid.join(", ")));
+                }
+            }
+        }
+        let title = new.title.clone();
+        let (id, started) = self.start_sibling(by, new).map_err(str::to_string)?;
+        if started { Ok(id) } else { Err(sibling::failed(&title, &id)) }
+    }
+    pub(super) fn session_message(&mut self, by: &str, id: &str, message: &str) -> Result<String, String> {
+        if message.trim().is_empty() {
+            return Err("the message was empty".into());
+        }
+        self.ask_sibling(by, id, message).map_err(str::to_string)
+    }
+    fn own(&mut self, by: &str, id: &str) -> Result<(), String> {
+        self.same_project(by, id).map_err(str::to_string)?;
+        let mut current = id.to_string();
+        let mut seen = HashSet::new();
+        while seen.insert(current.clone()) {
+            let Some(parent) = self.load(&current).and_then(|c| c.started_by.clone()) else { break };
+            if parent == by {
+                return Ok(());
+            }
+            current = parent;
+        }
+        Err("that conversation was not started by you".into())
+    }
+    pub(super) fn session_stop(&mut self, by: &str, id: &str) -> Result<String, String> {
+        self.own(by, id)?;
+        let title = self.convs[id].title.clone();
+        self.interrupt(id, true);
+        Ok(format!("Stopped {title}; it can be resumed."))
+    }
+    pub(super) fn session_resume(&mut self, by: &str, id: &str, message: Option<&str>) -> Result<String, String> {
+        self.own(by, id)?;
+        if self.goal_out_of_money(by) {
+            return Err(GOAL_CAP.into());
+        }
+        let target = &self.convs[id];
+        if target.archived_at.is_some() {
+            return Err("the conversation is archived".into());
+        }
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
+        match state_of(busy, target) {
+            State::Working => return Err("the conversation is working".into()),
+            State::Waiting => return Err("the conversation is waiting for the person".into()),
+            _ => {}
+        }
+        // The turn runs on the resumed conversation's own AI, so that AI's quota decides, not the asker's.
+        let ai = self.convs[id].choice.as_ref().and_then(|c| {
+            let vendor = Vendor::ALL.into_iter().find(|v| v.name() == c.vendor)?;
+            let family = c.model.as_deref().and_then(|m| family_of(crate::router::pinned(vendor, m))).map(str::to_string);
+            Some((vendor, family))
+        });
+        self.sibling_allowed(&ai).map_err(str::to_string)?;
+        let text = message.unwrap_or("Continue where you stopped. Check the project's state first.");
+        if text.trim().is_empty() {
+            return Err("the message was empty".into());
+        }
+        let turn = new_id();
+        let stopped = self.convs[id].stopped || matches!(state_of(false, &self.convs[id]), State::Stopped | State::Interrupted);
+        self.send_by_itself_with_id(id, text.into(), Wake::of("wake.asked"), turn.clone()).map_err(|why| match why.as_str() {
+            "error.queueFull" => "the conversation's inbox is full; it cannot take another message yet".into(),
+            _ => format!("the conversation could not take the message: {why}"),
+        })?;
+        if stopped && self.convs.get(id).is_some_and(|c| c.queued.iter().any(|q| q.id == turn)) {
+            let first = self.convs[id].queued.first().map(|q| q.id.clone()).unwrap_or_else(|| turn.clone());
+            if let Err(why) = self.send_queued(id, &first) {
+                self.remove_queued(id, &turn);
+                if let Some(c) = self.convs.get_mut(id) {
+                    c.stopped = true;
+                }
+                return Err(format!("the conversation could not start the queued message: {why}"));
+            }
+        }
+        Ok("The conversation will continue with your message.".into())
+    }
+    /// An agent archives its own conversation as its last step, never one the person pinned (the person wants it kept).
+    fn archive_itself(&mut self, conv: &str) -> Result<(), String> {
+        if self.convs.get(conv).ok_or("the conversation is gone")?.pinned_at.is_some() {
+            return Err("the person pinned this conversation, so it stays".into());
+        }
+        self.set_archived(conv, true)
+    }
+    pub(super) fn session_archive(&mut self, by: &str, id: &str) -> Result<String, String> {
+        self.own(by, id)?;
+        let c = &self.convs[id];
+        if c.archived_at.is_some() {
+            return Err("the conversation is already archived".into());
+        }
+        if c.pinned_at.is_some() {
+            return Err("the person pinned this conversation".into());
+        }
+        if !c.queued.is_empty() {
+            return Err("the conversation has a queued turn".into());
+        }
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
+        match state_of(busy, c) {
+            State::Working => return Err("the conversation is working or has a queued turn".into()),
+            State::Waiting => return Err("the conversation is waiting".into()),
+            _ => {}
+        }
+        self.set_archived(id, true)?;
+        Ok("The conversation was archived.".into())
+    }
+    pub(super) fn session_wait(&mut self, by: &str, on: Vec<String>, note: Option<String>) -> Result<String, String> {
+        let note = note.unwrap_or_default();
+        if on.is_empty() && note.trim().is_empty() {
+            return Err("wait needs child ids or a note".into());
+        }
+        if on.len() > 12 {
+            return Err("wait takes at most 12 ids".into());
+        }
+        if note.chars().count() > 200 {
+            return Err("the note is longer than 200 characters".into());
+        }
+        for id in &on {
+            self.own(by, id)?;
+        }
+        // A conversation that reported before the wait is read by the asker already; waiting on it would never end.
+        let mut reported = Vec::new();
+        for id in &on {
+            let child = &self.convs[id];
+            let reply = child.messages.iter().rev().find(|m| m.role == Role::Assistant);
+            let report_id = format!("report-{id}-{}", reply.map_or("empty", |m| m.id.as_str()));
+            let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
+            let ended = !matches!(state_of(busy, child), State::Working | State::Waiting);
+            let delivered = self
+                .convs
+                .get(by)
+                .is_some_and(|p| p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id));
+            if ended && delivered {
+                reported.push(id.clone());
+            }
+        }
+        let on: Vec<String> = on.into_iter().filter(|id| !reported.contains(id)).collect();
+        if on.is_empty() && note.trim().is_empty() {
+            return Ok("Those conversations already reported; read their reports and continue.".into());
+        }
+        let c = self.load(by).ok_or("the conversation is gone")?;
+        let previous = c.waiting_on.replace(crate::model::WaitingOn { ids: on.clone(), note, since: now() });
+        if self.try_save(by).is_err() {
+            self.convs.get_mut(by).expect("waiting conversation exists").waiting_on = previous;
+            return Err("the wait could not be saved".into());
+        }
+        self.list_changed();
+        for id in on {
+            self.tell_parent(&id);
+        }
+        Ok("End your turn now; Faber wakes you when one of these conversations reports.".into())
     }
 }
 
@@ -515,6 +786,27 @@ impl Core {
 mod tests {
     use super::*;
     use crate::model::Permission;
+
+    #[test]
+    fn session_control_stopped_with_queued_messages_is_not_working() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id":"child","title":"Work","area":"project","createdAt":0,"updatedAt":0,"messages":[],
+            "queued":[{"id":"q","text":"Next","choice":{"vendor":"claude"},"at":0}]
+        }))
+        .unwrap();
+        let mut reply = Message::new("reply".into(), Role::Assistant, "Done".into(), 0);
+        reply.status = Some(Status::Done);
+        c.messages.push(reply);
+        c.stopped = true;
+        assert_eq!(state_of(false, &c), State::Stopped);
+        assert_eq!(state_of(true, &c), State::Working);
+        c.stopped = false;
+        c.messages[0].status = Some(Status::Stopped);
+        assert_eq!(state_of(false, &c), State::Stopped);
+        c.messages[0].permissions =
+            Some(vec![Permission { request_id: "q".into(), tool: "AskUserQuestion".into(), input: serde_json::Value::Null, epoch: None }]);
+        assert_eq!(state_of(false, &c), State::Waiting);
+    }
 
     #[test]
     fn a_saved_streaming_or_unconcluded_conversation_is_never_finished() {

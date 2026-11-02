@@ -53,6 +53,16 @@ fn picked(result: Picked, not_local: &str) -> Result<Option<PathBuf>, Failure> {
     result.map_err(|why| Failure::key(if why == PickError::NoWindow { NO_WINDOW } else { not_local }))
 }
 
+/// The asking AI's conversation (`by`), or `error.session.agentOnly` when the caller is not an AI in a conversation.
+fn agent_by(by: Option<String>) -> Result<String, Failure> {
+    by.filter(|s| !s.trim().is_empty()).ok_or_else(|| Failure::key("error.session.agentOnly"))
+}
+
+/// An English refusal sentence from one of `Engine::session_*`, wrapped for the host table.
+fn refused(why: String) -> Failure {
+    Failure::with("error.session.refused", why)
+}
+
 /// Only letters, digits, spaces, hyphens and underscores of a title or a theme's name make a file name.
 fn file_stem(name: &str) -> String {
     name.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).collect()
@@ -68,6 +78,20 @@ fn data_url(source: &Path, kind: &str, max: u64) -> Option<String> {
 }
 
 table! {
+    /// This conversation's requests and their current state.
+    Read Free fn asks(h) -> Vec<Value> {
+        Ok(lock(&h.asks).pending_details())
+    }
+    /// Allow one identical retry, or decline the request.
+    Write Person fn answer_ask(h, id: String, allow: bool) -> bool {
+        let (answered, pending) = {
+            let mut book = lock(&h.asks);
+            let answered = book.answer(&id, allow);
+            (answered, book.pending())
+        };
+        if answered { h.announce(&json!({"type": "asks", "asks": pending})); }
+        Ok(answered)
+    }
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
         lock(&h.feed).forget();
@@ -181,9 +205,15 @@ table! {
         h.engine.route_draft(req, text);
         Ok(())
     }
-    Write Own("/id") fn interrupt(h, id: String) -> () {
-        h.engine.interrupt(&id);
-        Ok(())
+    /// Stops a conversation's running turn. An AI may only stop a conversation it started; its own conversation, its
+    /// parent and the person's conversations are refused.
+    Write Own("/id") fn interrupt(h, id: String, by: Option<String>) -> () [Failure] {
+        if let Some(by) = by {
+            h.engine.session_stop(&by, &id).map(|_| ()).map_err(refused)
+        } else {
+            h.engine.interrupt(&id);
+            Ok(())
+        }
     }
     /// What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply.
     Read Free fn results(h, id: String) -> Option<faber_engine::results::Results> {
@@ -286,12 +316,74 @@ table! {
         let engine = h.engine.clone();
         off("error.copy.failed", move || engine.remove_with(&id, discard.unwrap_or(false))).await?
     }
-    /// Archives a conversation, or brings an archived one back.
-    Write Free fn archive(h, id: String, on: bool) -> () {
-        h.engine.archive(&id, on)
+    /// Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation it
+    /// started that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused.
+    Write Own("/id") fn archive(h, id: String, on: bool, by: Option<String>) -> () [Failure] {
+        if let Some(by) = by {
+            if !on {
+                return Err(refused("only the person can bring an archived conversation back".into()));
+            }
+            h.engine.session_archive(&by, &id).map(|_| ()).map_err(refused)
+        } else {
+            h.engine.archive(&id, on).map_err(Failure::from)
+        }
     }
-    Write Free fn pin(h, id: String, on: bool) -> () {
-        h.engine.pin(&id, on)
+    /// Starts a new conversation in the same project for an independent piece of work and returns its id. `ai` is `same`
+    /// (default), `auto`, `claude` or `codex`; `model` and `effort` (`low`, `medium`, `high`) apply to a named AI or `same`,
+    /// never `auto`. Refused outside an AI's conversation, from a conversation another AI started, or when the project cap
+    /// or account quota is reached.
+    StartsTurn Free fn start_conversation(
+        h,
+        by: Option<String>,
+        title: String,
+        brief: String,
+        ai: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        keep_going: Option<bool>,
+        step: Option<String>,
+    ) -> String [Failure] {
+        let by = agent_by(by)?;
+        let ai = match ai.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            None | Some("same") => faber_engine::sibling::Ai::Same,
+            Some("auto") => faber_engine::sibling::Ai::Auto,
+            Some(name) => faber_engine::sibling::Ai::Named(
+                Vendor::ALL
+                    .into_iter()
+                    .find(|v| v.name() == name)
+                    .ok_or_else(|| refused("ai is not one of same, auto, claude or codex".into()))?,
+            ),
+        };
+        let new = faber_engine::engine::NewSession { title, brief, ai, model, effort, keep_going: keep_going.unwrap_or(false), step };
+        h.engine.session_start(&by, new).map_err(refused)
+    }
+    /// Sends `message` to another unarchived conversation of the same project as a message from this AI. Refused outside
+    /// an AI's conversation, for this conversation itself, for an archived conversation or for one in another project.
+    StartsTurn Free fn message_conversation(h, by: Option<String>, id: String, message: String) -> String [Failure] {
+        let by = agent_by(by)?;
+        h.engine.session_message(&by, &id, &message).map_err(refused)
+    }
+    /// Resumes a conversation this AI started that is stopped, cut off, failed or ended, sending `message` or the default
+    /// continuation line. Refused outside an AI's conversation, for a conversation this AI did not start, or while the
+    /// conversation is working, waiting for the person or archived.
+    StartsTurn Free fn resume_conversation(h, by: Option<String>, id: String, message: Option<String>) -> String [Failure] {
+        let by = agent_by(by)?;
+        h.engine.session_resume(&by, &id, message.as_deref()).map_err(refused)
+    }
+    /// Marks this AI's conversation as waiting for the conversations in `on` (all started by it, at most 12) and/or for
+    /// `note` (at most 200 characters), so Faber wakes it when one of them reports and spares it from Keep going prods and
+    /// auto-archive meanwhile. Refused outside an AI's conversation, when both `on` and `note` are empty, or for an `on` id
+    /// this AI did not start.
+    Write Free fn mark_waiting(h, by: Option<String>, on: Option<Vec<String>>, note: Option<String>) -> String [Failure] {
+        let by = agent_by(by)?;
+        h.engine.session_wait(&by, on.unwrap_or_default(), note).map_err(refused)
+    }
+    /// Pins a conversation, or unpins it. An AI may pin but never unpin: the person pinned it to keep it.
+    Write Free fn pin(h, id: String, on: bool, by: Option<String>) -> () [Failure] {
+        if by.is_some() && !on {
+            return Err(refused("only the person unpins a conversation".into()));
+        }
+        h.engine.pin(&id, on).map_err(Failure::from)
     }
     Write Ask fn move_to_project(h, id: String, project_id: String) -> Conversation {
         let engine = h.engine.clone();
@@ -475,6 +567,27 @@ table! {
         look::export_theme(&target, &json)?;
         Ok(true)
     }
+    /// The same readable record as the file export, without writing a file.
+    Read Free fn conversation_markdown(h, id: String) -> Value {
+        let engine = h.engine.clone();
+        let language = faber_engine::guide::Language::resolve(engine.settings().language.as_deref(), &faber_engine::guide::system_languages());
+        let source = match language {
+            faber_engine::guide::Language::En => include_str!("../../ui/locales/en.ts"),
+            faber_engine::guide::Language::PtBr => include_str!("../../ui/locales/pt-BR.ts"),
+            faber_engine::guide::Language::Es => include_str!("../../ui/locales/es.ts"),
+            faber_engine::guide::Language::Fr => include_str!("../../ui/locales/fr.ts"),
+            faber_engine::guide::Language::De => include_str!("../../ui/locales/de.ts"),
+        };
+        let word = |key: &str| -> Res<String> {
+            let line = source.lines().find(|line| line.trim_start().starts_with(&format!("\"{key}\":")) || line.trim_start().starts_with(&format!("'{key}':"))).ok_or("error.export.read")?;
+            let value = line.split_once(':').ok_or("error.export.read")?.1.trim().trim_end_matches(',').trim();
+            let quote = value.chars().next().ok_or("error.export.read")?;
+            Ok(value.strip_prefix(quote).and_then(|v| v.strip_suffix(quote)).ok_or("error.export.read")?.to_string())
+        };
+        let words = faber_engine::export::Words { you: word("export.you")?, auto: word("model.auto")?, attachments: word("export.attachments")?, files: word("export.files")? };
+        let (_, markdown) = off("error.export.read", move || engine.export_conversation(&id, &words)).await??;
+        Ok(json!({"markdown": markdown}))
+    }
     Write Person fn export_conversation(h, id: String, words: faber_engine::export::Words) -> bool [Failure] {
         use std::io::Write;
         let engine = h.engine.clone();
@@ -500,6 +613,30 @@ table! {
         let picked = h.shell.pick_folder().await.map_err(|why| if why == PickError::NoWindow { NO_WINDOW } else { "error.folder.notLocal" })?;
         let Some(path) = picked else { return Ok(None) };
         h.engine.open_folder(&path.to_string_lossy()).map(Some)
+    }
+    Write Person fn repoint_project(h, id: String, path: Option<String>) -> Option<Project> {
+        project_commands::id(&id)?;
+        if let Some(path) = path {
+            return h.engine.repoint_project(&id, &path).map(Some);
+        }
+        if h.hidden {
+            return Err("error.project.missing".into());
+        }
+        let picked = h.shell.pick_folder().await.map_err(|why| if why == PickError::NoWindow { NO_WINDOW } else { "error.folder.notLocal" })?;
+        let Some(path) = picked else { return Ok(None) };
+        h.engine.repoint_project(&id, &path.to_string_lossy()).map(Some)
+    }
+    Read Person fn open_log_folder(h) -> String {
+        let crash_file = h.data_dir.join(faber_engine::crash::CRASHES);
+        let target = if crash_file.exists() { crash_file } else { h.data_dir.clone() };
+        if !h.hidden && !cfg!(feature = "test-hooks") {
+            h.shell.reveal(target)?;
+        }
+        Ok(h.data_dir.to_string_lossy().into_owned())
+    }
+    Write Free fn dismiss_unclean_exit(h) -> () {
+        h.engine.dismiss_unclean_exit();
+        Ok(())
     }
     /// The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key.
     Read Free fn recents(h) -> faber_engine::recents::RecentsView {
@@ -752,6 +889,12 @@ table! {
     }
 
     // What only a window answers: the front end that has one handles these itself, and any other answers `error.host.noWindow`.
+
+    /// Bring the window to a conversation.
+    Window Ask fn show_conversation(h, id: String) -> () {
+        h.shell.show_conversation(&id)?;
+        Ok(())
+    }
 
     /// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
     Window Screen fn site_place(h, load: u32, box_id: u64, x: f64, y: f64, width: f64, height: f64) -> bool {

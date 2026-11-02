@@ -9,22 +9,23 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct Failure {
     pub key: String,
     pub detail: Option<String>,
+    pub data: Option<serde_json::Value>,
 }
 
 impl Failure {
     pub fn key(key: &str) -> Self {
-        Failure { key: key.into(), detail: None }
+        Failure { key: key.into(), detail: None, data: None }
     }
 
     pub(crate) fn with(key: &str, detail: impl Into<String>) -> Self {
-        Failure { key: key.into(), detail: Some(detail.into()) }
+        Failure { key: key.into(), detail: Some(detail.into()), data: None }
     }
 }
 
 /// Engine errors are plain keys.
 impl From<String> for Failure {
     fn from(key: String) -> Self {
-        Failure { key, detail: None }
+        Failure { key, detail: None, data: None }
     }
 }
 
@@ -39,6 +40,8 @@ struct Detailed {
     key: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    data: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,9 +53,9 @@ enum Shape {
 
 impl Serialize for Failure {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match &self.detail {
-            None => Shape::Key(self.key.clone()),
-            Some(detail) => Shape::Detailed(Detailed { key: self.key.clone(), detail: Some(detail.clone()) }),
+        match (&self.detail, &self.data) {
+            (None, None) => Shape::Key(self.key.clone()),
+            _ => Shape::Detailed(Detailed { key: self.key.clone(), detail: self.detail.clone(), data: self.data.clone() }),
         }
         .serialize(serializer)
     }
@@ -61,8 +64,8 @@ impl Serialize for Failure {
 impl<'de> Deserialize<'de> for Failure {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(match Shape::deserialize(deserializer)? {
-            Shape::Key(key) => Failure { key, detail: None },
-            Shape::Detailed(Detailed { key, detail }) => Failure { key, detail },
+            Shape::Key(key) => Failure { key, detail: None, data: None },
+            Shape::Detailed(Detailed { key, detail, data }) => Failure { key, detail, data },
         })
     }
 }

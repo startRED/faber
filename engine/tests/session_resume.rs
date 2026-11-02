@@ -168,7 +168,7 @@ fn send(id: Option<&str>, text: &str, effort: Effort) -> SendRequest {
 
 async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
+        let e = tokio::time::timeout(crate::support::DEADLINE, rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e
             && message.role == Role::Assistant
             && message.status != Some(Status::Streaming)
@@ -179,13 +179,7 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
 }
 
 async fn until(disk: &Shared, ready: impl Fn(&Disk) -> bool) {
-    for _ in 0..300 {
-        if ready(&disk.lock().unwrap()) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the app-server never saw the request");
+    crate::support::until("the app-server never saw the request", || ready(&disk.lock().unwrap())).await;
 }
 
 /// A conversation with one finished Codex turn, left on disk the way a closed Faber leaves it.

@@ -8,9 +8,34 @@
 //! which is why the cap is small.
 
 use crate::toolbox::{append_capped_line, append_capped_line_without_hanging};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+
+/// What the previous run left when it did not end cleanly: when this start saw it (`at`), when that run started (`started`),
+/// and whether `crashes.jsonl` has a panic line from that run (`panic`). The screen shows one calm note and never the panic text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UncleanExit {
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<u64>,
+    pub panic: bool,
+}
+
+static UNCLEAN: OnceLock<Mutex<HashMap<PathBuf, UncleanExit>>> = OnceLock::new();
+static STARTED_DIRS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+fn unclean_map() -> &'static Mutex<HashMap<PathBuf, UncleanExit>> {
+    UNCLEAN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn started_dirs() -> &'static Mutex<HashSet<PathBuf>> {
+    STARTED_DIRS.get_or_init(|| Mutex::new(HashSet::new()))
+}
 
 pub const CRASHES: &str = "crashes.jsonl";
 /// About 500 lines of about 200 bytes; the oldest half goes at the cap (`toolbox::append_capped_line`).
@@ -186,24 +211,82 @@ pub fn since(path: &Path, after: u64, now_ms: u64) -> std::io::Result<Vec<Seen>>
     Ok(seen)
 }
 
+/// Whether `crashes.jsonl` in `dir` has a `panic` line since the last `unclean-exit` line (and not older than `started`).
+fn panic_since_last_unclean(dir: &Path, started: Option<u64>) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(dir.join(CRASHES)) else { return false };
+    let Ok(meta) = file.metadata() else { return false };
+    let len = meta.len();
+    if file.seek(SeekFrom::Start(len.saturating_sub(READ_MAX))).is_err() {
+        return false;
+    }
+    let mut bytes = vec![];
+    if file.take(READ_MAX).read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let text = if len > READ_MAX { text.split_once('\n').map_or("", |(_, rest)| rest) } else { &text };
+    let mut panic = false;
+    for v in text.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()) {
+        match v["kind"].as_str() {
+            Some("unclean-exit") => panic = false,
+            Some("panic") if started.is_none_or(|s| v["at"].as_u64().is_none_or(|at| at >= s)) => panic = true,
+            _ => {}
+        }
+    }
+    panic
+}
+
+fn record_unclean_marker(dir: &Path, last: &Value) -> UncleanExit {
+    let at = now_ms();
+    let started = last["at"].as_u64();
+    let panic = panic_since_last_unclean(dir, started);
+    let of = |key: &str| last[key].as_str().unwrap_or("unknown").chars().take(64).collect::<String>();
+    let line = json!({ "at": at, "kind": "unclean-exit", "version": of("version"), "commit": of("commit"), "started": started });
+    append_capped_line(&dir.join(CRASHES), &line.to_string(), CRASHES_MAX);
+    UncleanExit { at, started, panic }
+}
+
 /// Starts a run: when the last one left its marker, one `unclean-exit` line says so (with that run's version and build, which
 /// differ after an update), then the marker is written again for this run. Says whether the last run ended badly.
 pub fn start_run(dir: &Path, version: &str, commit: &str) -> bool {
     let marker = dir.join(MARKER);
     let last = std::fs::read_to_string(&marker).ok().map(|text| serde_json::from_str::<Value>(&text).unwrap_or(Value::Null));
+    let mut map = unclean_map().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(last) = &last {
-        let of = |key: &str| last[key].as_str().unwrap_or("unknown").chars().take(64).collect::<String>();
-        let line = json!({ "at": now_ms(), "kind": "unclean-exit", "version": of("version"), "commit": of("commit"), "started": last["at"].as_u64() });
-        append_capped_line(&dir.join(CRASHES), &line.to_string(), CRASHES_MAX);
+        let unclean = record_unclean_marker(dir, last);
+        map.insert(dir.to_path_buf(), unclean);
+    } else {
+        map.remove(dir);
     }
+    drop(map);
+    started_dirs().lock().unwrap_or_else(|e| e.into_inner()).insert(dir.to_path_buf());
     let _ = std::fs::write(&marker, json!({ "at": now_ms(), "version": version, "commit": commit }).to_string());
     STARTED.store(true, Ordering::Relaxed);
     last.is_some()
 }
 
+/// Takes the unclean-exit notice for `dir` once. If `start_run` was not called on `dir` in this process (as in engine tests) and
+/// `running.marker` is on disk, consumes that marker now so the notice is shown once and not on the next start.
+pub fn take_unclean(dir: &Path) -> Option<UncleanExit> {
+    if let Some(unclean) = unclean_map().lock().unwrap_or_else(|e| e.into_inner()).remove(dir) {
+        return Some(unclean);
+    }
+    if started_dirs().lock().unwrap_or_else(|e| e.into_inner()).contains(dir) {
+        return None;
+    }
+    let marker = dir.join(MARKER);
+    let last = std::fs::read_to_string(&marker).ok().map(|text| serde_json::from_str::<Value>(&text).unwrap_or(Value::Null))?;
+    let unclean = record_unclean_marker(dir, &last);
+    let _ = std::fs::remove_file(&marker);
+    Some(unclean)
+}
+
 /// Ends a run the normal way (Quit, the end of the Windows session, or the shutdown before an update installs): the next start
 /// finds no marker.
 pub fn end_run(dir: &Path) {
+    unclean_map().lock().unwrap_or_else(|e| e.into_inner()).remove(dir);
+    started_dirs().lock().unwrap_or_else(|e| e.into_inner()).remove(dir);
     let _ = std::fs::remove_file(dir.join(MARKER));
 }
 
@@ -369,6 +452,32 @@ mod tests {
         std::fs::write(dir.path().join(MARKER), "{\"at\":").unwrap();
         assert!(start_run(dir.path(), "1.0.3", "ddd"));
         assert_eq!(lines(dir.path()).last().unwrap()["commit"], "unknown");
+    }
+
+    #[test]
+    fn recovery_320_unclean_exit_reports_when_it_happened_and_whether_a_panic_line_exists_once() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!start_run(dir.path(), "1.0.0", "aaa"));
+        assert_eq!(take_unclean(dir.path()), None);
+
+        // Hard kill / unexpected exit without panic line.
+        assert!(start_run(dir.path(), "1.0.0", "aaa"));
+        let first = take_unclean(dir.path()).expect("unclean exit reported once");
+        assert!(first.at > 0 && first.started.unwrap_or(0) > 0 && !first.panic);
+        assert_eq!(take_unclean(dir.path()), None, "shown once per start");
+
+        // Clean close or update restart leaves no unclean note.
+        end_run(dir.path());
+        assert!(!start_run(dir.path(), "1.0.1", "bbb"));
+        assert_eq!(take_unclean(dir.path()), None);
+
+        // A worker panic followed by an unclean exit reports panic = true.
+        let line = panic_line(now_ms(), "1.0.1", "bbb", "worker", "boom", "f.rs:1:1", "");
+        record_panic(dir.path(), &line, false);
+        assert!(start_run(dir.path(), "1.0.1", "bbb"));
+        let second = take_unclean(dir.path()).expect("unclean exit with panic reported");
+        assert!(second.panic);
+        assert_eq!(take_unclean(dir.path()), None);
     }
 
     fn file_with(lines: &[Value]) -> (tempfile::TempDir, PathBuf) {
