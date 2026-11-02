@@ -264,10 +264,16 @@ impl Core {
                         if !core.compact_due(&key) {
                             core.compacts.remove(&key);
                             core.list_changed();
+                            core.turn_ended(&key);
                         }
                     }
                 });
                 return true;
+            }
+            if let Some(plan) = self.compacts.remove(conv) {
+                self.queue_after_compaction(conv, plan, false);
+                self.save(conv);
+                self.emit_queue(conv);
             }
             return false;
         }
@@ -481,23 +487,8 @@ impl Core {
             self.list_changed();
             return;
         };
-        if let Some(next) = plan.next {
-            let (text, why) = match ok {
-                true => (sibling::compacted_prompt(&next), "wake.compacted"),
-                false => (sibling::compact_failed_prompt(&next), "wake.compactFailed"),
-            };
-            let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
-            c.queued.push(QueuedTurn {
-                id: new_id(),
-                text,
-                images: None,
-                attachments: None,
-                choice,
-                at: now(),
-                sending: false,
-                wake: Some(Wake::of(why)),
-            });
-        }
+        self.queue_after_compaction(conv, plan, ok);
+        let Some(c) = self.convs.get_mut(conv) else { return };
         c.updated_at = now();
         self.save(conv);
         self.drain(conv);
@@ -514,6 +505,28 @@ impl Core {
             Some(reply) => self.go_on(conv, &reply),
             // Nothing follows: a conversation an agent started reports to its parent now.
             None => self.turn_ended(conv),
+        }
+    }
+
+    fn queue_after_compaction(&mut self, conv: &str, plan: Plan, ok: bool) {
+        if let Some(next) = plan.next
+            && let Some(c) = self.convs.get_mut(conv)
+        {
+            let (text, why) = match ok {
+                true => (sibling::compacted_prompt(&next), "wake.compacted"),
+                false => (sibling::compact_failed_prompt(&next), "wake.compactFailed"),
+            };
+            let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
+            c.queued.push(QueuedTurn {
+                id: new_id(),
+                text,
+                images: None,
+                attachments: None,
+                choice,
+                at: now(),
+                sending: false,
+                wake: Some(Wake::of(why)),
+            });
         }
     }
 }

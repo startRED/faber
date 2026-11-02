@@ -2488,6 +2488,7 @@ export const de: Messages = {
   'notes.373.better': 'Nach einer fertigen Antwort starten keine Prüfungen oder Korrekturen mehr von selbst; Prüfungen bleiben auf Wunsch möglich, und Selbst weitermachen endet beim ersten Abschluss.',
   'notes.374.fixed': 'Nach dem Ende eines Durchgangs werden wartende Nachrichten und Berichte der Agenten weitergegeben, auch wenn keine Prüfungen laufen.',
   'notes.375.fixed': 'Projekte in Ordnern mit sehr langen Pfaden funktionieren jetzt.',
+  'notes.376.fixed': 'Eine KI erhält den Bericht einer Helferin auch dann, wenn deren Unterhaltung nicht komprimiert werden kann.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

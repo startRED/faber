@@ -2368,6 +2368,7 @@ export const en = {
   'notes.373.better': 'Finished replies no longer start checks or correction turns on their own; you can still ask for checks, and Keep going stops at the first done conclusion.',
   'notes.374.fixed': 'Queued messages and child reports continue after a turn ends, even when no checks run.',
   'notes.375.fixed': 'Projects in very long folder paths now work.',
+  'notes.376.fixed': 'An agent waiting for a helper now receives its report even if the helper cannot compact its conversation.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

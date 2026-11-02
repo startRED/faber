@@ -2488,6 +2488,7 @@ export const es: Messages = {
   'notes.373.better': 'Al terminar una respuesta ya no se inician comprobaciones ni correcciones por su cuenta; puedes seguir pidiendo comprobaciones y Seguir solo se detiene con la primera conclusión.',
   'notes.374.fixed': 'Los mensajes en espera y los informes de los agentes siguen al terminar el turno, aunque no se ejecuten comprobaciones.',
   'notes.375.fixed': 'Los proyectos en carpetas con rutas muy largas ya funcionan.',
+  'notes.376.fixed': 'Una IA que espera a una ayudante recibe su informe aunque la conversación de la ayudante no pueda compactarse.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

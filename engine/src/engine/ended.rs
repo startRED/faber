@@ -278,6 +278,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retired_cli_compaction_still_reports_child_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            let c = core.convs.get_mut(&child).unwrap();
+            c.area = Area::Project;
+            c.started_by = Some(parent.clone());
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            core.plan_compaction(&child, None).unwrap();
+            core.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]));
+            core.end_turn(&child, Some("child".into()), None);
+            core.turn_ended(&child);
+            let report_id = format!("report-{child}-child");
+            assert_eq!(core.convs[&parent].queued.iter().filter(|q| q.id == report_id).count(), 1);
+            assert!(!core.compacts.contains_key(&child));
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn retired_cli_compaction_keeps_the_requested_next_step() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.plan_compaction(&child, Some("Continue the task".into())).unwrap();
+            core.live.remove(&child);
+            core.convs.get_mut(&child).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+            assert!(!core.compact_due(&child));
+            let queued = &core.convs[&child].queued;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].text.contains("Continue the task"));
+            assert_eq!(queued[0].wake.as_ref().unwrap().why, "wake.compactFailed");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn a_reply_that_never_started_reports_its_failed_end_once() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);

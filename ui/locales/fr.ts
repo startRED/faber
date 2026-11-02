@@ -2488,6 +2488,7 @@ export const fr: Messages = {
   'notes.373.better': 'Une réponse terminée ne lance plus de vérifications ni de corrections toute seule ; vous pouvez toujours demander des vérifications, et Continuer seul s’arrête à la première conclusion.',
   'notes.374.fixed': 'Les messages en attente et les comptes rendus des agents suivent la fin du tour, même sans vérification.',
   'notes.375.fixed': 'Les projets dans des dossiers aux chemins très longs fonctionnent désormais.',
+  'notes.376.fixed': 'Une IA qui attend une assistante reçoit son rapport même si la conversation de celle-ci ne peut pas être compactée.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
