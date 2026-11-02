@@ -45,6 +45,7 @@ impl Backend for Fake {
                 }
                 "conversation_markdown" => Ok(json!({"markdown":"# Example\n"})),
                 "search_messages" => Ok(json!({"ready":true,"hits":[{"conversationId":"c1","title":"Example","snippet":"hello"}]})),
+                "start_conversation" => Ok(json!("c1")),
                 "send" => {
                     if !asks {
                         tokio::spawn(async move {
@@ -193,6 +194,19 @@ async fn session_verbs_send_the_host_their_arguments() {
         let (result, fake) = faber(false, &args, stdin, &[]).await;
         assert_eq!(result.code, 0, "{}", result.stdout);
         assert!(fake.calls.lock().unwrap().iter().any(|(name, value)| name == command && value == &expected));
+    }
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn session_start_output_identifies_the_child_in_both_modes() {
+    for args in [vec!["start", "Work", "brief"], vec!["call", "start_conversation", r#"{"title":"Work","brief":"brief"}"#]] {
+        for mode in ["--json", "--human"] {
+            let mut command = args.clone();
+            command.push(mode);
+            let (result, _) = faber(false, &command, "", &[]).await;
+            assert_eq!(result.code, 0);
+            let marker: Value = serde_json::from_str(result.stdout.lines().next().unwrap()).unwrap();
+            assert_eq!(marker, json!({"event":"conversation_started", "childId":"c1"}));
+        }
     }
 }
 #[tokio::test(flavor = "multi_thread")]

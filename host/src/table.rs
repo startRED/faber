@@ -332,7 +332,7 @@ table! {
             h.engine.archive(&id, on).map_err(Failure::from)
         }
     }
-    /// Starts a new conversation in the same project for an independent piece of work and returns its id. `ai` is `same`
+    /// Starts a new conversation in the same project for an independent piece of work and returns its id (the CLI exposes it as `.childId`). `ai` is `same`
     /// (default), `auto`, `claude` or `codex`; `model` and `effort` (`low`, `medium`, `high`) apply to a named AI or `same`,
     /// never `auto`. Refused outside an AI's conversation, from a conversation another AI started, or when the project cap
     /// or account quota is reached.

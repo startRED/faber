@@ -394,6 +394,37 @@ check('worklog: only successful starts with a returned child id link a child', (
   }
 });
 
+check('worklog: shell starts link only the confirmed child of this conversation', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const [child, setChild] = createSignal<import('../../ui/api.ts').Summary>({ id: 'child', title: 'Child', area: 'project', updatedAt: 0, startedBy: 'lead', childState: 'working' });
+  const [tool, setTool] = createSignal<ToolUse>({ id: 'start', name: 'Bash', input: { command: 'faber start Work brief' }, ok: true, output: 'child\n{"event":"conversation_started","childId":"child"}' });
+  let opened = '';
+  const dispose = render(() => createComponent(Thread, { get messages(): Message[] { return [{ id: 'answer', role: 'assistant', at: 0, text: '', status: 'done', tools: [tool()] }]; }, from: 0, conversationId: 'lead', options: [], onBranch: () => {}, get conversations() { return [child()]; }, onOpenChild: (c) => { opened = c.id; } }), root);
+  try {
+    const row = () => root.querySelector<HTMLButtonElement>('.child-conversation');
+    ok(row()?.textContent?.includes('Working'));
+    setTool({ ...tool(), output: 'before\n{"childId":"child","event":"conversation_started"}\nafter' });
+    ok(row(), 'marker between other output links the child');
+    setTool({ ...tool(), output: '{"event":"conversation_started","childId":"other"}\n{"event":"conversation_started","childId":"child"}\ndone' });
+    ok(row(), 'the last marker wins');
+    setTool({ ...tool(), output: '{"event":"conversation_started","childId":"child"}\n{"event":"conversation_started","childId":"other"}\ndone' });
+    equal(row(), null, 'an earlier marker does not override the last');
+    setTool({ ...tool(), output: 'prefix {"event":"conversation_started","childId":"child"} suffix' });
+    equal(row(), null, 'embedded text is not a marker');
+    setTool({ ...tool(), output: '{"event":"conversation_started","childId":"child","extra":true}' });
+    equal(row(), null, 'extra fields are not a marker');
+    setTool({ ...tool(), output: '{"event":"conversation_started","childId":"child"}\ndone' });
+    setChild({ ...child(), childState: 'waiting', waitingOn: { note: 'Review' } });
+    ok(row()?.textContent?.includes('Review'));
+    row()!.click(); equal(opened, 'child');
+    setChild({ ...child(), startedBy: 'other' }); equal(row(), null);
+    setChild({ ...child(), startedBy: 'lead' });
+    setTool({ ...tool(), ok: false }); equal(row(), null);
+    setTool({ ...tool(), ok: true, output: '{"childId":"child"}' }); equal(row(), null);
+    setTool({ ...tool(), output: '{"event":"conversation_started","childId":"child"}', name: 'Read' }); equal(row(), null);
+  } finally { dispose(); root.remove(); }
+});
+
 check('worklog: a finished message keeps the child conversation waiting until its summary changes', async () => {
   useLanguage('en');
   const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts };

@@ -2465,6 +2465,7 @@ export const es: Messages = {
   'notes.363.fixed': 'Los modos que limitan el acceso ahora protegen las conversaciones y los ajustes de Faber frente a cambios, incluso cuando un proyecto está dentro de la carpeta de datos de Faber.',
   'notes.364.better': 'La pantalla inicial de Proyectos y el catálogo vacío ahora tienen un dibujo pequeño que muestra para qué sirve.',
   'notes.365.new': 'Puedes conectar las herramientas de Faber a una IA mediante MCP.',
+  'notes.366.better': 'Puedes abrir las conversaciones que el agente inicia mediante comandos y ver su estado.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

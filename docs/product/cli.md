@@ -126,6 +126,8 @@ on stdout, and failures write `{"error":"<key>","message":"<English words>"}` on
 terminal (or `--human` is passed), `faber` prints short lines in the user's language (`cli.*` in `ui/locales/*.ts`) and
 errors on stderr. When a refusal includes a detail, both modes show it; JSON puts it in a separate `detail` field and keeps `error` unchanged.
 
+A successful `start` or `call start_conversation` returns `{ "event": "conversation_started", "childId": "…" }` in JSON mode. Human mode prints the same JSON marker first, then the id. The engine keeps the first 4,000 characters of a tool result, so emit the marker before lengthy output.
+
 An ask refusal with a request ID instead prints `{"error":"error.reach.ask","request":"<id>"}` in JSON mode.
 
 | Exit code | Meaning |
@@ -165,7 +167,7 @@ waits for the person), prints `conversation {id, last: 1}` and exits `0`, or exi
 
 ```bash
 # Start a sibling conversation in the same project and get its id:
-id=$(faber start "SQL migrations" "Audit the SQL migrations for lock time" | jq -r .)
+id=$(faber start "SQL migrations" "Audit the SQL migrations for lock time" | tee /dev/stderr | jq -r .childId)
 
 # Do other work, then mark the wait and end this turn:
 faber mark-waiting --on "$id"

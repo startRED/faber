@@ -220,8 +220,18 @@ function Step(props: { conversationId: string; conversations?: Summary[]; runnin
   const childId = createMemo(() => {
     const tool = props.tool();
     const action = (tool.input as { action?: string } | undefined)?.action;
-    if (tool.name !== 'Conversation' || tool.ok !== true || (action && action !== 'start') || !tool.output) return undefined;
-    try { return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId; } catch { return undefined; }
+    if (tool.ok !== true || !tool.output) return undefined;
+    const conversation = tool.name === 'Conversation' && (!action || action === 'start');
+    const command = ['Bash', 'PowerShell', 'commandExecution'].includes(tool.name);
+    if (!conversation && !command) return undefined;
+    try {
+      if (conversation) return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId;
+      for (const line of tool.output.split('\n').reverse()) {
+        if (!/^\{"(?:childId":"[A-Za-z0-9_-]+","event":"conversation_started|event":"conversation_started","childId":"[A-Za-z0-9_-]+)"\}\r?$/.test(line)) continue;
+        return (JSON.parse(line) as { childId: string }).childId;
+      }
+      return undefined;
+    } catch { return undefined; }
   });
   const child = createMemo(() => props.conversations?.find((c) => c.id === childId() && c.startedBy === props.conversationId));
   const running = () => props.running?.find((r) => r.conversationId === child()?.id);

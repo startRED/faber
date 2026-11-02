@@ -2465,6 +2465,7 @@ export const de: Messages = {
   'notes.363.fixed': 'Modi mit eingeschränktem Zugriff schützen jetzt Fabers Gespräche und Einstellungen vor Änderungen, auch wenn ein Projekt in Fabers Datenordner liegt.',
   'notes.364.better': 'Der Startbildschirm von Projekte und der leere Katalog zeigen jetzt eine kleine Zeichnung, die den Zweck der Ansicht zeigt.',
   'notes.365.new': 'Sie können Fabers Werkzeuge über MCP mit einer KI verbinden.',
+  'notes.366.better': 'Du kannst Gespräche öffnen, die der Agent per Befehl startet, und ihren Status sehen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

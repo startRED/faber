@@ -305,7 +305,12 @@ pub async fn run(args: Args, out: Out) -> i32 {
     };
     match result {
         Ok(v) => {
-            if !out.json && verb == "export" {
+            if (verb == "start" || (verb == "call" && id == "start_conversation")) && v.is_string() {
+                out.line(&json!({"event":"conversation_started", "childId":v}));
+                if !out.json {
+                    out.result(&v);
+                }
+            } else if !out.json && verb == "export" {
                 print!("{}", v["markdown"].as_str().unwrap_or(""));
             } else if !out.json && verb == "search" {
                 for hit in v["hits"].as_array().into_iter().flatten() {

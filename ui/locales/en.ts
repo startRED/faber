@@ -2345,6 +2345,7 @@ export const en = {
   'notes.363.fixed': 'Permission modes that limit access now protect Faber’s conversations and settings from changes, even when a project is inside Faber’s data folder.',
   'notes.364.better': 'The Projects start screen and an empty catalog now have a small drawing that shows what the screen is for.',
   'notes.365.new': "You can connect Faber's tools to an AI through MCP.",
+  'notes.366.better': 'You can open conversations the agent starts from its command steps and see their current state.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
