@@ -2463,6 +2463,7 @@ export const de: Messages = {
   'notes.361.better': 'Wähle das Modell nach KI und passe den Denkaufwand über dieselbe Schaltfläche an.',
   'notes.362.better': 'Lange Gespräche öffnen mit den letzten 40 Nachrichten; beim Hochscrollen werden ältere nachgeladen, ohne dass deine Leseposition verrutscht.',
   'notes.363.fixed': 'Modi mit eingeschränktem Zugriff schützen jetzt Fabers Gespräche und Einstellungen vor Änderungen, auch wenn ein Projekt in Fabers Datenordner liegt.',
+  'notes.364.better': 'Der Startbildschirm von Projekte und der leere Katalog zeigen jetzt eine kleine Zeichnung, die den Zweck der Ansicht zeigt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

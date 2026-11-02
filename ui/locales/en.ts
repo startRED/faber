@@ -2343,6 +2343,7 @@ export const en = {
   'notes.361.better': 'Choose a model by AI and adjust its effort from the same chip.',
   'notes.362.better': 'Long conversations open on the latest 40 messages; older messages load as you scroll up, keeping your place.',
   'notes.363.fixed': 'Permission modes that limit access now protect Faber’s conversations and settings from changes, even when a project is inside Faber’s data folder.',
+  'notes.364.better': 'The Projects start screen and an empty catalog now have a small drawing that shows what the screen is for.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

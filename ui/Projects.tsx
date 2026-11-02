@@ -37,6 +37,7 @@ export function Projects(props: Props) {
         <div class="welcome-grid" ref={animateList}>
           <Empty
             class="w-main"
+            scene="openProject"
             title={t('empty.openProjectTitle')}
             line={t('empty.openProjectBody')}
             button={{ label: t('side.addProject'), onClick: () => props.onAdd() }}

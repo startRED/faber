@@ -2463,6 +2463,7 @@ export const es: Messages = {
   'notes.361.better': 'Elige el modelo por IA y ajusta su esfuerzo desde el mismo botón.',
   'notes.362.better': 'Las conversaciones largas abren en los últimos 40 mensajes; los anteriores se cargan al subir, sin perder tu lugar.',
   'notes.363.fixed': 'Los modos que limitan el acceso ahora protegen las conversaciones y los ajustes de Faber frente a cambios, incluso cuando un proyecto está dentro de la carpeta de datos de Faber.',
+  'notes.364.better': 'La pantalla inicial de Proyectos y el catálogo vacío ahora tienen un dibujo pequeño que muestra para qué sirve.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
