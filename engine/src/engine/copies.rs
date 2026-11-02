@@ -165,6 +165,8 @@ impl Engine {
     /// conversation that is idle, clean and merged into the person's branch. That conversation keeps its record, and its
     /// next message makes the copy again in the same folder, so its CLI session resumes.
     pub fn sweep_copies(&self) {
+        // Linux has no background class here yet: the sweep keeps its normal priority there.
+        #[cfg(any(windows, target_os = "macos"))]
         let _background = faber_winproc::background_thread();
         let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
         let Some(mut exec) = run() else { return };
