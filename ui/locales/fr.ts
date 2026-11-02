@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  "child.working": "En cours",
+  "child.waiting": "En attente",
+  "child.stopped": "Arrêtée",
+  "child.done": "Terminée",
+  "child.failed": "Échec",
+  "child.archived": "Archivée",
   "results.line": "Livré : {delivered} · Coût : {cost}",
   "results.title": "Résultats",
   "results.total": "Total",
@@ -2442,6 +2448,7 @@ export const fr: Messages = {
   'notes.352.fixed': 'Votre message démarre même si Auto ne reçoit pas à temps la réponse du routeur.',
   'notes.353.fixed': 'Les réponses sont désormais relancées quand Codex signale un service occupé, avec un compteur discret.',
   'notes.354.fixed': 'Vos copies de projet gardent votre travail ; Faber nettoie les dossiers recréables après sept jours sans activité.',
+  'notes.355.new': 'Vous pouvez ouvrir les conversations lancées par l’agent et suivre leur progression dans le journal de travail.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

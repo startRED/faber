@@ -1,6 +1,12 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  "child.working": "Trabalhando",
+  "child.waiting": "Aguardando",
+  "child.stopped": "Parada",
+  "child.done": "Concluída",
+  "child.failed": "Falhou",
+  "child.archived": "Arquivada",
   "results.line": "Entregue: {delivered} · Custo: {cost}",
   "results.title": "Resultados",
   "results.total": "Total",
@@ -2429,6 +2435,7 @@ export const ptBR: Messages = {
   'notes.352.fixed': 'Sua mensagem começa mesmo quando o Auto não recebe uma resposta do roteador a tempo.',
   'notes.353.fixed': 'As respostas agora tentam de novo quando o Codex avisa que o serviço está ocupado, com um contador discreto.',
   'notes.354.fixed': 'Suas cópias de projeto preservam seu trabalho enquanto o Faber limpa pastas recriáveis após sete dias sem uso.',
+  'notes.355.new': 'Você pode abrir as conversas iniciadas pelo agente e acompanhar o andamento delas no registro de trabalho.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

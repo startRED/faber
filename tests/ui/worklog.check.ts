@@ -1,9 +1,11 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
+import { App } from '../../ui/App.tsx';
 import { ToolGlyph } from '../../ui/icons/kinds.tsx';
 import { keepParts, timeline } from '../../ui/timeline.ts';
-import type { Message, ToolUse } from '../../ui/api.ts';
+import { api, type AppEvent, type AppState, type Conversation, type Message, type ToolUse } from '../../ui/api.ts';
+import { store } from '../../ui/running.ts';
 import { applyLook } from '../../ui/appearance.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, stepsSummary, toolLine, toolRow } from '../../ui/worklog.ts';
@@ -352,6 +354,69 @@ check('settings_search: unknown choices never leak into the settings work log', 
     }),
     { label: 'PowerShell', detail: 'cargo t --suite ui' },
   );
+});
+
+check('worklog: linked child updates and opens from its tool call', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [child, setChild] = createSignal<import('../../ui/api.ts').Summary>({ id: 'child', title: 'First title', area: 'project', updatedAt: 0, startedBy: 'lead', childState: 'working', childLine: 'Reading files' });
+  const message: Message = { id: 'answer', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [{ id: 'call', name: 'Conversation', input: { action: 'start', title: 'First title' }, ok: true, output: 'Started.\n{"childId":"child"}' }] };
+  let opened = '';
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'lead', options: [], onBranch: () => {}, get conversations() { return [child()]; }, onOpenChild: (c) => { opened = c.id; } }), root);
+  try {
+    const row = () => root.querySelector<HTMLButtonElement>('.child-conversation')!;
+    ok(row().textContent!.includes('First title') && row().textContent!.includes('Working'));
+    setChild({ ...child(), title: 'Renamed', childState: 'waiting', waitingOn: { note: 'Review' }, childLine: 'Ready for review' });
+    ok(row().textContent!.includes('Renamed') && row().textContent!.includes('Waiting') && row().textContent!.includes('Review'));
+    setChild({ ...child(), startedBy: 'another-lead' });
+    equal(root.querySelector('.child-conversation'), null, 'another conversation cannot claim this child');
+    setChild({ ...child(), startedBy: 'lead' });
+    setChild({ ...child(), archived: true });
+    ok(row().textContent!.includes('Archived'));
+    row().click();
+    equal(opened, 'child');
+  } finally { dispose(); root.remove(); }
+});
+
+check('worklog: only successful starts with a returned child id link a child', () => {
+  const child = { id: 'child', title: 'Child', area: 'project' as const, updatedAt: 0, startedBy: 'lead' };
+  for (const tool of [
+    { id: 'read', name: 'Conversation', input: { action: 'read', id: 'child' }, ok: true, output: '{"childId":"child"}' },
+    { id: 'implicit-read', name: 'Conversation', input: { id: 'child' }, ok: true, output: 'Read.' },
+    { id: 'start', name: 'Conversation', input: { action: 'start', id: 'child' }, ok: true, output: 'Started.' },
+    { id: 'failed', name: 'Conversation', input: { action: 'start' }, ok: false, output: '{"childId":"child"}' },
+  ]) {
+    const root = document.createElement('div'); document.body.append(root);
+    const message: Message = { id: 'answer', role: 'assistant', at: 0, text: '', status: 'done', tools: [tool] };
+    const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'lead', options: [], onBranch: () => {}, conversations: [child], onOpenChild: () => {} }), root);
+    try { equal(root.querySelector('.child-conversation'), null, tool.id); } finally { dispose(); root.remove(); }
+  }
+});
+
+check('worklog: a finished message keeps the child conversation waiting until its summary changes', async () => {
+  useLanguage('en');
+  const before = { open: api.open, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts };
+  const saved = localStorage.getItem('faber.place');
+  const lead: Conversation = { id: 'lead', title: 'Lead', area: 'project', projectId: 'p', createdAt: 0, updatedAt: 1, sessions: {}, messages: [{ id: 'answer', role: 'assistant', at: 0, text: '', status: 'done', tools: [{ id: 'start', name: 'Conversation', input: { action: 'start' }, ok: true, output: '{"childId":"child"}' }] }] };
+  const child = { id: 'child', title: 'Child', area: 'project' as const, projectId: 'p', updatedAt: 1, startedBy: 'lead', childState: 'waiting' as const };
+  const initial = { conversations: [{ id: lead.id, title: lead.title, area: lead.area, projectId: 'p', updatedAt: 1 }, child], projects: [{ id: 'p', name: 'Project', path: 'E:/project' }], vendors: ['claude'], settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } }, running: { revision: store.list().revision + 1, items: [] }, quotas: [], usage: [], models: [], version: 'test', look: sala({ motion: 'none' }) } as AppState;
+  api.open = async () => lead; api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {}; api.setClock = async () => {}; api.setShellTexts = async () => {};
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'project', projectId: 'p', id: 'lead' }));
+  store.offer(initial.running);
+  let hear!: (event: AppEvent) => void;
+  const root = document.createElement('div'); document.body.append(root);
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener) => { if (listener) hear = listener; } } }), root);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    hear({ type: 'message', conversationId: 'child', message: { id: 'child-answer', role: 'assistant', at: 1, text: 'Waiting for my children', status: 'done' } });
+    ok(root.querySelector('.child-conversation')?.textContent?.includes('Waiting'), 'a completed turn does not conclude a waiting conversation');
+  } finally {
+    dispose(); root.remove(); Object.assign(api, before);
+    store.offer({ revision: store.list().revision + 1, items: [] });
+    if (saved === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', saved);
+  }
 });
 
 check('timeline: words, thoughts, steps and agents keep their places and unchanged objects', () => {

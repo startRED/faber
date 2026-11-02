@@ -1,6 +1,12 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "child.working": "Working",
+  "child.waiting": "Waiting",
+  "child.stopped": "Stopped",
+  "child.done": "Done",
+  "child.failed": "Failed",
+  "child.archived": "Archived",
   "results.line": "Delivered: {delivered} · Cost: {cost}",
   "results.title": "Results",
   "results.total": "Total",
@@ -2322,6 +2328,7 @@ export const en = {
   'notes.352.fixed': 'Your message starts even when Auto cannot get a routing answer in time.',
   'notes.353.fixed': 'Replies now retry automatically when Codex reports a busy service, with a quiet attempt counter.',
   'notes.354.fixed': 'Your project copies keep your work while Faber clears rebuildable folders after seven idle days.',
+  'notes.355.new': 'You can open the conversations the agent starts and follow their progress from its work log.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
