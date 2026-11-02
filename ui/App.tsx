@@ -381,9 +381,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const panes = recall<Record<string, Pane>>('faber.column', {});
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
+  let readingResizeFrame: number | undefined;
+  onCleanup(() => { if (readingResizeFrame !== undefined) cancelAnimationFrame(readingResizeFrame); });
   const tailWatch = () => (tail ??= new ResizeObserver(() => {
     if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
-    else holdReading();
+    else {
+      holdReading();
+      if (!reading || stick) return;
+      // Estimated heights can change again after this resize; keep its scroll event from replacing the anchor.
+      if (readingResizeFrame !== undefined) cancelAnimationFrame(readingResizeFrame);
+      readingResizeFrame = requestAnimationFrame(() => {
+        readingResizeFrame = undefined;
+        holdReading();
+      });
+    }
   }));
   let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
@@ -1240,7 +1251,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
 
   const onScroll = (el: HTMLDivElement) => {
-    if (restoringReading) return;
+    if (restoringReading || readingResizeFrame !== undefined) return;
     const below = el.scrollHeight - el.scrollTop - el.clientHeight;
     const end = until();
     if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
