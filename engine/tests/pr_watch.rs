@@ -68,14 +68,13 @@ fn done() -> Value {
 }
 
 async fn until(engine: &Engine, id: &str, what: &str, ok: impl Fn(&[Message]) -> bool) -> Vec<Message> {
-    for _ in 0..300 {
-        let messages = engine.open(id).unwrap().messages;
-        if ok(&messages) {
-            return messages;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{what}: {:?}", engine.open(id).unwrap().messages);
+    let mut messages = vec![];
+    support::until(what, || {
+        messages = engine.open(id).unwrap().messages;
+        ok(&messages)
+    })
+    .await;
+    messages
 }
 
 fn follow_of(messages: &[Message]) -> Option<&faber_engine::model::Follow> {

@@ -58,13 +58,8 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
                 choice: Choice { vendor: "auto".into(), model: None, effort: None },
             })
             .unwrap();
-        for _ in 0..100 {
-            if engine.open(&id).unwrap().messages.last().unwrap().permissions.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(engine.open(&id).unwrap().messages.last().unwrap().permissions.is_some());
+        support::until("the turn never asked for permission", || engine.open(&id).unwrap().messages.last().unwrap().permissions.is_some())
+            .await;
         engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(notice)]);
         let reply = engine.open(&id).unwrap().messages.pop().unwrap();
         assert_eq!(reply.status, Some(if matches!(index, 0 | 3) { Status::Error } else { Status::Stopped }));

@@ -78,14 +78,15 @@ fn ask(area: Area, project: &str, conversation: Option<&str>, text: &str) -> Sen
 }
 
 async fn until(engine: &Engine, id: &str, what: &str, ok: impl Fn(&Conversation) -> bool) -> Conversation {
-    for _ in 0..300 {
+    let mut found = None;
+    support::until(what, || {
         let c = engine.open(id).unwrap();
-        if ok(&c) {
-            return c;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{what}: {:?}", engine.open(id).unwrap().messages);
+        let is_ok = ok(&c);
+        found = Some(c);
+        is_ok
+    })
+    .await;
+    found.unwrap()
 }
 
 fn ended(c: &Conversation) -> bool {

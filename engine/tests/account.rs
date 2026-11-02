@@ -302,7 +302,7 @@ async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_fini
     // The current-thread runtime has not polled the replay yet: the turn is in flight.
     engine.replace_clis(BTreeMap::new());
     assert!(engine.state().vendors.is_empty());
-    let reply = tokio::time::timeout(Duration::from_secs(3), async {
+    let reply = tokio::time::timeout(crate::support::DEADLINE, async {
         while let Some(event) = events.recv().await {
             if let AppEvent::Message { message, .. } = event
                 && message.role == Role::Assistant
@@ -403,7 +403,7 @@ async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_
         choice,
     });
     assert!(sent.is_ok(), "send must use the replacement subscription: {sent:?}");
-    let reply = tokio::time::timeout(Duration::from_secs(3), async {
+    let reply = tokio::time::timeout(crate::support::DEADLINE, async {
         while let Some(event) = events.recv().await {
             if let AppEvent::Message { message, .. } = event
                 && message.role == Role::Assistant
