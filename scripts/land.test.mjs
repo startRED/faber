@@ -248,7 +248,14 @@ test('main accepts a full phase-1-base dispatch after its gate passes', () => {
   assert.match(main, /gh workflow run auto-release\.yml --ref phase-1-base -f sha="\$GITHUB_SHA"/);
 });
 
-test('a train takes the oldest queued riders that still stand, never a workflow change or one red alone (R-next)', () => {
+test('a pull request queued again keeps its place: the lowest number rides first, whenever it was queued', () => {
+  const view = (oid) => ({ state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false, headRefOid: oid });
+  const rider = (pr, time) => ({ pr, oid: `h${pr}`, files: ['ui/App.tsx'], time, red: false, view: view(`h${pr}`) });
+  const entries = [rider('600', 10), rider('601', 11), rider('602', 12), rider('562', 40)];
+  assert.deepEqual(riders(entries).map((e) => e.pr), ['562', '600', '601']);
+});
+
+test('a train takes the lowest-numbered queued riders that still stand, never a workflow change or one red alone (R-next)', () => {
   const view = (oid) => ({ state: 'OPEN', isDraft: false, baseRefName: 'phase-1-base', isCrossRepository: false, headRefOid: oid });
   const rider = (pr, time, more = {}) => ({ pr, oid: `h${pr}`, files: ['ui/App.tsx'], time, red: false, view: view(`h${pr}`), ...more });
   const entries = [

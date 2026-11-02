@@ -14,7 +14,7 @@
 // --dry-run shows the commit it would queue and pushes nothing.
 //
 // Trains (R-next): once the base's ci.yml runs them, a queued pull request waits for the next train, which `--train`
-// builds on CI: the oldest queued ones, each squashed on the one before it, checked by one run and landed together by the
+// builds on CI: the lowest-numbered queued ones, each squashed on the one before it, checked by one run and landed together by the
 // land job (`--land`); a red train sends its first half again (`--split`). Before that, batches (R190 V3): a pull request
 // that touches other parts than one queued is squashed on top of it (at most `BATCH` deep). `--alone` never batches.
 //
@@ -769,15 +769,17 @@ const LOCK = 'refs/heads/train';
 const trainAt = () => git('ls-remote', 'origin', LOCK).split(/\s/)[0] ?? '';
 
 /**
- * The riders of the next train, oldest queueing first and at most `TRAIN`: queue entries `{ pr, oid, files, time, red,
- * view }` whose pull request still stands at the head that was squashed, changes no workflow (which lands only from a
- * PC) and was not red alone since it was queued; with `only`, those pull requests alone.
+ * The riders of the next train, lowest pull request number first and at most `TRAIN`: queue entries `{ pr, oid, files,
+ * time, red, view }` whose pull request still stands at the head that was squashed, changes no workflow (which lands
+ * only from a PC) and was not red alone since it was queued; with `only`, those pull requests alone. The number, not the
+ * queueing time, keeps a pull request queued again in its place: on 2026-11-02 #562 went to the back after each of four
+ * conflicts with riders queued after it, and lost the race every time.
  */
 export function riders(entries, only) {
   return entries
     .filter((e) => e.oid && !workflow(e.files) && !e.red && e.view && !refusal(e.view) && e.view.headRefOid === e.oid)
     .filter((e) => !only || only.includes(e.pr))
-    .sort((a, b) => a.time - b.time || Number(a.pr) - Number(b.pr))
+    .sort((a, b) => Number(a.pr) - Number(b.pr))
     .slice(0, TRAIN);
 }
 
