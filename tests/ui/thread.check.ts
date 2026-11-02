@@ -107,6 +107,11 @@ check('thread: 300 messages open at the newest 40, prepend without a jump and lo
     await frames(4);
     const settled = thread.querySelector<HTMLElement>('[data-message-index="260"]')!.getBoundingClientRect().top;
     ok(Math.abs(settled - before) < 3, `a late resize keeps the original reading anchor: ${before} -> ${settled}`);
+    thread.scrollTop = thread.scrollHeight;
+    thread.dispatchEvent(new Event('scroll'));
+    thread.querySelector<HTMLElement>('[data-message-index="220"]')!.style.paddingBottom = '61px';
+    await frames(4);
+    ok(thread.scrollHeight - thread.scrollTop - thread.clientHeight < 3, 'reaching the end releases the prepend anchor and follows resizing content');
     const search = root.querySelector<HTMLInputElement>('.search input')!;
     search.value = 'needle'; search.dispatchEvent(new InputEvent('input', { bubbles: true }));
     await waitFor(() => !!root.querySelector('.message-hits button'), 'search provides a link to an unloaded message');

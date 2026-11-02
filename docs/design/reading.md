@@ -10,8 +10,9 @@ How conversation text reads and keeps its place, in Chat and Projects.
 - A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it
   requests the preceding 40 and prepends them with an instant viewport correction, after restoring any focused search
   marker. The next frame reapplies the reading anchor after offscreen replies update their estimated heights; resize
-  corrections then reapply that anchor in the frame after the last resize, ignoring interim automatic scroll events.
-  One request per conversation window may be in flight; replies from a previous
+  corrections reapply only the prepend's captured anchor in the frame after a resize, ignoring automatic scroll events
+  above the tail. Pointer, wheel, keyboard or focus input releases that anchor immediately; reaching the tail follows again.
+  Restart restoration keeps its existing path. One request per conversation window may be in flight; replies from a previous
   opening are discarded.
   Search and version links, and a saved reading position, load as many pages as their target needs. Message indices and
   saved positions include the unloaded `Conversation.earlier` offset. Loaded pages are retained; nothing adds a setting,
