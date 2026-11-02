@@ -403,6 +403,8 @@ check('worklog: shell starts link only the confirmed child of this conversation'
   try {
     const row = () => root.querySelector<HTMLButtonElement>('.child-conversation');
     ok(row()?.textContent?.includes('Working'));
+    setTool({ ...tool(), name: 'commandExecution' });
+    ok(row(), 'a Codex command links the same child');
     setTool({ ...tool(), output: 'before\n{"childId":"child","event":"conversation_started"}\nafter' });
     ok(row(), 'marker between other output links the child');
     setTool({ ...tool(), output: '{"event":"conversation_started","childId":"other"}\n{"event":"conversation_started","childId":"child"}\ndone' });

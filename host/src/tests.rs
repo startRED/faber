@@ -328,6 +328,68 @@ fn seed_conversation(host: &Host, id: &str, started_by: Option<&str>, waiting_on
 }
 
 #[tokio::test]
+async fn session_control_accepts_a_codex_parent_and_checks_its_children() {
+    let (host, dir) = host().await;
+    let project = host.engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    for (id, parent) in [("lead", None), ("child", Some("lead")), ("busy", Some("lead")), ("other", None), ("foreign", None)] {
+        let mut conv: faber_engine::model::Conversation = serde_json::from_value(json!({
+            "id": id, "title": id, "area": "project", "projectId": project.id, "createdAt": 1, "updatedAt": 2,
+            "messages": [], "choice": {"vendor": "codex"}
+        }))
+        .unwrap();
+        conv.started_by = parent.map(String::from);
+        if id != "busy" {
+            conv.messages = serde_json::from_value(json!([{"id": "done", "role": "assistant", "text": "done", "at": 1}])).unwrap();
+        }
+        if id == "foreign" {
+            conv.project_id = Some("another-project".into());
+        }
+        faber_engine::store::Store::new(&host.data_dir).save(&conv);
+    }
+    host.engine.open("lead").unwrap();
+    let agent = Caller::Agent { conversation: Some("lead".into()) };
+    let start = host.dispatch_session(&agent, "start_conversation", json!({"title": "Work", "brief": "work"}), None).await.unwrap_err();
+    assert_eq!(start.key, "error.session.refused");
+    // This host has no CLI: a valid request reaches launch, rather than failing validation or parent setup.
+    assert_eq!(start.detail.as_deref(), Some("the conversation could not start"));
+    for (command, args, expected_key, expected_detail) in [
+        ("interrupt", json!({"id": "other"}), "error.reach.ask", None),
+        ("resume_conversation", json!({"id": "other"}), "error.session.refused", Some("that conversation was not started by you")),
+        ("archive", json!({"id": "other", "on": true}), "error.reach.ask", None),
+        ("mark_waiting", json!({"on": ["other"]}), "error.session.refused", Some("that conversation was not started by you")),
+        (
+            "message_conversation",
+            json!({"id": "foreign", "message": "Status?"}),
+            "error.session.refused",
+            Some("no conversation with that id is in this project"),
+        ),
+    ] {
+        let error = host.dispatch_session(&agent, command, args, None).await.unwrap_err();
+        assert_eq!(error.key, expected_key, "{command}");
+        assert_eq!(error.detail.as_deref(), expected_detail, "{command}");
+    }
+    host.dispatch_session(&agent, "mark_waiting", json!({"on": ["busy"], "by": "other"}), None).await.unwrap();
+    assert_eq!(host.engine.open("lead").unwrap().waiting_on.unwrap().ids, vec!["busy"]);
+    host.dispatch_session(&agent, "interrupt", json!({"id": "child"}), None).await.unwrap();
+    assert!(host.engine.open("child").unwrap().stopped);
+    let resume = host.dispatch_session(&agent, "resume_conversation", json!({"id": "child"}), None).await.unwrap_err();
+    assert_eq!(resume.key, "error.session.refused");
+    assert_eq!(resume.detail.as_deref(), Some("this AI may be billed per use, so Faber does not start conversations on it by itself"));
+    host.dispatch_session(&agent, "message_conversation", json!({"id": "child", "message": "Status?"}), None).await.unwrap();
+    let child = host.engine.open("child").unwrap();
+    assert!(child.stopped);
+    assert_eq!(child.queued.len(), 1);
+    assert!(child.queued[0].text.contains("Status?"));
+    assert_eq!(child.queued[0].choice.vendor, "codex");
+    host.engine.remove_queued("child", &child.queued[0].id);
+    host.dispatch_session(&agent, "archive", json!({"id": "child", "on": true}), None).await.unwrap();
+    assert!(host.engine.open("child").unwrap().archived_at.is_some());
+    let resume = host.dispatch_session(&agent, "resume_conversation", json!({"id": "child"}), None).await.unwrap_err();
+    assert_eq!(resume.key, "error.session.refused");
+    assert_eq!(resume.detail.as_deref(), Some("the conversation is archived"));
+}
+
+#[tokio::test]
 async fn dispatch_as_sets_by_from_a_conversation_agent_and_strips_it_for_everyone_else() {
     let (host, _dir) = host().await;
     seed_conversation(&host, "c1", Some("c2"), None);
