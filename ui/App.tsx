@@ -2136,6 +2136,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             onOpen={openSummary}
                             terminal={terminalHere() ? fromTerminal : undefined}
                             uncleanExit={state().uncleanExit}
+                            gitReason={state().gitReason}
                             onDismissUncleanExit={dismissUncleanExit}
                             onOpenLogFolder={openLogFolder}
                             onFindProjectFolder={(id) => void findProjectFolder(id)}

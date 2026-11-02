@@ -250,6 +250,8 @@ pub(crate) fn child_line(c: &Conversation) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppState {
+    #[serde(rename = "gitReason", skip_serializing_if = "Option::is_none")]
+    pub git_reason: Option<&'static str>,
     pub background: crate::background::List,
     pub conversations: Vec<Summary>,
     pub projects: Vec<Project>,
@@ -493,6 +495,7 @@ struct Core {
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
+    git_missing: bool,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
@@ -805,6 +808,7 @@ impl Engine {
                 test_items: Vec::new(),
                 before: HashMap::new(),
                 git: None,
+                git_missing: false,
                 rewind,
                 unclean_exit,
                 project_states: Mutex::new(HashMap::new()),
@@ -2202,6 +2206,7 @@ impl Core {
             }
         }
         AppState {
+            git_reason: self.git_missing.then_some("reason.git_missing"),
             background: self.background.list(),
             conversations: self.listed(),
             projects,

@@ -32,6 +32,13 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
   Claude Code has no list to ask, so its sessions come from its history files of that folder only (parity F5).
 
+When native Git is missing, one quiet card above the composer explains that each conversation works in the project
+folder (`reason.git_missing`). Its single ghost button, Download Git, opens the official download page in the system
+browser through the existing open-link path. It uses the home notice surface, wraps at narrow widths and adds no
+motion or polling. The engine caches the native executable lookup and checks again when the window regains focus.
+A new conversation still starts in place, without a branch crumb or Changes; conversations already started in place
+stay there after Git becomes available. Chat and missing or disconnected project folders do not show this card.
+
 ### Standing goals
 
 A short line beneath each title explains standing goals, memory and terminal sessions whether the fold is open or closed. Above Memory, one more quiet fold (`ui/ProjectGoals.tsx`) built the same way: a text button, the shared Collapse, one

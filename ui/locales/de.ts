@@ -1958,6 +1958,8 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "Die Git-Operation ist fehlgeschlagen.",
+  "reason.git_missing": "Git ist nicht installiert. Deshalb arbeitet jede Unterhaltung in deinem Ordner.",
+  "projects.gitDownload": "Git herunterladen",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "Natives Git ist nicht verfügbar oder konnte nicht geprüft werden.",
   "reason.remote.ghMissing": "Die GitHub-CLI (gh) ist nicht installiert. Deine Arbeit bleibt lokal, bis sie es ist.",
@@ -2468,6 +2470,7 @@ export const de: Messages = {
   'notes.366.better': 'Du kannst Gespräche öffnen, die der Agent per Befehl startet, und ihren Status sehen.',
   'notes.367.better': 'Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten.',
   'notes.368.better': 'Der Tastaturfokus wechselt beim Öffnen in die Einstellungen, bleibt beim Speichern auf deiner Auswahl und kehrt beim Schließen zurück.',
+  'notes.369.better': 'Ohne Git arbeiten Projektunterhaltungen in deinem Ordner; die Projektstartseite erklärt den Grund und bietet einen Link zum Herunterladen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

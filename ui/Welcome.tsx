@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { type CliSession, type Project, type RunningItem, type Summary } from './api.ts';
+import { api, type AppState, type CliSession, type Project, type RunningItem, type Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 
 import { CrashNote, MissingFolder } from './RecoveryNotes.tsx';
@@ -41,6 +41,7 @@ export function Welcome(props: {
   projects: Project[];
   /** The project this new conversation works in, if it is one: named above the greeting, with its folder on hover. */
   project?: Project;
+  gitReason?: AppState['gitReason'];
   onSuggest: (text: string) => void;
   onOpen: (conversation: Summary) => void;
   /** In a project with an AI connected: its terminal sessions, asked for only when the person opens the list. */
@@ -97,6 +98,16 @@ export function Welcome(props: {
           <p class="lead">{t('projects.chat.lead')}</p>
         </Show>
         <MissingFolder project={props.project} onFind={props.onFindProjectFolder} onRemove={props.onRemoveProject} />
+        <Show when={presentProject() && props.gitReason}>
+          {(reason) => (
+            <div class="crash-note" role="status" data-testid="git-missing">
+              <p>{t(reason())}</p>
+              <div class="crash-note-actions">
+                <button type="button" class="btn ghost" onClick={() => void api.openLink('https://git-scm.com/downloads')}>{t('projects.gitDownload')}</button>
+              </div>
+            </div>
+          )}
+        </Show>
         {props.children}
         <Show when={!props.project}>
           <Suggestions onSuggest={props.onSuggest} />

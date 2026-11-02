@@ -651,6 +651,7 @@ export interface VendorUsage {
   ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
+  gitReason?: 'reason.git_missing';
   uncleanExit?: { at: number; started?: number; panic: boolean };
   conversations: Summary[];
   projects: Project[];

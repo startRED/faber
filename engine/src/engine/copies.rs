@@ -42,7 +42,23 @@ pub(super) struct Plan {
 
 impl Engine {
     pub fn set_git(&self, run: GitRunner) {
-        self.with(|c| c.git = Some(run));
+        let missing = run().is_none();
+        self.with(|c| {
+            c.git = Some(run);
+            c.git_missing = missing;
+        });
+    }
+
+    pub(super) fn refresh_git(&self) {
+        crate::project::git::Process::refresh();
+        let run = self.with(|c| c.git.clone());
+        let missing = run.is_some_and(|run| run().is_none());
+        self.with(|c| {
+            if c.git_missing != missing {
+                c.git_missing = missing;
+                c.list_changed();
+            }
+        });
     }
 
     pub(super) fn make_copy(plan: Option<Plan>) -> Result<Made, String> {

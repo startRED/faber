@@ -1,6 +1,7 @@
 //! Running git without a shell: a fixed argv, a cleaned environment, and every configured filter and hook switched off.
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,9 +90,27 @@ pub trait Executor {
 pub struct Process {
     executable: PathBuf,
 }
+// Both a found path and a missing executable stay cached until the window regains focus.
+static EXECUTABLE: Mutex<Option<Result<PathBuf, GitError>>> = Mutex::new(None);
+
 impl Process {
     pub fn find() -> Result<Self, GitError> {
-        let cli = crate::cli::find_cli("git").ok_or(GitError::Process)?;
+        let mut cached = EXECUTABLE.lock().unwrap_or_else(|e| e.into_inner());
+        cached.get_or_insert_with(Self::locate).clone().map(|executable| Self { executable })
+    }
+
+    pub fn refresh() {
+        *EXECUTABLE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn locate() -> Result<PathBuf, GitError> {
+        let cli = crate::cli::find_cli("git")
+            .or_else(|| {
+                // An installer changes future processes' PATH, so also check its standard folders on focus.
+                let dirs = install_dirs(cfg!(windows), &|key| std::env::var(key).ok());
+                crate::cli::resolve_cli("git", &dirs, cfg!(windows), &|p| Path::new(p).is_file(), &|_| String::new())
+            })
+            .ok_or(GitError::Process)?;
         let path = PathBuf::from(cli.command);
         if !cli.prefix.is_empty()
             || !path.is_absolute()
@@ -99,7 +118,7 @@ impl Process {
         {
             return Err(GitError::Process);
         }
-        Ok(Self { executable: path })
+        Ok(path)
     }
     fn command(&self, call: &Invocation) -> Command {
         let mut command = Command::new(&self.executable);
@@ -123,6 +142,17 @@ impl Process {
         }
         command
     }
+}
+
+fn install_dirs(windows: bool, env: &dyn Fn(&str) -> Option<String>) -> String {
+    if !windows {
+        return String::new();
+    }
+    [("ProgramFiles", "Git\\cmd"), ("LOCALAPPDATA", "Programs\\Git\\cmd")]
+        .into_iter()
+        .filter_map(|(key, sub)| env(key).map(|root| format!("{root}\\{sub}")))
+        .collect::<Vec<_>>()
+        .join(";")
 }
 const COMMAND_TIME: Duration = Duration::from_secs(10);
 
@@ -304,6 +334,22 @@ pub fn config_overrides(keys: &[u8]) -> Result<Vec<String>, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_installed_while_faber_is_open_is_found_without_a_new_path() {
+        let env = |key: &str| match key {
+            "ProgramFiles" => Some("C:\\Program Files".into()),
+            "LOCALAPPDATA" => Some("C:\\Users\\Newcomer\\AppData\\Local".into()),
+            _ => None,
+        };
+        for installed in ["C:\\Program Files\\Git\\cmd\\git.exe", "C:\\Users\\Newcomer\\AppData\\Local\\Programs\\Git\\cmd\\git.exe"] {
+            let cli = crate::cli::resolve_cli("git", &install_dirs(true, &env), true, &|p| p == installed, &|_| String::new()).unwrap();
+            assert_eq!(cli.command, installed);
+            assert!(cli.prefix.is_empty());
+        }
+        assert!(install_dirs(false, &env).is_empty());
+        assert!(install_dirs(true, &|_| None).is_empty());
+    }
 
     #[test]
     fn changes_no_index_difference_is_success_but_a_command_error_is_not() {

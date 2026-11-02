@@ -1955,6 +1955,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.git.command": "A operação do Git falhou.",
+  "reason.git_missing": "O Git não está instalado, então cada conversa trabalha na sua pasta.",
+  "projects.gitDownload": "Baixar Git",
   // Native speaker must translate (needs native review).
   "reason.git.unknown": "O Git nativo não está disponível ou não pôde ser verificado.",
   "reason.remote.ghMissing": "O GitHub CLI (gh) não está instalado. Seu trabalho fica só no computador até ele estar.",
@@ -2455,6 +2457,7 @@ export const ptBR: Messages = {
   'notes.366.better': 'Você pode abrir as conversas que o agente inicia por comandos e acompanhar o estado delas.',
   'notes.367.better': 'Conversas novas ganham um título curto no idioma da sua mensagem depois da primeira resposta, sem mudar os nomes que você escolheu.',
   'notes.368.better': 'O foco do teclado entra nas Configurações ao abrir, fica na sua escolha ao salvar e volta ao fechar.',
+  'notes.369.better': 'Sem Git, as conversas do projeto trabalham na sua pasta; a tela inicial explica o motivo e mostra onde baixar.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
