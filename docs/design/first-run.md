@@ -9,6 +9,7 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
   already saved). Opened later, from the no-AI state or from
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
+- A failed install explains the problem and next step in the card, with Try again and the official page together. The same card appears in Settings.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
   screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use
   AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Continue saves the appearance, the answer, the name and, unless the tutorial

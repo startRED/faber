@@ -215,7 +215,7 @@ export function Setup(props: SetupProps) {
                           class="btn primary"
                           onClick={() => void installVendor(vendor)}
                         >
-                          {t('setup.install')}
+                          {t(card().error ? 'setup.retry' : 'setup.install')}
                         </button>
                       </Show>
                       <Show when={card().actions.includes('officialPage')}>
