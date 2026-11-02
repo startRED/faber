@@ -2466,6 +2466,7 @@ export const de: Messages = {
   'notes.364.better': 'Der Startbildschirm von Projekte und der leere Katalog zeigen jetzt eine kleine Zeichnung, die den Zweck der Ansicht zeigt.',
   'notes.365.new': 'Sie können Fabers Werkzeuge über MCP mit einer KI verbinden.',
   'notes.366.better': 'Du kannst Gespräche öffnen, die der Agent per Befehl startet, und ihren Status sehen.',
+  'notes.367.better': 'Neue Unterhaltungen bekommen nach der ersten Antwort einen kurzen Titel in der Sprache deiner Nachricht; selbst gewählte Namen bleiben erhalten.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

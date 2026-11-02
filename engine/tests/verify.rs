@@ -51,7 +51,8 @@ fn engine(dir: &crate::support::DataFolder, spawn: faber_engine::proc::Spawner) 
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
-        ask: None,
+        // These wire scenarios cover conversation turns; auxiliary models are mocked separately.
+        ask: Some(Arc::new(|_| Box::pin(async { None }))),
     };
     Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap()
 }

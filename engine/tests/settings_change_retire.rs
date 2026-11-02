@@ -25,7 +25,8 @@ fn engine(dir: &crate::support::DataFolder, vendor: Vendor, spawn: Spawner) -> E
             max_warm: 3,
             idle: Duration::from_secs(120),
             runtime: tokio::runtime::Handle::current(),
-            ask: None,
+            // These wire scenarios cover conversation turns; auxiliary models are mocked separately.
+            ask: Some(Arc::new(|_| Box::pin(async { None }))),
         },
         Arc::new(|_| {}),
     )

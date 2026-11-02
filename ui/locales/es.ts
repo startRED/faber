@@ -2466,6 +2466,7 @@ export const es: Messages = {
   'notes.364.better': 'La pantalla inicial de Proyectos y el catálogo vacío ahora tienen un dibujo pequeño que muestra para qué sirve.',
   'notes.365.new': 'Puedes conectar las herramientas de Faber a una IA mediante MCP.',
   'notes.366.better': 'Puedes abrir las conversaciones que el agente inicia mediante comandos y ver su estado.',
+  'notes.367.better': 'Las conversaciones nuevas reciben un título corto en el idioma de tu mensaje tras la primera respuesta, sin cambiar los nombres que elegiste.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

@@ -2453,6 +2453,7 @@ export const ptBR: Messages = {
   'notes.364.better': 'A tela inicial de Projetos e o catálogo vazio agora têm um desenho pequeno que mostra para que serve a tela.',
   'notes.365.new': 'Você pode conectar as ferramentas do Faber a uma IA por MCP.',
   'notes.366.better': 'Você pode abrir as conversas que o agente inicia por comandos e acompanhar o estado delas.',
+  'notes.367.better': 'Conversas novas ganham um título curto no idioma da sua mensagem depois da primeira resposta, sem mudar os nomes que você escolheu.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -3,6 +3,15 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+After the first answer, an ordinary new conversation may receive a title of at most six words in the first message's
+language. A link-only or code-only message uses the Settings language. A bare web link immediately shows a localized
+host-only fallback, with no URL credentials, path or query. The existing sidebar row receives the title through the
+ordinary list update; the draft, model choice and composer controls do not change. Manual names always win, including
+a rename back to the initial name. Branched, picked-up and agent-started conversations retain their existing names.
+One bounded small-model request uses a connected subscription and the existing quota gate; denial, failure or a
+30-second timeout keeps the fallback, without retries or an extra control. Checks: `engine/tests/title.rs` and
+`tests/ui/composer.check.ts` (`composer: a localized first-exchange title updates the existing sidebar row without changing the draft`).
+
 The model and manual effort share one chip. Its native top-layer popover uses the context menu's surface, stays within
 window edges and opens down when the full menu fits, otherwise toward the side with more room. Auto is first, followed
 by connected AI groups with their existing square/diamond marks. Current models (the Auto profile ids and the account
