@@ -94,7 +94,7 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     open_settings(page)?;
 
     // General: the language, hooks, both notification switches, keep-awake, resume-interrupted, autostart and full trust for Faber's own setup.
@@ -147,10 +147,10 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     )?;
     let shares =
         page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent)")?;
-    same(shares.to_string(), r#"["≥ 7%","≥ 47%"]"#.to_string(), "the shares of the two windows")?;
+    same(shares.to_string(), r#"["at least 7%","at least 47%"]"#.to_string(), "the shares of the two windows")?;
     let names =
         page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .uname')].map((e) => e.childNodes[0].textContent)")?;
-    same(names.to_string(), r#"["5-hour window","7-day window"]"#.to_string(), "the windows")?;
+    same(names.to_string(), r#"["5-hour limit","7-day limit"]"#.to_string(), "the windows")?;
     same(page.count(&css("[data-restore=manage]"))?, 1, "Manage accounts once in the section")?;
     ctx.shot(&mut app, "settings-accounts")?;
 
@@ -173,24 +173,24 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     let vendor = css(".usage .vendor").has_text("Claude");
     page.click(&vendor)?;
     let heading = page.named("heading", "set.subscriptions")?;
     page.wait_visible(&heading)?;
     let shares =
         "[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent).join(' ')";
-    same(page.eval(shares)?.as_str(), Some("≥ 7% ≥ 47%"), "the figures at the usage limits")?;
+    same(page.eval(shares)?.as_str(), Some("at least 7% at least 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
-    page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    page.wait_for("the quota after a reload", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
     page.wait_visible(&actions)?;
     // DOM readiness can precede the new document's native pointer hit-test frame.
     page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
     open_settings(page)?;
     open_section(page, "set.subscriptions")?;
-    page.wait_for("the same figures", &format!("({shares}) === '≥ 7% ≥ 47%'"))
+    page.wait_for("the same figures", &format!("({shares}) === 'at least 7% at least 47%'"))
 }
 
 fn clicks_rendered_target(ctx: &mut Ctx) -> Result {

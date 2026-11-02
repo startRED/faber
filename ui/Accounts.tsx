@@ -166,6 +166,7 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
             {/* Without a current reading, said once per card: where the limit can still be checked. */}
             <Show when={rows().some((r) => r.used === undefined)}><p class="acct-foot acct-unread">{t('quota.unavailable')}</p></Show>
             <p class="acct-foot">{t('usage.ownSpend', { cost: money(x().ownSpendUsd) })}</p>
+            <p class="acct-foot">{t('usage.apiValue')}</p>
             <Fold id={`acct-${v()}-details`} title={t('usage.details')}>
               <div class="acct-details">
                 <For each={notes(x())}>{(text) => <p class="hint">{text}</p>}</For>

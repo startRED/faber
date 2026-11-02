@@ -10,5 +10,9 @@ check('money: every amount Faber counts is said one way, "in API value", in ever
     const own = words['answer.cost'].replace('{cost}', '').trim();
     ok(words['usage.ownSpend'].endsWith(own), `${name}: the day's total says it like a reply does ("${own}")`);
     ok(/API/.test(own), `${name}: it names the API it is measured against`);
+    ok(/API/.test(words['usage.apiValue']), `${name}: the estimate explains the same term`);
+    ok(words['usage.apiValue'].split(/[.!]\s*/).filter(Boolean).length >= 2, `${name}: the estimate and billing distinction are separate sentences`);
   }
+  ok(en['usage.apiValue'].includes('not a bill'));
+  ok(ptBR['usage.apiValue'].includes('Não é uma cobrança'));
 });

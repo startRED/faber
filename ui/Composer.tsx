@@ -10,6 +10,7 @@ import { animateList, keepForExit } from './motion.ts';
 import { Thumb } from './Thumbs.tsx';
 import { appendAttachments, attachmentDiscardVersion, attachmentSaveFailed, hasKeptAttachments, keep, keepAttachments, kept, keptAttachments, release, retainAttachments, setDirty, useDraft, watchAttachments, type DraftAttachments } from './unsent.ts';
 import { pressed } from './keys.ts';
+import { PickMenu } from './controls.tsx';
 
 export interface Draft {
   text: string;
@@ -145,14 +146,14 @@ export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: ()
 
 /** The conversation's mode picker: every surface uses the same choices and their one-line meanings. */
 export function PermissionChip(props: { mode: PermissionMode; onMode: (mode: PermissionMode) => void; modes?: readonly PermissionMode[]; caption?: string; disabled?: boolean }) {
+  const id = createUniqueId();
   return (
-    <label class="chip choose mode" title={t(`set.permissions.${props.mode}.line`)}>
+    <div class="permission-chip" title={t(`set.permissions.${props.mode}.line`)}>
       <Show when={props.caption}><span>{props.caption}</span></Show>
-      <select aria-label={props.caption ?? t('composer.mode')} aria-description={t(`set.permissions.${props.mode}.line`)} value={props.mode} disabled={props.disabled} onChange={(e) => props.onMode(e.currentTarget.value as PermissionMode)}>
-        <For each={props.modes ?? PERMISSION_MODES}>{(m) => <option value={m} selected={m === props.mode} title={t(`set.permissions.${m}.line`)}>{t(`set.permissions.${m}`)}</option>}</For>
-      </select>
-      <Icon name="down" small />
-    </label>
+      <PickMenu id={id} label={props.caption ?? t('composer.mode')} value={props.mode}
+        options={(props.modes ?? PERMISSION_MODES).map((m): [PermissionMode, string, string] => [m, t(`set.permissions.${m}`), t(`set.permissions.${m}.line`)])}
+        onPick={props.onMode} disabled={props.disabled} compact />
+    </div>
   );
 }
 

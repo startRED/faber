@@ -1,9 +1,94 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { Composer, type Draft } from '../../ui/Composer.tsx';
-import { t } from '../../ui/i18n.ts';
-import { check, equal, ok } from './check.ts';
+import { PERMISSION_MODES, type PermissionMode } from '../../ui/api.ts';
+import { Composer, type Draft, PermissionChip } from '../../ui/Composer.tsx';
+import { t, useLanguage } from '../../ui/i18n.ts';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
+
+check('composer: access choices show what each allows, preserve the current mode and return focus without sending', async () => {
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      const root = document.createElement('div');
+      root.style.cssText = 'position:fixed;left:0;bottom:0;width:720px';
+      for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+      root.dataset.motion = 'none';
+      document.body.append(root);
+      const [mode, setMode] = createSignal<PermissionMode>('plan');
+      let sends = 0;
+      const dispose = render(() => createComponent(Composer, {
+        vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+        get mode() { return mode(); }, onMode: setMode,
+        onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => { sends++; },
+      }), root);
+      try {
+        const button = root.querySelector<HTMLButtonElement>('.permission-chip [role="combobox"]')!;
+        const field = root.querySelector('textarea')!;
+        const before = field.getBoundingClientRect();
+        button.focus();
+        button.click();
+        await frames(2);
+        const options = [...root.querySelectorAll<HTMLElement>('.permission-chip [role="option"]')];
+        const menu = root.querySelector<HTMLElement>('.permission-chip [role="listbox"]')!;
+        deepEqual(options.map((o) => o.querySelector('b')!.textContent), PERMISSION_MODES.map((m) => t(`set.permissions.${m}`)));
+        deepEqual(options.map((o) => o.querySelector('small')!.textContent), PERMISSION_MODES.map((m) => t(`set.permissions.${m}.line`)));
+        equal(options.find((o) => o.getAttribute('aria-selected') === 'true')!.querySelector('b')!.textContent, t('set.permissions.plan'));
+        for (const option of options) {
+          const line = option.querySelector('small')!;
+          ok(line.getBoundingClientRect().height > 0 && getComputedStyle(line).visibility === 'visible', `${language}: the description is visible`);
+          ok(line.scrollWidth <= line.clientWidth + 1, `${language}: long descriptions wrap`);
+        }
+        equal(field.getBoundingClientRect().top, before.top, 'the menu does not move the composer');
+        menu.style.maxHeight = '120px';
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+        await frames(2);
+        const last = options.at(-1)!.getBoundingClientRect();
+        const bounds = menu.getBoundingClientRect();
+        ok(menu.scrollTop > 0 && last.top >= bounds.top && last.bottom <= bounds.bottom + 1, 'the active choice scrolls fully into a short menu');
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        equal(button.getAttribute('aria-expanded'), 'false');
+        equal(mode(), 'plan', 'Escape keeps the current choice');
+        equal(document.activeElement, button);
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        equal(mode(), 'dontAsk');
+        equal(document.activeElement, button);
+        equal(sends, 0, 'choosing access never sends a message');
+        button.click();
+        root.querySelector<HTMLElement>('[role="option"]')!.click();
+        equal(mode(), 'ask', 'pointer selection uses the same mode values');
+      } finally { dispose(); root.remove(); }
+    }
+  } finally { useLanguage('en'); }
+});
+
+check('composer: an access choice keeps its restricted choices, caption and disabled state', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  let picked = false;
+  const [disabled, setDisabled] = createSignal(true);
+  const dispose = render(() => createComponent(PermissionChip, {
+    mode: 'ask', modes: ['ask', 'dontAsk'], caption: 'Access', get disabled() { return disabled(); }, onMode: () => { picked = true; },
+  }), root);
+  try {
+    const button = root.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    ok(button.disabled);
+    equal(button.getAttribute('aria-label'), 'Access');
+    button.click();
+    equal(button.getAttribute('aria-expanded'), 'false');
+    setDisabled(false);
+    button.click();
+    await frames(2);
+    const options = [...root.querySelectorAll<HTMLElement>('[role="option"]')];
+    equal(options.length, 2, 'only the allowed modes are offered');
+    setDisabled(true);
+    equal(button.getAttribute('aria-expanded'), 'false', 'disabling an open choice closes it');
+    options[1]!.click();
+    equal(picked, false);
+  } finally { dispose(); root.remove(); }
+});
 
 check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after sending', async () => {
   const root = document.createElement('div');

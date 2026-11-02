@@ -27,6 +27,22 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
   ok(en['set.chatFolderHint'].length < 50, 'the row keeps one short line');
 });
 
+check('settings: plain words explain automatic actions, saved search results and incomplete limits in every language', () => {
+  equal(en['set.hooksBody'], 'Projects run my automatic actions');
+  equal(ptBR['set.hooksBody'], 'Os projetos rodam minhas ações automáticas');
+  equal(en['set.webSearch.cached'], 'Stored copy');
+  equal(ptBR['set.webSearch.cached'], 'Cópia salva');
+  equal(en['set.faberTrustHint'], 'The AI manages tools and web search without asking.');
+  equal(ptBR['set.faberTrustHint'], 'A IA gerencia ferramentas e busca na web sem perguntar.');
+  for (const [code, words] of Object.entries({ en, ptBR, es, fr, de })) {
+    ok(!/CLI|hooks/i.test(words['set.hooksBody']), `${code}: the label says what runs`);
+    ok(/hooks/i.test(words['set.hooksHint']) && /hooks/i.test(words['set.hooksMore']), `${code}: the tool's term is explained nearby`);
+    ok(!/cache|caché/i.test(words['set.webSearch.cached']), `${code}: saved results have a plain name`);
+    ok(!/[≥~+]/.test(words['quota.atLeast'] + words['quota.uncounted']), `${code}: uncertainty uses words`);
+    for (const key of ['set.hooksHint', 'set.hooksLocked'] as const) ok(words[key].length <= 70, `${code}: ${key} fits the row`);
+  }
+});
+
 check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
   ok(!Object.keys(en).some((key) => key.startsWith('project.permissions')), 'no permission sentence is kept for the top of a conversation');
   const body = en['set.permissionsDontAskBody'];
@@ -593,6 +609,7 @@ check('R140: the permission menu lists five modes with one plain line each, and 
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       await leave();
       equal(view.host.querySelector('[role="listbox"]'), null, 'Esc closes it');
+      equal(document.activeElement, pick(), 'Esc returns focus to the access choice');
       equal(escapes, 0, 'and stays inside the menu');
       pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       equal(escapes, 1, 'with the menu shut, Esc goes on to the page as before');
@@ -993,6 +1010,7 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
     await tick();
     await tick();
     equal(view.host.querySelectorAll('.acct').length, 2, 'one card for each AI');
+    ok(view.host.textContent!.includes(en['usage.apiValue']), 'the visible estimate explains that it is not a bill');
     const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
     ok(card.textContent!.includes('Plan: Max'), 'the plan is capitalised');
     const pill = card.querySelector('.acct-pill')!;
@@ -1032,16 +1050,24 @@ check('settings: a window still counting, or with an uncounted share, reads at l
       await tick();
       const cell = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .urow .share')!;
       ok(cell.scrollWidth <= cell.clientWidth + 1, `the share fits its cell (${cell.scrollWidth} > ${cell.clientWidth})`);
+      const label = cell.parentElement!.querySelector<HTMLElement>('.uname')!;
+      ok(label.getBoundingClientRect().right <= cell.getBoundingClientRect().left, 'the limit name and amount do not overlap');
       return cell.textContent!.trim();
     } finally { view.stop(); }
   };
   const counting = await share(usage(true, null));
-  ok(counting.startsWith('≥ 44%'), `"${counting}" does not read at least 44%`);
+  ok(counting.startsWith('at least 44%'), `"${counting}" does not read at least 44%`);
   ok(counting.includes(en['quota.counting']), 'screen readers still hear that it is counting');
   const extra = await share(usage(false, 0.12));
-  ok(extra.startsWith('≥ 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
+  ok(extra.startsWith('at least 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
   const calm = await share(usage(false, null));
   equal(calm, '44%', 'a settled reading shows the number alone');
+  try {
+    for (const language of ['pt-BR', 'de', 'fr', 'es'] as const) {
+      useLanguage(language);
+      await share(usage(true, null));
+    }
+  } finally { useLanguage('en'); }
 }));
 
 check('settings: a billed-per-use or unconfirmed account says so calmly and is never amber; a really low one stays amber (C002)', () => signedIn(async () => {
