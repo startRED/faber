@@ -1,5 +1,5 @@
 import { ChatGroup } from './ChatGroup.tsx';
-import { createComputed, createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { batch, createComputed, createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
@@ -97,7 +97,7 @@ function remember(key: string, value: unknown) {
   }
 }
 
-// A long conversation draws only its latest messages, and more as the user scrolls up, so memory stays flat.
+// A long conversation opens its latest page and keeps older pages only when requested.
 const PAGE = 40;
 // Faber's browser is a pane of the window only on Windows (R161 step 7).
 const isWindows = navigator.userAgent.includes('Windows');
@@ -352,7 +352,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       reading = undefined;
       if (scrolls.delete(id)) readingDirty = true;
     } else {
-      const point = readingPoint(thread, current()?.messages ?? []);
+      const point = readingPoint(thread, current()?.messages ?? [], current()?.earlier);
       if (!point) return;
       reading = point;
       scrolls.delete(id);
@@ -363,7 +363,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const holdReading = () => {
     if (!thread || !reading || stick || restoringReading || loading()) return;
-    restoreReading(thread, reading, current()?.messages ?? []);
+    restoreReading(thread, reading, current()?.messages ?? [], current()?.earlier);
     lastScrollTop = thread.scrollTop;
   };
   onMount(() => {
@@ -382,7 +382,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
   const tailWatch = () => (tail ??= new ResizeObserver(() => {
-    if (thread && stick) thread.scrollTop = thread.scrollHeight;
+    if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
     else holdReading();
   }));
   let lastScrollTop = 0;
@@ -780,13 +780,71 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     consider();
   });
 
+  let historyGeneration = 0;
+  let olderPage: Promise<void> | undefined;
+  const loadOlder = (): Promise<void> => {
+    if (olderPage) return olderPage;
+    const c = current();
+    const first = c?.messages[0]?.id;
+    if (!c?.earlier || !first || loading()) return Promise.resolve();
+    const generation = historyGeneration;
+    olderPage = (async () => {
+      try {
+        const older = await api.messagesBefore(c.id, first);
+        if (generation !== historyGeneration || current()?.id !== c.id || current()?.messages[0]?.id !== first) return;
+        if (!older?.length) return;
+        keepReading();
+        const point = reading;
+        const el = thread;
+        const height = el?.scrollHeight ?? 0;
+        const marked = searchMark?.classList.contains('search-focus');
+        const focused = searchMark === document.activeElement;
+        const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
+        restoringReading = true;
+        batch(() => {
+          setFrom((f) => f === 0 ? 0 : f + older.length);
+          setUntil((end) => end === undefined ? undefined : end + older.length);
+          setSearchIndex((at) => at === undefined ? undefined : at + older.length);
+          setCurrent((latest) => latest && ({ ...latest, earlier: Math.max(0, (latest.earlier ?? 0) - older.length), messages: [...older, ...latest.messages] }));
+        });
+        if (el) {
+          if (searchAt !== undefined) {
+            searchMark?.classList.remove('search-focus');
+            searchMark = el.querySelector<HTMLElement>(`[data-message-index="${searchAt}"]`) ?? undefined;
+            if (marked) searchMark?.classList.add('search-focus');
+            if (focused) searchMark?.focus({ preventScroll: true });
+          }
+          if (point) restoreReading(el, point, current()!.messages, current()?.earlier);
+          else el.scrollTop += el.scrollHeight - height;
+          lastScrollTop = el.scrollTop;
+        }
+        requestAnimationFrame(() => {
+          if (generation !== historyGeneration) return;
+          restoringReading = false;
+          // Offscreen replies can replace their estimated heights after the prepend's first layout.
+          holdReading();
+        });
+      } catch (err) {
+        if (generation === historyGeneration) fail(err);
+      } finally {
+        if (generation === historyGeneration) olderPage = undefined;
+      }
+    })();
+    return olderPage;
+  };
+
   // A page whose messages fold into a run (task 018) may not fill the window, and a list that cannot scroll never asks for
   // the page above it: it takes pages until it scrolls or nothing is left.
   const fillPage = (): void => {
     requestAnimationFrame(() => {
-      if (!thread || from() === 0 || thread.scrollHeight > thread.clientHeight) return;
-      setFrom((f) => Math.max(0, f - PAGE));
-      fillPage();
+      if (!thread || thread.scrollHeight > thread.clientHeight) return;
+      if (from() > 0) {
+        setFrom((f) => Math.max(0, f - PAGE));
+        fillPage();
+      } else if (current()?.earlier) {
+        const first = current()?.messages[0]?.id;
+        void loadOlder().then(() => { if (current()?.messages[0]?.id !== first) fillPage(); });
+      }
     });
   };
 
@@ -794,6 +852,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
   const go = async (next: Place, messageIndex?: number) => {
+    const generation = ++historyGeneration;
+    olderPage = undefined;
     keepReading(); saveReading();
     reading = undefined;
     restoringReading = false;
@@ -813,16 +873,26 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     let snapshot: Conversation | undefined;
     try {
       snapshot = (next.id ? await api.open(next.id) : undefined) ?? undefined;
+      if (generation !== historyGeneration) return;
+      const saved = messageIndex === undefined && next.id ? scrolls.get(next.id) : undefined;
+      const needed = messageIndex ?? (saved ? Math.max(0, saved.index - Math.floor(PAGE / 2)) : undefined);
+      while (snapshot?.earlier && needed !== undefined && needed < snapshot.earlier) {
+        const older = await api.messagesBefore(snapshot.id, snapshot.messages[0]!.id);
+        if (generation !== historyGeneration) return;
+        if (!older?.length) break;
+        snapshot = { ...snapshot, earlier: Math.max(0, snapshot.earlier - older.length), messages: [...older, ...snapshot.messages] };
+      }
     } catch (err) {
-      fail(err);
+      if (generation === historyGeneration) fail(err);
     }
     // Messages that came while the snapshot was on its way are already in it, merged by `opening`.
     const done = opening.finish(token, snapshot);
     if (done.stale) return;
     setLoading(false);
-    const target = messageIndex !== undefined && messageIndex >= 0 && messageIndex < (done.conversation?.messages.length ?? 0) ? messageIndex : undefined;
+    const offset = done.conversation?.earlier ?? 0;
+    const target = messageIndex !== undefined && messageIndex >= offset && messageIndex < offset + (done.conversation?.messages.length ?? 0) ? messageIndex - offset : undefined;
     const saved = target === undefined && next.id ? scrolls.get(next.id) : undefined;
-    const left = saved && readingWindow(done.conversation?.messages ?? [], saved, PAGE);
+    const left = saved && readingWindow(done.conversation?.messages ?? [], saved, PAGE, offset);
     const pane = next.id ? panes[next.id] : undefined;
     stick = target === undefined && !left;
     restoringReading = !!left;
@@ -847,7 +917,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
     if (done.conversation) askVersions(done.conversation.id);
     if (target !== undefined) searchFrame = requestAnimationFrame(() => {
-      searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target}"]`) ?? undefined;
+      searchMark = thread?.querySelector<HTMLElement>(`[data-message-index="${target + offset}"]`) ?? undefined;
       if (!searchMark) return;
       searchMark.classList.add('search-focus');
       searchMark.focus({ preventScroll: true });
@@ -1137,7 +1207,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // Follow the answer while it streams, unless the user scrolled up to read.
   createEffect(
     on(current, () => {
-      if (thread && stick) thread.scrollTop = thread.scrollHeight;
+      if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
     }),
   );
 
@@ -1177,9 +1247,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (focused) searchMark?.focus({ preventScroll: true });
       }
       // Focusing a reused row can change its rendered geometry; restore the viewport afterwards.
-      if (point) restoreReading(el, point, current()?.messages ?? []);
+      if (point) restoreReading(el, point, current()?.messages ?? [], current()?.earlier);
       else el.scrollTop += el.scrollHeight - before;
       lastScrollTop = el.scrollTop;
+    } else if (el.scrollTop < 400 && current()?.earlier && !loading()) {
+      if (below >= 40) stick = false;
+      void loadOlder();
     }
   };
 
@@ -1983,6 +2056,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     onOpenChild={openSummary}
                                     workingFolder={c().workingFolder}
                                     messages={c().messages}
+                                    earlier={c().earlier}
                                     endState={state().conversations.find((conversation) => conversation.id === c().id)?.state}
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}

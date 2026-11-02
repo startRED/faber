@@ -2448,6 +2448,7 @@ export const ptBR: Messages = {
   'notes.359.fixed': 'Um passo do plano só vira concluído quando a IA diz o que conferiu; um ajudante que termina não o marca mais.',
   'notes.360.fixed': 'Quando um ajudante para de repente, a IA que esperava por ele pode seguir, e fechar o Faber não deixa uma IA recém-aberta rodando.',
   'notes.361.better': 'Escolha o modelo por IA e ajuste o esforço pelo mesmo botão.',
+  'notes.362.better': 'Conversas longas abrem nas 40 mensagens mais recentes; as anteriores aparecem ao rolar pra cima, sem perder seu lugar.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

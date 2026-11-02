@@ -2461,6 +2461,7 @@ export const de: Messages = {
   'notes.359.fixed': 'Ein Planschritt gilt erst als erledigt, wenn die KI sagt, was sie geprüft hat; das Ende eines Helfers hakt ihn nicht mehr ab.',
   'notes.360.fixed': 'Wird ein Helfer unerwartet beendet, kann die wartende KI fortfahren; beim Schließen von Faber bleibt keine gerade gestartete KI zurück.',
   'notes.361.better': 'Wähle das Modell nach KI und passe den Denkaufwand über dieselbe Schaltfläche an.',
+  'notes.362.better': 'Lange Gespräche öffnen mit den letzten 40 Nachrichten; beim Hochscrollen werden ältere nachgeladen, ohne dass deine Leseposition verrutscht.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

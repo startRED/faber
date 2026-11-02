@@ -2461,6 +2461,7 @@ export const es: Messages = {
   'notes.359.fixed': 'Un paso del plan solo pasa a hecho cuando la IA dice qué comprobó; que termine un ayudante ya no lo marca.',
   'notes.360.fixed': 'Si un ayudante se cierra de repente, la IA que lo esperaba puede continuar, y cerrar Faber no deja una IA recién iniciada en marcha.',
   'notes.361.better': 'Elige el modelo por IA y ajusta su esfuerzo desde el mismo botón.',
+  'notes.362.better': 'Las conversaciones largas abren en los últimos 40 mensajes; los anteriores se cargan al subir, sin perder tu lugar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

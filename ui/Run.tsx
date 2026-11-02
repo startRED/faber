@@ -156,7 +156,7 @@ function reasons(messages: Message[], run: Run): string {
 /** One header over a run: the loop icon, how long it worked on its own and how many turns, and the plan's progress on the
  * newest run, in the work log's disclosure. Opened, it shows the earlier turns, each with its work log folded; only the
  * newest turn with content stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
-export function RunBlock(props: { messages: Message[]; run: Run; shown?: number; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number }) {
+export function RunBlock(props: { messages: Message[]; run: Run; shown?: number; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number; offset?: number }) {
   const [open, setOpen] = createSignal(false);
   let details!: HTMLDetailsElement;
   const foldedReplies = () => {
@@ -186,7 +186,7 @@ export function RunBlock(props: { messages: Message[]; run: Run; shown?: number;
   return (
     <details class="run-block disclosure" ref={(el) => (details = el)} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary title={reasons(props.messages, props.run) || undefined}
-        data-reading-id={props.messages[props.run.replies[0]!]!.id} data-reading-index={props.run.replies[0]} data-reading-run="true">
+        data-reading-id={props.messages[props.run.replies[0]!]!.id} data-reading-index={props.run.replies[0]! + (props.offset ?? 0)} data-reading-run="true">
         <Icon name="loop" small />
         <span class="run-title">{title()}</span>
       </summary>

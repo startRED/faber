@@ -1071,7 +1071,7 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
+export function Thread(props: Shared & { messages: Message[]; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
   const shown = keepForExit(open);
@@ -1103,7 +1103,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
   });
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
-      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at} />
+      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at + (props.earlier ?? 0)} />
     </Show>
   );
   return (
@@ -1120,7 +1120,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
             fallback={
               <Show when={!hidden().has(props.from + i)}>
                 <Show when={runs().get(props.from + i)}>
-                  {(run) => <RunBlock messages={props.messages} run={run()} shown={props.from + i} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} />}
+                  {(run) => <RunBlock messages={props.messages} run={run()} shown={props.from + i} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} offset={props.earlier} />}
                 </Show>
                 {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
                 <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
@@ -1131,7 +1131,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                     prompt={prompt(props.from + i)}
                     last={props.from + i === lastShown()}
                     answered={answered(props.from + i)}
-                    messageIndex={props.from + i}
+                    messageIndex={(props.earlier ?? 0) + props.from + i}
                   />
                 </Show>
               </Show>
@@ -1146,7 +1146,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
                     editKey={editKey}
                     m={m}
                     onBranch={props.onBranch}
-                    messageIndex={props.from + i}
+                    messageIndex={(props.earlier ?? 0) + props.from + i}
                     onRewind={() => showRestore(m())}
                     onRedo={m().id === redoAt() && redo() ? () => showRestore(m(), redo()) : undefined}
                     recovery={redo()?.recovery}

@@ -2461,6 +2461,7 @@ export const fr: Messages = {
   'notes.359.fixed': 'Une étape du plan n’est faite que lorsque l’IA dit ce qu’elle a vérifié ; la fin d’un assistant ne la coche plus.',
   'notes.360.fixed': 'Si une aide s’arrête soudainement, l’IA qui l’attendait peut continuer, et fermer Faber ne laisse aucune IA tout juste lancée en cours.',
   'notes.361.better': 'Choisissez le modèle par IA et réglez son effort depuis le même bouton.',
+  'notes.362.better': 'Les longues conversations s’ouvrent sur les 40 derniers messages ; les précédents se chargent quand vous remontez, sans perdre votre place.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

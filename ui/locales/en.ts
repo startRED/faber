@@ -2341,6 +2341,7 @@ export const en = {
   'notes.359.fixed': 'A plan step now turns done only when the AI says what it checked; a helper finishing no longer ticks it.',
   'notes.360.fixed': 'Helpers that stop unexpectedly release the waiting AI, and closing Faber leaves no newly started AI process behind.',
   'notes.361.better': 'Choose a model by AI and adjust its effort from the same chip.',
+  'notes.362.better': 'Long conversations open on the latest 40 messages; older messages load as you scroll up, keeping your place.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
