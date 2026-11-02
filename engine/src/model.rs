@@ -10,15 +10,20 @@ use std::collections::BTreeMap;
 pub enum Vendor {
     Claude,
     Codex,
+    /// Gemini through Antigravity's `agy` CLI (task 055). Known, but nothing discovers, starts or routes it yet.
+    Gemini,
 }
 
 impl Vendor {
-    pub const ALL: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
+    pub const ALL: [Vendor; 3] = [Vendor::Claude, Vendor::Codex, Vendor::Gemini];
+    /// The vendors Faber discovers, lists and starts today; Gemini joins once its CLI is discovered (the tasks after 055).
+    pub const RUNNABLE: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
     pub fn name(self) -> &'static str {
         match self {
             Vendor::Claude => "claude",
             Vendor::Codex => "codex",
+            Vendor::Gemini => "gemini",
         }
     }
 }
