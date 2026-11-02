@@ -49,7 +49,7 @@ rustix = { version = "1", features = ["fs", "process"] }
 [dev-dependencies]
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
-# The paused clock of the tests that wait out the router (30 s) and an answer's acknowledgement (5 s).
+# The paused clock of the tests that wait out the router (2.5 s) and an answer's acknowledgement (5 s).
 tokio = { version = "1", features = ["test-util"] }
 
 [lints]

@@ -352,8 +352,7 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
-    // The header is the mark and the name; why Auto chose it, and the effort, are its tooltip and also the Faber row above the answer
-    // (R493: every intermediary is visible), and the price note is the cost's tooltip.
+    // The header keeps the default reason; the Faber row explains the unanswered router (R493).
     let reason = page.text_of("reason.autoDefault")?;
     let tips = page.eval("(() => ({ header: document.querySelector('article.ai .model')?.title, cost: document.querySelector('article.ai .actions .cost')?.title }))()")?;
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
@@ -362,7 +361,8 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(text.contains(&reason), || format!("the Faber row should say why Auto chose the model: {text}"))?;
+    let timeout = page.text_of("act.why.routerTimeout")?;
+    ensure(text.contains(&timeout), || format!("the Faber row should explain the router timeout: {text}"))?;
     ensure(!text.contains("in API value"), || format!("the price note stays in the cost's tooltip: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
@@ -403,7 +403,7 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
     )?;
     ask(page, QUESTION)?;
     // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
-    // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
+    // the allowed time) and the header says only that; with one vendor there is nothing to choose.
     let choosing = if vendor == "claude" {
         // The header is placed a frame before its words are; reading it at once saw "".
         page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')?.innerText.trim()")?;
