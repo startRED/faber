@@ -2464,6 +2464,7 @@ export const fr: Messages = {
   'notes.362.better': 'Les longues conversations s’ouvrent sur les 40 derniers messages ; les précédents se chargent quand vous remontez, sans perdre votre place.',
   'notes.363.fixed': 'Les modes qui limitent l’accès protègent désormais les conversations et les réglages de Faber contre les modifications, même quand un projet se trouve dans le dossier de données de Faber.',
   'notes.364.better': 'L’écran de départ de Projets et le catalogue vide ont maintenant un petit dessin qui montre à quoi sert l’écran.',
+  'notes.365.new': 'Vous pouvez connecter les outils de Faber à une IA par MCP.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

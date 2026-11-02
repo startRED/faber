@@ -527,3 +527,4 @@ One line per decision of the owner's decision ledger, newest wording. "Owner" me
 | R525 | 2026-10-31 | A plan step is done only when the AI marks it with evidence (what it ran or looked at); a helper or subagent ending never marks a step. | AI |
 | R526 | 2026-11-01 | The Electron shell uses the host pane rules, isolated visual pages and the signed updater while the shipped app remains Tauri. | AI |
 | R527 | 2026-10-31 | One scene per empty state and the first-run accounts step: static line drawings in the third ink, never behind text; the first-run accounts scene, once shown, is hidden below 800 px height or 900 px width. Extends R170 and docs/design/brand.md. | AI (Erick delegou) |
+| R528 | 2026-11-01 | The command table supplies MCP tools and argument schemas through a standard-input server using the calling agent's own channel identity; complex argument types stay loosely typed. | AI (owner delegated) |

@@ -3,6 +3,21 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 #[test]
+fn mcp_schema_maps_table_argument_types() {
+    assert_eq!(
+        argument_schema(&[
+            ("text", "String"),
+            ("enabled", "bool"),
+            ("count", "u64"),
+            ("ratio", "f64"),
+            ("tags", "Option<Vec<String>>"),
+            ("choice", "Vendor")
+        ]),
+        json!({"type":"object", "properties":{"text":{"type":"string"}, "enabled":{"type":"boolean"}, "count":{"type":"integer"}, "ratio":{"type":"number"}, "tags":{"type":"array","items":{"type":"string"}}, "choice":{"type":"object","description":"Vendor JSON value"}}, "required":["text","enabled","count","ratio","choice"]})
+    );
+}
+
+#[test]
 fn the_table_names_each_command_once_and_never_a_reserved_name() {
     let names: Vec<&str> = Host::commands().iter().map(|c| c.name).collect();
     let mut unique = names.clone();

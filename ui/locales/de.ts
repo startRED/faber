@@ -2464,6 +2464,7 @@ export const de: Messages = {
   'notes.362.better': 'Lange Gespräche öffnen mit den letzten 40 Nachrichten; beim Hochscrollen werden ältere nachgeladen, ohne dass deine Leseposition verrutscht.',
   'notes.363.fixed': 'Modi mit eingeschränktem Zugriff schützen jetzt Fabers Gespräche und Einstellungen vor Änderungen, auch wenn ein Projekt in Fabers Datenordner liegt.',
   'notes.364.better': 'Der Startbildschirm von Projekte und der leere Katalog zeigen jetzt eine kleine Zeichnung, die den Zweck der Ansicht zeigt.',
+  'notes.365.new': 'Sie können Fabers Werkzeuge über MCP mit einer KI verbinden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
