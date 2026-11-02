@@ -583,8 +583,7 @@ fn permission(ctx: &mut Ctx) -> Result {
     system_motion(page, false)?;
     inject(page)?;
     clock_and_slow(page)?;
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     let config = Config { width: 1440, height: 900, look: "sala", language: "en", size: 15, motion: "full" }.label();
     let w = watch(ctx, "ask appears", page, &["ask"], |p| {
         ask(p, TWO_WRITES)?;

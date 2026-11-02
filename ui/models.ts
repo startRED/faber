@@ -4,21 +4,24 @@ import { t } from './i18n.ts';
 export interface Option {
   label: string;
   choice: Choice;
+  current?: boolean;
 }
 
 const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'Codex' };
+// shortcut: Auto profile ids are mirrored here; share metadata when the account model list exposes profiles.
+const AUTO_MODELS = new Set(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra']);
 
 // Claude Code has no model list, so its aliases are fixed; ChatGPT's list comes from the account.
 export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {
   const options: Option[] = [{ label: t('model.autoChoose'), choice: { vendor: 'auto' } }];
   if (vendors.includes('claude')) {
     for (const [label, model] of [['Opus', 'opus'], ['Sonnet', 'sonnet'], ['Haiku', 'haiku']] as const) {
-      options.push({ label: `Claude ${label}`, choice: { vendor: 'claude', model } });
+      options.push({ label: `Claude ${label}`, choice: { vendor: 'claude', model }, current: true });
     }
   }
   if (vendors.includes('codex')) {
     // Each model by its own name, once the account lists them; Auto covers the moment before.
-    for (const m of codexModels) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id } });
+    for (const m of codexModels) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id }, current: m.isDefault || AUTO_MODELS.has(m.id) });
   }
   return options;
 }

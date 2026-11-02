@@ -61,10 +61,12 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
   const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener) => { if (listener) hear = listener; } } }), root);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
   const field = () => root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
-  const select = (model: string) => {
-    const picker = root.querySelector<HTMLSelectElement>('.composer .choose select')!;
-    picker.value = [...picker.options].find((option) => option.textContent?.includes(model))!.value;
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
+  const select = async (model: string) => {
+    root.querySelector<HTMLButtonElement>('.composer .model-chip')!.click();
+    await settle();
+    [...root.querySelectorAll<HTMLButtonElement>('.model-option')].find((button) => button.textContent?.includes(model))!.click();
+    field().focus();
+    await settle();
   };
   const type = (text: string) => {
     field().value = text;
@@ -82,7 +84,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     await settle();
     deepEqual(cli(), ['/context'], 'Claude uses this conversation\'s own list before its last list');
     ok(shown().includes('/btw'), 'the quick question is offered in an open conversation, as its head button is');
-    select('Test-model');
+    await select('Test-model');
     await settle();
     deepEqual(asked.at(-1), [conversation.id, 'codex'], 'the latest Claude answer cannot override the current choice');
     deepEqual(cli(), ['$review-notes'], 'the other AI never leaks into the list');
@@ -104,7 +106,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     type('/');
     await settle();
     deepEqual(cli(), ['$review-notes']);
-    select('Sonnet');
+    await select('Sonnet');
     await settle();
     deepEqual(asked.at(-1), [conversation.id, 'claude'], 'switching refreshes an already open token too');
     deepEqual(cli(), ['/context'], 'a Codex answer cannot override the new Claude choice');
@@ -133,7 +135,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
 
     type('');
     await settle();
-    select('Test-model');
+    await select('Test-model');
     type('/');
     await settle();
     const fallbackQueries = asked.length;
@@ -147,7 +149,7 @@ check('slash: App uses each AI\'s own or last list, refreshes on announcements a
     equal(asked.length, fallbackQueries + 1, 'an unrelated AI announcement does not query');
 
     type('');
-    select('Sonnet');
+    await select('Sonnet');
     let updates = 0;
     const stream = () => {
       const message = { ...conversation.messages[0]!, status: 'streaming' as const, text: `Answer part ${++updates}` };
@@ -419,7 +421,7 @@ check('slash: a skill uses its agent prefix and Auto moves the existing model ch
     equal(field.value, '$review-notes ', 'the skill is written as the agent expects');
     equal(choice().vendor, 'codex', 'the existing onChoice receives the selected agent');
     equal(choice().model, 'test-model', 'the model picker can show that choice');
-    equal(root.querySelector('select')?.value, '2');
+    equal(root.querySelector('.model-label')?.textContent, 'Agent model');
     ok(!sent, 'a skill pick never sends');
   } finally {
     dispose();

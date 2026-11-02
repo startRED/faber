@@ -131,8 +131,7 @@ fn stop_and_send(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(Launch { claude: CliSlot::Fake, codex: CliSlot::Off, recording, ..Launch::default() })?;
     let page = &mut app.page;
     // A chosen model starts at once; Auto would wait for its routing question, which this recording does not hold.
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     ask(page, "Write a 600-word essay about the history of bread.")?;
     // The recording streams its first words, then waits for the interrupt.
     page.wait_for("the essay's first words", "document.querySelector('article.ai .md')?.innerText.includes('Few') === true")?;
@@ -181,8 +180,7 @@ fn proof(ctx: &mut Ctx) -> Result {
     page.click(&css(".prow .item").has_text("Demo"))?;
     page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
     // A chosen model starts at once; Auto would wait for its routing question, which this recording does not hold.
-    let model = page.labelled("composer.model")?;
-    page.select_option(&model, "Claude Haiku")?;
+    super::select_model(page, "Claude Haiku")?;
     let sent = Instant::now();
     ask(page, "Add a line to notes.txt.")?;
     // The fake CLI writes nothing, so while the recording holds after its Write step the file lands in the work copy
