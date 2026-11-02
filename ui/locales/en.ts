@@ -2321,6 +2321,7 @@ export const en = {
   'notes.351.new': 'An agent can start, message and resume its conversations from a terminal, then wait for their reports.',
   'notes.352.fixed': 'Your message starts even when Auto cannot get a routing answer in time.',
   'notes.353.fixed': 'Replies now retry automatically when Codex reports a busy service, with a quiet attempt counter.',
+  'notes.354.fixed': 'Your project copies keep your work while Faber clears rebuildable folders after seven idle days.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

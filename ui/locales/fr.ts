@@ -2441,6 +2441,7 @@ export const fr: Messages = {
   'notes.351.new': 'Un agent peut ouvrir, contacter et reprendre ses conversations depuis le terminal, puis attendre leurs résultats.',
   'notes.352.fixed': 'Votre message démarre même si Auto ne reçoit pas à temps la réponse du routeur.',
   'notes.353.fixed': 'Les réponses sont désormais relancées quand Codex signale un service occupé, avec un compteur discret.',
+  'notes.354.fixed': 'Vos copies de projet gardent votre travail ; Faber nettoie les dossiers recréables après sept jours sans activité.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -2428,6 +2428,7 @@ export const ptBR: Messages = {
   'notes.351.new': 'Um agente pode abrir, conversar e retomar suas conversas pelo terminal e aguardar os resultados.',
   'notes.352.fixed': 'Sua mensagem começa mesmo quando o Auto não recebe uma resposta do roteador a tempo.',
   'notes.353.fixed': 'As respostas agora tentam de novo quando o Codex avisa que o serviço está ocupado, com um contador discreto.',
+  'notes.354.fixed': 'Suas cópias de projeto preservam seu trabalho enquanto o Faber limpa pastas recriáveis após sete dias sem uso.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

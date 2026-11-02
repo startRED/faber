@@ -2441,6 +2441,7 @@ export const de: Messages = {
   'notes.351.new': 'Ein Agent kann Gespräche im Terminal starten, anschreiben und fortsetzen und auf ihre Ergebnisse warten.',
   'notes.352.fixed': 'Deine Nachricht startet auch dann, wenn Auto nicht rechtzeitig eine Antwort vom Router erhält.',
   'notes.353.fixed': 'Antworten werden jetzt automatisch wiederholt, wenn Codex einen ausgelasteten Dienst meldet, mit einem unauffälligen Versuchszähler.',
+  'notes.354.fixed': 'Deine Projektkopien behalten deine Arbeit; Faber räumt wiederherstellbare Ordner nach sieben Tagen ohne Aktivität auf.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
