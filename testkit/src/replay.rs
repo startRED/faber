@@ -89,7 +89,9 @@ impl Replay {
     /// One line the app wrote. Returns the lines to send back: the recorded outputs up to the next recorded input.
     pub fn feed(&mut self, line: &str) -> io::Result<Vec<String>> {
         let msg: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("not JSON ({e}): {line}")))?;
-        if msg["method"] == "skills/list" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "skills/list") {
+        if matches!(msg["method"].as_str(), Some("skills/list" | "thread/name/set"))
+            && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != msg["method"])
+        {
             return Ok(vec![]);
         }
         if msg["method"] == "config/read" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "config/read") {
@@ -150,6 +152,20 @@ mod tests {
         old.feed(&turn.to_string()).unwrap();
         assert!(old.mismatches.is_empty());
         let answer = json!({"id":"faber-commands-1","result":{"data":[]}});
+        let mut current = Replay::new(vec![entry(true, request.clone()), entry(false, answer.clone())]);
+        assert_eq!(current.feed(&request.to_string()).unwrap(), [answer.to_string()]);
+        assert!(current.mismatches.is_empty());
+    }
+
+    #[test]
+    fn thread_naming_can_be_recorded_or_absent_from_an_older_fixture() {
+        let request = json!({"id":"faber-name-1","method":"thread/name/set","params":{"threadId":"t","name":"My conversation"}});
+        let turn = json!({"id":3,"method":"turn/start"});
+        let mut old = Replay::new(vec![entry(true, turn.clone())]);
+        assert!(old.feed(&request.to_string()).unwrap().is_empty());
+        old.feed(&turn.to_string()).unwrap();
+        assert!(old.mismatches.is_empty());
+        let answer = json!({"id":"faber-name-1","result":{}});
         let mut current = Replay::new(vec![entry(true, request.clone()), entry(false, answer.clone())]);
         assert_eq!(current.feed(&request.to_string()).unwrap(), [answer.to_string()]);
         assert!(current.mismatches.is_empty());

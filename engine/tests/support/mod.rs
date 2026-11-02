@@ -76,7 +76,8 @@ pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Val
 
 pub async fn expect_method(input: &mut BufReader<tokio::io::DuplexStream>, method: &str) -> Value {
     let mut msg = read_message(input).await;
-    while method != "skills/list" && msg["method"] == "skills/list" {
+    while (method != "skills/list" && msg["method"] == "skills/list") || (method != "thread/name/set" && msg["method"] == "thread/name/set")
+    {
         msg = read_message(input).await;
     }
     assert_eq!(msg["method"], method);
@@ -342,7 +343,9 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
             let Ok(Some(line)) = lines.next_line().await else { break };
             // A line cut short is the writer's failure, not a mismatch of the recording.
             let Ok(sent) = serde_json::from_str::<Value>(&line) else { continue };
-            if sent["method"] == "skills/list" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "skills/list") {
+            if matches!(sent["method"].as_str(), Some("skills/list" | "thread/name/set"))
+                && entries.get(at).is_none_or(|entry| entry.msg["method"] != sent["method"])
+            {
                 continue;
             }
             if sent["method"] == "config/read" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "config/read") {

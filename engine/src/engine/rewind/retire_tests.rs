@@ -10,7 +10,7 @@ async fn read(input: &mut tokio::io::Lines<BufReader<DuplexStream>>, method: &st
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let msg: Value = serde_json::from_str(&input.next_line().await.unwrap().expect("server input closed early")).unwrap();
-            if msg["method"] == "skills/list" {
+            if matches!(msg["method"].as_str(), Some("skills/list" | "thread/name/set")) {
                 continue;
             }
             assert_eq!(msg["method"], method);
