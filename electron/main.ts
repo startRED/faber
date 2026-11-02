@@ -2,7 +2,7 @@
 // anything a person sees; the commands, their rules and the events all live in Rust (`host/`). This file only creates
 // the window, serves the screen, and carries calls across.
 
-import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, net, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, protocol, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -115,13 +115,15 @@ function screenFile(address: string): string | null {
 
 /** Serves dist/ under faber://app/. Every answer carries the policy, so no file there can become a page without it. */
 function serveScreen(): void {
+  // Keep internal file reads outside the default session's fail-closed visual-page guard.
+  const assets = session.fromPartition('screen-assets');
   protocol.handle(SCHEME, async (request) => {
     if (testmode.testing && request.url === `${ORIGIN}/__test_blank__`) {
       return new Response('', { headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP } });
     }
     const file = screenFile(request.url);
     if (!file) return new Response(null, { status: 404 });
-    const response = await net.fetch(pathToFileURL(file).toString());
+    const response = await assets.fetch(pathToFileURL(file).toString());
     const headers = new Headers(response.headers);
     headers.set('Content-Security-Policy', CSP);
     headers.set('X-Content-Type-Options', 'nosniff');
