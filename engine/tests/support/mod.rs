@@ -464,6 +464,8 @@ impl DataFolder {
     pub fn initialize_chat(&self) {
         #[cfg(windows)]
         drop(faber_engine::workspace::relocation::open(&self.data, &self.chat).unwrap());
+        #[cfg(unix)]
+        faber_engine::workspace::unix_chat::open(&self.data).unwrap();
     }
 
     pub fn scratch_path(&self) -> std::path::PathBuf {
@@ -473,7 +475,7 @@ impl DataFolder {
         }
         #[cfg(not(windows))]
         {
-            self.data.join("chat")
+            self.data.with_file_name("data-chat-work")
         }
     }
 }

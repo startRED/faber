@@ -2350,7 +2350,6 @@ async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept(
     engine.shutdown();
 }
 
-#[cfg(windows)]
 #[tokio::test]
 async fn private_chat_reopens_legacy_files_outside_the_protected_data_folder() {
     for vendor in Vendor::RUNNABLE {
@@ -2359,7 +2358,7 @@ async fn private_chat_reopens_legacy_files_outside_the_protected_data_folder() {
         let root = owned.path().canonicalize().unwrap();
         let data = root.join("data");
         std::fs::create_dir(&data).unwrap();
-        let work = root.join("work");
+        let work = root.join(if cfg!(windows) { "work" } else { "data-chat-work" });
         let mut saved = export_sample("Legacy private work");
         saved.id = "11111111-1111-4111-8111-111111111111".into();
         saved.area = Area::Chat;

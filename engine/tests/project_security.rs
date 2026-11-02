@@ -869,6 +869,29 @@ fn data_folder_writes_are_refused_by_both_clis_in_every_sandboxed_mode() {
     assert!(!denies_data_write(Permissions::Ask, "Write", &json!({"file_path":data.join("settings.json")}), None));
 }
 
+#[cfg(unix)]
+#[test]
+fn data_folder_aliases_protect_only_the_actual_root_not_its_shared_temporary_parent() {
+    use faber_engine::permissions::{data_sandbox_config, denies_data_write};
+    let owned = tempfile::tempdir().unwrap();
+    let root = owned.path().canonicalize().unwrap();
+    let alias = root.join("alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let data = root.join("data");
+    let _store = faber_engine::store::Store::new(&alias.join("data"));
+    let project = root.join("project");
+    std::fs::create_dir(&project).unwrap();
+    for cwd in [&project, &alias.join("project")] {
+        let config = data_sandbox_config(cwd, true);
+        let id = config["default_permissions"].as_str().unwrap();
+        assert_eq!(config[&format!("permissions.{id}")]["filesystem"][":workspace_roots"]["."], "write");
+        assert!(!denies_data_write(Permissions::Ask, "Write", &json!({"file_path":"new/folder/notes.txt"}), cwd.to_str()));
+        for target in [data.join("new/settings.json"), alias.join("data/new/settings.json")] {
+            assert!(denies_data_write(Permissions::Ask, "Write", &json!({"file_path":target}), cwd.to_str()));
+        }
+    }
+}
+
 #[test]
 fn data_folder_host_attachments_still_save_without_opening_agent_writes() {
     use faber_engine::workspace::{Attachment, save_files};

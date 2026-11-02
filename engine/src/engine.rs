@@ -665,7 +665,7 @@ impl Engine {
         let chat_dir = crate::permissions::checked_folder(&chat_directory.0)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
         #[cfg(not(windows))]
-        let chat_dir = opts.data_dir.join("chat");
+        let chat_dir = crate::workspace::unix_chat::open(&opts.data_dir)?;
         // Snapshot verification and cleanup run outside Core; an unready catalog never delays a session.
         let catalog_store = crate::tools::Store::new(&opts.data_dir);
         catalog_store.set_runtime(opts.runtime.clone());

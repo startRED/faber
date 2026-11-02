@@ -2,6 +2,8 @@
 
 #[cfg(windows)]
 pub mod relocation;
+#[cfg(unix)]
+pub mod unix_chat;
 
 use crate::model::FileInfo;
 use base64::Engine as _;

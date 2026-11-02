@@ -2493,6 +2493,7 @@ export const fr: Messages = {
   'notes.377.better': 'De nouveaux dessins rendent les écrans vides et la première étape des comptes plus faciles à reconnaître.',
   'notes.378.fixed': 'Codex peut demander une autorisation dans sa propre conversation et commence à répondre sans attente supplémentaire.',
   'notes.379.fixed': 'Le sélecteur de couleur personnalisée des Réglages affiche aussi son contour de focus clavier sur macOS.',
+  'notes.380.fixed': 'Sur macOS et Linux, le Chat peut enregistrer son travail et demander votre accord tout en protégeant les données de Faber.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
