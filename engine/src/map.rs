@@ -344,7 +344,7 @@ fn commands(lines: &[&str], at: usize, start: usize, push: &mut impl FnMut(Kind,
     }
 }
 
-/// The commands in the host's `table! { ... }` (`host/src/lib.rs`), one per `<Kind> fn name(` line, until the block's
+/// The commands in the host's `table! { ... }` (`host/src/table.rs`), one per `<Kind> <Reach> fn name(` line, until the block's
 /// closing brace at the start of a line. One behind a test-only `#[cfg(...)]` is left out.
 fn table(lines: &[&str], at: usize, push: &mut impl FnMut(Kind, String, usize)) {
     let mut test_only = false;
@@ -357,8 +357,8 @@ fn table(lines: &[&str], at: usize, push: &mut impl FnMut(Kind, String, usize)) 
             test_only = trimmed.contains("test") && !trimmed.contains("not(");
             continue;
         }
-        let mut words = trimmed.splitn(3, ' ');
-        if let (Some("Read" | "Write" | "StartsTurn" | "Window"), Some("fn"), Some(rest)) = (words.next(), words.next(), words.next()) {
+        let Some((head, rest)) = trimmed.split_once(" fn ") else { continue };
+        if let Some("Read" | "Write" | "StartsTurn" | "Window") = head.split(' ').next() {
             let name = ident(rest);
             if !std::mem::take(&mut test_only) && !name.is_empty() {
                 push(Kind::Command, name.to_string(), i + 1);

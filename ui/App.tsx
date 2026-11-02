@@ -891,6 +891,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
 
   onMount(() => {
+    const openRequested = (id: string) => {
+      const conversation = state().conversations.find((c) => c.id === id);
+      if (conversation) openSummary(conversation);
+      else void api.open(id).then((found) => {
+        if (found) { closeSettings(); closeSide(false); void go(openPlace(place(), found)); }
+      }).catch(fail);
+    };
+    const requested = (event: Event) => openRequested((event as CustomEvent<string>).detail);
+    window.addEventListener('faber:show-conversation', requested);
+    const unlistenOpen = api.onShowConversation(openRequested).catch(() => () => {});
+    onCleanup(() => { window.removeEventListener('faber:show-conversation', requested); void unlistenOpen.then((stop) => stop()); });
     const firstInstall = isFirstInstall(props.initial.settings, props.initial.conversations);
     void api.notesSeen().then(
       (seen) => {
@@ -1114,6 +1125,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       if (thread && stick) thread.scrollTop = thread.scrollHeight;
     }),
   );
+
+  // Opening or closing a step is reading: the thread stops following the reply, so the row stays under the pointer while
+  // the reply grows below it (W1). Scrolling back to the end follows again.
+  const openedHere = (e: MouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.closest('article [aria-expanded]')) return;
+    stick = false;
+    keepReading();
+  };
 
   const onScroll = (el: HTMLDivElement) => {
     if (restoringReading) return;
@@ -1899,7 +1918,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           el.addEventListener('scrollend', saveReading);
                           onCleanup(() => { tailWatch().unobserve(el); el.removeEventListener('scrollend', saveReading); });
                         });
-                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped() || (colShown() && wide())}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} onClick={openedHere} inert={trapped() || (colShown() && wide())}>
                         <Show
                           when={newChat()}
                           fallback={
@@ -1916,7 +1935,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                               >
                                 {(c) => (
                                   <Thread
+                                    workingFolder={c().workingFolder}
                                     messages={c().messages}
+                                    endState={state().conversations.find((conversation) => conversation.id === c().id)?.state}
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}
                                     onRewind={() => go(place())}
@@ -1948,6 +1969,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                       if (to) openSummary(to);
                                     }}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
+                                    onActChange={(target) => {
+                                      if (target === 'composerModel') document.querySelector<HTMLSelectElement>('.composer .choose select')?.focus();
+                                      else if (target === 'keepGoing') document.querySelector<HTMLButtonElement>('.composer .keep')?.focus();
+                                      else if (target === 'toolKit') { closeSide(false); setFocus(false); setCatalogOpen(true); }
+                                      else openSettings(target === 'checks' ? 'projects' : 'general');
+                                    }}
                                   />
                                 )}
                               </Show>

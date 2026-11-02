@@ -3375,6 +3375,7 @@ mod tests {
                     core.rewind.captured_for_test("reply");
                     core.start("kit", "reply", &pick(vendor), "Debug this failure".into(), vec![], true).unwrap();
                     assert_eq!(core.convs["kit"].messages.last().unwrap().tool_kit.is_some(), !empty);
+                    assert_eq!(core.convs["kit"].messages.last().unwrap().acts.iter().any(|a| a.kind == crate::act::ActKind::Kit), !empty);
                     core.convs.get_mut("kit").unwrap().messages.push(Message::new("second".into(), Role::Assistant, String::new(), 2));
                     core.rewind.captured_for_test("second");
                     core.start("kit", "second", &pick(vendor), "Again".into(), vec![], true).unwrap();

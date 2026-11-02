@@ -300,7 +300,9 @@ async fn checks_preserve_compaction(vendor: Vendor, permissions: bool, stop: boo
     assert_eq!(c.messages.len(), if fail_first { 6 } else { 4 }, "one continuation after the original reply and any correction");
     closed(&old).await;
     done(&mut new, vendor, "main").await;
-    until(&app, &id, |c| c.messages.last().unwrap().status == Some(Status::Done)).await;
+    // The continuation is the reply after the person's request and any correction; Faber may then ask once for a conclusion.
+    let last = if fail_first { 5 } else { 3 };
+    until(&app, &id, |c| c.messages.get(last).is_some_and(|m| m.status == Some(Status::Done))).await;
     app.shutdown();
 }
 

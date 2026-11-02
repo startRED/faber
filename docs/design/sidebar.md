@@ -26,6 +26,7 @@ remain usable from the keyboard in both areas.
 - An empty Projects list puts the existing folder-purpose sentence before its illustration and keeps the existing
   add-folder control visible without hover. This also explains the narrow drawer without closing navigation or adding
   a second folder action (`tests/ui/shell.check.ts`, `shell: empty Projects explains its purpose`).
+- In Chat with no groups, the Groups label is visually hidden but still names the section for assistive technology; the existing New group button stays visible and keyboard reachable (`shell: empty Chat hides its Groups label`).
 - Chat groups extend the same project row, expand/collapse and menu parts: a folder name opens its [short page](chat-groups.md), and its + starts a chat there. New group is the quiet + beside Groups; naming happens in the same inline rename box as chats. Groups precede the existing outside-chat lists. A group keeps its own Pinned and date sections; search lists matching chats once in the usual flat list, with matching group names above. The chat menu adds Move to group after Export, and Remove from group when assigned; moving uses an inline labelled group picker, with Escape to cancel. The group menu offers Rename and Delete; Delete asks once and keeps its chats outside the group.
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
@@ -67,7 +68,7 @@ remain usable from the keyboard in both areas.
   small size. Nothing on the line wraps: the bar gives way. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is and the not-yet-counted estimate are its tooltip. While
   use is still being counted the share reads "≥ 44% used" (the real share can only be higher), with the words in the tooltip
   (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
-  A vendor with no reading yet, or a weekly reading past its reset, shows "—". The version is not on the sidebar: it is the
+  A vendor with no current reading shows no bar: under its name, on a second line (the one place the line wraps), "Usage shows once the subscription reports it", and its tooltip says to check the limits with the provider. The version is not on the sidebar: it is the
   tooltip of the Settings button.
 - Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails
   come with the progress view in Phase 3.

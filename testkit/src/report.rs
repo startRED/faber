@@ -8,6 +8,7 @@ use std::time::Duration;
 pub enum Status {
     Pass,
     Fail,
+    Quarantined,
     /// The suite could not start (the build failed), which is never reported as a pass.
     NotRun,
     Skipped,
@@ -52,9 +53,13 @@ fn seconds(time: Duration) -> String {
 
 /// `pass  ui      i18n: every locale has every key (4 ms)`, and the reason on the lines after a failure.
 pub fn line(outcome: &Outcome) -> String {
+    if outcome.status == Status::Quarantined {
+        return format!("QUARANTINED {}: {}", outcome.name, outcome.message.lines().next().unwrap_or_default());
+    }
     let word = match outcome.status {
         Status::Pass => "pass",
         Status::Fail => "FAIL",
+        Status::Quarantined => unreachable!(),
         Status::NotRun => "----",
         Status::Skipped => "skip",
     };
@@ -110,11 +115,12 @@ pub fn quiet(outcome: &Outcome) -> Option<String> {
 pub fn summary(outcomes: &[Outcome]) -> String {
     let count = |status| outcomes.iter().filter(|o| o.status == status).count();
     format!(
-        "{} passed, {} failed, {} not run, {} skipped",
+        "{} passed, {} failed, {} not run, {} skipped, quarantined failures: {}",
         count(Status::Pass),
         count(Status::Fail),
         count(Status::NotRun),
-        count(Status::Skipped)
+        count(Status::Skipped),
+        count(Status::Quarantined)
     )
 }
 
@@ -151,13 +157,13 @@ mod tests {
     #[test]
     fn the_summary_counts_every_kind_and_only_failures_and_not_runs_fail_the_run() {
         let mut all = vec![Outcome::pass(Suite::Rust, "a", None), Outcome::skipped(Suite::Screen, "needs WebView2", "x")];
-        assert_eq!(summary(&all), "1 passed, 0 failed, 0 not run, 1 skipped");
+        assert_eq!(summary(&all), "1 passed, 0 failed, 0 not run, 1 skipped, quarantined failures: 0");
         assert_eq!(exit_code(&all), 0);
         all.push(Outcome::not_run(Suite::Ui, "ui", "the build failed"));
         assert_eq!(exit_code(&all), 1, "a suite that could not run is never a pass");
         all.pop();
         all.push(Outcome::fail(Suite::Ui, "b", None, ""));
-        assert_eq!(summary(&all), "1 passed, 1 failed, 0 not run, 1 skipped");
+        assert_eq!(summary(&all), "1 passed, 1 failed, 0 not run, 1 skipped, quarantined failures: 0");
         assert_eq!(exit_code(&all), 1);
     }
 

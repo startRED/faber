@@ -3,7 +3,11 @@
 //! that size for the webview to parse, and the window grew to 8 GB in a few hours. So an update of a streaming reply
 //! carries only the steps that changed since the last one the screen heard: `toolsFrom` steps are as they were, and after
 //! them a step that did not change is only its id with `same`. The screen puts the rest back from what it holds
-//! (`ui/opening.ts`). A reply that stops streaming goes whole, and so does every reply once the screen opens a conversation.
+//! (`ui/opening.ts`). Its words and its thinking only grow while it streams, so an update carries only what was added:
+//! `textFrom` (and `thinkingFrom`) say where the added words start, in the UTF-16 units the screen counts, and the screen
+//! appends them; a text that changed before that point (a cut, a rewrite) goes whole. Before this an update of a reply
+//! with 40 KB of words was 40 KB, 30 times a second (W1, 2026-10-31).
+//! A reply that stops streaming goes whole, and so does every reply once the screen opens a conversation.
 
 use faber_engine::AppEvent;
 use faber_engine::model::{Message, Status, ToolUse};
@@ -14,11 +18,48 @@ use std::hash::Hasher;
 /// Past this many streaming replies, the oldest record is dropped: its next update simply goes whole.
 const KEPT: usize = 64;
 
-/// What the screen last heard of each streaming reply: one fingerprint per step, in order.
+/// What the screen last heard of each streaming reply: one fingerprint per step, in order, and how much of its words and
+/// thinking.
 #[derive(Default)]
 pub struct Feed {
-    heard: HashMap<String, Vec<(String, u64)>>,
+    heard: HashMap<String, Heard>,
     order: Vec<String>,
+}
+
+#[derive(Default)]
+struct Heard {
+    prints: Vec<(String, u64)>,
+    text: Said,
+    thinking: Said,
+}
+
+/// How much of a growing text the screen holds: its length in bytes and in UTF-16 units, and a fingerprint of those bytes.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+struct Said {
+    bytes: usize,
+    units: usize,
+    print: u64,
+}
+
+impl Said {
+    /// What of `now` the screen still needs, with the record once it has it: the added part and where it starts when `now`
+    /// only grew from what the screen holds, else `None` (the whole text goes).
+    fn after(self, now: &str) -> (Option<(usize, &str)>, Said) {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let grew = self.bytes > 0 && now.len() >= self.bytes && now.is_char_boundary(self.bytes) && {
+            hasher.write(&now.as_bytes()[..self.bytes]);
+            hasher.finish() == self.print
+        };
+        if !grew {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            hasher.write(now.as_bytes());
+            return (None, Said { bytes: now.len(), units: now.encode_utf16().count(), print: hasher.finish() });
+        }
+        let added = &now[self.bytes..];
+        hasher.write(added.as_bytes());
+        let next = Said { bytes: now.len(), units: self.units + added.encode_utf16().count(), print: hasher.finish() };
+        (Some((self.units, added)), next)
+    }
 }
 
 /// A step's fingerprint: a hash of everything the screen would receive for it.
@@ -56,7 +97,13 @@ impl Feed {
         let prints: Vec<(String, u64)> = tools.iter().map(|t| (t.id.clone(), fingerprint(t))).collect();
         let streaming = message.status == Some(Status::Streaming);
         let before = if streaming { self.heard.get(&message.id) } else { None };
-        let sent = match before {
+        let (text, thinking) = (before.map(|b| b.text).unwrap_or_default(), before.map(|b| b.thinking).unwrap_or_default());
+        let (added_text, text) = text.after(&message.text);
+        let thinking_now = message.thinking.as_deref().unwrap_or_default();
+        let (added_thinking, thinking) = thinking.after(thinking_now);
+        let added_text = added_text.map(|(from, added)| (from, added.to_string()));
+        let added_thinking = added_thinking.filter(|_| message.thinking.is_some()).map(|(from, added)| (from, added.to_string()));
+        let sent = match before.map(|b| &b.prints) {
             Some(before) => {
                 let from = before.iter().zip(&prints).take_while(|(a, b)| a == b).count();
                 let unchanged: HashMap<&str, u64> = before.iter().map(|(id, print)| (id.as_str(), *print)).collect();
@@ -77,12 +124,20 @@ impl Feed {
         };
         let id = message.id.clone();
         if streaming {
-            self.remember(id, prints);
+            self.remember(id, Heard { prints, text, thinking });
         } else if self.heard.remove(&id).is_some() {
             self.order.retain(|o| *o != id);
         }
         let mut value = screen_message(conversation_id, message);
         let shown = &mut value["message"];
+        if let Some((from, added)) = added_text {
+            shown["text"] = added.into();
+            shown["textFrom"] = from.into();
+        }
+        if let Some((from, added)) = added_thinking {
+            shown["thinking"] = added.into();
+            shown["thinkingFrom"] = from.into();
+        }
         match sent {
             Some((from, rest)) => {
                 shown["tools"] = Value::Array(rest);
@@ -94,8 +149,8 @@ impl Feed {
         value
     }
 
-    fn remember(&mut self, id: String, prints: Vec<(String, u64)>) {
-        if self.heard.insert(id.clone(), prints).is_none() {
+    fn remember(&mut self, id: String, heard: Heard) {
+        if self.heard.insert(id.clone(), heard).is_none() {
             self.order.push(id);
         }
         if self.order.len() > KEPT {
@@ -149,6 +204,42 @@ mod tests {
         assert_eq!(rest[2], json!({ "id": "c", "same": true }));
     }
 
+    fn words(status: Status, text: &str, thinking: Option<&str>) -> AppEvent {
+        let AppEvent::Message { conversation_id, mut message } = reply(status, vec![]) else { unreachable!() };
+        message.text = text.into();
+        message.thinking = thinking.map(Into::into);
+        AppEvent::Message { conversation_id, message }
+    }
+
+    #[test]
+    fn streaming_words_and_thinking_go_as_the_part_that_was_added() {
+        let mut feed = Feed::default();
+        let first = feed.shrink(words(Status::Streaming, "Olá", None));
+        assert_eq!(first["message"]["text"], "Olá");
+        assert!(first["message"].get("textFrom").is_none(), "the first update is whole: {first}");
+        // UTF-16 units, as the screen counts them: "🦀" is two.
+        let next = feed.shrink(words(Status::Streaming, "Olá 🦀", Some("Plan")));
+        assert_eq!((next["message"]["text"].as_str(), next["message"]["textFrom"].as_u64()), (Some(" 🦀"), Some(3)));
+        assert_eq!(next["message"]["thinking"], "Plan", "a thinking that just started goes whole");
+        assert!(next["message"].get("thinkingFrom").is_none());
+        let more = feed.shrink(words(Status::Streaming, "Olá 🦀 and more", Some("Plan it")));
+        assert_eq!((more["message"]["text"].as_str(), more["message"]["textFrom"].as_u64()), (Some(" and more"), Some(6)));
+        assert_eq!((more["message"]["thinking"].as_str(), more["message"]["thinkingFrom"].as_u64()), (Some(" it"), Some(4)));
+        let same = feed.shrink(words(Status::Streaming, "Olá 🦀 and more", Some("Plan it")));
+        assert_eq!((same["message"]["text"].as_str(), same["message"]["textFrom"].as_u64()), (Some(""), Some(15)), "{same}");
+
+        // A text cut or rewritten before the point the screen holds goes whole.
+        let cut = feed.shrink(words(Status::Streaming, "Olá 🦀 and", Some("Plan it")));
+        assert_eq!(cut["message"]["text"], "Olá 🦀 and");
+        assert!(cut["message"].get("textFrom").is_none(), "{cut}");
+        let rewritten = feed.shrink(words(Status::Streaming, "Hey 🦀 and so on", Some("Plan it")));
+        assert_eq!(rewritten["message"]["text"], "Hey 🦀 and so on");
+        assert!(rewritten["message"].get("textFrom").is_none(), "{rewritten}");
+        let done = feed.shrink(words(Status::Done, "Hey 🦀 and so on.", Some("Plan it")));
+        assert_eq!(done["message"]["text"], "Hey 🦀 and so on.");
+        assert!(done["message"].get("textFrom").is_none() && done["message"].get("thinkingFrom").is_none(), "an ended reply goes whole");
+    }
+
     #[test]
     fn an_ended_reply_and_the_first_update_after_an_open_go_whole() {
         let mut feed = Feed::default();
@@ -168,7 +259,7 @@ mod tests {
         let mut feed = Feed::default();
         assert_eq!(feed.shrink(AppEvent::List), json!({ "type": "list" }));
         for i in 0..KEPT + 5 {
-            feed.remember(format!("m{i}"), vec![]);
+            feed.remember(format!("m{i}"), Heard::default());
         }
         assert_eq!((feed.heard.len(), feed.order.len()), (KEPT, KEPT));
         assert!(!feed.heard.contains_key("m0"));

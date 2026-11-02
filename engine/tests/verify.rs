@@ -314,8 +314,20 @@ async fn until_turns(pipe: &support::Pipe, n: usize) {
 }
 
 async fn until(engine: &Engine, id: &str, done: impl Fn(&[Message]) -> bool) -> Vec<Message> {
-    support::until("the conversation never got there", || done(&engine.open(id).unwrap().messages)).await;
-    engine.open(id).unwrap().messages
+    let start = std::time::Instant::now();
+    loop {
+        let messages = engine.open(id).unwrap().messages;
+        if done(&messages) {
+            return messages;
+        }
+        let seen = |m: &Message| (m.role, m.wake.as_ref().map(|w| w.why.clone()), m.status, state(m));
+        assert!(
+            start.elapsed() < support::DEADLINE,
+            "the conversation never got there: {:?}",
+            messages.iter().map(seen).collect::<Vec<_>>()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 fn state(m: &Message) -> Option<ChecksState> {
@@ -341,10 +353,14 @@ async fn a_reply_that_changed_files_is_done_once_the_checks_pass_and_a_failure_a
     // The fix passes: the reply is done, and nothing more is sent. The reply to a fix is checked even when no step of it
     // reads as a file change (a command can change files too).
     replies(&mut pipe, 2, false).await;
-    let messages = until(&engine, &id, |m| m.len() == 4 && state(&m[3]) == Some(ChecksState::Passed)).await;
+    let messages = until(&engine, &id, |m| m.len() >= 4 && state(&m[3]) == Some(ChecksState::Passed)).await;
     assert_eq!(messages[3].checks.as_ref().unwrap().passed, 2);
+    // The agent edited and never concluded: Faber asks once for it, and for nothing else.
+    until_turns(&pipe, 3).await;
+    assert!(turns(&pipe)[2].starts_with("Your last turn ended without concluding"), "{:?}", turns(&pipe));
+    replies(&mut pipe, 3, false).await;
     tokio::time::sleep(Duration::from_millis(60)).await;
-    assert_eq!(turns(&pipe).len(), 2);
+    assert_eq!(turns(&pipe).len(), 3);
     engine.shutdown();
 }
 

@@ -1,5 +1,6 @@
 import { batch, createSignal } from 'solid-js';
 import type { AppEvent } from './api.ts';
+import { combine } from './opening.ts';
 
 // Quiet during games (docs/design/looks.md, "Quiet during games"; R191). While a game or another full-screen app is in front of
 // the shown window, the screen acts as if its window were hidden: no picture or animation moves, no row repaints on a
@@ -101,9 +102,12 @@ export function heldKey(e: AppEvent): string | undefined {
   }
 }
 
-/** Lists keep their higher revision; every other event, the one that came last. */
-const keep = (held: AppEvent, next: AppEvent): AppEvent =>
-  ((held.type === 'running' && next.type === 'running') || (held.type === 'background' && next.type === 'background')) && held.revision > next.revision ? held : next;
+/** Lists keep their higher revision; a reply keeps what both of its updates brought (only the added words travel); every other
+ * event, the one that came last. */
+const keep = (held: AppEvent, next: AppEvent): AppEvent => {
+  if (held.type === 'message' && next.type === 'message') return { ...next, message: combine(held.message, next.message) };
+  return ((held.type === 'running' && next.type === 'running') || (held.type === 'background' && next.type === 'background')) && held.revision > next.revision ? held : next;
+};
 
 /**
  * Hands events to `deliver` as they come, except while held: then they wait, one per key (`heldKey`) in the place the first

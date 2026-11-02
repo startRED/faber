@@ -7,7 +7,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub const AUTOSTART_FLAG: &str = "--autostart";
+// The arguments a start at login carries are `faber_host::autostart`'s, which every shell reads alike.
+pub use faber_host::autostart::{AUTOSTART_FLAG, creates_window, is_autostart_arg};
 
 pub trait AutostartKeeper: Send + Sync {
     fn register(&self) -> Result<(), String>;
@@ -190,22 +191,12 @@ fn has_run_value() -> Result<bool, String> {
     }
 }
 
-/// Checks whether `--autostart` is in the arguments.
-pub fn is_autostart_arg(args: impl IntoIterator<Item = String>) -> bool {
-    args.into_iter().any(|a| a == AUTOSTART_FLAG)
-}
-
-pub fn creates_window(args: impl IntoIterator<Item = String>) -> bool {
-    !is_autostart_arg(args)
+/// What the switch shows: whether Windows will really start Faber (`faber_host::autostart::shown`).
+pub fn shown(keeper: &dyn AutostartKeeper, saved: bool) -> bool {
+    faber_host::autostart::shown(keeper.is_registered(), saved)
 }
 
 /// Changes the registration and settings together; tests supply both operations.
-/// What the switch shows: whether Windows will really start Faber. The key can go without Faber (a cleanup tool, another
-/// account tool), and the setting alone would then still say on. A key that cannot be read leaves the setting as saved.
-pub fn shown(keeper: &dyn AutostartKeeper, saved: bool) -> bool {
-    keeper.is_registered().unwrap_or(saved)
-}
-
 pub fn save<T>(keeper: &dyn AutostartKeeper, enabled: Option<bool>, persist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let Some(enabled) = enabled else { return persist() };
     let failed = |error| {
@@ -267,26 +258,6 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_shows_the_run_key_and_the_setting_only_when_the_key_cannot_be_read() {
-        assert!(!shown(&FakeAutostart::new(false), true), "a key removed outside Faber turns the switch off");
-        assert!(shown(&FakeAutostart::new(true), false));
-        struct Unreadable;
-        impl AutostartKeeper for Unreadable {
-            fn register(&self) -> Result<(), String> {
-                Ok(())
-            }
-            fn unregister(&self) -> Result<(), String> {
-                Ok(())
-            }
-            fn is_registered(&self) -> Result<bool, String> {
-                Err("access denied".into())
-            }
-        }
-        assert!(shown(&Unreadable, true));
-        assert!(!shown(&Unreadable, false));
-    }
-
-    #[test]
     fn fake_autostart_records_state_without_touching_registry() {
         let fake = FakeAutostart::default();
         assert_eq!(fake.is_registered(), Ok(false));
@@ -296,18 +267,5 @@ mod tests {
 
         assert_eq!(fake.unregister(), Ok(()));
         assert_eq!(fake.is_registered(), Ok(false));
-    }
-
-    #[test]
-    fn autostart_flag_detection() {
-        assert!(is_autostart_arg(vec!["faber.exe".into(), "--autostart".into()]));
-        assert!(!is_autostart_arg(vec!["faber.exe".into(), "--other".into()]));
-        assert!(!is_autostart_arg(vec![]));
-    }
-
-    #[test]
-    fn autostart_never_creates_a_window_even_in_hidden_tests() {
-        assert!(!creates_window(vec!["faber.exe".into(), AUTOSTART_FLAG.into()]));
-        assert!(creates_window(vec!["faber.exe".into()]));
     }
 }

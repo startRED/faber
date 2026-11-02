@@ -74,6 +74,32 @@ const PATHS = {
   megaphone: ['m3 10 16-5v14L3 14Z', 'M7 15.2V18a2 2 0 0 0 4 0v-1.6'],
   gamepad: ['M7 6h10a5 5 0 0 1 5 5v2a4 4 0 0 1-7 2.6l-.6-.6H9.6l-.6.6A4 4 0 0 1 2 13v-2a5 5 0 0 1 5-5Z', 'M6 11h4M8 9v4', 'M15 10h.01M17 12h.01'],
   dice: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z', 'M8.5 8.5h.01M15.5 8.5h.01M12 12h.01M8.5 15.5h.01M15.5 15.5h.01'],
+  // The kinds of step in a work log (docs/design/icons.md): one drawing each, beside the words that say what it did.
+  read: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z', 'M9.5 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 1 0-5 0'],
+  subagent: [
+    'M12 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
+    'M12 8.5v3',
+    'M6.5 15.5v-1a2.5 2.5 0 0 1 2.5-2.5h6a2.5 2.5 0 0 1 2.5 2.5v1',
+    'M6.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
+    'M17.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
+  ],
+  // Two rings that overlap: another AI working beside this one.
+  helper: ['M3.5 12a5 5 0 1 0 10 0 5 5 0 1 0-10 0', 'M10.5 12a5 5 0 1 0 10 0 5 5 0 1 0-10 0'],
+  // One stem that forks into two arrows: Faber chose a way (a model, an effort, a route) and says which.
+  decision: ['M12 21v-7', 'M12 14 6.5 8.5', 'm12 14 5.5-5.5', 'M6.5 12.5v-4h4', 'M13.5 8.5h4v4'],
+  bolt: ['M13 2 4 14h7l-1 8 9-12h-7Z'],
+  // The eight states of a conversation, each a different silhouette so colour is never the only cue
+  // (working: an open ring; waiting: the "needs you" bubble; stuck: an hourglass; concluded: a ring with a check; ended without a conclusion:
+  // a broken ring; interrupted: a ring with a pause; stopped: a ring with a square; failed: a warning triangle).
+  'state-working': ['M21 12a9 9 0 1 1-9-9'],
+  'state-waiting': ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z', 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3', 'M12 17h.01'],
+  // An hourglass: it works but gets nowhere (a silent step, the same call again and again).
+  'state-stuck': ['M6 3h12', 'M6 21h12', 'M7 3v3a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v3', 'M17 3v3a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v3'],
+  'state-concluded': ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'm8 12.2 2.8 2.8 5.2-5.6'],
+  'state-ended': ['M20.46 15.08A9 9 0 0 1 10.44 20.86', 'M5.11 17.79A9 9 0 0 1 5.11 6.21', 'M10.44 3.14A9 9 0 0 1 20.46 8.92', 'M8.5 12h7'],
+  'state-interrupted': ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M10 9v6', 'M14 9v6'],
+  'state-stopped': ['M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0', 'M9.5 9.5h5v5h-5Z'],
+  'state-failed': ['M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z', 'M12 9v4', 'M12 17h.01'],
   puzzle: ['M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3Z'],
 } as const;
 

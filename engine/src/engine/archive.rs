@@ -61,6 +61,7 @@ impl Core {
         }
         if on {
             c.archived_at = Some(now());
+            c.waiting_on = None;
             c.pinned_at = None;
             // What Faber queued by itself (a report, a question, Keep going) never wakes an archived conversation.
             c.queued.retain(|q| q.sending || q.wake.is_none());

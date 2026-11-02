@@ -14,6 +14,7 @@ pub mod lanes;
 pub mod page;
 pub mod plan;
 pub mod proctree;
+pub mod quarantine;
 pub mod replay;
 pub mod report;
 pub mod runner;

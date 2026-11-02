@@ -124,6 +124,8 @@ mod quota_live;
 mod recents;
 #[path = "results.rs"]
 mod results;
+#[path = "resume_cut.rs"]
+mod resume_cut;
 #[path = "rewind.rs"]
 mod rewind;
 #[path = "route.rs"]
@@ -134,6 +136,8 @@ mod route_pacing;
 mod running;
 #[path = "search.rs"]
 mod search;
+#[path = "session_control.rs"]
+mod session_control;
 #[path = "session_resume.rs"]
 mod session_resume;
 #[path = "settings_change_retire.rs"]

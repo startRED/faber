@@ -1,12 +1,13 @@
 //! The badge: an amber circle with the number of questions that wait for the user, drawn at run time on the tray
-//! picture that fits the display. Plain functions of pixels, tested without a tray.
+//! picture that fits the display. Plain functions of pixels, tested without a tray. The shell that draws the tray gets
+//! either the pixels (Tauri decodes the shipped picture itself) or, from the sidecar, a finished PNG per size.
 
 /// The amber that means "needs you", and the dark ink printed on it [tokens].
 const AMBER: [u8; 3] = [0xf2, 0xb1, 0x3c];
 const AMBER_INK: [u8; 3] = [0x1d, 0x14, 0x04];
 
 /// The character printed on the badge: 1 to 9, "+" for ten and more, nothing for none.
-pub(super) fn glyph(needs_you: usize) -> Option<char> {
+pub fn glyph(needs_you: usize) -> Option<char> {
     match needs_you {
         0 => None,
         n @ 1..=9 => char::from_digit(n as u32, 10),
@@ -33,7 +34,7 @@ fn glyph_rows(c: char) -> Option<[u8; 5]> {
 
 /// The tray picture that fits a display scale: the smallest of the three that is not smaller than 16 px times the
 /// scale, so a picture is scaled down by the system and never up.
-pub(super) fn tray_side(scale: f64) -> u32 {
+pub fn tray_side(scale: f64) -> u32 {
     if scale.is_nan() || scale <= 1.0 {
         16
     } else if scale <= 1.5 {
@@ -43,12 +44,53 @@ pub(super) fn tray_side(scale: f64) -> u32 {
     }
 }
 
-pub(super) fn tray_png(side: u32) -> &'static [u8] {
+pub fn tray_png(side: u32) -> &'static [u8] {
     match side {
-        16 => include_bytes!("../../icons/tray-16.png"),
-        24 => include_bytes!("../../icons/tray-24.png"),
-        _ => include_bytes!("../../icons/tray-32.png"),
+        16 => include_bytes!("../../../src-tauri/icons/tray-16.png"),
+        24 => include_bytes!("../../../src-tauri/icons/tray-24.png"),
+        _ => include_bytes!("../../../src-tauri/icons/tray-32.png"),
     }
+}
+
+/// The pixels (RGBA, 8 bits), width and height of a PNG; None for a picture that is not 8-bit colour with or without
+/// alpha, or that does not decode.
+fn decode(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info().ok()?;
+    let mut pixels = vec![0; reader.output_buffer_size()?];
+    let frame = reader.next_frame(&mut pixels).ok()?;
+    if frame.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    pixels.truncate(frame.buffer_size());
+    let rgba = match frame.color_type {
+        png::ColorType::Rgba => pixels,
+        png::ColorType::Rgb => pixels.as_chunks::<3>().0.iter().flat_map(|px| [px[0], px[1], px[2], 255]).collect(),
+        _ => return None,
+    };
+    Some((rgba, frame.width, frame.height))
+}
+
+/// A square RGBA picture as PNG bytes.
+fn encode(rgba: &[u8], side: u32) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, side, side);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().ok()?.write_image_data(rgba).ok()?;
+    Some(out)
+}
+
+/// The tray picture of `side` px as PNG bytes, with the badge for `needs_you` waiting items on it. The plain picture
+/// as shipped when nothing waits, and also when the badge cannot be drawn (the caller still has a picture to show).
+pub fn tray_png_with_badge(side: u32, needs_you: usize) -> Vec<u8> {
+    let plain = tray_png(side);
+    let Some(c) = glyph(needs_you) else { return plain.to_vec() };
+    decode(plain)
+        .and_then(|(rgba, width, height)| with_badge(&rgba, width, height, c))
+        .and_then(|rgba| encode(&rgba, side))
+        .unwrap_or_else(|| plain.to_vec())
 }
 
 /// Source-over of one colour on one RGBA pixel, with `cover` sixteenths of the pixel covered.
@@ -67,7 +109,7 @@ fn blend(px: &mut [u8], color: [u8; 3], cover: u32) {
 /// The badge on a square RGBA picture: an amber circle at the bottom right with the character in dark ink. None for
 /// a picture it does not know how to draw on (not square, not a tray size, wrong buffer, a character without a glyph),
 /// so the caller keeps the plain icon.
-pub(super) fn with_badge(rgba: &[u8], width: u32, height: u32, c: char) -> Option<Vec<u8>> {
+pub fn with_badge(rgba: &[u8], width: u32, height: u32, c: char) -> Option<Vec<u8>> {
     // Circle diameter and pixel size of the character. The diameter and the character have the same parity, so the
     // character sits in the middle.
     let (diameter, scale) = match width {
@@ -120,7 +162,6 @@ pub(super) fn with_badge(rgba: &[u8], width: u32, height: u32, c: char) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tauri::image::Image;
 
     /// The badge on a transparent icon, as text: `#` is the character, `o` full amber, `:` the soft edge of the circle and
     /// `.` a pixel the badge left alone.
@@ -259,10 +300,38 @@ mod tests {
     #[test]
     fn the_shipped_tray_pictures_decode_and_take_a_badge() {
         for side in [16, 24, 32] {
-            let image = Image::from_bytes(tray_png(side)).expect("the picture decodes");
-            assert_eq!((image.width(), image.height()), (side, side));
-            assert!(with_badge(image.rgba(), side, side, '+').is_some());
+            let (rgba, width, height) = decode(tray_png(side)).expect("the picture decodes");
+            assert_eq!((width, height), (side, side));
+            assert!(with_badge(&rgba, side, side, '+').is_some());
         }
+    }
+
+    #[test]
+    fn a_badged_picture_is_a_png_of_the_same_side_with_the_badge_drawn_on_it() {
+        for side in [16, 24, 32] {
+            assert_eq!(tray_png_with_badge(side, 0), tray_png(side), "nothing waits: the picture as shipped");
+            let (plain, ..) = decode(tray_png(side)).unwrap();
+            let (drawn, width, height) = decode(&tray_png_with_badge(side, 3)).expect("the badged picture decodes");
+            assert_eq!((width, height), (side, side));
+            assert_eq!(drawn, with_badge(&plain, side, side, '3').unwrap(), "what is drawn is what `with_badge` makes");
+            assert_ne!(drawn, plain);
+        }
+        let (many, ..) = decode(&tray_png_with_badge(32, 12)).unwrap();
+        let (plus, ..) = decode(&tray_png_with_badge(32, 99)).unwrap();
+        assert_eq!(many, plus, "ten and more are the same plus");
+    }
+
+    #[test]
+    fn a_png_that_is_not_8_bit_colour_is_refused_instead_of_misdrawn() {
+        assert_eq!(decode(b"not a png"), None);
+        let mut grey = Vec::new();
+        let mut encoder = png::Encoder::new(&mut grey, 2, 2);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&[0; 4]).unwrap();
+        assert_eq!(decode(&grey), None);
+        let (rgba, ..) = decode(&encode(&[10, 20, 30, 40].repeat(4), 2).unwrap()).unwrap();
+        assert_eq!(rgba, [10, 20, 30, 40].repeat(4), "encode and decode agree");
     }
 
     #[test]

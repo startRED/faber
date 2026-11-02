@@ -136,6 +136,18 @@ const [wide, setWide] = createSignal(false);
 // Where each opened page is now, by the card's conversation and address: widening the column draws the pane again, and the
 // page it shows has not moved meanwhile.
 const lives = new Map<string, string>();
+// What the person is typing in the address field, by conversation. Crossing the docking width draws the pane again in the
+// column's other place: the words go with it, and the field keeps the focus it had. A conversation no pane shows any more
+// drops its words, a microtask later: the pane that takes over comes in the same update.
+const [drafts, setDrafts] = createSignal<Record<string, string>>({});
+const panes = new Set<() => string>();
+let refocus: string | undefined;
+const sweep = () =>
+  queueMicrotask(() => {
+    const shown = new Set([...panes].map((owner) => owner()));
+    if (refocus !== undefined && !shown.has(refocus)) refocus = undefined;
+    setDrafts((all) => (Object.keys(all).every((id) => shown.has(id)) ? all : Object.fromEntries(Object.entries(all).filter(([id]) => shown.has(id)))));
+  });
 /** The page fills the work area over the conversation instead of sitting in the column, as an opened subagent can. */
 export const siteWide = wide;
 export const toggleSiteWide = () => setWide((on) => !on);
@@ -557,8 +569,35 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   const blank = () => !props.site.url;
   const title = () => (blank() ? t('site.browser') : moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
   // The address field shows where the page is until the person types; Enter loads what they typed, Esc puts it back.
-  const [typed, setTyped] = createSignal<string>();
+  // The conversation is kept as a plain value: a pane that goes reads no more of its closed `<Show>`'s props.
+  let mine = props.site.conversationId;
+  const owner = () => mine;
+  const typed = () => drafts()[props.site.conversationId];
+  const setTyped = (text?: string) =>
+    setDrafts((all) => {
+      if (all[mine] === text) return all;
+      const next = { ...all };
+      if (text === undefined) delete next[mine];
+      else next[mine] = text;
+      return next;
+    });
   const [focused, setFocused] = createSignal(false);
+  panes.add(owner);
+  createEffect(on(() => props.site.conversationId, (now) => ((mine = now), sweep()), { defer: true }));
+  // The other place's pane goes in the same update, before or after this one comes: both have run by the next microtask.
+  onMount(() =>
+    queueMicrotask(() => {
+      if (refocus !== owner() || !address) return;
+      refocus = undefined;
+      address.focus();
+      address.setSelectionRange(address.value.length, address.value.length);
+    }),
+  );
+  onCleanup(() => {
+    panes.delete(owner);
+    if (focused()) refocus = owner();
+    sweep();
+  });
   const [refused, setRefused] = createSignal<'site.refused' | 'site.openFailed'>();
   let navigation = 0;
   onCleanup(() => navigation++);

@@ -25,41 +25,20 @@ const LINE_COLORS: [&str; 3] = ["line", "line-2", "line-3"];
 const MEANINGS: [(&str, &str); 3] =
     [("amber", "error.look.nearAmber"), ("claude", "error.look.nearClaude"), ("codex", "error.look.nearCodex")];
 
-/// An error the screen can show: a translation key and, sometimes, the field or the pairs it is about.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Failure {
-    pub key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
+use crate::failure::Failure;
 
-impl Failure {
-    pub fn key(key: &str) -> Self {
-        Failure { key: key.into(), detail: None }
-    }
-
-    fn with(key: &str, detail: impl Into<String>) -> Self {
-        Failure { key: key.into(), detail: Some(detail.into()) }
-    }
-
-    fn invalid(field: impl Into<String>) -> Self {
-        Failure::with("error.look.fileInvalid", field)
-    }
-}
-
-/// Engine errors are plain keys.
-impl From<String> for Failure {
-    fn from(key: String) -> Self {
-        Failure { key, detail: None }
-    }
+/// The error for a field a theme file or an appearance carries wrongly.
+fn invalid(field: impl Into<String>) -> Failure {
+    Failure::with("error.look.fileInvalid", field)
 }
 
 // ---- the tokens ----
 
 fn token(pointer: &str) -> &'static Value {
     static TOKENS: OnceLock<Value> = OnceLock::new();
+    // The file stays beside the shell, whose screen imports it too; it moves to a shared place with phase 7 (the shell's removal).
     TOKENS
-        .get_or_init(|| serde_json::from_str(include_str!("themes.json")).expect("themes.json is valid JSON"))
+        .get_or_init(|| serde_json::from_str(include_str!("../../src-tauri/src/themes.json")).expect("themes.json is valid JSON"))
         .pointer(pointer)
         .unwrap_or_else(|| panic!("themes.json has no {pointer}"))
 }
@@ -277,19 +256,19 @@ impl Appearance {
         if let Some(unknown) =
             map.keys().find(|k| !FIELDS.contains(&k.as_str()) && !(header && ["format", "version", "name"].contains(&k.as_str())))
         {
-            return Err(Failure::invalid(unknown));
+            return Err(invalid(unknown));
         }
         let text = |field: &str, allowed: &[&str]| -> Result<Option<String>, Failure> {
             match map.get(field) {
                 None => Ok(None),
                 Some(Value::String(s)) if allowed.contains(&s.as_str()) => Ok(Some(s.clone())),
-                Some(_) => Err(Failure::invalid(field)),
+                Some(_) => Err(invalid(field)),
             }
         };
         let numeric = |field: &str, ok: &dyn Fn(f64) -> bool| -> Result<Option<f64>, Failure> {
             match map.get(field) {
                 None => Ok(None),
-                Some(v) => v.as_f64().filter(|n| ok(*n)).map(Some).ok_or_else(|| Failure::invalid(field)),
+                Some(v) => v.as_f64().filter(|n| ok(*n)).map(Some).ok_or_else(|| invalid(field)),
             }
         };
         let one_of = |options: Vec<f64>| move |n: f64| options.iter().any(|o| (o - n).abs() < 1e-9);
@@ -297,11 +276,11 @@ impl Appearance {
         let (min, max, step) = (number(&size["min"]), number(&size["max"]), number(&size["step"]));
         let on_step = move |n: f64| (min..=max).contains(&n) && ((n - min) / step - ((n - min) / step).round()).abs() < 1e-9;
 
-        let base = text("base", &bases())?.ok_or_else(|| Failure::invalid("base"))?;
+        let base = text("base", &bases())?.ok_or_else(|| invalid("base"))?;
         let accent = match map.get("accent") {
             None => None,
             Some(Value::String(s)) if parse_hex(s).is_some() => Some(s.to_ascii_lowercase()),
-            Some(_) => return Err(Failure::invalid("accent")),
+            Some(_) => return Err(invalid("accent")),
         };
         let numbers = |pointer: &str| token(pointer).as_array().into_iter().flatten().map(number).collect::<Vec<_>>();
         Ok(Appearance {
@@ -329,14 +308,14 @@ impl Appearance {
 
 fn parse_effects(value: Option<&Value>) -> Result<Option<Effects>, Failure> {
     let Some(value) = value else { return Ok(None) };
-    let Value::Object(map) = value else { return Err(Failure::invalid("effects")) };
+    let Value::Object(map) = value else { return Err(invalid("effects")) };
     if let Some(unknown) = map.keys().find(|k| !["ambient", "texture", "glow"].contains(&k.as_str())) {
-        return Err(Failure::invalid(format!("effects.{unknown}")));
+        return Err(invalid(format!("effects.{unknown}")));
     }
     let flag = |name: &str| match map.get(name) {
         None => Ok(true),
         Some(Value::Bool(b)) => Ok(*b),
-        Some(_) => Err(Failure::invalid(format!("effects.{name}"))),
+        Some(_) => Err(invalid(format!("effects.{name}"))),
     };
     Ok(Some(Effects { ambient: flag("ambient")?, texture: flag("texture")?, glow: flag("glow")? }))
 }
@@ -352,7 +331,7 @@ fn is_rgba(s: &str) -> bool {
 
 fn parse_colors(value: Option<&Value>) -> Result<BTreeMap<String, String>, Failure> {
     let Some(value) = value else { return Ok(BTreeMap::new()) };
-    let Value::Object(map) = value else { return Err(Failure::invalid("colors")) };
+    let Value::Object(map) = value else { return Err(invalid("colors")) };
     let mut colors = BTreeMap::new();
     for (key, v) in map {
         if MEANINGS.iter().any(|(name, _)| key.starts_with(name)) {
@@ -360,11 +339,11 @@ fn parse_colors(value: Option<&Value>) -> Result<BTreeMap<String, String>, Failu
         }
         let line = LINE_COLORS.contains(&key.as_str());
         if !line && !SOLID_COLORS.contains(&key.as_str()) {
-            return Err(Failure::invalid(format!("colors.{key}")));
+            return Err(invalid(format!("colors.{key}")));
         }
         let color =
             v.as_str().map(str::to_ascii_lowercase).filter(|c| !c.contains("var(") && (parse_hex(c).is_some() || (line && is_rgba(c))));
-        colors.insert(key.clone(), color.ok_or_else(|| Failure::invalid(format!("colors.{key}")))?);
+        colors.insert(key.clone(), color.ok_or_else(|| invalid(format!("colors.{key}")))?);
     }
     Ok(colors)
 }
@@ -441,7 +420,7 @@ fn px(value: &str) -> f64 {
 }
 
 pub fn look(a: &Appearance) -> Result<Look, Failure> {
-    let mut vars = css_of(&a.base).ok_or_else(|| Failure::invalid("base"))?;
+    let mut vars = css_of(&a.base).ok_or_else(|| invalid("base"))?;
     let own = vars.clone();
     let defaults = &token("/defaults")[a.base.as_str()];
     let mut notices = Vec::new();
@@ -601,14 +580,14 @@ pub fn parse_theme_file(bytes: &[u8]) -> Result<ThemeFile, Failure> {
     if bytes.len() as u64 > max_theme_bytes() {
         return Err(Failure::key("error.look.fileTooBig"));
     }
-    let Ok(Value::Object(map)) = serde_json::from_slice::<Value>(bytes) else { return Err(Failure::invalid("file")) };
+    let Ok(Value::Object(map)) = serde_json::from_slice::<Value>(bytes) else { return Err(invalid("file")) };
     if map.get("format").and_then(Value::as_str) != Some("faber-theme") {
-        return Err(Failure::invalid("format"));
+        return Err(invalid("format"));
     }
     if map.get("version").and_then(Value::as_u64) != Some(1) {
-        return Err(Failure::invalid("version"));
+        return Err(invalid("version"));
     }
-    let name = map.get("name").and_then(Value::as_str).filter(|n| valid_name(n)).ok_or_else(|| Failure::invalid("name"))?;
+    let name = map.get("name").and_then(Value::as_str).filter(|n| valid_name(n)).ok_or_else(|| invalid("name"))?;
     let appearance = Appearance::parse(&map, true)?;
     look(&appearance)?;
     Ok(ThemeFile { name: name.into(), appearance })
@@ -626,7 +605,7 @@ struct FileOut<'a> {
 /// The theme file for a look that can be saved, with its keys in a stable order.
 pub fn write_theme_file(appearance: &Obj, name: &str) -> Result<String, Failure> {
     if !valid_name(name) {
-        return Err(Failure::invalid("name"));
+        return Err(invalid("name"));
     }
     let (appearance, _) = validated(appearance)?;
     let out = FileOut { format: "faber-theme", version: 1, name, appearance: &appearance };

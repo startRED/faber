@@ -1,0 +1,1 @@
+{"id":"old-done","title":"Old done","area":"project","createdAt":0,"updatedAt":0,"ended":{"at":5,"kind":"done","workMs":9},"messages":[{"id":"r","role":"assistant","text":"Fixed.","at":0,"status":"done","wrapUp":{"recap":"Fixed it.","done":true}}]}

@@ -218,8 +218,9 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       const view = window.__reviewLayoutView;
       const fold = document.createElement('div'); fold.className = 'fold';
       fold.innerHTML = '<div class="fold-inner"><div style="height:240px">Project rows</div></div>';
-      const details = document.createElement('details'); details.className = 'activity';
-      details.innerHTML = '<summary>Measured work</summary><div class="activity-body"><div class="md">' + '<p>Work step</p>'.repeat(200) + '</div></div>';
+      const details = document.createElement('div'); details.className = 'steps';
+      details.innerHTML = '<button class="steps-head" aria-expanded="false">Measured work</button>';
+      details.firstChild.onclick = () => { const list = details.querySelector('.steps-list'); if (list) list.remove(); else details.insertAdjacentHTML('beforeend', '<div class="steps-list">' + '<div class="step">Work step</div>'.repeat(200) + '</div>'); };
       const field = document.querySelector('.composer textarea');
       const card = field.closest('.composer');
       const type = (lines) => { field.value = 'line\n'.repeat(lines); field.dispatchEvent(new Event('input', { bubbles: true })); };
@@ -227,19 +228,19 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       if (view === 'disclosure') {
         const answer = document.querySelector('.col > article.ai:last-child');
         answer.insertBefore(details, answer.querySelector(':scope > .md'));
-        details.querySelector('summary').scrollIntoView();
+        details.querySelector('.steps-head').scrollIntoView();
       }
       getComputedStyle(fold).gridTemplateRows;
       // Measure size transitions after fixture insertion and its separate arrival motion have settled.
       setTimeout(async () => {
-      const intervals = [], idle = [], costs = [], animated = [];
+      const intervals = [], idle = [], costs = [], animated = []; let toggles = 0;
       const elements = [view === 'fold' ? fold : view === 'disclosure' ? details : view === 'composer' ? card : null];
       const measure = (active, cycle) => new Promise(done => {
         let previous = performance.now(), running = 0;
         const start = previous;
         if (active) {
           if (view === 'fold') fold.classList.toggle('open');
-          else if (view === 'disclosure') details.querySelector('summary').click();
+          else if (view === 'disclosure') { details.querySelector('.steps-head').click(); if (!!details.querySelector('.steps-list') === (cycle % 2 === 0)) toggles++; }
           else type(8 + cycle);
         }
         const frame = now => {
@@ -259,7 +260,7 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       for (let i = 0; i < 5; i++) await measure(true, i);
       fold.remove(); details.remove(); type(0);
       const p95 = values => [...values].sort((a,b) => a-b)[Math.floor(values.length*.95)];
-      resolve({view, frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
+      resolve({view, toggles, frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
         p95: p95(intervals), layout: p95(costs), idle: p95(idle), worst: Math.max(...intervals), idleWorst: Math.max(...idle)});
       }, 300);
     })"#)?;
@@ -267,7 +268,11 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
             "{view} layout motion: {} frames, p95 {} ms, layout {} ms, idle p95 {} ms; worst active/idle {}/{} ms",
             measured["frames"], measured["p95"], measured["layout"], measured["idle"], measured["worst"], measured["idleWorst"]
         ));
-        ensure(measured["animated"] == measured["expected"], || format!("the size transitions did not run: {measured}"))?;
+        if view == "disclosure" {
+            ensure(measured["toggles"] == 5, || format!("the step group did not open and close: {measured}"))?;
+        } else {
+            ensure(measured["animated"] == measured["expected"], || format!("the size transitions did not run: {measured}"))?;
+        }
         ensure(measured["frames"].as_u64().unwrap_or(0) >= 60, || format!("not enough frames: {measured}"))?;
         ensure(measured["idle"].as_f64().unwrap_or(f64::MAX) < 25.0, || format!("the idle host missed the frame budget: {measured}"))?;
         ensure(measured["p95"].as_f64().unwrap_or(f64::MAX) < 25.0 && measured["layout"].as_f64().unwrap_or(f64::MAX) < 8.0, || {

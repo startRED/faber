@@ -1,0 +1,15 @@
+/* The states of a conversation and who is speaking (docs/design/icons.md). Colour and silhouette go together, so colour is
+   never the only cue: an open ring that breathes while it works, the amber bubble for "needs you", an hourglass for stuck, a
+   check, a broken ring when it ended without a conclusion, a pause, a square, a warning triangle. */
+.st { display: inline-flex; flex: none; color: var(--ink-2); }
+.st-working { color: var(--accent-text); animation: pulse var(--dur-pulse) var(--ease-io) infinite; }
+.st-waiting, .st-stuck { color: var(--amber-ink); }
+.st-concluded { color: var(--ink); }
+.st-stopped { color: var(--ink-3); }
+.st-failed { color: var(--danger); }
+.mk-faber { flex: none; color: var(--ink-2); }
+/* A state beside its words in Technical details. */
+.det-state, .work-state { display: inline-flex; align-items: center; gap: 5px; }
+/* A failed row already speaks in amber (it needs a look); its triangle keeps that colour instead of a second one. */
+.det-facts > li[data-state='failed'] .st-failed, .background-work > li[data-need='true'] .st { color: inherit; }
+:is([data-motion='reduced'], [data-motion='none']) .st-working { animation: none !important; }

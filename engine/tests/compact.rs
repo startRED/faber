@@ -719,7 +719,13 @@ async fn progress(agent: &mut Pipe, request: &str, tool: &str, input: Value) {
 async fn kept_turn(agent: &mut Pipe, n: usize, read: u64, closes: bool) {
     agent.say(response(Value::Null, 2, read, 0)).await;
     if closes {
-        progress(agent, &format!("w{n}"), "wrap_up", json!({ "recap": "The login page is fixed and checked." })).await;
+        progress(
+            agent,
+            &format!("w{n}"),
+            "wrap_up",
+            json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The rest is not done." }),
+        )
+        .await;
     }
     agent.say(result(1_000_000)).await;
 }

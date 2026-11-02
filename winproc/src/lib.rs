@@ -1,11 +1,12 @@
 //! A process created with `CREATE_SUSPENDED` runs nothing until its main thread is resumed. Faber creates every CLI that way,
 //! puts it in its job object, and only then resumes it, so nothing the CLI starts can ever be outside the job. Neither std nor
 //! tokio gives the thread handle, so the thread is found through a toolhelp snapshot. Asking whether a process has ended is the
-//! other call. With the Windows API files of the shell (awake, autostart, tray, pane), this is the only unsafe code in Faber.
+//! other call. With the Windows API files of the shell (awake, autostart, the chime, pane), this is the only unsafe code in Faber.
 //!
 //! The test runner reads the system's process list here too (`processes`): one call, where WMI took 100 ms or more.
 //! The index worker also uses the safe background-priority wrapper, on Windows and macOS.
 //! Project memory uses handle-relative, no-follow file access through `MemoryDirectory` on Windows.
+//! The command line's named pipe is made here too, open only to the signed-in user (`pipe.rs`), with the user's language for its words (`locale.rs`).
 
 /// Puts this dedicated worker in macOS's background quality-of-service class until it exits.
 #[cfg(target_os = "macos")]
@@ -37,12 +38,26 @@ pub struct JobAccounting {
 }
 
 mod files;
+#[cfg(windows)]
+mod locale;
+#[cfg(windows)]
+pub use locale::user_language;
+#[cfg(windows)]
+mod pipe;
+#[cfg(windows)]
+mod user_file;
 pub use files::{open_catalog_file, open_plain_file};
+#[cfg(windows)]
+pub use pipe::{PipeClient, pipe_peer_is_user, user_pipe};
+#[cfg(windows)]
+pub use user_file::write_user_only;
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]
 pub use memory::MemoryDirectory;
+pub mod front;
 pub mod process_tree;
+pub mod sound;
 
 #[cfg(unix)]
 fn owned_group(pgid: u32) -> std::io::Result<rustix::process::Pid> {

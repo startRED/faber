@@ -45,7 +45,7 @@ check('thread: streaming preserves the open paragraph, selection, code scroll an
   } finally { window.getSelection()?.removeAllRanges(); root.remove(); }
 });
 
-check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
+check('thread: ten tool steps fold while all words stay visible', async () => {
   const root = document.createElement('div');
   document.body.append(root);
   const narration = 'Checking the files.\n\nRunning the checks.\n\n';
@@ -59,22 +59,18 @@ check('thread: ten tool steps and narration fold into one activity row above the
     get messages() { return [message()]; }, from: 0, conversationId: 'activity-check', options: [], onBranch: () => {},
   }), root);
   try {
-    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
-    equal(root.querySelectorAll('.activity').length, 1);
-    equal(group.open, false);
-    ok(root.querySelector('.activity-latest')!.textContent?.includes('check 9'), 'latest running command remains visible');
+    const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
+    equal(head.getAttribute('aria-expanded'), 'false');
+    ok(head.textContent!.includes('check 9'), 'the running command remains visible');
+    const words = () => [...root.querySelectorAll('.ai > .md')].map((part) => part.textContent).join('');
+    ok(words().includes('Checking the files') && words().includes('The requested change is complete.') && words().includes('All checks passed.'), 'all words remain visible');
     setMessage({ ...message(), status: 'done' });
-    equal(root.querySelectorAll('.activity').length, 1);
-    equal(group.open, false, 'completion stays collapsed');
-    equal(root.querySelector('.activity-latest'), null);
-    ok(root.querySelector('.ai > .md')!.textContent?.includes(final.split('\n')[0]!));
-    ok(!root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'), 'narration is kept out of the final answer');
-    group.open = true;
-    ok(group.textContent?.includes('Checking the files'));
-    equal(group.querySelectorAll('.tools > span').length, 10);
-    // Older conversations without recorded boundaries keep their full text.
+    equal(head.getAttribute('aria-expanded'), 'false');
+    head.click();
+    equal(root.querySelectorAll('.steps-list .step').length, 10, 'all ten commands are inspectable');
+    ok(root.querySelector('.thought'), 'thinking stays visible in its own row');
     setMessage({ ...message(), textBreaks: undefined, activityEnd: undefined });
-    ok(root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'));
+    ok(words().includes('Checking the files'), 'older replies keep their words');
   } finally {
     dispose();
     root.remove();
@@ -184,65 +180,47 @@ check('thread: a Codex work log reads cleanly: titles on their own lines, tidy c
     id: 'worklog', role: 'assistant', at: 0, status: 'streaming', text: `${status}\n\n${status}\n\nI checked the files instead.`,
     textBreaks: [status.length + 2], activityEnd: status.length + 2,
     thinking: '**Minimizing output verbosity****Assessing time budget and test approach****Preparing for final retry**',
-    tools: [{ id: 'c1', name: 'commandExecution', input: `${exe} -Command "${inner}"`, ok: true }],
+    tools: [{ id: 'c1', name: 'commandExecution', input: `${exe} -Command "${inner}"`, at: 0, ok: true }],
   });
   const dispose = render(() => createComponent(Thread, {
     get messages() { return [message()]; }, from: 0, conversationId: 'worklog', options: [], onBranch: () => {},
   }), root);
   try {
-    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
-    group.open = true;
+    root.querySelector<HTMLButtonElement>('.steps-head')!.click();
+    root.querySelector<HTMLButtonElement>('.thought .step-line')!.click();
     const shown = () => root.textContent ?? '';
-    ok(!shown().includes('**'), 'no raw bold markers');
-    ok(!shown().includes('commandExecution'), 'no internal kind name');
-    ok(!shown().includes('\\\\'), 'no doubled backslashes');
-    const titles = [...group.querySelectorAll('.activity-thinking p')].map((p) => p.textContent);
+    ok(!shown().includes('**') && !shown().includes('commandExecution'));
+    const titles = [...root.querySelectorAll('.thought-text p')].map((p) => p.textContent);
     equal(titles.join('|'), 'Minimizing output verbosity|Assessing time budget and test approach|Preparing for final retry');
-    const row = group.querySelector<HTMLElement>('.tools > span')!;
+    const row = root.querySelector<HTMLElement>('.step:not(.thought) .step-line')!;
     equal(row.querySelector('b')!.textContent, 'PowerShell');
     equal(row.querySelector('i')!.textContent, inner);
-    equal(row.title, inner, 'the full command is the tooltip');
-    equal(shown().split(status).length - 1, 2, 'while streaming the answer shows the words as the agent said them');
-    equal(root.querySelector('.activity-latest'), null, 'no status line under a visible answer');
+    equal(row.title, inner);
+    equal(shown().split(status).length - 1, 2);
     setMessage({ ...message(), status: 'done' });
-    equal((root.textContent ?? '').split(status).length - 1, 1, 'and the status sentence shows once when done');
+    equal(shown().split(status).length - 1, 2, 'completion preserves the words');
   } finally {
     dispose();
     root.remove();
   }
 });
 
-// The 2026-10-29 live look: the running command showed in the opened work log and again as the latest line under it.
-check('thread: the running command shows once, in the opened work log or else in the latest line, also inside a run of commands', async () => {
-  const root = document.createElement('div');
-  document.body.append(root);
+check('thread: running steps stay visible alone and in a fold', () => {
+  const root = document.createElement('div'); document.body.append(root);
   const running = (id: string, command: string) => ({ id, name: 'Bash', input: { command }, ok: undefined });
-  const [message, setMessage] = createSignal<Message>({ id: 'once', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [running('a', 'cargo build --release')] });
-  const dispose = render(() => createComponent(Thread, {
-    get messages() { return [message()]; }, from: 0, conversationId: 'once', options: [], onBranch: () => {},
-  }), root);
-  const toggled = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const latest = () => root.querySelector('.activity-latest')?.textContent ?? '';
+  const [message, setMessage] = createSignal<Message>({ id: 'once', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [running('a', 'cargo build')] });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'once', options: [], onBranch: () => {} }), root);
   try {
-    const log = root.querySelector<HTMLDetailsElement>('details.activity')!;
-    ok(latest().includes('cargo build'), 'closed, the latest line says the command');
-    log.open = true; await toggled();
-    equal(root.querySelector('.activity-latest'), null, 'open, the log is the one place the command shows');
-    ok(log.querySelector('.tools > span .live'), 'and the running step carries the running mark');
-    setMessage({ ...message(), text: 'Building it now.' });
-    equal(root.querySelector('.activity-latest.after'), null, 'nor under the words');
-    log.open = false; await toggled();
-    ok(root.querySelector('.activity-latest.after')?.textContent?.includes('cargo build'), 'closed again, the line under the words comes back');
-    setMessage({ ...message(), text: '', tools: [{ ...running('a', 'cargo build'), ok: true }, { ...running('b', 'cargo test'), ok: true }, running('c', 'cargo clippy')] });
-    log.open = true; await toggled();
-    const run = log.querySelector<HTMLDetailsElement>('details.step-group')!;
-    ok(latest().includes('cargo clippy'), 'a closed run of commands hides the step, so the latest line stays');
-    run.open = true; await toggled();
-    equal(root.querySelector('.activity-latest'), null, 'an opened run shows it, so the line goes');
-  } finally {
-    dispose();
-    root.remove();
-  }
+    ok(root.querySelector('.steps.one .step .live'));
+    ok(root.querySelector('.step-line')!.textContent!.includes('cargo build'));
+    setMessage({ ...message(), tools: [{ ...running('a', 'cargo build'), ok: true }, running('b', 'cargo test')] });
+    const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
+    ok(head.textContent!.includes('cargo test'));
+    head.click();
+    equal(root.querySelectorAll('.steps-list .step').length, 2);
+    ok(root.querySelector('.steps-list .step[data-state="running"]')!.textContent!.includes('cargo test'));
+    equal(root.querySelector('.activity-latest'), null);
+  } finally { dispose(); root.remove(); }
 });
 
 check('thread: the final answer is never cut, a long command wraps inside a 720 px column, and a command that looks like markup stays text', () => {
@@ -264,59 +242,46 @@ check('thread: the final answer is never cut, a long command wraps inside a 720 
     get messages() { return [message()]; }, from: 0, conversationId: 'worklog-edges', options: [], onBranch: () => {},
   }), root);
   try {
-    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
-    group.open = true;
-    equal(root.querySelector('.ai > .md')!.textContent?.trim(), answer, 'a status that only starts the answer does not cut it');
-    ok(group.textContent?.includes('Check'), 'and stays in the activity');
-    group.querySelector<HTMLDetailsElement>('details.step-group')!.open = true;
-    const [first, second] = [...group.querySelectorAll<HTMLElement>('.tools > span')];
-    equal(first!.querySelector('i')!.textContent, long, 'the whole command, never cut at the edge');
-    const box = first!.getBoundingClientRect();
-    ok(box.right <= root.getBoundingClientRect().right + 0.5, `it stays inside the column (${box.right})`);
-    ok(first!.querySelector('i')!.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(first!).lineHeight || '16'), 'it wraps onto a second line');
-    equal(first!.title, long, 'the full command is the tooltip');
+    const words = [...root.querySelectorAll('.ai > .md')].map((part) => part.textContent).join('');
+    ok(words.includes(narration.trim()) && words.includes(answer), 'all words stay visible');
+    root.querySelector<HTMLButtonElement>('.steps-head')!.click();
+    const [first, second] = [...root.querySelectorAll<HTMLElement>('.steps-list .step-line')];
+    ok(first!.querySelector('i')!.textContent!.includes('START') && first!.querySelector('i')!.textContent!.includes('END'));
+    first!.click();
+    equal(first!.parentElement!.querySelector('.step-what')!.textContent, long, 'the full command is available');
+    ok(first!.getBoundingClientRect().right <= root.getBoundingClientRect().right + 0.5, 'fits the column');
+    equal(first!.title, long);
     equal(second!.querySelector('i')!.textContent, markup);
-    equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
+    equal(second!.querySelectorAll('img, b i, i b').length, 0);
   } finally {
     dispose();
     root.remove();
   }
 });
 
-check('thread: while an answer streams every paragraph stays in the answer, and the narration folds into the activity only when it ends', () => {
+check('thread: words remain visible in order between steps while streaming and after completion', () => {
   const root = document.createElement('div');
   document.body.append(root);
   const said = ['Sigo no código.', 'Corrigindo a parte 2.', 'Parte 2 pronta.', 'Atualizando o mapa do produto.'];
-  const before = said.join('\n\n');
-  const after = `${before}\n\nAll done.`;
-  const tools = [{ id: '1', name: 'Bash', input: { command: 'one' }, ok: true }, { id: '2', name: 'Bash', input: { command: 'two' } }];
-  const reply = (text: string, end: number, status: Message['status'] = 'streaming'): Message => ({ id: 'streamed', role: 'assistant', at: 0, status, text, activityEnd: end, tools });
-  const [message, setMessage] = createSignal<Message>(reply(before, before.length));
+  const before = said.join('\n\n') + '\n\n';
+  const tools = [{ id: '1', name: 'Bash', input: { command: 'one' }, ok: true, at: before.length }];
+  const reply = (text: string, status: Message['status'] = 'streaming'): Message => ({ id: 'streamed', role: 'assistant', at: 0, status, text, tools });
+  const [message, setMessage] = createSignal<Message>(reply(before + 'All done.'));
   const dispose = render(() => createComponent(Thread, {
     get messages() { return [message()]; }, from: 0, conversationId: 'streamed', options: [], onBranch: () => {},
   }), root);
-  const answer = () => root.querySelector('.ai > .md')!.textContent ?? '';
-  const folded = () => root.querySelector('.activity-body .md')?.textContent ?? '';
-  const everything = (when: string) => {
-    for (const paragraph of said) ok(answer().includes(paragraph), `${when}: "${paragraph}" is in the answer, which reads ${JSON.stringify(answer())}`);
-    equal(folded(), '', `${when}: nothing is folded away yet`);
-  };
   try {
-    everything('while a step runs');
-    setMessage(reply(after, before.length));
-    everything('when words come after the step');
-    ok(answer().includes('All done.'), 'and the new words join them');
-    setMessage(reply(after, after.length));
-    everything('when the next step starts');
-    setMessage(reply(after, before.length, 'done'));
-    equal(answer().trim(), 'All done.', 'when the answer ends only the final text shows');
-    // The narration's last two paragraphs show in the activity; the earlier ones wait under "2 more" (task 018).
-    for (const paragraph of said.slice(2)) ok(folded().includes(paragraph), `the narration "${paragraph}" is inside the activity`);
-    ok(!folded().includes(said[0]!), 'the earliest paragraph waits under more');
-    const more = root.querySelector<HTMLButtonElement>('.activity-body .more-narration')!;
-    equal(more.textContent!.trim(), t('narration.more', { n: 2 }));
-    more.click();
-    for (const paragraph of said) ok(folded().includes(paragraph), `the narration "${paragraph}" is inside the activity`);
+    for (const status of ['streaming', 'done'] as const) {
+      setMessage(reply(before + 'All done.', status));
+      const parts = [...root.querySelectorAll('.ai > .md, .ai > .steps')];
+      deepEqual(parts.map((part) => part.classList.contains('md') ? 'words' : 'steps'), ['words', 'steps', 'words']);
+      const words = parts.map((part) => part.textContent ?? '').join(' ');
+      const phrases = [...said, 'All done.'];
+      for (let i = 0; i < phrases.length; i++) {
+        ok(words.includes(phrases[i]!), phrases[i]);
+        if (i) ok(words.indexOf(phrases[i - 1]!) < words.indexOf(phrases[i]!), 'the words keep their order');
+      }
+    }
   } finally {
     dispose();
     root.remove();

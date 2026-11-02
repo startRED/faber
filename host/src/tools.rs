@@ -1,17 +1,13 @@
 //! The catalog's skills and servers on screen (`faber_engine::tools`): what ships, what is installed, and installing or removing one.
 
-use crate::Faber;
+use crate::{Host, Res};
 use faber_engine::tools::{InstallError, Store, catalog, find};
 use serde::Serialize;
-use tauri::State;
-
-type Res<T> = Result<T, String>;
 
 /// Reads only known skill directories and the plugin installation manifest; no CLI is started.
-#[tauri::command]
-pub async fn tools_inventory(faber: State<'_, Faber>, project_id: Option<String>) -> Res<Vec<faber_engine::tool_inventory::List>> {
-    let engine = faber.engine.clone();
-    let data = faber.data_dir.clone();
+pub(crate) async fn tools_inventory(h: &Host, project_id: Option<String>) -> Res<Vec<faber_engine::tool_inventory::List>> {
+    let engine = h.engine.clone();
+    let data = h.data_dir.clone();
     faber_engine::tool_inventory::read_with(project_id.is_some(), move || {
         let project = project_id.as_deref().map(|id| engine.project(id)).transpose()?;
         let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from);
@@ -20,15 +16,13 @@ pub async fn tools_inventory(faber: State<'_, Faber>, project_id: Option<String>
     .await
 }
 
-#[tauri::command]
-pub async fn mcp_servers(faber: State<'_, Faber>, project_id: String) -> Res<Vec<faber_engine::mcp_servers::List>> {
-    faber.engine.mcp_servers(&project_id).await
+pub(crate) async fn mcp_servers(h: &Host, project_id: String) -> Res<Vec<faber_engine::mcp_servers::List>> {
+    h.engine.mcp_servers(&project_id).await
 }
 
-#[tauri::command]
-pub async fn set_mcp_server(faber: State<'_, Faber>, project_id: String, name: String, enabled: bool) -> Res<()> {
-    let engine = faber.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.set_mcp_server(&project_id, &name, enabled))
+pub(crate) async fn set_mcp_server(h: &Host, project_id: String, name: String, enabled: bool) -> Res<()> {
+    let engine = h.engine.clone();
+    tokio::task::spawn_blocking(move || engine.set_mcp_server(&project_id, &name, enabled))
         .await
         .map_err(|_| "error.tools.toggle".to_string())?
 }
@@ -36,7 +30,7 @@ pub async fn set_mcp_server(faber: State<'_, Faber>, project_id: String, name: S
 /// One row of the list: the catalog's entry and whether this computer has it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolRow {
+pub(crate) struct ToolRow {
     id: String,
     cli_name: Option<String>,
     job: String,
@@ -68,13 +62,12 @@ struct PluginPartRow {
     kind: faber_engine::tools::plugins::PartKind,
 }
 
-#[tauri::command]
-pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
-    let data = faber.data_dir.clone();
+pub(crate) async fn tools_list(h: &Host) -> Res<Vec<ToolRow>> {
+    let data = h.data_dir.clone();
     // Unknown until the startup probe has read the CLI: the default flags mean "not read yet" (or no Claude Code).
-    let flags = faber.engine.claude_flags();
+    let flags = h.engine.claude_flags();
     let claude_plugins_available = (flags != Default::default()).then_some(flags.plugin_dir);
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let store = Store::new(&data);
         let statuses = store.checked_statuses();
         let installed = store.installed();
@@ -110,12 +103,11 @@ pub async fn tools_list(faber: State<'_, Faber>) -> Res<Vec<ToolRow>> {
 }
 
 /// Downloads a skill from its own repository, or a server's package from npm, and installs it. New sessions receive the changed store; moving files may also affect an existing session.
-#[tauri::command]
-pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
-    // An update never ends the process in the middle of an install (update.rs).
-    let _running = crate::update::SetupRunning::begin()?;
+pub(crate) async fn tools_install(h: &Host, id: String) -> Res<()> {
+    // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
+    let _running = h.shell.hold_install()?;
     let item = find(&id).ok_or("error.tools.unknown")?.clone();
-    let data_dir = faber.data_dir.clone();
+    let data_dir = h.data_dir.clone();
     let store = tokio::task::spawn_blocking(move || Store::new(&data_dir)).await.map_err(|_| "error.tools.install".to_string())?;
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
@@ -131,7 +123,7 @@ pub async fn tools_install(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[derive(Serialize)]
-pub struct PreparedReplacement {
+pub(crate) struct PreparedReplacement {
     plan: faber_engine::tools::ReplacementPlan,
     from: String,
     to: String,
@@ -139,11 +131,10 @@ pub struct PreparedReplacement {
 }
 
 /// Captures the exact existing copy for the person's detail confirmation; it downloads nothing.
-#[tauri::command]
-pub async fn tools_prepare_replacement(faber: State<'_, Faber>, id: String) -> Res<PreparedReplacement> {
+pub(crate) async fn tools_prepare_replacement(h: &Host, id: String) -> Res<PreparedReplacement> {
     find(&id).ok_or("error.tools.unknown")?;
-    let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let data = h.data_dir.clone();
+    tokio::task::spawn_blocking(move || {
         let plan = Store::new(&data).capture_replacement(&id).map_err(|_| "error.tools.install".to_string())?;
         Ok(PreparedReplacement { from: plan.old_commit().into(), to: plan.item().commit.clone(), enabled: plan.enabled(), plan })
     })
@@ -152,10 +143,9 @@ pub async fn tools_prepare_replacement(faber: State<'_, Faber>, id: String) -> R
 }
 
 /// Revalidates the confirmed snapshot before downloading and again under the publication lock.
-#[tauri::command]
-pub async fn tools_replace(faber: State<'_, Faber>, plan: faber_engine::tools::ReplacementPlan) -> Res<()> {
-    let _running = crate::update::SetupRunning::begin()?;
-    let data = faber.data_dir.clone();
+pub(crate) async fn tools_replace(h: &Host, plan: faber_engine::tools::ReplacementPlan) -> Res<()> {
+    let _running = h.shell.hold_install()?;
+    let data = h.data_dir.clone();
     let store = tokio::task::spawn_blocking(move || Store::new(&data)).await.map_err(|_| "error.tools.install".to_string())?;
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     faber_engine::tools::replace_checked(&store, &plan, source.as_deref()).await.map_err(|why| match why {
@@ -164,31 +154,28 @@ pub async fn tools_replace(faber: State<'_, Faber>, plan: faber_engine::tools::R
     })
 }
 
-#[tauri::command]
-pub async fn tools_remove(faber: State<'_, Faber>, id: String) -> Res<()> {
+pub(crate) async fn tools_remove(h: &Host, id: String) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
-    let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || Store::new(&data).remove(&id))
+    let data = h.data_dir.clone();
+    tokio::task::spawn_blocking(move || Store::new(&data).remove(&id))
         .await
         .map_err(|_| "error.tools.remove".to_string())?
         .map_err(|_| "error.tools.remove".to_string())
 }
 
-#[tauri::command]
-pub async fn tools_set_enabled(faber: State<'_, Faber>, id: String, enabled: bool) -> Res<()> {
+pub(crate) async fn tools_set_enabled(h: &Host, id: String, enabled: bool) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
-    let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || Store::new(&data).set_enabled(&id, enabled))
+    let data = h.data_dir.clone();
+    tokio::task::spawn_blocking(move || Store::new(&data).set_enabled(&id, enabled))
         .await
         .map_err(|_| "error.tools.toggle".to_string())?
         .map_err(|_| "error.tools.toggle".to_string())
 }
 
-#[tauri::command]
-pub async fn tools_restore(faber: State<'_, Faber>, id: String) -> Res<()> {
+pub(crate) async fn tools_restore(h: &Host, id: String) -> Res<()> {
     find(&id).ok_or("error.tools.unknown")?;
-    let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || Store::new(&data).restore(&id))
+    let data = h.data_dir.clone();
+    tokio::task::spawn_blocking(move || Store::new(&data).restore(&id))
         .await
         .map_err(|_| "error.tools.restore".to_string())?
         .map_err(|_| "error.tools.restore".to_string())
@@ -196,16 +183,14 @@ pub async fn tools_restore(faber: State<'_, Faber>, id: String) -> Res<()> {
 
 /// The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the
 /// engine's memory when the panel opens; nothing is prepared, polled or started.
-#[tauri::command]
-pub async fn tools_in_use(faber: State<'_, Faber>, id: String) -> Res<Vec<(String, String)>> {
-    Ok(faber.engine.tools_in_use(&id))
+pub(crate) async fn tools_in_use(h: &Host, id: String) -> Res<Vec<(String, String)>> {
+    Ok(h.engine.tools_in_use(&id))
 }
 
 /// Called on entering Catalog, before any removal in this visit can offer Undo.
-#[tauri::command]
-pub async fn tools_clear_removed(faber: State<'_, Faber>) -> Res<()> {
-    let data = faber.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || Store::new(&data).clear_removed_for_catalog())
+pub(crate) async fn tools_clear_removed(h: &Host) -> Res<()> {
+    let data = h.data_dir.clone();
+    tokio::task::spawn_blocking(move || Store::new(&data).clear_removed_for_catalog())
         .await
         .map_err(|_| "error.tools.remove".to_string())?
         .map_err(|_| "error.tools.remove".to_string())

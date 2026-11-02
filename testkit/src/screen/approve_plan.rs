@@ -112,13 +112,13 @@ fn run(ctx: &mut Ctx, codex: bool, stop: bool) -> Result {
         same(page.count(&css("article.ai"))?, 1, "Stop does not send work after the held plan result arrives")?;
         same(page.count(&css(".mine.queued"))?, 0, "the approved work was removed from the queue")?;
         same(page.count(&css("article.ai").has_text("Started the approved work."))?, 0, "no approved work reached a replacement process")?;
-        let approved = page.labelled("wake.approvedPlan")?;
+        let approved = css(".faber-act").has_text(&page.text_of("wake.approvedPlan")?);
         same(page.count(&approved)?, 0, "the approved work was cancelled before dispatch")?;
         return Ok(());
     }
     page.wait_visible(&css("article").has_text("Started the approved work."))?;
     page.wait_gone(&card)?;
-    let approved = page.labelled("wake.approvedPlan")?;
+    let approved = css(".faber-act").has_text(&page.text_of("wake.approvedPlan")?);
     page.wait_visible(&approved)?;
     ensure(
         !page

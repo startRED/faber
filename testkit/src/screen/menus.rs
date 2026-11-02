@@ -7,6 +7,22 @@ use std::time::Duration;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 
+/// A point near the left edge of `.main` whose element, up to `.main`, holds no text of its own and is no field, button,
+/// link, paragraph or focusable row: the empty margin beside the thread.
+const EMPTY_SPOT: &str = "(() => {
+  const m = document.querySelector('.main'); const r = m.getBoundingClientRect();
+  const own = (n) => [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
+  const busy = 'p,li,button,a,input,textarea,select,[contenteditable],[tabindex],img,svg';
+  for (const fy of [0.1, 0.25, 0.4, 0.55, 0.7]) for (const dx of [6, 16]) {
+    const x = r.left + dx, y = r.top + r.height * fy, el = document.elementFromPoint(x, y);
+    if (!el || !m.contains(el)) continue;
+    let ok = true;
+    for (let n = el; n; n = n.parentElement) { if (own(n) || n.matches(busy)) { ok = false; break; } if (n === m) break; }
+    if (ok) return { x, y };
+  }
+  return null;
+})()";
+
 pub fn scenarios() -> Vec<Scenario> {
     vec![Scenario { name: "right-click opens Faber's short menus on a chat and a text field, and nothing anywhere else", run: right_click }]
 }
@@ -73,12 +89,20 @@ fn right_click(ctx: &mut Ctx) -> Result {
     page.wait_visible(&css(".list .crow .item").has_text("The blue sky"))?;
     page.wait_visible(&css(".dock .composer"))?;
 
-    // The title bar, the sidebar footer and the greeting area show nothing at all.
-    for place in ["header.top", ".side-foot", ".main"] {
+    // The title bar, the sidebar footer and an empty spot of the main area show nothing at all.
+    for place in ["header.top", ".side-foot"] {
         page.right_click(&css(place))?;
         std::thread::sleep(Duration::from_millis(150));
         same(page.count(&css(".cmenu"))?, 0, &format!("menus after a right-click on {place}"))?;
     }
+    // The middle of the main area holds the thread now, whose messages and Faber rows have menus of their own.
+    let spot = page.eval(EMPTY_SPOT)?;
+    let (Some(x), Some(y)) = (spot["x"].as_f64(), spot["y"].as_f64()) else {
+        return Err("no empty spot in .main to right-click: every probe landed on text, a field or a button".into());
+    };
+    page.cdp.right_click_at(x, y)?;
+    std::thread::sleep(Duration::from_millis(150));
+    same(page.count(&css(".cmenu"))?, 0, "menus after a right-click on an empty spot of .main")?;
 
     // A text field: Cut, Copy, Paste, Select all, working through the real clipboard.
     let composer = page.labelled("composer.message")?;

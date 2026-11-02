@@ -1,12 +1,38 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
+import { keepParts, timeline } from '../../ui/timeline.ts';
 import type { Message, ToolUse } from '../../ui/api.ts';
 import { applyLook } from '../../ui/appearance.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, toolLine, toolRow } from '../../ui/worklog.ts';
+import { changeOf, groupLabel, groupSteps, sourcesOf, stepLine, stepsSummary, toolLine, toolRow } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 import { sala } from './appearance.check.ts';
+
+check('worklog: file paths use the conversation folder and keep the full detail', () => {
+  useLanguage('en');
+  const folder = 'C:\\Projects\\app';
+  const read = (path: string): ToolUse => ({ id: 'path', name: 'Read', input: { file_path: path }, ok: true });
+  equal(toolRow(read('c:\\Projects\\app\\src\\b.txt'), true, folder).detail, 'src/b.txt');
+  equal(toolRow(read('C:/Projects/application/b.txt'), true, folder).detail, 'application/b.txt');
+  equal(toolRow(read('/tmp/proj-cwd/b.txt'), true, folder).detail, 'proj-cwd/b.txt');
+  equal(toolRow(read('\\\\server\\share\\app\\src\\lib\\a.ts'), true, '\\\\SERVER\\Share\\app').detail, 'src/lib/a.ts', 'a network share ignores letter case');
+  equal(toolRow(read('/Home/app/a.ts'), true, '/home/app').detail, 'app/a.ts', 'elsewhere letter case counts');
+  equal(toolRow({ id: 'n', name: 'NotebookEdit', input: { notebook_path: 'C:\\Projects\\app\\book.ipynb' } }, false, folder).detail, 'book.ipynb');
+  equal(toolRow({ id: 'f', name: 'fileChange', input: [{ path: 'C:\\Projects\\app\\a.txt' }, { path: 'D:\\other\\b.txt' }] }, false, folder).detail, 'a.txt, other/b.txt');
+  equal(toolRow({ id: 'f', name: 'fileChange', input: { 'C:\\Projects\\app\\a.txt': {} } }, false, folder).detail, 'a.txt');
+  equal(toolLine({ id: 'c', name: 'Bash', input: { command: 'cat C:\\Projects\\app\\a.txt' } }, folder), 'Running · cat C:\\Projects\\app\\a.txt');
+  const root = document.createElement('div'); document.body.append(root);
+  const path = 'c:\\Projects\\app\\src\\b.txt';
+  const dispose = render(() => createComponent(Thread, { messages: [{ id: 'paths', role: 'assistant', at: 0, status: 'done', text: '', tools: [read(path)] }], workingFolder: folder, from: 0, conversationId: 'paths', options: [], onBranch: () => {} }), root);
+  try {
+    const button = root.querySelector<HTMLButtonElement>('.step-line')!;
+    equal(button.querySelector('i')!.textContent, 'src/b.txt');
+    equal(button.title, path);
+    button.click();
+    equal(root.querySelector('.step-what')!.textContent, path);
+  } finally { dispose(); root.remove(); }
+});
 
 check('worklog: every Claude Code tool reads as what it does, in words', () => {
   equal(toolRow({ id: '1', name: 'Read', input: { file_path: 'C:\\p\\a.txt' } }).label, t('tool.read'));
@@ -126,12 +152,12 @@ check('worklog: an edit in flight shows its lines under the status line, and its
     deepEqual(shown(), ['+line 0', '+line 1', '+line 2', '+line 3'], 'the first four lines show');
     equal(root.querySelector('.changed p')!.textContent, '2 more lines');
     equal(root.querySelector('.changed')!.getAttribute('aria-hidden'), 'true', 'the status line already says it; the lines are for the eye');
-    equal(root.querySelector('.tools .delta')!.getAttribute('aria-label'), '6 lines added');
+    equal(root.querySelector('.step .delta')!.getAttribute('aria-label'), '6 lines added');
     setMessage({ ...message(), tools: [{ ...message().tools![0]!, ok: true }] });
     ok(root.querySelector('.changed'), 'a finished edit stays until the next step or the answer');
     const said = 'Writing the notes.\n\n';
     setMessage({ ...message(), text: said, textBreaks: [said.length], activityEnd: said.length });
-    ok(root.querySelector('.changed'), 'narration before the edit is not the answer');
+    ok(root.querySelector('.changed'), 'words before the edit are not the answer');
     setMessage({ ...message(), text: said + 'Done.' });
     equal(root.querySelector('.changed'), null, 'the answer takes its place');
     setMessage({ ...message(), text: said, tools: [...message().tools!, { id: 'b', name: 'Bash', input: { command: 'npm test' } }] });
@@ -179,12 +205,12 @@ check('worklog: a step that runs long says for how long, and a quick one never d
   const [message, setMessage] = createSignal<Message>({ id: 'long', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [build(5_000)] });
   const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'long', options: [], onBranch: () => {} }), root);
   try {
-    const long = () => root.querySelector('.activity-latest .long');
+    const long = () => root.querySelector('.step .long');
     equal(long(), null, 'five seconds is no long step');
     setMessage({ ...message(), tools: [build(150_000, undefined, 'slow')] });
-    equal(long()!.textContent, ' · 2 min');
+    equal(long()!.textContent, '· 2 min');
     equal(long()!.getAttribute('aria-hidden'), 'true', 'the live region says the step, not a clock');
-    equal(root.querySelector('.activity-latest .step')!.textContent, 'Running · cargo build', 'the step keeps its words');
+    ok(root.querySelector('.step-line')!.textContent!.includes('cargo build'), 'the step keeps its words');
     setMessage({ ...message(), tools: [build(150_000, true, 'slow')] });
     equal(long(), null, 'an ended step has no running time');
     setMessage({ ...message(), tools: [{ id: 'old', name: 'Bash', input: { command: 'cargo build' } }] });
@@ -231,103 +257,46 @@ check('worklog: steps of one kind in a row group into one phrase, and a run that
   equal(stepLine([], run('lost')), 'Running · ls', 'a step no group holds reads on its own');
 });
 
-check('worklog: a work log with a run of steps shows one phrase that opens into the steps, and the status line counts them', () => {
+check('worklog: a fold summarizes steps, opens them, and stays open while they grow', () => {
   useLanguage('en');
-  const root = document.createElement('div');
-  document.body.append(root);
-  const read = (id: string, file: string, ok?: boolean) => ({ id, name: 'Read', input: { file_path: file }, ok });
-  const [message, setMessage] = createSignal<Message>({
-    id: 'grouped', role: 'assistant', at: 0, status: 'streaming', text: '',
-    tools: [read('a', 'a.ts', true), read('b', 'b.ts', true), { id: 'x', name: 'Bash', input: { command: 'npm test' }, ok: true }],
-  });
+  const root = document.createElement('div'); document.body.append(root);
+  const read = (id: string, ok?: boolean) => ({ id, name: 'Read', input: { file_path: `${id}.ts` }, ok });
+  const [message, setMessage] = createSignal<Message>({ id: 'grouped', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [read('a', true), read('b', true)] });
   const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'grouped', options: [], onBranch: () => {} }), root);
   try {
-    const group = () => root.querySelector<HTMLDetailsElement>('.tools details.step-group');
-    equal(group()!.querySelector('summary')!.textContent, 'Reading 2 files');
-    equal([...group()!.querySelectorAll('.tools > span')].length, 2, 'it opens into the single steps');
-    equal(root.querySelectorAll('.activity-body > .tools > span').length, 1, 'the command after it is its own step');
-    equal(root.querySelector('.activity-latest .step')!.textContent, 'Running · npm test', 'the newest step is a command alone');
-    group()!.open = true;
-    setMessage({ ...message(), tools: [...message().tools!, read('c', 'c.ts')] });
-    equal(root.querySelector('.activity-latest .step')!.textContent, 'Reading · c.ts', 'a new kind starts its own run');
-    setMessage({ ...message(), tools: [read('a', 'a.ts', true), read('b', 'b.ts', true), read('c', 'c.ts'), read('d', 'd.ts')] });
-    equal(root.querySelector('.activity-latest .step')!.textContent, 'Reading 4 files · d.ts', 'the sentence counts the run so far');
-    ok(group()!.open, 'a run the person opened stays open while it grows');
-    equal(group()!.querySelector('summary')!.textContent, 'Reading 4 files');
-    setMessage({ ...message(), tools: [read('a', 'a.ts', true), read('b', 'b.ts', false), read('c', 'c.ts', true), read('d', 'd.ts', true)] });
-    equal(group()!.querySelector('summary')!.textContent, 'Reading 4 files, 1 failed', 'a failed step is said beside the phrase, with a separator a screen reader hears');
-    equal(getComputedStyle(group()!.querySelector('summary .sr-only')!).position, 'absolute', 'and the separator is not drawn');
-    setMessage({ ...message(), status: 'done', text: 'Done.' });
-    ok(group(), 'the phrase stays in the finished log');
-  } finally {
-    dispose();
-    root.remove();
-  }
+    const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
+    ok(head.textContent!.includes('Read 2 files'));
+    equal(head.getAttribute('aria-expanded'), 'false');
+    head.click();
+    equal(root.querySelectorAll('.steps-list .step').length, 2);
+    setMessage({ ...message(), tools: [...message().tools!, read('c')] });
+    equal(head.getAttribute('aria-expanded'), 'true');
+    ok(head.textContent!.includes('Reading · c.ts'));
+    equal(root.querySelectorAll('.steps-list .step').length, 3);
+    setMessage({ ...message(), tools: [read('a', true), read('b', false), read('c', true)] });
+    ok(head.textContent!.includes('1 failed'));
+    equal(root.querySelectorAll('.step[data-state="failed"]').length, 1);
+  } finally { dispose(); root.remove(); }
 });
 
-// The group is a chip like the single steps beside it. The work log's `.disclosure summary` rules have the same specificity and
-// come later in the sheet, so the chip's own rules must outrank them: otherwise it is a taller, square, full-width bar.
-check('worklog: a group of steps is a chip like its neighbours, closed and open, for Claude and Codex steps in English and in German at 720 px', () => {
-  const claude: ToolUse[] = [
-    { id: 'r1', name: 'Read', input: { file_path: 'a.ts' }, ok: true },
-    { id: 'r2', name: 'Read', input: { file_path: 'b.ts' }, ok: false },
-    { id: 'x', name: 'Bash', input: { command: 'npm test' }, ok: true },
-  ];
-  const codex: ToolUse[] = [
-    { id: 'c1', name: 'commandExecution', input: 'ls', ok: true },
-    { id: 'c2', name: 'commandExecution', input: 'pwd', ok: true },
-    { id: 'f1', name: 'fileChange', input: [{ path: 'a.txt', diff: '' }], ok: true },
-    { id: 'f2', name: 'fileChange', input: [{ path: 'b.txt', diff: '' }], ok: true },
-    { id: 'w', name: 'webSearch', input: 'faber', ok: true },
-  ];
-  const cases = [
-    ['en', claude, ['tool.group.read']],
-    ['de', claude, ['tool.group.read']],
-    ['en', codex, ['tool.group.command', 'tool.group.change']],
-    ['de', codex, ['tool.group.command', 'tool.group.change']],
-  ] as const;
+check('worklog: folded steps fit a 720 px window in English and German', () => {
   try {
-    for (const [lang, tools, keys] of cases) {
-      useLanguage(lang);
-      const root = document.createElement('div');
-      applyLook(sala({ motion: 'none' }), root);
-      root.style.width = '720px';
-      document.body.append(root);
-      const message: Message = { id: 'look', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [...tools] };
-      const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'look', options: [], onBranch: () => {} }), root);
+    for (const language of ['en', 'de']) {
+      useLanguage(language);
+      const root = document.createElement('div'); applyLook(sala({ motion: 'none' }), root); root.style.width = '720px'; document.body.append(root);
+      const tools: ToolUse[] = [{ id: 'a', name: 'Read', input: { file_path: 'a.ts' }, ok: true }, { id: 'b', name: 'Read', input: { file_path: 'b.ts' }, ok: false }];
+      const dispose = render(() => createComponent(Thread, { messages: [{ id: 'look', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools }], from: 0, conversationId: 'look', options: [], onBranch: () => {} }), root);
       try {
-        root.querySelector<HTMLDetailsElement>('details.activity')!.open = true;
-        const groups = [...root.querySelectorAll<HTMLDetailsElement>('.activity-body > .tools > details.step-group')];
-        const chip = root.querySelector<HTMLElement>('.activity-body > .tools > span')!;
-        equal(groups.length, keys.length, `${lang}: ${keys.length} group(s) next to a single chip`);
-        const limit = root.getBoundingClientRect().right;
-        groups.forEach((group, i) => {
-          const summary = group.querySelector<HTMLElement>('summary')!;
-          ok(summary.textContent!.startsWith(t(keys[i]!, { n: 2 })), `${lang}: the group says its phrase: ${summary.textContent}`);
-          for (const open of [false, true]) {
-            group.open = open;
-            const when = `${lang}, ${keys[i]}, ${open ? 'open' : 'closed'}`;
-            const s = getComputedStyle(summary);
-            const c = getComputedStyle(chip);
-            equal(`${s.paddingTop} ${s.paddingRight}`, `${c.paddingTop} ${c.paddingRight}`, `${when}: the padding is the chip's`);
-            equal(s.borderTopLeftRadius, c.borderTopLeftRadius, `${when}: the corners are the chip's`);
-            ok(s.borderTopLeftRadius !== '0px', `${when}: the corners are round`);
-            equal(getComputedStyle(summary, '::after').marginLeft, '0px', `${when}: the chevron sits beside the phrase, not at the far edge`);
-            const box = summary.getBoundingClientRect();
-            const chipBox = chip.getBoundingClientRect();
-            ok(Math.abs(box.height - chipBox.height) <= 3, `${when}: as tall as a chip (${box.height} against ${chipBox.height})`);
-            ok(box.width < group.getBoundingClientRect().width - (open ? 100 : -1), `${when}: the header is not a full-width bar (${box.width} in ${group.getBoundingClientRect().width})`);
-            ok(box.right <= limit + 1, `${when}: stays inside 720 px`);
-          }
-        });
-      } finally {
-        dispose();
-        root.remove();
-      }
+        const head = root.querySelector<HTMLButtonElement>('.steps-head')!;
+        for (const open of [false, true]) {
+          equal(head.getAttribute('aria-expanded'), String(open));
+          ok(head.getBoundingClientRect().right <= root.getBoundingClientRect().right + 1, language);
+          if (!open) head.click();
+        }
+        equal(root.querySelectorAll('.steps-list .step').length, 2);
+      } finally { dispose(); root.remove(); }
     }
-  } finally {
-    useLanguage('en');
-  }
+  } finally { useLanguage('en'); }
 });
 
 // The time a subagent took, from the engine's own stamps on its call: shown once it ended, never for a quick or a refused one.
@@ -375,4 +344,55 @@ check('settings_search: unknown choices never leak into the settings work log', 
     }),
     { label: 'PowerShell', detail: 'cargo t --suite ui' },
   );
+});
+
+check('timeline: words, thoughts, steps and agents keep their places and unchanged objects', () => {
+  const tools: ToolUse[] = [
+    { id: 'read', name: 'Read', input: {}, at: 3, ok: true },
+    { id: 'agent', name: 'Agent', input: {}, at: 3, ok: true },
+    { id: 'run', name: 'Bash', input: {}, at: 6, ok: true },
+  ];
+  const m: Message = { id: 't', role: 'assistant', at: 0, text: 'oneTWOend', tools, thinking: 'firstsecond',
+    thinkingMarks: [{ from: 0, at: 3, steps: 0 }, { from: 5, at: 3, steps: 1 }] };
+  const parts = timeline(m, m.text);
+  deepEqual(parts.map((p) => p.kind), ['text', 'steps', 'agent', 'text', 'steps', 'text']);
+  const first = parts[1]!;
+  ok(first.kind === 'steps');
+  if (first.kind === 'steps') deepEqual(first.items.map((item) => item.kind === 'thought' ? item.text : item.tool.id), ['first', 'read', 'second']);
+  const kept = keepParts(parts, timeline(m, m.text));
+  equal(kept, parts, 'an unchanged timeline retains its array');
+  const grown = keepParts(parts, timeline({ ...m, text: m.text + '!' }, m.text + '!'));
+  equal(grown[1], parts[1], 'unchanged steps keep their object');
+  equal(grown[2], parts[2], 'the agent keeps its object');
+  ok(grown[5] !== parts[5], 'the grown words get a new object');
+  for (const end of [undefined, 3]) {
+    const old = timeline({ ...m, thinking: '', thinkingMarks: [], activityEnd: end, tools: tools.filter((tool) => tool.name !== 'Agent').map(({ at: _at, ...tool }) => tool) }, m.text);
+    deepEqual(old.map((p) => p.kind), end ? ['text', 'steps', 'text'] : ['steps', 'text']);
+    const steps = old.find((p) => p.kind === 'steps');
+    ok(steps?.kind === 'steps' && steps.items.length === 2, 'all old steps stay together at the old boundary');
+  }
+});
+
+check('timeline: nested helpers stay beside their ancestor before the next step', () => {
+  const m: Message = { id: 'nested', role: 'assistant', at: 0, text: 'before after', tools: [
+    { id: 'parent', name: 'Agent', input: {}, at: 6 },
+    { id: 'next', name: 'Read', input: {}, at: 6 },
+    { id: 'child', name: 'Agent', input: {}, parent: 'parent' },
+    { id: 'grandchild', name: 'Task', input: {}, parent: 'child' },
+    { id: 'child-work', name: 'Read', input: {}, parent: 'child' },
+  ] };
+  const parts = timeline(m, m.text);
+  deepEqual(parts.map((part) => part.kind === 'agent' ? part.tool.id : part.kind), ['text', 'parent', 'child', 'grandchild', 'steps', 'text']);
+});
+
+check('worklog: completed steps use past tense and summaries count ended work', () => {
+  useLanguage('en');
+  const read: ToolUse = { id: 'r', name: 'Read', input: { file_path: 'a' }, ok: true };
+  const run: ToolUse = { id: 'c', name: 'Bash', input: { command: 'test' }, ok: true };
+  equal(toolRow(read).label, t('tool.read'));
+  equal(toolRow(read, true).label, t('step.read'));
+  equal(toolRow(run, true).label, t('step.command'));
+  equal(stepsSummary([read, run, { ...read, id: 'pending', ok: undefined }, { id: 'other', name: 'Unknown', input: {}, ok: false }]),
+    'Read 1 file · Ran 1 command · 1 other step');
+  equal(stepsSummary([{ ...run, ok: undefined }]), '');
 });

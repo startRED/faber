@@ -366,8 +366,8 @@ fn opens_by_itself(ctx: &mut Ctx) -> Result {
     let button = page.inner_text(&css(".run-btn"))?;
     ensure(button.contains(&words), || format!("the amber button should say {words:?}: {button:?}"))?;
     // A question with a long path stays inside the reading column and the stage, beside the docked column.
-    let inside = page.eval("(() => { const stage = document.querySelector('.main').getBoundingClientRect().right; return [...document.querySelectorAll('article .ask, article .activity summary')].every((e) => e.getBoundingClientRect().right <= stage + 0.5); })()")?;
-    same(inside.as_bool(), Some(true), "the card and the activity row stay inside the stage")?;
+    let inside = page.eval("(() => { const stage = document.querySelector('.main').getBoundingClientRect().right; return [...document.querySelectorAll('article .ask, article .step-line, article .steps-head')].every((e) => e.getBoundingClientRect().right <= stage + 0.5); })()")?;
+    same(inside.as_bool(), Some(true), "the card and the step rows stay inside the stage")?;
     ctx.shot(&mut app, "running-column-asks")?;
     let page = &mut app.page;
     // Closing it leaves only the button amber, and the same question does not open it again.
@@ -608,9 +608,12 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let share = css(".usage .vendor").has_text("Claude").css(".share");
-    let unknown = page.text_of("quota.unknown")?;
-    page.wait_visible(&share)?;
-    same(page.inner_text(&share)?, unknown, "before the CLI has reported")?;
+    // Before the CLI has reported there is no bar and no number: the line says when the usage will show.
+    let waiting = css(".usage .vendor").has_text("Claude").css(".unavailable");
+    let line = page.text_of("side.usage")?;
+    page.wait_visible(&waiting)?;
+    same(page.inner_text(&waiting)?, line, "before the CLI has reported")?;
+    same(page.count(&share)?, 0, "no number before the CLI has reported")?;
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;

@@ -308,6 +308,7 @@ impl Core {
             None if on && idle && last => self.go_on(conv, reply_id),
             None => {}
         }
+        self.request_conclusion(conv);
         self.tell_parent(conv);
     }
 
@@ -402,6 +403,7 @@ impl Core {
                 }
             }
         }
+        self.request_conclusion(conv);
         self.tell_parent(conv);
     }
 

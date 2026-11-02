@@ -20,11 +20,11 @@ and check it the way the project says. When the task you take next has nothing t
 Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
-with done set to true; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
+with outcome done, saying what you checked; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
 
 /// What the agent is told once, when it first says nothing is left: a second look at the original request before Faber believes it.
 pub const CHECK: &str = "Before you stop: reread the person's original request word for word. List anything that is not done or not \
-verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with done set to true again; only if you \
+verified. If anything is left, continue it now. If nothing is left, call your wrap_up tool with outcome done again, saying what you checked; only if you \
 have no wrap_up tool, end your reply with this line alone again: [keep going: stop]";
 
 /// The line the agent ended its reply with when nothing was left, before the closing box's `done` (task 017). Still read for a
@@ -163,7 +163,7 @@ pub fn stop_at(text: &str) -> Option<usize> {
 /// Takes every [`STOP`] out of a reply, since it is a signal for Faber and never words for the person (task 015): a line that
 /// holds only it (with the marks a model puts around a line) wherever it is, such as before the answer to a hook, and one at
 /// the very end of the last line. `positions` are offsets into the text in UTF-16 units (the reply's `activity_end` and
-/// `text_breaks`); each one after a cut moves back with it. True when there was one.
+/// `text_breaks`, where its steps and thinking sit); each one after a cut moves back with it. True when there was one.
 pub fn strip_stop(text: &mut String, positions: &mut [&mut usize]) -> bool {
     let mark = |c: char| matches!(c, '`' | '*' | '_' | '"' | '\'');
     let bare = |line: &str| line.trim().trim_matches(|c: char| mark(c) || c == '.').trim().eq_ignore_ascii_case(STOP);
@@ -418,7 +418,12 @@ impl Core {
             let mut end = m.activity_end.unwrap_or(0);
             let had_breaks = m.text_breaks.is_some();
             let mut breaks = m.text_breaks.take().unwrap_or_default();
-            let mut positions: Vec<&mut usize> = std::iter::once(&mut end).chain(breaks.iter_mut()).collect();
+            // Where each step and each piece of thinking sits among the words moves back with the cut too.
+            let mut positions: Vec<&mut usize> = std::iter::once(&mut end)
+                .chain(breaks.iter_mut())
+                .chain(m.tools.iter_mut().flatten().filter_map(|t| t.at.as_mut()))
+                .chain(m.thinking_marks.iter_mut().map(|mark| &mut mark.at))
+                .collect();
             let found = strip_stop(&mut m.text, &mut positions);
             if m.activity_end.is_some() {
                 m.activity_end = Some(end);
@@ -433,6 +438,9 @@ impl Core {
             return None;
         }
         c.keep_going.as_ref()?;
+        if c.waiting_on.is_some() {
+            return None;
+        }
         let last_idx = c.messages.len().saturating_sub(1);
         let silent_twice = last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
         let halt_id = if silent_twice {
@@ -445,6 +453,9 @@ impl Core {
             reply_id.to_string()
         };
         let m = c.messages.last_mut()?;
+        if silent_twice {
+            m.halt = Some("reason.keepGoing.silent".into());
+        }
         let ok = m.status == Some(Status::Done);
         let error = m.error.clone().unwrap_or_else(|| "error.turnFailed".into());
         let asked = ok && unanswered_question(m);
@@ -474,7 +485,7 @@ impl Core {
         let before = kg.clone();
         self.note_away(conv, &halt_id);
         let decision = if silent_twice {
-            Next::Halt("reason.keepGoing.done")
+            Next::Halt("reason.keepGoing.silent")
         } else {
             next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
         };
@@ -502,7 +513,7 @@ impl Core {
     /// wakes drain after Error. With an empty queue Faber sends its own next turn.
     pub(super) fn keep_going_after(&mut self, conv: &str, reply_id: Option<String>) {
         let Some(reply_id) = reply_id else { return };
-        let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };
+        let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some() && c.waiting_on.is_none()) else { return };
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some())
             || c.messages
                 .last()
@@ -583,7 +594,8 @@ impl Core {
     /// call this while it runs).
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         let Some(c) = self.convs.get(conv) else { return };
-        if c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
+        if c.waiting_on.is_some()
+            || c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
             || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
         {
             return;
@@ -837,7 +849,7 @@ impl Core {
         let Some(c) = self.convs.get_mut(conv) else { return };
         let current = c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_some_and(|w| w.until == until);
         let at_rest = c.messages.last().is_some_and(|m| m.id == reply_id && m.status != Some(Status::Streaming));
-        if !current || !at_rest || self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
+        if c.waiting_on.is_some() || !current || !at_rest || self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
             return;
         }
         if let Some(kg) = c.keep_going.as_mut() {

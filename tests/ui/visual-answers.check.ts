@@ -807,24 +807,23 @@ check('visual answers: a visual written between tool steps keeps its card when t
   const message: Message = { ...messages()[0]!, text: before + 'Done.', activityEnd: before.length, tools: [{ id: 'read', name: 'Read', input: {}, ok: true }] };
   const dispose = render(() => createComponent(Thread, { messages: [message], visuals: [a], conversationId: 'visual', options: [], from: 0, onBranch: () => {} }), host);
   try {
-    ok(host.querySelector('.visual-card')?.closest('details'), 'the work log keeps the visual card instead of raw code');
+    ok(host.querySelector('.ai > .md .visual-card'), 'the visual card stays visible in the reply');
+    ok(host.querySelector('.visual-card')!.compareDocumentPosition(host.querySelector('.steps')!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the card stays before the tool step');
     equal(host.querySelector('.codeblock'), null);
     ok(host.textContent!.includes('Done.'));
   } finally { dispose(); host.remove(); }
 });
 
-check('visual files: saved file locators do not unfold the hidden narration beside More', () => {
+check('visual files: saved file locators preserve visible words in order', () => {
   const host = document.createElement('div'); document.body.append(host);
   const a = answer(); a.versions = [{ ...a.versions[0]!, file: 'page.html', start: 0, end: 0 }];
   const before = 'Hidden first paragraph.\n\nHidden second paragraph.\n\nShown third paragraph.\n\nShown fourth paragraph.\n\n';
   const message: Message = { ...messages()[0]!, text: before + 'Done.', activityEnd: before.length, tools: [{ id: 'read', name: 'Read', input: {}, ok: true }] };
   const dispose = render(() => createComponent(Thread, { messages: [message], visuals: [a], conversationId: 'visual', options: [], from: 0, onBranch: () => {} }), host);
   try {
-    ok(host.querySelector('.more-narration'));
-    ok(!host.textContent!.includes('Hidden first paragraph.'));
-    ok(host.textContent!.includes('Shown third paragraph.'));
-    host.querySelector<HTMLButtonElement>('.more-narration')!.click();
-    ok(host.textContent!.includes('Hidden first paragraph.'));
+    const words = [...host.querySelectorAll('.ai > .md')].map((part) => part.textContent).join('');
+    ok(words.includes('Hidden first paragraph.') && words.includes('Shown fourth paragraph.') && words.includes('Done.'));
+    ok(words.indexOf('Hidden first paragraph.') < words.indexOf('Shown fourth paragraph.'));
     equal(host.querySelectorAll('.visual-card').length, 1, 'saved file appears once, after the reply');
   } finally { dispose(); host.remove(); }
 });

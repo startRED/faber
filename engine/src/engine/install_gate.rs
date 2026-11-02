@@ -76,6 +76,7 @@ impl Engine {
         if cut.is_empty() {
             return;
         }
+        self.with(|c| c.update_resumes.extend(cut.iter().map(|(id, _)| id.clone())));
         let (engine, wait) = (self.clone(), self.with(|c| RESUME_WAIT * c.keep_pace));
         self.with(|c| c.opts.runtime.clone()).spawn(async move {
             tokio::time::sleep(Duration::from_secs_f64(wait)).await;
@@ -112,7 +113,7 @@ impl Core {
 /// The conversations to bring back after the restart for an update, in the data folder.
 const RESUME_FILE: &str = "resume-after-update.json";
 /// The wait before they go on, so the accounts and quotas are read first.
-const RESUME_WAIT: f64 = 20.0;
+pub(super) const RESUME_WAIT: f64 = 20.0;
 /// What the agent is told when Faber brings it back; the person sees `wake.updated` in their language instead.
 const RESUME: &str = "Faber restarted to install an update, which cut your last turn short. Pick up exactly where you left off \
 and finish what you were doing; do not start over.";

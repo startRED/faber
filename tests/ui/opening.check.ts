@@ -1,5 +1,6 @@
 import type { Conversation, HeardMessage, Message, ToolUse } from '../../ui/api.ts';
-import { createOpening, upsert, whole } from '../../ui/opening.ts';
+import { combine, createOpening, upsert, whole } from '../../ui/opening.ts';
+import { createFrameFeed } from '../../ui/frame.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const message = (id: string, text: string, status: Message['status']): Message => ({ id, role: 'assistant', text, at: 1, status });
@@ -91,4 +92,53 @@ check('opening: an update of a streaming reply is made whole from the steps the 
   ok(whole(undefined, full) === full, 'an update with every step is taken as it is');
   const c = conversation('a', [held]);
   ok(upsert(c, heard([{ id: 'zz', same: true }], 0)) === c, 'upsert leaves the conversation alone when it cannot be made whole');
+});
+
+// W1 (2026-10-31): a streaming reply's words travel as the part that was added, never the whole text again.
+check('opening: words and thinking sent from a point go after what the screen holds, and a gap asks again', () => {
+  const held: Message = { ...message('r', 'Olá 🦀', 'streaming'), thinking: 'Plan' };
+  const next = whole(held, { ...message('r', ' and more', 'streaming'), textFrom: 6, thinking: ' it', thinkingFrom: 4 });
+  equal(next?.text, 'Olá 🦀 and more');
+  equal(next?.thinking, 'Plan it');
+  ok(next && !('textFrom' in next) && !('thinkingFrom' in next), 'the reply on screen is whole');
+  equal(whole(held, { ...message('r', ' more', 'streaming'), textFrom: 3 }), undefined, 'a piece that does not start where the screen ends is asked again');
+  equal(whole(undefined, { ...message('r', ' more', 'streaming'), textFrom: 3 }), undefined, 'and so is one for a reply the screen lacks');
+  equal(whole(held, message('r', 'All new', 'done'))?.text, 'All new', 'a whole text replaces it');
+  const c = upsert(conversation('a', [held]), { ...message('r', '!', 'streaming'), textFrom: 6 });
+  equal(c.messages[0]?.text, 'Olá 🦀!');
+});
+
+check('opening: two held updates of one reply make one with the words of both', () => {
+  const first: HeardMessage = { ...message('r', ' and', 'streaming'), textFrom: 5, tools: [{ id: 'b', name: 'Read', input: {} }], toolsFrom: 1 };
+  const second: HeardMessage = { ...message('r', ' more', 'streaming'), textFrom: 9, tools: [{ id: 'b', same: true }, { id: 'c', name: 'Bash', input: {} }], toolsFrom: 1 };
+  const both = combine(first, second);
+  deepEqual([both.text, both.textFrom, both.toolsFrom, both.tools?.map((t) => t.id)], [' and more', 5, 1, ['b', 'c']]);
+  ok(both.tools && !('same' in both.tools[0]!), 'a step the earlier update brought is taken from it');
+  const screen: Message = { ...message('r', 'Hello', 'streaming'), tools: [{ id: 'a', name: 'Read', input: {} }] };
+  equal(whole(screen, both)?.text, 'Hello and more');
+  deepEqual(whole(screen, both)?.tools?.map((t) => t.id), ['a', 'b', 'c']);
+  const fromWhole = combine(message('r', 'Hello', 'streaming'), { ...message('r', '!', 'streaming'), textFrom: 5 });
+  deepEqual([fromWhole.text, 'textFrom' in fromWhole], ['Hello!', false], 'after a whole update the two are whole');
+  const gap = combine(first, { ...message('r', 'x', 'streaming'), textFrom: 99 });
+  equal(gap.textFrom, 99, 'updates that do not meet stay as they came, and the screen asks again');
+});
+
+check('opening: events reach the screen once per frame, in order, in one batch', () => {
+  const heard: number[] = [];
+  let frame: (() => void) | undefined;
+  let asked = 0;
+  const cancelled: number[] = [];
+  const feed = createFrameFeed<number>((n) => heard.push(n), (run) => ((frame = run), ++asked), (id) => cancelled.push(id));
+  feed.push(1);
+  feed.push(2);
+  deepEqual(heard, [], 'nothing before the frame');
+  frame!();
+  deepEqual(heard, [1, 2]);
+  feed.push(3);
+  feed.flush();
+  deepEqual(heard, [1, 2, 3]);
+  equal(cancelled.at(-1), asked, 'a flush before the frame cancels it, so a hidden window never piles up frames');
+  feed.push(4);
+  feed.push(5);
+  equal(asked, 3, 'one frame asked for however many events wait');
 });

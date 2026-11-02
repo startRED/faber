@@ -372,7 +372,7 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         support::expect_method(&mut input, "initialized").await;
         let thread = support::expect_method(&mut input, if resumed { "thread/resume" } else { "thread/start" }).await;
         let words = thread["params"]["developerInstructions"].as_str().unwrap();
-        assert!(words.contains("You are Faber"));
+        assert!(words.contains("State the underlying model truthfully"));
         assert_eq!(words.contains("Use our glossary, exactly as written."), grouped);
         assert!(!words.contains("Old group words"));
         support::emit(&mut output, json!({"id":thread["id"],"result":{"thread":{"id":"group-test"}}})).await;
@@ -381,7 +381,7 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         turn = support::read_message(&mut input).await;
         let args = args.lock().unwrap();
         let words = &args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1];
-        assert!(words.contains("You are Faber"));
+        assert!(words.contains("State the underlying model truthfully"));
         assert_eq!(words.contains("Use our glossary, exactly as written."), grouped);
         assert!(!words.contains("Old group words"));
         assert_eq!(args.iter().any(|a| a == "--resume"), resumed);

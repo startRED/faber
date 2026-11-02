@@ -99,21 +99,23 @@ check('run: one header with the time, the turns and the plan, the earlier turns 
   }
 });
 
-check('run: narration in the work log folds to its last two paragraphs, and the answer never folds', async () => {
+check('run: words around steps stay visible in order', async () => {
   const root = document.createElement('div');
   document.body.append(root);
-  const dispose = render(() => createComponent(Thread, { conversationId: long.id, messages: messages.slice(-2), from: 0, options: [], onBranch: () => {} }), root);
+  const reply = messages.at(-1)!;
+  const before = 'First I read the page.\n\nThen I fixed the redirect.\n\nThen I checked the form.\n\n';
+  const last = { ...reply, text: before + 'All the pages work.', tools: [{ id: 'read', name: 'Read', input: {}, at: before.length, ok: true }] };
+  const dispose = render(() => createComponent(Thread, { conversationId: long.id, messages: [last], from: 0, options: [], onBranch: () => {} }), root);
   try {
     await settle();
-    const log = root.querySelector('.activity-body')!;
-    const more = log.querySelector<HTMLButtonElement>('.more-narration')!;
-    equal(more.textContent!.trim(), t('narration.more', { n: 1 }));
-    ok(!log.textContent!.includes('First I read the page') && log.textContent!.includes('Then I checked the form'), log.textContent!);
-    ok(root.querySelector(':scope .ai > .md')!.textContent!.includes('All the pages work.'), 'the answer stays whole');
-    more.click();
-    await settle();
-    ok(log.textContent!.includes('First I read the page'));
-    equal(log.querySelector('.more-narration'), null);
+    const parts = [...root.querySelectorAll('.ai > .md, .ai > .steps')];
+    deepEqual(parts.map((part) => part.classList.contains('md') ? 'words' : 'steps'), ['words', 'steps', 'words']);
+    const words = parts.map((part) => part.textContent ?? '').join(' ');
+    const phrases = ['First I read the page.', 'Then I fixed the redirect.', 'Then I checked the form.', 'All the pages work.'];
+    for (let i = 0; i < phrases.length; i++) {
+      ok(words.includes(phrases[i]!), phrases[i]);
+      if (i) ok(words.indexOf(phrases[i - 1]!) < words.indexOf(phrases[i]!), 'the words keep their order');
+    }
   } finally {
     dispose();
     root.remove();
@@ -147,7 +149,7 @@ check('run: trailing wake turns with only thinking keep the last reply with cont
     await settle();
     const shown = [...root.querySelectorAll(':scope > .ai')];
     equal(shown.length, 2, 'only the first reply and the last reply with content are shown');
-    ok(shown[1]!.querySelector(':scope > .md')!.textContent!.includes('All the pages work.'), 'the conclusion stays visible');
+    ok([...shown[1]!.querySelectorAll(':scope > .md')].some((part) => part.textContent!.includes('All the pages work.')), 'the conclusion stays visible');
     ok(shown[1]!.querySelector('.plan'), 'the plan stays attached to the visible reply');
   } finally {
     dispose();

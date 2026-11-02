@@ -136,7 +136,7 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
               </div>
             </Show>
             <div class="acct-rows" ref={animateList}>
-              <For each={rows()}>
+              <For each={rows().filter((r) => r.window)}>
                 {(row) => {
                   const w = () => x().windows.find((win) => win.name === row.window);
                   // A share that may still rise reads "at least" (C010); the long explanation stays in Details.
@@ -144,9 +144,10 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
                   const open = () => fresh().counting || !!fresh().uncountedPoints;
                   return (
                     <div class="urow">
-                      <span class="uname">{row.window ? t('quota.window', { window: windowName(row.window) }) : t('usage.noReading')}</span>
+                      <span class="uname">{t('quota.window', { window: windowName(row.window!) })}</span>
+                      <Show when={row.used !== undefined} fallback={<span class="unread">{t('usage.noReading')}</span>}>
                       <span class="share num">
-                        {row.used === undefined ? t('quota.unknown') : open() ? t('quota.atLeast', { share: percent(row.used) }) : percent(row.used)}
+                        {open() ? t('quota.atLeast', { share: percent(row.used!) }) : percent(row.used!)}
                         <Show when={row.used !== undefined && fresh().counting}>
                           <span class="sr-only"> {t('quota.counting')}</span>
                         </Show>
@@ -156,11 +157,14 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
                         <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}% 0 0)` }} />
                       </span>
                       <span class="reset">{row.used !== undefined && row.resetsAt ? t('usage.resets', { when: untilReset(row.resetsAt) }) : ''}</span>
+                      </Show>
                     </div>
                   );
                 }}
               </For>
             </div>
+            {/* Without a current reading, said once per card: where the limit can still be checked. */}
+            <Show when={rows().some((r) => r.used === undefined)}><p class="acct-foot acct-unread">{t('quota.unavailable')}</p></Show>
             <p class="acct-foot">{t('usage.ownSpend', { cost: money(x().ownSpendUsd) })}</p>
             <Fold id={`acct-${v()}-details`} title={t('usage.details')}>
               <div class="acct-details">

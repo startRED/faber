@@ -63,8 +63,8 @@ impl Level {
 
 const DESCRIPTION: &str = "Runs this project's own checks (its \"Proof commands\": lint, type checks, tests, builds) on this \
 folder and returns what failed, each failure with its file and line and the tool's suggested fix. `fast` (the default) runs \
-only the checks your changes can affect and skips one that already passed on the same content; `full` runs every check. Use \
-fast after a change, and full once before you say the work is done. The whole output stays in the log it names.";
+only the checks your changes can affect and skips one that already passed on the same content; `full` runs every check. You can use \
+fast after a change or full to run every check. The whole output stays in the log it names.";
 
 fn schema() -> Value {
     json!({

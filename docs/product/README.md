@@ -4,8 +4,8 @@ What Faber is, its principles and goals, and the order of work. Each part of the
 [docs/README.md](../README.md) says which page answers what.
 
 Status: Phase 1 (the new base) is in progress. The base app already works: the engine, the Tauri shell, Chat, Projects,
-Auto, five languages and the updater. What these pages describe beyond that base is still to be built, in the order of
-[Phases](#phases).
+Auto, the [command line](cli.md), five languages and the updater. What these pages describe beyond that base is still to
+be built, in the order of [Phases](#phases).
 
 ## What Faber is
 

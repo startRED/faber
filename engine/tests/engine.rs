@@ -1,7 +1,7 @@
 use crate::support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Experience, MemberState, Message, Permissions, Role, Settings, Setup, Status, Vendor};
+use faber_engine::model::{Area, Experience, MemberState, Message, Permissions, Role, Settings, Setup, Status, ThinkingMark, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -1844,7 +1844,7 @@ async fn research_plan_edit_approve_report(vendor: Vendor, area: Area) -> (suppo
             let args = f.args.lock().unwrap();
             let persona = args[0].windows(2).find(|pair| pair[0] == "--append-system-prompt").unwrap();
             assert!(persona[1].contains(phase));
-            assert!(persona[1].contains("You are Faber"));
+            assert!(persona[1].contains("State the underlying model truthfully"));
         }
         assert!(planning.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(report.args.lock().unwrap()[0].windows(2).any(|pair| pair == ["--permission-mode", "default"]));
@@ -1854,7 +1854,7 @@ async fn research_plan_edit_approve_report(vendor: Vendor, area: Area) -> (suppo
             let thread = wire.iter().find(|m| m["method"] == "thread/start" || m["method"] == "thread/resume").unwrap();
             let persona = thread["params"]["developerInstructions"].as_str().unwrap();
             assert!(persona.contains(phase));
-            assert!(persona.contains("You are Faber"));
+            assert!(persona.contains("State the underlying model truthfully"));
         }
         let plans: Vec<_> = planning.wire.messages().into_iter().filter(|m| m["method"] == "turn/start").collect();
         assert_eq!(plans.len(), 2);
@@ -2546,6 +2546,7 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
+    assert!(serde_json::to_value(&reply).unwrap().get("acts").is_none());
     assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".to_string()));
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["sessions"]["claude"], "c5b9834c-dfc7-4086-beed-2212be93b722");
@@ -2796,6 +2797,40 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     assert_eq!(reply.text_breaks.as_ref().unwrap()[0], blocks[0].encode_utf16().count() + 2);
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["messages"][1]["textBreaks"], serde_json::json!(reply.text_breaks));
+    // Each step records where the words stood when it started, so the thread draws them in the order they happened (W1).
+    let tools = reply.tools.as_ref().unwrap();
+    let len = reply.text.encode_utf16().count();
+    assert!(tools.iter().all(|t| t.at.is_some_and(|at| at <= len)), "{tools:?}");
+    assert!(tools.windows(2).all(|w| w[0].at <= w[1].at), "steps keep their order among the words");
+    let first_break = reply.text_breaks.as_ref().unwrap()[0];
+    assert!(tools.iter().any(|t| t.at == Some(first_break - 2)), "the step between the two blocks sits at the end of the first");
+    assert_eq!(saved["messages"][1]["tools"][0]["at"], serde_json::json!(tools[0].at));
+}
+
+#[tokio::test]
+async fn each_piece_of_thinking_records_where_it_falls_among_the_words() {
+    let thinking = |text: &str| Entry {
+        input: false,
+        msg: serde_json::json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":text}}}),
+    };
+    let mut entries = fixture("claude", "chat");
+    let first = entries.iter().position(|e| e.msg["event"]["delta"]["type"] == "text_delta").unwrap();
+    let last = entries.iter().rposition(|e| e.msg["event"]["delta"]["type"] == "text_delta").unwrap();
+    entries.insert(last + 1, thinking("Check the wording."));
+    entries.insert(first, thinking(" again."));
+    entries.insert(first, thinking("Light scatters"));
+    let dir = support::DataFolder::new();
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(entries).spawn);
+    engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.thinking.as_deref(), Some("Light scatters again.Check the wording."));
+    let at = reply.text.encode_utf16().count();
+    assert_eq!(
+        reply.thinking_marks,
+        [ThinkingMark { from: 0, at: 0, steps: 0 }, ThinkingMark { from: "Light scatters again.".len(), at, steps: 0 }],
+        "a piece that follows new words starts a new place; one that follows only thinking joins it"
+    );
 }
 
 #[tokio::test]
@@ -3228,7 +3263,7 @@ async fn without_a_name_nothing_is_added_and_clearing_it_stops_it_for_new_conver
     assert_eq!(args.len(), 3);
     for a in [&args[0], &args[2]] {
         let prompt = appended(a).unwrap();
-        assert!(prompt.contains("You are Faber"));
+        assert!(prompt.contains("State the underlying model truthfully"));
         assert!(!prompt.contains("called Erick."));
     }
     assert!(appended(&args[1]).is_some());
@@ -4956,6 +4991,17 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     let claude_args = claude.args.lock().unwrap()[0].clone();
     assert!(claude_args.windows(2).any(|a| a[0] == "--mcp-config" && a[1].contains("\"type\":\"sdk\"")), "{claude_args:?}");
     let reply = &c.messages[1];
+    let act = reply.acts.iter().find(|act| act.kind == faber_engine::act::ActKind::Helper).expect("helper act");
+    let brief = faber_engine::helper::prompt(&serde_json::json!({"title": "Check config", "brief": "Check config.toml for risky values."}))
+        .unwrap();
+    assert_eq!(act.sent.as_deref(), Some(brief.as_str()));
+    assert!(matches!(
+        &act.actor,
+        faber_engine::act::Actor::Ai { vendor: Vendor::Codex, model: Some(_), role: faber_engine::act::ActorRole::Helper }
+    ));
+    assert_eq!(act.what, "act.helper.started");
+    assert_eq!(act.params.get("vendor").map(String::as_str), Some("codex"));
+    assert!(act.params.contains_key("model"));
     let tools = reply.tools.as_ref().unwrap();
     let call = tools.iter().find(|t| t.name == "Helper").expect("the helper call is one step");
     let report = "`config.toml` contains only `timeout = 30` and `retries = 3`.";
@@ -5615,7 +5661,7 @@ async fn a_conversation_the_agent_started_reports_back_when_it_finishes() {
     let c = until(&engine, &parent, |c| c.queued.iter().any(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone"))).await;
     let note = c.queued.iter().find(|q| q.wake.is_some()).unwrap();
     assert!(
-        note.text.contains("\"Docs\"") && note.text.contains("finished its latest turn") && note.text.contains("Wrote the parser page."),
+        note.text.contains("\"Docs\"") && note.text.contains("concluded its task") && note.text.contains("Wrote the parser page."),
         "{}",
         note.text
     );
@@ -6435,7 +6481,7 @@ async fn research_codex_follow_up_reopens_backend_without_interrupting_active_pe
         let resumed = reply_style_codex_thread(&mut ordinary, "thread/resume", 0, "main").await;
         assert_eq!(resumed["params"]["threadId"], "main", "the conversation keeps its history");
         let instructions = resumed["params"]["developerInstructions"].as_str().unwrap();
-        assert!(instructions.contains("You are Faber"));
+        assert!(instructions.contains("State the underlying model truthfully"));
         assert!(!instructions.contains("Search the web over many steps") && !instructions.contains("Do not search yet."));
         assert_eq!(reply_style_rpc(&ordinary, "turn/start", 0).await["params"]["input"][0]["text"], SKY);
         assert!(!report.closed.load(std::sync::atomic::Ordering::SeqCst));
@@ -6910,4 +6956,43 @@ async fn project_adopted_tasks_location_approval_survives_reopen_without_approvi
     assert!(!root.path().join(".faber").exists());
     assert!(!data.path().join("decisions-kept.json").exists());
     reopened.shutdown();
+}
+
+#[test]
+fn faber_acts_old_messages_load_without_acts() {
+    let message = Message::new("old".into(), Role::User, "hello".into(), 0);
+    let json = serde_json::to_value(message).unwrap();
+    let loaded: Message = serde_json::from_value(json).unwrap();
+    assert!(serde_json::to_value(loaded).unwrap().get("acts").is_none());
+}
+
+#[test]
+fn faber_acts_wire_shape_and_unicode_limit() {
+    use faber_engine::act::{Actor, ActorRole, FaberAct};
+    use faber_engine::model::Wake;
+    use faber_engine::router::Pick;
+    use faber_engine::tools::kits::Report;
+    let sent = "é".repeat(4001);
+    let wake = serde_json::to_value(FaberAct::wake(&Wake::of("wake.keepGoing"), &sent)).unwrap();
+    assert_eq!(wake["kind"], "wake");
+    assert_eq!(wake["actor"], json!({"who": "faber"}));
+    assert_eq!(wake["change"], "keepGoing");
+    assert_eq!(wake["sent"].as_str().unwrap().chars().count(), 4000);
+    let pick =
+        Pick { vendor: Vendor::Codex, model: Some("model".into()), effort: "medium".into(), reason: "reason.autoOnly".into(), pace: None };
+    let route = serde_json::to_value(FaberAct::route(
+        &pick,
+        Actor::Ai { vendor: Vendor::Claude, model: Some("router".into()), role: ActorRole::Router },
+    ))
+    .unwrap();
+    assert_eq!(route["actor"], json!({"who":"ai", "vendor":"claude", "model":"router", "role":"router"}));
+    assert_eq!(route["params"], json!({"vendor":"codex", "model":"model", "effort":"medium"}));
+    let kit = serde_json::to_value(FaberAct::kit(&Report { ids: vec!["one".into(), "two".into()], ..Default::default() })).unwrap();
+    assert_eq!(kit["kind"], "kit");
+    assert_eq!(kit["params"]["ids"], "one, two");
+    assert_eq!(kit["change"], "toolKit");
+    let recovery = serde_json::to_value(FaberAct::recovery("act.recovery.moved", Some(Vendor::Codex))).unwrap();
+    assert_eq!(recovery["kind"], "recovery");
+    assert_eq!(recovery["params"], json!({"vendor":"codex"}));
+    assert!(recovery.get("why").is_none(), "the sentence already says why");
 }

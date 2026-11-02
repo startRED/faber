@@ -1219,6 +1219,7 @@ pub(super) mod tests {
                 actions: vec!["Start".into()],
                 done: false,
                 answered: None,
+                ..Default::default()
             });
             c.live.get_mut(&id).unwrap().turn = None;
         });

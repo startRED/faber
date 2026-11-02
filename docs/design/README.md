@@ -34,7 +34,8 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 The shared message box's lists and earlier messages live in [composer.md](composer.md); replies and plan approval in [conversation.md](conversation.md). Reading width and scroll position live in [reading.md](reading.md).
 Native pieces and generated pages have their own [visual-answer rules](visual-answers.md).
 
-- Every text on screen lives in `ui/locales/`, written by hand in each language.
+- Every text on screen lives in `ui/locales/`, written by hand in each language. A kind of step, a state and who is speaking each
+  has one drawing, chosen through `ui/icons/kinds.tsx` and listed in [icons.md](icons.md); the words stay beside it.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
 - Areas whose content can grow scroll; they never cut content off. Every scrollbar is the screen's own (`ui/styles.css`): no

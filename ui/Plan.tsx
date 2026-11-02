@@ -54,30 +54,37 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
 
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
  * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
-export function WrapUpBox(props: { box: WrapUp; open: boolean; onReply?: (text: string) => void }) {
+export function WrapUpBox(props: { box: WrapUp; open: boolean; written?: boolean; onReply?: (text: string) => void }) {
+  // A conclusion with its summary is the AI's own last message in the thread: the box then holds only its question, if any.
+  // An AI that concluded and wrote nothing after it leaves the recap here, so the result is never lost.
+  const own = () => !!props.box.summary && props.written !== false;
   return (
-    <section class="wrap-up" aria-label={t('wrap.label')}>
-      <p class="recap">{props.box.recap}</p>
-      <Show when={props.box.ask}>
-        {(ask) => (
-          <div class="wrap-ask">
-            <p class="q">{ask()}</p>
-            <Show when={!props.box.answered}>
-              <Show when={props.open && props.onReply}>
-                <div class="wrap-actions">
-                  <For each={props.box.actions ?? []}>
-                    {(action, i) => (
-                      <button type="button" class={i() === 0 ? 'btn primary' : 'btn secondary'} onClick={() => props.onReply?.(action)}>
-                        {action}
-                      </button>
-                    )}
-                  </For>
-                </div>
+    <Show when={!own() || props.box.ask}>
+      <section class="wrap-up" aria-label={t('wrap.label')}>
+        <Show when={!own()}>
+          <p class="recap">{props.box.recap}</p>
+        </Show>
+        <Show when={props.box.ask}>
+          {(ask) => (
+            <div class="wrap-ask">
+              <p class="q">{ask()}</p>
+              <Show when={!props.box.answered}>
+                <Show when={props.open && props.onReply}>
+                  <div class="wrap-actions">
+                    <For each={props.box.actions ?? []}>
+                      {(action, i) => (
+                        <button type="button" class={i() === 0 ? 'btn primary' : 'btn secondary'} onClick={() => props.onReply?.(action)}>
+                          {action}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
               </Show>
-            </Show>
-          </div>
-        )}
-      </Show>
-    </section>
+            </div>
+          )}
+        </Show>
+      </section>
+    </Show>
   );
 }

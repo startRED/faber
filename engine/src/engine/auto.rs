@@ -25,8 +25,9 @@ pub(super) struct Guess {
     request: String,
     /// What the small model said about the request (kind, level, confidence). The table runs when the message is sent, on the
     /// quota of that moment, so only this is kept.
-    result: Option<Option<Asked>>,
-    waiters: Vec<oneshot::Sender<Option<Asked>>>,
+    result: Option<Option<(Asked, crate::act::Actor)>>,
+    actor: crate::act::Actor,
+    waiters: Vec<oneshot::Sender<Option<(Asked, crate::act::Actor)>>>,
     /// The new conversation whose answering CLI starts as soon as the route is known.
     warm: Option<String>,
     /// A conversation under way is routed inside its own subscription, where the CLI keeps the history.
@@ -222,10 +223,15 @@ impl Core {
     }
 
     /// The route for a sent message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<Option<Asked>> {
+    pub(super) fn route_for(
+        &mut self,
+        request: &str,
+        attached: usize,
+        only: Option<Vendor>,
+    ) -> oneshot::Receiver<Option<(Asked, crate::act::Actor)>> {
         let (tx, rx) = oneshot::channel();
         match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
-            Some(Guess { result: Some(routed), .. }) => drop(tx.send(*routed)),
+            Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
             Some(g) => g.waiters.push(tx),
             None => {
                 self.start_guess(request.trim().to_string(), attached, None, only);
@@ -240,10 +246,11 @@ impl Core {
     /// The router answered (or gave up): the waiting message starts, and a routed draft gets its CLI ready.
     fn guessed(&mut self, request: &str, only: Option<Vendor>, verdict: Option<Asked>) {
         let Some(g) = self.guess.as_mut().filter(|g| g.request == request && g.only == only && g.result.is_none()) else { return };
-        g.result = Some(verdict);
+        let routed = verdict.map(|v| (v, g.actor.clone()));
+        g.result = Some(routed.clone());
         let (waiters, warm) = (std::mem::take(&mut g.waiters), g.warm.take());
         for waiter in waiters {
-            let _ = waiter.send(verdict);
+            let _ = waiter.send(routed.clone());
         }
         // A new conversation's CLI gets ready for the pick of this moment; the pick at dispatch may differ, and then the
         // process started here is replaced.
@@ -263,8 +270,9 @@ impl Core {
         let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
         let cands = candidates(&vendors, &self.codex_models);
         // One candidate needs no router: the everyday default answers.
-        let (answer, stop) = if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None) };
-        if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, waiters: vec![], warm, only, stop }) {
+        let (answer, stop, actor) =
+            if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None, crate::act::Actor::Faber) };
+        if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, actor, waiters: vec![], warm, only, stop }) {
             stop_router(old.stop);
         }
         let me = self.me.clone();
@@ -284,19 +292,19 @@ impl Core {
     }
 
     /// Asks the fastest cheap connected model once, in a session that reads and runs nothing.
-    fn ask_router(&mut self, prompt: String) -> (Option<oneshot::Receiver<Option<String>>>, Option<Stop>) {
+    fn ask_router(&mut self, prompt: String) -> (Option<oneshot::Receiver<Option<String>>>, Option<Stop>, crate::act::Actor) {
         if let Some(ask) = &self.opts.ask {
             let (tx, rx) = oneshot::channel();
             let answer = ask(prompt);
             tokio::spawn(async move { drop(tx.send(answer.await)) });
-            return (Some(rx), None);
+            return (Some(rx), None, crate::act::Actor::Faber);
         }
         let Some(Spare { session, answer, asked, vendor, model_name, .. }) = self.spare.take().or_else(|| self.open_router()) else {
-            return (None, None);
+            return (None, None, crate::act::Actor::Faber);
         };
         if self.allows(vendor, family_of(model_name), Purpose::Router, false).is_err() || self.begin_unbounded(vendor).is_err() {
             session.close();
-            return (None, None);
+            return (None, None, crate::act::Actor::Faber);
         }
         *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
         session.send(UserTurn::text(prompt));
@@ -307,7 +315,11 @@ impl Core {
                 core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, at, model_name, None, true);
             }
         });
-        (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
+        (
+            Some(answer),
+            Some(Arc::new(Mutex::new(Some(session)))),
+            crate::act::Actor::Ai { vendor, model: Some(model_name.into()), role: crate::act::ActorRole::Router },
+        )
     }
 
     /// A router session waiting for its question: a thread on the running Codex process, or a Claude process of its own.
@@ -483,7 +495,7 @@ impl Core {
         id: &str,
         reply_id: &str,
         routed: Option<Routed>,
-        fallback: Pick,
+        fallback: (Pick, crate::act::Actor),
         text: String,
         images: Vec<Image>,
     ) {
@@ -503,12 +515,15 @@ impl Core {
         if let (Some(r), Some(t)) = (&routed, self.transfers.get_mut(id)) {
             t.check = r.check;
         }
-        let pick = routed.map(|r| r.pick()).unwrap_or(fallback);
+        // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
+        let from_router = routed.is_some();
+        let pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
+            m.acts.push(crate::act::FaberAct::route(&pick, if from_router { fallback.1 } else { crate::act::Actor::Faber }));
         }
         self.save(id);
         if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {
@@ -729,6 +744,7 @@ mod tests {
                 core.guess = Some(Guess {
                     request: "fix".into(),
                     result: None,
+                    actor: crate::act::Actor::Faber,
                     waiters: vec![],
                     warm: Some("draft".into()),
                     only: None,

@@ -97,7 +97,10 @@ export function Running(props: {
   const rows = () => props.items.length + (props.done?.length ?? 0);
   const commandCount = () => props.background?.filter((item) => item.state === 'running').length ?? 0;
   const ended = (c: Summary) => c.ended!;
-  const endWords = (c: Summary) => (ended(c).kind === 'done' ? t('run.done') : ended(c).kind === 'failed' ? t('run.doneFailed') : t('run.needsYou'));
+  const endWords = (c: Summary) => {
+    const kind = ended(c).kind;
+    return kind === 'done' ? t('run.done') : kind === 'failed' ? t('run.doneFailed') : kind === 'unconcluded' ? t('run.unconcluded') : kind === 'interrupted' ? t('run.interrupted') : t('run.needsYou');
+  };
   const worked = (c: Summary) => {
     const e = elapsed(0, ended(c).workMs);
     return t('run.worked', { time: t(e.key, { n: e.n }) });

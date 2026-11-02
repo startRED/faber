@@ -120,7 +120,7 @@ check('calm: while an answer streams, its blocks keep their nodes, and a change 
     equal(paragraphs()[1], second, 'the open block keeps its node while it grows');
     equal(second!.textContent, 'Second paragraph grows');
     const open = paragraphs()[1];
-    setMessage({ ...message(), tools: [{ id: 't1', name: 'Bash', input: { command: 'ls' }, ok: true }] });
+    setMessage({ ...message(), tools: [{ id: 't1', name: 'Bash', input: { command: 'ls' }, at: message().text.length, ok: true }] });
     equal(paragraphs()[0], first);
     equal(paragraphs()[1], open, 'a tick that changed only the tools touches no text');
     setMessage({ ...message(), text: 'First paragraph.\n\nSecond paragraph grows\n\nThird' });
@@ -390,11 +390,9 @@ check('calm: a helper sent to the background is a ring and a running one a dot, 
     equal(style.borderRadius, '50%', 'round, not square');
     equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', 'hollow while it works in the background');
     equal(row.querySelector('.agent-meta')!.textContent, [t('agent.kind.general'), t('agent.background'), t('activity.steps', { n: 0 })].join(' · '));
-    // The row opens the subagent in the running column (R161 step 3), and still lines up with the work log's summary.
-    const a = getComputedStyle(row);
-    const b = getComputedStyle(view.root.querySelector('.activity summary')!);
-    const inset = (s: CSSStyleDeclaration, side: 'Top' | 'Left') => parseFloat(s[`padding${side}`]) + parseFloat(s[`border${side}Width`]);
-    deepEqual([inset(a, 'Top'), inset(a, 'Left'), a.display, a.cursor], [inset(b, 'Top'), inset(b, 'Left'), b.display, b.cursor]);
+    const step = view.root.querySelector<HTMLElement>('.step-line .step-icon')!;
+    ok(step.getBoundingClientRect().left >= view.root.getBoundingClientRect().left, 'the step stays inside the conversation');
+    ok(row.getBoundingClientRect().left >= view.root.getBoundingClientRect().left, 'the helper stays inside the conversation');
   } finally {
     view.close();
   }

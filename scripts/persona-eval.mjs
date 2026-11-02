@@ -83,7 +83,7 @@ const WAIT_TALK = /\b(?:aguard\w*|esperando|em segundo plano|ainda\s+(?:est[aá]
 
 // The answer to "can I buy it?" is no: a refusal of the purchase ("Não, ...", "não dá", "será recusada"), not any "não"
 // ("Não se preocupe, você consegue"), and no "yes".
-const NO = /^n[aã]o\b\s*(?:[.,!;:—–-]|$)|\bn[aã]o\s+(?:\S+\s+)?(?:consegue|d[aá]|passa|cabe|pode|vai\s+(?:passar|dar)|[eé]\s+poss[ií]vel)(?!\p{L})|\brecusad\w*|\bnegad\w*/iu;
+const NO = /^(?:provavelmente|em geral|geralmente)[,\s]+n[aã]o\b|^n[aã]o\b\s*(?:[.,!;:—–-]|$)|\bn[aã]o\s+(?:\S+\s+)?(?:consegue|d[aá]|passa|cabe|pode|vai\s+(?:passar|dar)|[eé]\s+poss[ií]vel)(?!\p{L})|\brecusad\w*|\bnegad\w*/iu;
 const YES = /\bsim\b/i;
 
 /** The cases. `aim` says which ones the old words should fail; `clis` which CLIs can run one in a single turn (Codex's

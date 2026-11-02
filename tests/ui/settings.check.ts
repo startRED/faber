@@ -223,6 +223,9 @@ check('settings: the new sections are written in every language, and the file hi
     'set.soundHint',
     'set.keepAwake',
     'set.keepAwakeHint',
+    'set.resumeInterrupted',
+    'set.resumeInterruptedHint',
+    'set.resumeInterruptedMore',
     'set.autostart',
     'set.autostartHint',
     'set.updates',
@@ -288,7 +291,7 @@ const section = (props: AppearanceProps) => mount(() => createComponent(Appearan
 const useButton = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('.ap-bar .btn.primary')!;
 const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLButtonElement>(`[aria-labelledby="look-${id}-name"]`)!;
 // What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
-const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, autostart: false };
+const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, resumeInterrupted: true, autostart: false };
 
 check('settings: notification switches show what the engine sends, save separately and restore a refused change without playing anything', async () => {
   const [saved, setSaved] = createSignal<Saved>(SHOWN);
@@ -343,10 +346,12 @@ check('settings: keep-awake and autostart show what the engine sends, saving sep
     },
   }));
   try {
+    const resume = view.host.querySelector<HTMLInputElement>('#set-resume-interrupted-switch')!;
     const awake = view.host.querySelector<HTMLInputElement>('#set-awake-switch')!;
     const autostart = view.host.querySelector<HTMLInputElement>('#set-autostart-switch')!;
     ok(awake && autostart, 'the two system switches are there on Windows');
     equal(awake.checked, true);
+    equal(resume.checked, true);
     equal(autostart.checked, false);
     awake.click();
     await tick();
@@ -356,11 +361,14 @@ check('settings: keep-awake and autostart show what the engine sends, saving sep
     awake.click();
     await tick();
     equal(awake.checked, false);
+    resume.click();
+    await tick();
+    equal(resume.checked, false);
     autostart.click();
     await tick();
     equal(autostart.checked, true);
-    deepEqual(saved(), { ...SHOWN, keepAwake: false, autostart: true });
-    deepEqual(patches, [{ keepAwake: false }, { keepAwake: false }, { autostart: true }]);
+    deepEqual(saved(), { ...SHOWN, keepAwake: false, resumeInterrupted: false, autostart: true });
+    deepEqual(patches, [{ keepAwake: false }, { keepAwake: false }, { resumeInterrupted: false }, { autostart: true }]);
   } finally {
     view.stop();
     if (original) Object.defineProperty(navigator, 'userAgent', original);
@@ -523,8 +531,8 @@ check('settings: unsupported system controls are absent outside Windows', () => 
     onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
   }));
   try {
-    // Hooks, full trust, notify, sound and previews; keep-awake and autostart are Windows-only.
-    equal(view.host.querySelectorAll('input[role="switch"]').length, 5);
+    // Hooks, full trust, notify, sound, resume and previews; keep-awake and autostart are Windows-only.
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 6);
   } finally {
     view.stop();
     if (original) Object.defineProperty(navigator, 'userAgent', original);
@@ -960,7 +968,7 @@ check('settings: the accounts card writes Faber\'s spend in the person\'s format
       look: look(), saved: {}, vendors: ['claude'], quotas: {}, now: 0, usage, start: 'accounts',
       onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
     }));
-    try { return view.host.querySelector('.acct-foot')!.textContent!; } finally { view.stop(); }
+    try { return view.host.querySelector('.acct-foot:not(.acct-unread)')!.textContent!; } finally { view.stop(); }
   };
   try {
     ok(text('en').includes('$3.20'), text('en'));

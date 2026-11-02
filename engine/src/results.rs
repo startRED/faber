@@ -386,7 +386,15 @@ mod tests {
     #[test]
     fn only_a_reply_to_the_person_is_an_answer_and_a_closing_box_with_done_concludes() {
         let mut done = reply(6, "All finished.");
-        done.wrap_up = Some(crate::model::WrapUp { recap: "ok".into(), ask: None, actions: vec![], done: true, answered: None });
+        done.wrap_up = Some(crate::model::WrapUp {
+            recap: "ok".into(),
+            ask: None,
+            actions: vec![],
+            done: true,
+            answered: None,
+            outcome: None,
+            summary: None,
+        });
         let c = conv(vec![person(1), reply(2, "Here is why."), faber(3), reply(4, "I looked again."), faber(5), done]);
         let r = tally(&c);
         assert_eq!(r.delivered.answers, 1, "turns Faber sent by itself are not answers");
@@ -437,7 +445,15 @@ mod tests {
     #[test]
     fn a_closing_box_that_is_not_done_delivers_nothing() {
         let mut open = reply(4, "");
-        open.wrap_up = Some(crate::model::WrapUp { recap: "not yet".into(), ask: None, actions: vec![], done: false, answered: None });
+        open.wrap_up = Some(crate::model::WrapUp {
+            recap: "not yet".into(),
+            ask: None,
+            actions: vec![],
+            done: false,
+            answered: None,
+            outcome: None,
+            summary: None,
+        });
         let c = conv(vec![faber(3), open]);
         assert_eq!(tally(&c).dry.turns, 1);
         assert!(!tally(&c).delivered.concluded);
@@ -447,7 +463,15 @@ mod tests {
     fn a_reply_still_streaming_counts_what_it_cost_and_did_but_is_not_a_turn_an_answer_or_a_conclusion() {
         let mut running = with_tools(reply(2, "so far"), vec![tool("a", "Edit", json!({ "file_path": "a.rs" }), Some(true))]);
         running.status = Some(Status::Streaming);
-        running.wrap_up = Some(crate::model::WrapUp { recap: "ok".into(), ask: None, actions: vec![], done: true, answered: None });
+        running.wrap_up = Some(crate::model::WrapUp {
+            recap: "ok".into(),
+            ask: None,
+            actions: vec![],
+            done: true,
+            answered: None,
+            outcome: None,
+            summary: None,
+        });
         let r = tally(&conv(vec![person(1), running]));
         assert_eq!((r.cost.turns, r.delivered.files, r.delivered.answers), (0, 1, 0));
         assert!((r.cost.usd - 0.5).abs() < 1e-9, "its spend is already spent");
