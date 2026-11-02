@@ -2452,6 +2452,7 @@ export const es: Messages = {
   'notes.354.fixed': 'Tus copias de proyecto conservan tu trabajo mientras Faber limpia las carpetas regenerables tras siete días sin uso.',
   'notes.355.new': 'Puedes abrir las conversaciones que inicia el agente y seguir su avance desde el registro de trabajo.',
   'notes.356.fixed': 'La cuota se actualiza al despertar el equipo y el traspaso de la conversación indica qué IA continúa sin afirmar que esa misma IA agotó su cuota.',
+  'notes.357.better': 'Las preguntas que se abren solas dejan más espacio para trabajar en ventanas pequeñas, y la barra lateral de Proyectos vacía muestra menos contenido repetido.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

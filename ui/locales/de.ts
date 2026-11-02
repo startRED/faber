@@ -2452,6 +2452,7 @@ export const de: Messages = {
   'notes.354.fixed': 'Deine Projektkopien behalten deine Arbeit; Faber räumt wiederherstellbare Ordner nach sieben Tagen ohne Aktivität auf.',
   'notes.355.new': 'Du kannst die vom Agenten gestarteten Unterhaltungen öffnen und ihren Fortschritt im Arbeitsprotokoll verfolgen.',
   'notes.356.fixed': 'Nach dem Aufwachen wird das Kontingent aktualisiert, und bei einer Gesprächsübergabe steht, welche KI übernimmt, ohne derselben KI ein leeres Kontingent zuzuschreiben.',
+  'notes.357.better': 'Von selbst geöffnete Fragen lassen in kleinen Fenstern mehr Platz zum Arbeiten, und die leere Projekte-Seitenleiste zeigt weniger doppelte Inhalte.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

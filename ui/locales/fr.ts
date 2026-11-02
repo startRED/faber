@@ -2452,6 +2452,7 @@ export const fr: Messages = {
   'notes.354.fixed': 'Vos copies de projet gardent votre travail ; Faber nettoie les dossiers recréables après sept jours sans activité.',
   'notes.355.new': 'Vous pouvez ouvrir les conversations lancées par l’agent et suivre leur progression dans le journal de travail.',
   'notes.356.fixed': 'Le quota est actualisé au réveil et le transfert de la conversation indique quelle IA prend la suite sans dire que cette même IA a épuisé son quota.',
+  'notes.357.better': 'Les questions qui s’ouvrent toutes seules laissent plus de place pour travailler dans les petites fenêtres, et la barre latérale des Projets vide est plus sobre.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

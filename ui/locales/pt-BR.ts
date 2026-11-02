@@ -2439,6 +2439,7 @@ export const ptBR: Messages = {
   'notes.354.fixed': 'Suas cópias de projeto preservam seu trabalho enquanto o Faber limpa pastas recriáveis após sete dias sem uso.',
   'notes.355.new': 'Você pode abrir as conversas iniciadas pelo agente e acompanhar o andamento delas no registro de trabalho.',
   'notes.356.fixed': 'A cota é atualizada depois que o PC acorda, e a transferência da conversa mostra qual IA assumiu sem dizer que a mesma IA ficou sem cota.',
+  'notes.357.better': 'As perguntas que abrem sozinhas deixam mais espaço pra trabalhar em janelas pequenas, e a barra lateral de Projetos ficou mais limpa quando está vazia.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

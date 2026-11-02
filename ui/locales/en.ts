@@ -2332,6 +2332,7 @@ export const en = {
   'notes.354.fixed': 'Your project copies keep your work while Faber clears rebuildable folders after seven idle days.',
   'notes.355.new': 'You can open the conversations the agent starts and follow their progress from its work log.',
   'notes.356.fixed': 'Quota refreshes after sleep, and conversation handoffs explain which AI took over without blaming the same AI for an exhausted quota.',
+  'notes.357.better': 'Questions that open by themselves leave more room to work in small windows, and the empty Projects sidebar is quieter.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
