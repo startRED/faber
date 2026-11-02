@@ -82,6 +82,7 @@ mod session;
 mod settings_change;
 mod siblings;
 mod silence;
+mod stage;
 mod stuck_watch;
 mod title;
 mod toolbox;
@@ -146,7 +147,8 @@ pub enum AppEvent {
         conversation_id: String,
         parts: Vec<crate::model::ContextPart>,
     },
-    /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
+    /// "Keep going" stopped by itself in a conversation, or a leading agent's job ended on its closing box, and why (a
+    /// `reason.keepGoing.*` key): the tray tells the person.
     Halted {
         conversation_id: String,
         title: String,
@@ -487,6 +489,9 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
+    /// The closing box each leading agent last told the tray about (`stage.rs`), so one box is told once. Never saved: after a
+    /// restart only a new run ends.
+    stage_told: HashMap<String, String>,
     /// Leaders none of whose members, as saved when Faber opened, will wake them, with those members' ids
     /// (`resume_cut_leaders`, which takes them once).
     quiet_teams: HashMap<String, Vec<String>>,
@@ -728,6 +733,7 @@ impl Engine {
                 dirty_transcripts: Mutex::new(HashSet::new()),
                 transcript_timer: false,
                 parent_reports,
+                stage_told: HashMap::new(),
                 quiet_teams,
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
@@ -4109,6 +4115,7 @@ impl Core {
             self.reopen_busy_plan_steps(&lead, true);
         }
         let items = self.running_items();
+        self.tell_stages(&items);
         self.mark_ended(&items);
         // A conversation that started, ended or now waits for the person moves a step of the plan that names it.
         let moved: HashSet<String> = self.running.items.iter().chain(&items).map(|i| i.conversation_id.clone()).collect();
