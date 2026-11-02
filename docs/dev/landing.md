@@ -13,15 +13,15 @@ Nobody waits on CI (R182). Right after opening a pull request, its lane runs `no
 When the queued commit's gate or its landing fails, the `report` job turns that status red and comments on the pull
 request with the run, which wakes the session that watches it (the app's auto-fix). The fix is pushed to the pull
 request and queued again with `land.mjs`; a push alone never lands, since the landing stops at a head it did not squash.
-`land.mjs` is the only way in (R186). A pull request's own run checks only `changes`, the title and the lints, since
-the queue checks the very commit that lands; the suites ran twice per change before, once on the pull request and
-once on its squash or its queue commit, and five landings at once left screen parts waiting up to 226 s for a runner.
+`land.mjs` is the only way in (R186). Internal human pull requests keep the title check and leave CI to the queue,
+which checks the exact commit that lands. Fork and Dependabot pull requests keep their independent checks.
+Waiting queue riders run only planning and train dispatch; their train checks the documents and every required suite.
 Before retrying an old stacked pull request, compare its intended changes with landed descendants. Squashing a
 descendant can incorporate every change without closing the ancestor's pull request. If all implementation, checks,
 notes and documentation are already present, close the obsolete request as incorporated instead of restoring its old
 tree. Keep the landing and comparison evidence; a remaining code or research change still needs its own review.
 
-So a pull request is never merged with the button or `gh pr merge`: its green says only that the lints passed. A
+So a pull request is never merged with the button or `gh pr merge`: its green does not prove the queued commit. A
 Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
 branch cancels the run before it, so a lane queues once, with its fix complete.
 
@@ -38,6 +38,8 @@ train blames nobody yet: `--split` sends its first half again and keeps its seco
 status keeps it off trains until it is queued again. A rider pushed again or closed, or a base that moved, sends the
 next train with whoever stands. A cancelled run reports nothing. `queue.yml` sends a train every twenty minutes when
 none runs. A workflow change never rides: it is checked alone and landed with `--finish`.
+If GitHub never acquired a runner, the gate stays red but the report retries the train once instead of splitting or
+blaming riders. Another capacity failure holds the train with an infrastructure summary; it never reports a code failure.
 
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
@@ -51,4 +53,6 @@ minutes). A failure there queues nothing and prints the failing tests; `--no-ver
 run again on a new base), no `cargo` on the PATH or another landing checking at the time queue without the status,
 and CI runs every suite. The status is only as trusted as the owner's PC: any program there can post it with the
 owner's sign-in, as the spec accepts, and the daily run on `main` catches a false green within a day. Every suite still runs on `main` once a day and before a commit becomes stable, which is also
-where macOS runs its Rust suite now (Erick, 2026-10-17): the PC proves macOS through Clippy only (R166).
+where macOS also runs its native suites. Trains and standalone queue checks run the scoped macOS Rust and UI suites
+inside the existing Mac lints job, sharing its runner and cache. A Windows PC's proof never skips these native suites.
+The existing Ubuntu documents job checks Linux engine and runner compilation whenever the queue needs lints.

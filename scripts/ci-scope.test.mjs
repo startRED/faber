@@ -69,7 +69,7 @@ test('the command reads the list from its input and prints one output line per d
   assert.equal(run(''), 'lints=true\nrust=true\nui=true\nscreen=true\n');
 });
 
-test('main warms every Rust cache the checks read, under the same names, and only main saves (R165)', () => {
+test('main warms lint/app caches; Rust suites refresh their cache only when they actually run (R165)', () => {
   // A Windows checkout may end its lines with CRLF.
   const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const warm = ci.slice(ci.indexOf('\n  warm:'), ci.indexOf('\n  main:'));
@@ -81,8 +81,8 @@ test('main warms every Rust cache the checks read, under the same names, and onl
     ...(/\n {2}app:[\s\S]*?shared-key: app\n/.test(ci) ? ['windows-latest app'] : []),
     ...(/\n {2}electron-app:[\s\S]*?shared-key: electron-app\n/.test(ci) ? ['windows-latest electron-app'] : []),
   ];
-  assert.equal(read.length, 6, read.join(', '));
-  assert.deepEqual([...new Set(warmed)].sort(), [...new Set(read)].sort());
+  assert.equal(read.length, 5, read.join(', '));
+  assert.deepEqual([...new Set(warmed)].sort(), [...new Set(read.filter((key) => !key.endsWith(' rust')))].sort());
   assert.equal(ci.match(/uses: Swatinem\/rust-cache@v2/g).length, 4, 'check, app, electron-app and warm');
   assert.equal(ci.match(/save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/g).length, 3, 'check, app and electron-app save only on main');
 });
@@ -96,4 +96,69 @@ test('Windows COM updates stay on the minor line required by WebView2', () => {
   const manifest = readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
   assert.match(manifest, /windows-core = "0\.62"/);
   assert.match(manifest, /webview2-com = "0\.39"/);
+});
+
+test('a runner GitHub never provided retries once and never blames riders (41518314073)', async () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const script = (section) => {
+    const lines = section.split('          script: |\n')[1].split('\n');
+    const end = lines.findIndex((line) => line.trim() && !line.startsWith('            '));
+    return lines.slice(0, end < 0 ? lines.length : end).map((line) => line.slice(12)).join('\n');
+  };
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const detect = new AsyncFunction('github', 'context', 'core', script(ci.split('\n  gate:')[1]));
+  const retry = new AsyncFunction('github', 'context', 'core', 'process', script(ci.split('\n  report:')[1]));
+  const context = { repo: { owner: 'owner', repo: 'repo' }, runId: 1, ref: 'refs/heads/queue/pr-1' };
+  let unavailable, dispatched;
+  const summaries = [];
+  const core = {
+    setOutput: (_, value) => { unavailable = value; }, warning: () => {},
+    summary: { addRaw: (value) => { summaries.push(value); return { write: async () => {} }; } },
+  };
+  const jobs = [{ name: 'check (macos-latest, lints rust ui)', runner_id: 0, steps: [],
+    conclusion: 'cancelled', check_run_url: 'https://api.github.com/repos/owner/repo/check-runs/42' }];
+  let annotations = [{ message: 'The job was not acquired by Runner of type hosted even after multiple attempts' }];
+  const github = {
+    rest: { actions: { listJobsForWorkflowRun: 'jobs', createWorkflowDispatch: async (args) => { dispatched = args; } },
+      checks: { listAnnotations: 'annotations' } },
+    paginate: async (route) => route === 'jobs' ? jobs : annotations,
+  };
+  await detect(github, context, core);
+  assert.equal(unavailable, 'true', 'actual cancelled/runner_id=0 incident must not blame code');
+  for (const name of ['changes', 'docs', 'costs', 'app', 'ui', 'screen (1/8)']) {
+    jobs[0].name = name;
+    await detect(github, context, core);
+    assert.equal(unavailable, 'true', name);
+  }
+  for (const name of ['electron-app', 'electron']) {
+    jobs[0].name = name;
+    await detect(github, context, core);
+    assert.equal(unavailable, 'false', 'advisory Electron jobs cannot fail the gate or blame riders');
+  }
+  assert.match(ci, /ELECTRON_BLOCKS_GATE: 'false'/);
+  jobs[0].name = 'check (macos-latest, lints rust ui)';
+  await retry(github, context, core, { env: { GITHUB_RUN_ATTEMPT: '1' } });
+  assert.deepEqual(dispatched, { ...context.repo, workflow_id: 'ci.yml', ref: 'queue/pr-1', inputs: { runner_retry: 'true' } });
+  dispatched = undefined;
+  await retry(github, context, core, { env: { RUNNER_RETRY: 'true', GITHUB_RUN_ATTEMPT: '1' } });
+  assert.equal(dispatched, undefined, 'capacity outages must not loop');
+  await retry(github, context, core, { env: { GITHUB_RUN_ATTEMPT: '2' } });
+  assert.equal(dispatched, undefined, 'manual reruns must not reset the retry budget');
+  assert.match(summaries.join('\n'), /Train held for infrastructure; no rider is blamed/);
+  annotations = [{ message: 'Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.' }];
+  await detect(github, context, core);
+  assert.equal(unavailable, 'false', 'a capacity notice alone is not proof of an unacquired job');
+  jobs[0].runner_id = 7;
+  jobs[0].steps = [{ name: 'cargo t', conclusion: 'failure' }];
+  annotations = [{ message: 'The job was not acquired by Runner of type hosted even after multiple attempts' }];
+  await detect(github, context, core);
+  assert.equal(unavailable, 'false', 'started code failures still blame/split normally');
+  github.paginate = async () => { throw new Error('API unavailable'); };
+  await detect(github, context, core);
+  assert.equal(unavailable, 'true', 'unreadable infrastructure evidence must not blame riders');
+  assert.match(ci, /RUNNER_UNAVAILABLE.*steps\.runner\.outputs\.unavailable/);
+  assert.match(ci, /\[ "\$RUNNER_UNAVAILABLE" != true \] \|\| .*exit 1/);
+  const report = ci.split('\n  report:')[1].split('\n  train:')[0];
+  assert.equal(report.match(/if: needs\.gate\.outputs\.runner_unavailable != 'true'/g).length, 3,
+    'checkout, setup and blame/split are skipped on infrastructure failure');
 });

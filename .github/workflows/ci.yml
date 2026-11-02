@@ -12,6 +12,10 @@ on:
         description: Only build, and save the Rust caches (main only)
         type: boolean
         default: false
+      runner_retry:
+        description: One retry after GitHub did not provide a runner
+        type: boolean
+        default: false
   # Every suite once a day on main, whatever the queue skipped (R165).
   schedule:
     - cron: '17 6 * * *'
@@ -32,6 +36,12 @@ jobs:
   # commit before it is green, so main never reaches unproven code (R127); a queue commit is compared with phase-1-base,
   # where it lands, and needs phase-1-base green the same way (R165). Anything this job cannot tell runs everything.
   changes:
+    # Internal human PRs land only through the queue, which checks the exact squash; do not check their merge twice.
+    # Forks and Dependabot keep their independent proofs.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,19 +75,17 @@ jobs:
           WARM: ${{ github.event_name == 'workflow_dispatch' && inputs.warm && github.ref == 'refs/heads/main' }}
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          LIGHT: >-
-            ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
-            github.event.pull_request.user.login != 'dependabot[bot]' }}
-          # macOS runs its ui and rust suites only in the nightly run and in a full run started by hand (promote-stable.yml);
-          # elsewhere it runs the lints alone, so the code still builds there and a macOS-only failure never holds the queue
-          # (R468). A queue branch the land job starts again by hand stays a queue run.
+          # Native suites catch Unix filesystem and WebKit failures that cross Clippy cannot (#609, #610).
+          # Run them once on a train, or on a workflow change checked alone, as well as nightly/full checks.
           MAC: >-
-            ${{ github.event_name == 'schedule' ||
+            ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/heads/queue/') ||
+            github.ref == 'refs/heads/train' ||
             (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/queue/')) }}
         shell: bash
         run: |
           set -uo pipefail
           scope=""
+          mac_scope=""
           # A commit is green when a run of this workflow that checked that very commit passed: a push, a queue run, or one
           # started by hand. A pull request checks a merge commit instead, and a warm run of main checks nothing.
           green() {
@@ -111,6 +119,10 @@ jobs:
             if [ "$EVENT" != pull_request ] && grep -q '=false' <<<"$found"; then
               green "$base" || { echo "Everything runs: $base, the commit this one builds on, is not green (yet)"; return; }
             fi
+            # A Windows PC's proof cannot cover native macOS suites.
+            if [ -n "$verify" ]; then
+              mac_scope=$(jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs) || { mac_scope=""; return; }
+            fi
             scope=$found
           }
           warm=false
@@ -139,26 +151,24 @@ jobs:
             decide
           fi
           [ -n "$scope" ] || scope=$(printf 'lints=true\nrust=true\nui=true\nscreen=true')
-          # A pull request of this repository lands only through scripts/land.mjs, whose queue run checks the very commit
-          # that lands, so its own run keeps only the lints (R186). Dependabot's still runs every suite it needs.
-          if [ "$LIGHT" = true ]; then
-            echo "A pull request: the queue runs the suites on the commit that lands, so this run checks the lints only"
-            scope=$(grep '^lints=' <<<"$scope"; printf 'rust=false\nui=false\nscreen=false')
-          fi
           echo "$scope"
           get() { if grep -q "^$1=true$" <<<"$scope"; then echo true; else echo false; fi; }
           lints=$(get lints); rust=$(get rust); ui=$(get ui); screen=$(get screen)
+          [ -n "$mac_scope" ] || mac_scope=$scope
           # `cache` names the Rust cache of each kind of job; the warm job below builds the same kinds under the same names.
           entries=()
           if [ "$lints" = true ]; then
             entries+=('{"os":"windows-latest","part":"lints","cache":"lints"}')
-            # macOS has no screen suite; its job runs the ui suite next to the lints, so the test app is built there too.
-            if [ "$ui" = true ] && [ "$MAC" = true ]; then part='lints ui'; else part=lints; fi
+            # One Mac runner and cache for the lints and every native suite the change needs.
+            part=lints
+            if [ "$MAC" = true ]; then
+              if grep -q '^rust=true$' <<<"$mac_scope"; then part+=' rust'; fi
+              if grep -q '^ui=true$' <<<"$mac_scope"; then part+=' ui'; fi
+            fi
             entries+=("{\"os\":\"macos-latest\",\"part\":\"$part\",\"cache\":\"lints-ui\"}")
           fi
           if [ "$rust" = true ]; then
             entries+=('{"os":"windows-latest","part":"rust","cache":"rust"}')
-            if [ "$MAC" = true ]; then entries+=('{"os":"macos-latest","part":"rust","cache":"rust"}'); fi
           fi
           app=false
           if [ "$ui" = true ] || [ "$screen" = true ]; then app=true; fi
@@ -177,7 +187,7 @@ jobs:
             echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"; echo "waits=$waits"
           } >> "$GITHUB_OUTPUT"
 
-  # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163); macOS's suites only at night (R468).
+  # The lints and native suites on Windows and macOS. A train shares each required suite across its riders.
   check:
     needs: changes
     if: needs.changes.outputs.check == 'true'
@@ -215,9 +225,9 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy -p faber --features test-hooks -- -D warnings
       # Building apart from running shows on the job page how much of the Rust suite is the compiler (R163).
-      - if: matrix.part == 'rust'
+      - if: contains(matrix.part, 'rust')
         run: cargo test --workspace --no-run
-      - if: matrix.part == 'rust'
+      - if: contains(matrix.part, 'rust')
         run: cargo t --suite rust
       # On macOS the hidden test window's page stopped mid-run: a check that typed waited on a spelling check while the
       # app waited on the page's scrolling (the checks page turns spelling off, tests/ui/crash.ts). The system's text
@@ -435,9 +445,10 @@ jobs:
             target/faber-test/run.log
           if-no-files-found: ignore
 
-  # A warm run (R165) builds on main what each kind of job builds and saves it as that kind's Rust cache, which every
+  # A warm run (R165) builds on main what the lint/app jobs build and saves it as that kind's Rust cache, which every
   # branch, queue and pull request can read. The land and main jobs start one after main moves; the daily run saves too.
   # When main already holds a cache for the exact dependencies, the job restores it, sees it is current and stops.
+  # Rust tests already compile and run in the queue; the nightly native Rust jobs refresh their caches on main.
   warm:
     needs: changes
     if: needs.changes.outputs.warm == 'true'
@@ -448,8 +459,6 @@ jobs:
         include:
           - { os: windows-latest, cache: lints }
           - { os: macos-latest, cache: lints-ui }
-          - { os: windows-latest, cache: rust }
-          - { os: macos-latest, cache: rust }
           - { os: windows-latest, cache: app }
           - { os: windows-latest, cache: electron-app }
     runs-on: ${{ matrix.os }}
@@ -475,20 +484,27 @@ jobs:
           case "${{ matrix.cache }}" in
             lints) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings ;;
             lints-ui) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings; cargo t --build-only ;;
-            rust) cargo test --workspace --no-run; cargo build -p faber-testkit --bin faber-test ;;
             app) cargo t --build-only ;;
             electron-app) ELECTRON_SKIP_BINARY_DOWNLOAD= node node_modules/electron/install.js; FABER_TEST_SHELL=electron cargo t --build-only ;;
           esac
 
-  # The living documents stay small, listed in docs/README.md and linked right (scripts/docs.mjs). It runs for every
-  # change, words only included, and takes seconds, so it needs no plan.
+  # Reuse the existing Ubuntu job for the Linux compile guard; no desktop libraries or app build are needed.
+  # The documents still run for every change, including words only.
   docs:
+    needs: changes
+    # Waiting riders dispatch a train; its docs job checks the combined tree before it can land.
+    if: needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
       - run: node scripts/docs.mjs
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.lints == 'true' && github.event_name != 'pull_request'
+      - name: Linux engine and runner compile guard
+        if: needs.changes.outputs.lints == 'true' && github.event_name != 'pull_request'
+        run: cargo check -p faber-engine -p faber-testkit --all-targets
 
   # One check that is green only when CI is (R174): phase-1-base requires it, so a pull request set to merge by itself
   # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means
@@ -496,11 +512,45 @@ jobs:
   # A waiting queue run tested nothing, so it has no gate at all: a green one would let `land.mjs --finish` land it.
   gate:
     needs: [changes, docs, check, app, screen, electron-app, electron]
-    if: always() && needs.changes.outputs.waits != 'true'
+    if: always() && needs.changes.result != 'skipped' && needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: read
+    outputs:
+      runner_unavailable: ${{ steps.runner.outputs.unavailable }}
     steps:
+      - uses: actions/github-script@v8
+        id: runner
+        with:
+          script: |
+            // A job GitHub never started says nothing about the riders' code.
+            const repo = context.repo;
+            let unavailable = false;
+            try {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                ...repo, run_id: context.runId, filter: 'latest', per_page: 100,
+              });
+              for (const job of jobs) {
+                // Electron jobs are advisory while ELECTRON_BLOCKS_GATE is false below.
+                if (job.runner_id || job.steps?.length || !job.check_run_url ||
+                    !/^(check \(|changes$|docs$|costs$|app$|ui$|screen \()/.test(job.name)) continue;
+                const annotations = await github.paginate(github.rest.checks.listAnnotations, {
+                  ...repo, check_run_id: Number(job.check_run_url.split('/').pop()), per_page: 100,
+                });
+                if (job.conclusion === 'startup_failure' || annotations.some(a =>
+                  /job was not acquired by Runner/i.test(a.message))) unavailable = true;
+              }
+            } catch (error) {
+              // Do not blame riders when infrastructure evidence cannot be read either.
+              core.warning(`Runner availability could not be read: ${error.message}`);
+              unavailable = true;
+            }
+            core.setOutput('unavailable', String(unavailable));
+            if (unavailable) await core.summary.addRaw('RETRY: GitHub did not provide a runner (or its evidence). No rider is blamed; landing remains blocked.').write();
       - env:
           CHANGES: ${{ needs.changes.result }}
+          RUNNER_UNAVAILABLE: ${{ steps.runner.outputs.unavailable }}
           DOCS: ${{ needs.docs.result }}
           CHECK: ${{ needs.check.result }}
           APP: ${{ needs.app.result }}
@@ -515,6 +565,7 @@ jobs:
         shell: bash
         run: |
           ok() { [ "$1" = success ] || { [ "$1" = skipped ] && [ "$2" = false ]; }; }
+          [ "$RUNNER_UNAVAILABLE" != true ] || { echo "::error::RETRY: runner unavailable; no rider is blamed"; exit 1; }
           [ "$CHANGES" = success ] || { echo "::error::changes: $CHANGES"; exit 1; }
           [ "$DOCS" = success ] || { echo "::error::docs: $DOCS"; exit 1; }
           ok "$CHECK" "$PLAN_CHECK" || { echo "::error::check: $CHECK"; exit 1; }
@@ -671,16 +722,36 @@ jobs:
       statuses: write
       pull-requests: write
     steps:
+      - name: Retry missing runner once, never blame riders
+        if: needs.gate.outputs.runner_unavailable == 'true'
+        uses: actions/github-script@v8
+        env:
+          RUNNER_RETRY: ${{ inputs.runner_retry }}
+        with:
+          script: |
+            const retry = process.env.RUNNER_RETRY !== 'true' && process.env.GITHUB_RUN_ATTEMPT === '1';
+            await core.summary.addRaw(retry
+              ? 'RETRY: GitHub did not provide a runner. Dispatching this train once again; no rider is blamed.'
+              : 'Runner still unavailable after one retry. Train held for infrastructure; no rider is blamed.').write();
+            if (retry) {
+              await github.rest.actions.createWorkflowDispatch({
+                ...context.repo, workflow_id: 'ci.yml', ref: context.ref.replace('refs/heads/', ''),
+                inputs: { runner_retry: 'true' },
+              });
+            }
       - uses: actions/checkout@v7
+        if: needs.gate.outputs.runner_unavailable != 'true'
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v7
+        if: needs.gate.outputs.runner_unavailable != 'true'
         with:
           node-version: 24
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FAILED: ${{ needs.gate.result == 'failure' && 'its checks failed' || 'it could not land on phase-1-base' }}
+        if: needs.gate.outputs.runner_unavailable != 'true'
         run: |
           set -euo pipefail
           pr=${GITHUB_REF#refs/heads/queue/pr-}
@@ -734,7 +805,7 @@ jobs:
           if ! grep -q "'--train'" "$RUNNER_TEMP/land.mjs"; then gh workflow run ci.yml --ref "${GITHUB_REF#refs/heads/}"; exit 0; fi
           node "$RUNNER_TEMP/land.mjs" --train --self "$GITHUB_RUN_ID"
 
-  # The nightly run is the only one that runs macOS's suites (R468), and nobody waits on it, so a red one keeps one
+  # Nobody waits on the nightly run, so a red one keeps one
   # issue open, labelled `nightly`, with a comment per failed night; the fix closes it. It never blocks the queue.
   nightly:
     needs: gate

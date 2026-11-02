@@ -77,8 +77,9 @@ file that is not words runs the lints. A push is compared with the commit before
 cannot tell runs everything (R165). A queue commit whose very tree carries the PC's green `faber/verify` leaves out
 the suites it covers, which `land.mjs` ran on this PC before queueing ([workflow](workflow.md#merge-on-green), R190 V2).
 Every suite still runs once a day on `main`, and on a commit before it becomes
-stable (`promote-stable.yml` starts the run and waits for it). The lints run on Windows and macOS; macOS's `rust` and `ui`
-suites run only nightly and before stable, and a red night opens a `nightly` issue (R468). One Windows job builds the test app once (`cargo t --build-only`, the fake
+stable (`promote-stable.yml` starts and waits for it). The Mac lints job runs scoped Rust/UI suites on the queue too,
+regardless of Windows `faber/verify`. Ubuntu docs checks Linux compilation. A red night opens a `nightly` issue.
+One Windows job builds the test app once (`cargo t --build-only`, the fake
 CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
 `testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
 (`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a
@@ -90,7 +91,7 @@ when an import reaches a file outside that list). Every Cargo the runner starts 
 ring's build script, and everything above it, build again. Each kind of job keeps its own Rust cache, and only `main`
 saves it: a run can read only the caches of its own branch and of `main`, and branches that each saved their own pushed
 the others out of the 10 GB GitHub keeps. Since pushes made by CI start no run, the `land` and `main` jobs start a warm run
-on `main` after it moves, which builds what each kind of job builds and saves it when the dependencies changed. The runner
+on `main` after it moves, warming lint/app caches; Rust suites refresh theirs when they run on `main`. The runner
 deals the scenarios so the parts take about the same time: the slowest first, each to the lightest part so far, by the CI
 seconds of each scenario. A `costs` job reads them from the logs of the newest green runs (`scripts/screen-costs.mjs`) and
 hands every part the same table (`--costs`), so the dealing never ages; without those logs, and on a person's PC, the copy
