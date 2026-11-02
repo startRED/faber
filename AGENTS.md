@@ -109,7 +109,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map
 - `channel/`: the local channel (user-only named pipe or Unix socket, per-run secret and conversation tokens) between the
   command line and `host/`.
 - `cli/`: the `faber` command line ([cli](docs/product/cli.md)).
-- `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the commands that need the window (the browser pane).
+- `electron/`: the Electron shell and browser views. `src-tauri/` remains the shipped shell until the release switch and is retired after an Electron release.
 - `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
   The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
   `pane/native.rs`);

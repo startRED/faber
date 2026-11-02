@@ -291,3 +291,8 @@ test('user-facing and notes-base read the real history', () => {
     r.stop();
   }
 });
+
+test('Electron components count as shipped', async () => {
+  const { SHIPS } = await import('./channel.mjs');
+  for (const dir of ['electron', 'installer', 'sidecar', 'update', 'src-tauri']) assert.ok(SHIPS.includes(dir), dir);
+});

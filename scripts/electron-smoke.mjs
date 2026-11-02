@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-if (process.platform !== 'win32' || !process.argv[2]) throw new Error('Usage: node scripts/electron-smoke.mjs <Windows installer>');
+if (process.platform !== 'win32' || !process.argv[2] || !process.argv[3]) throw new Error('Usage: node scripts/electron-smoke.mjs <Electron installer> <old Tauri installer>');
 if (process.env.FABER_SMOKE_DISPOSABLE !== '1') throw new Error('Set FABER_SMOKE_DISPOSABLE=1 only on a disposable Windows account');
 const installer = path.resolve(process.argv[2]);
+const oldInstaller = path.resolve(process.argv[3]);
 // electron-builder removes its previous installation before installing, so refuse a populated account.
 const registry = path.join(process.env.SystemRoot, 'System32', 'reg.exe');
 const guid = '27536615-8ccf-50e9-9bb7-91b15cd04c36';
@@ -34,11 +35,15 @@ function requireFile(name) {
 }
 try {
   mkdirSync(folder);
-  for (const name of ['faber.exe', 'uninstall.exe', 'faber-local.exe']) writeFileSync(path.join(folder, name), 'old Tauri file');
+  run(oldInstaller, ['/S', `/D=${folder}`]);
+  requireFile('faber.exe');
+  mkdirSync(env.FABER_DATA_DIR);
+  writeFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'existing data');
   run(installer, ['/S', '/UPDATE', `/D=${folder}`]);
   installed = true;
   for (const name of ['faber.exe', 'resources/app.asar', 'resources/faber-sidecar.exe', 'bin/faber.exe']) requireFile(name);
   for (const name of ['uninstall.exe', 'faber-local.exe']) if (existsSync(path.join(folder, name))) throw new Error(`Leftover ${name}`);
+  if (readFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'utf8') !== 'existing data') throw new Error('Existing data was changed');
   if (readFileSync(path.join(folder, 'faber.exe')).subarray(0, 2).toString() !== 'MZ') throw new Error('Installed faber.exe is not a Windows executable');
   app = spawn(path.join(folder, 'faber.exe'), [], { env, windowsHide: true, shell: false, stdio: 'ignore' });
   app.on('error', () => {});

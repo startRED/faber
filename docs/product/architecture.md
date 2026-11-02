@@ -4,6 +4,10 @@ How Faber is built and updated, what makes it better over time, and the curated 
 
 ## Architecture
 
+The shipped app is still Tauri until the Electron release workflow lands. The switch targets the same signed update manifest, installation folder and data folder; an installed Tauri Faber should update in place. The release smoke is prepared to install an older Tauri version and check a data sentinel; it has not yet proved a real signed update or data preservation.
+
+Electron CI run 41354470235 measured 108 MB idle and 3.9% focused / 0.5% unfocused CPU on one core; it failed 38 UI checks. Run 41409242442 could not open the screen or measure memory. These are not comparable to the older Tauri measurements below.
+
 ```text
 App (Tauri 2: window, tray, notifications, auto-update)
  └─ UI (SolidJS + TypeScript, in the system webview) ── fixed command list ──┐

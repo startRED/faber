@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 
 const TAG = /^v(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$/;
 /** Files whose change a person can see; the same list auto-release.yml has always used. */
-export const SHIPS = ['ui', 'engine', 'host', 'src-tauri', 'package.json', 'vite.config.ts'];
+export const SHIPS = ['ui', 'engine', 'host', 'electron', 'installer', 'sidecar', 'update', 'src-tauri', 'package.json', 'vite.config.ts'];
 const USER_FACING = /^(feat|fix|perf)(\(|!|:)/;
 const DAY = 24 * 3600;
 
