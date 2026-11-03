@@ -46,6 +46,7 @@ rest of the shell are in [layout.md](layout.md).
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
+- An agent asking to retry an action appears in the needs you count and a notice in the running list opens the newest asking conversation. Its conversation shows a held-back style card with one safe group description and Allow once or Not now. The controls are native buttons, errors stay retryable, and the card adds no motion.
 - An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
   A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike.
   A row amber only because a helper seems stuck has no card to answer: it shows "A helper seems stuck", one line on

@@ -1,3 +1,4 @@
+import { AgentAskCard } from './Ask.tsx';
 import { ChatGroup } from './ChatGroup.tsx';
 import { batch, createComputed, createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
@@ -114,6 +115,32 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId, groupId: saved?.groupId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [agentAsks, setAgentAsks] = createSignal<import('./api.ts').AgentAsk[]>([]);
+  let asksRevision = 0;
+  let asksTimer: ReturnType<typeof setTimeout> | undefined;
+  const firstSeen = new Map<string, number>();
+  const receiveAsks = (list: import('./api.ts').AgentAsk[]) => {
+    const now = Date.now();
+    const ids = new Set(list.map((ask) => ask.id));
+    for (const id of firstSeen.keys()) if (!ids.has(id)) firstSeen.delete(id);
+    for (const ask of list) if (!firstSeen.has(ask.id)) firstSeen.set(ask.id, now);
+    setAgentAsks(list);
+    clearTimeout(asksTimer);
+    if (list.length) {
+      const due = Math.min(...list.map((ask) => firstSeen.get(ask.id)! + 601_000));
+      asksTimer = setTimeout(() => {
+        const revision = asksRevision;
+        void api.asks().then((pending) => {
+          if (revision === asksRevision) {
+            firstSeen.clear();
+            receiveAsks(pending);
+          }
+        }).catch(() => {});
+      }, Math.max(0, due - now));
+    }
+  };
+  onCleanup(() => clearTimeout(asksTimer));
+  const removeAgentAsk = (id: string) => receiveAsks(agentAsks().filter((ask) => ask.id !== id));
   const [visuals, setVisuals] = createSignal<{ id: string; answers: VisualAnswer[] }>();
   const visualAnswers = () => visuals()?.id === current()?.id ? visuals()!.answers : [];
   // Ask only when fence markers or the reply's state change, never for each word or tool tick. The engine decides what closed.
@@ -467,7 +494,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // shows as running (the engine keeps it, so an update or the awake lock still waits for the process).
   const every = () => store.list().items;
   const items = createMemo(() => shownRunning(every()));
-  const needing = () => items().filter((i) => i.state === 'needsYou').length;
+  const needing = () => new Set([...items().filter((i) => i.state === 'needsYou').map((i) => i.conversationId), ...agentAsks().map((a) => a.conversation)]).size;
+  const allWaitingKeys = () => [...waitingKeys(items()), ...agentAsks().map((a) => `agent-ask:${a.id}`)];
   // A run that ended while nobody looked stays a done card in the column and a dot on its sidebar row (task 016) until the person
   // sees the conversation: its thread loaded on the stage (not under Settings, the setup or the first run) of a window they can
   // see (not hidden, no game in front). The engine keeps the mark, so a restart keeps both.
@@ -603,11 +631,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const hidden = focus();
     setFocus(false);
     if (columnOpen() && !reopening) {
-      if (hidden) autoOpen.seen(waitingKeys(items()));
+      if (hidden) autoOpen.seen(allWaitingKeys());
       return;
     }
     // Every question waiting now is on screen, so none of them opens the column again.
-    autoOpen.seen(waitingKeys(items()));
+    autoOpen.seen(allWaitingKeys());
     // Two modal dialogs never stack: one the user opens closes the sidebar overlay.
     if (user) closeSide(false);
     setByUser(user);
@@ -625,7 +653,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setBackgroundOpen(false);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
-    autoOpen.seen(waitingKeys(items()));
+    autoOpen.seen(allWaitingKeys());
     clearTimeout(retry);
     setColumnOpen(false);
     setByUser(false);
@@ -635,7 +663,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const el = column;
     if (!columnOpen() || !el) return finishColumnClose();
     el.dataset.exiting = 'true';
-    autoOpen.seen(waitingKeys(items()));
+    autoOpen.seen(allWaitingKeys());
     clearTimeout(retry);
     // Release the modal trap before returning focus; retain the actual pane until it has left.
     setByUser(false);
@@ -790,7 +818,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     clearTimeout(retry);
     if (heldPointers.size) return;
     if (composing) autoOpen.typed(Date.now());
-    const verdict = autoOpen.check(waitingKeys(items()), Date.now());
+    const verdict = autoOpen.check(allWaitingKeys(), Date.now());
     if (verdict.open) openColumn(false);
     else if (verdict.retryIn !== undefined) retry = setTimeout(consider, verdict.retryIn + 20);
   };
@@ -1021,10 +1049,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
     // The Catalog is a place too: it was open when Faber closed, so it opens again over the conversation.
     if ((saved as { catalog?: boolean } | undefined)?.catalog) setCatalogOpen(true);
+    const revision = asksRevision;
+    void api.asks().then((list) => { if (revision === asksRevision) receiveAsks(list); }).catch(() => {});
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
+      if (e.type === 'asks') { asksRevision++; receiveAsks(e.asks); }
       if (e.type === 'background') setState((s) => !s.background || e.revision > s.background.revision ? { ...s, background: { revision: e.revision, items: e.items } } : s);
       if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
         setCommandsVersion((n) => n + 1);
@@ -1666,6 +1697,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const runningColumn = () => (
     <Running
       items={items()}
+      agentAsks={agentAsks()}
+      onOpenAsk={(id) => { const c = state().conversations.find((item) => item.id === id); if (c) { if (!docked()) closeColumn(); openSummary(c); } }}
       done={done()}
       projects={state().projects}
       conversations={state().conversations}
@@ -2017,11 +2050,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     title={t('run.toggle')}
                     onClick={toggleColumn}
                   >
-                    <Show when={items().length > 0} fallback={<span class="seg">{t('run.none')}</span>}>
-                      <span class="seg">
+                    <Show when={items().length > 0 || agentAsks().length > 0} fallback={<span class="seg">{t('run.none')}</span>}>
+                      <Show when={items().length > 0}><span class="seg">
                         <span class="live" aria-hidden="true" />
                         {t('run.running', { n: items().length })}
-                      </span>
+                      </span></Show>
                       <Show when={needing() > 0}>
                         <span class="seg ask">
                           <Icon name="ask" small />
@@ -2118,6 +2151,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                   />
                                 )}
                               </Show>
+                              <For each={agentAsks().filter((ask) => ask.conversation === current()?.id)}>{(ask) => <AgentAskCard ask={ask} onAnswered={removeAgentAsk} />}</For>
                               <Show when={error()}>
                                 <div class="note err" role="alert">
                                   {error()}

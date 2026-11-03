@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, untrack } from 'solid-js';
-import { api, PERMISSION_MODES, type Parked, type Permission, type PermissionMode } from './api.ts';
+import { api, PERMISSION_MODES, type AgentAsk, type Parked, type Permission, type PermissionMode } from './api.ts';
 import { PermissionChip } from './Composer.tsx';
 import { Markdown, openLinks } from './markdown.tsx';
 import { motion } from './appearance.ts';
@@ -590,4 +590,30 @@ export function Parkeds(props: { parked: Parked[]; more?: number; surface?: stri
       </div>
     </Show>
   );
+}
+
+/** A request for one exact retry, described only by Faber's own group words. */
+export function AgentAskCard(props: { ask: AgentAsk; onAnswered: (id: string) => void }) {
+  const [sending, setSending] = createSignal(false);
+  const [problem, setProblem] = createSignal<string>();
+  const answer = async (allow: boolean) => {
+    setSending(true);
+    setProblem(undefined);
+    try {
+      await api.answerAsk(props.ask.id, allow);
+      props.onAnswered(props.ask.id);
+    } catch (err) {
+      const outcome = answerOutcome(err);
+      if (outcome === 'stale') props.onAnswered(props.ask.id);
+      else setProblem(fromEngine(outcome.problem));
+    } finally { setSending(false); }
+  };
+  return <div class="ask parked" data-testid="agent-ask" role="group" aria-label={t('agentAsk.label')}>
+    <b role="status">{t(`agentAsk.${props.ask.label}`)}</b>
+    <div>
+      <button type="button" class="btn primary" disabled={sending()} onClick={() => void answer(true)}>{t('agentAsk.allow')}</button>
+      <button type="button" class="btn" disabled={sending()} onClick={() => void answer(false)}>{t('agentAsk.later')}</button>
+    </div>
+    <Show when={problem()}><div class="note err" role="alert">{problem()}</div></Show>
+  </div>;
 }

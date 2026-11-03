@@ -865,7 +865,10 @@ export interface Aside {
   /** A translation key when it failed. */
   error?: string | null;
 }
+export interface AgentAsk { id: string; conversation: string; label: 'organize' | 'settings' | 'tools' | 'projects' | 'environments' | 'rewind'; state: 'pending' | 'allowed' | 'denied' | 'expired'; }
+
 export type AppEvent =
+  | { type: 'asks'; asks: AgentAsk[] }
   | { type: 'catalog' }
   | ({ type: 'background' } & BackgroundList)
   | { type: 'commands'; conversationId: string; vendor: Vendor }
@@ -983,6 +986,8 @@ export const api = {
   state: () => invoke<AppState>('state'),
   results: (id: string) => invoke<Results | null>('results', { id }),
   projectResults: (projectId: string) => invoke<ProjectResultsView>('project_results', { projectId }),
+  asks: () => invoke<AgentAsk[]>('asks'),
+  answerAsk: (id: string, allow: boolean) => invoke<boolean>('answer_ask', { id, allow }),
   createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
   saveChatGroup: (id: string, name?: string, instructions?: string) => invoke<ChatGroup>('save_chat_group', { id, name, instructions }),
   addChatGroupFiles: (id: string, files: Attachment[]) => invoke<ChatGroup>('add_chat_group_files', { id, files }),

@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show, type Accessor, type ComponentProps } from 'solid-js';
-import { api, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
+import { api, type AgentAsk, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { DetailsPane } from './Details.tsx';
 import { Changes } from './Changes.tsx';
@@ -30,6 +30,8 @@ import type { AgentStep } from './worklog.ts';
  * that waits is answered here, in place; a click on a row opens its conversation. */
 export function Running(props: {
   items: RunningItem[];
+  agentAsks?: AgentAsk[];
+  onOpenAsk?: (id: string) => void;
   /** Runs that ended while nobody looked (`doneCards`): a calm card each, until opened or dismissed. */
   done?: Summary[];
   projects: Project[];
@@ -95,7 +97,7 @@ export function Running(props: {
   // The blocks are kept by their key for the same reason.
   const blockKeys = createMemo(() => blocks().map((b) => b.key), [], { equals: (a, b) => a.length === b.length && a.every((k, i) => k === b[i]) });
   const noBlock: Block = { key: '', items: [], done: [], needs: 0 };
-  const rows = () => props.items.length + (props.done?.length ?? 0);
+  const rows = () => props.items.length + (props.done?.length ?? 0) + (props.agentAsks?.length ?? 0);
   const commandCount = () => props.background?.filter((item) => item.state === 'running').length ?? 0;
   const ended = (c: Summary) => c.ended!;
   const endWords = (c: Summary) => {
@@ -161,6 +163,12 @@ export function Running(props: {
                   </div>
                 }
               >
+                <Show when={props.agentAsks?.length}>
+                  <div class="ask parked" role="status" data-testid="agent-ask-notice">
+                    <b>{t('agentAsk.notice')}</b>
+                    <div><button type="button" class="btn" onClick={() => { const ask = props.agentAsks?.at(-1); if (ask) props.onOpenAsk?.(ask.conversation); }}>{t('agentAsk.open')}</button></div>
+                  </div>
+                </Show>
                 <For each={blockKeys()}>
                   {(key) => { const block = () => blocks().find((b) => b.key === key) ?? noBlock; return (
                     <section class="proj-g">

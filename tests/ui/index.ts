@@ -151,3 +151,5 @@ export async function runChecksOnBoot(): Promise<void> {
     crash(String(error));
   }
 }
+
+import './agent-ask.check.ts';
