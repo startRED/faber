@@ -37,11 +37,13 @@ try {
   mkdirSync(folder);
   run(oldInstaller, ['/S', `/D=${folder}`]);
   requireFile('faber.exe');
+  const oldExe = readFileSync(path.join(folder, 'faber.exe'));
   mkdirSync(env.FABER_DATA_DIR);
   writeFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'existing data');
   run(installer, ['/S', '/UPDATE', `/D=${folder}`]);
   installed = true;
   for (const name of ['faber.exe', 'resources/app.asar', 'resources/faber-sidecar.exe', 'bin/faber.exe']) requireFile(name);
+  if (!readFileSync(path.join(folder, 'previous/faber-tauri.exe')).equals(oldExe)) throw new Error('The previous Tauri executable was not preserved');
   for (const name of ['uninstall.exe', 'faber-local.exe']) if (existsSync(path.join(folder, name))) throw new Error(`Leftover ${name}`);
   if (readFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'utf8') !== 'existing data') throw new Error('Existing data was changed');
   if (readFileSync(path.join(folder, 'faber.exe')).subarray(0, 2).toString() !== 'MZ') throw new Error('Installed faber.exe is not a Windows executable');

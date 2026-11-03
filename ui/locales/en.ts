@@ -2381,6 +2381,7 @@ export const en = {
   'notes.384.better': 'Long tool details may now appear shortened in the work log.',
   'notes.385.better': 'You can see which recent conversations finished, need you or stopped when Faber closed before opening them.',
   'notes.386.better': 'You see a quiet line sooner when the agent repeats a step or goes silent; the sign lets it keep working.',
+  'notes.387.better': 'Your conversations and settings get a backup before the move to the new Faber.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

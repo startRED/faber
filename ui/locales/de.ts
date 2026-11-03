@@ -2501,6 +2501,7 @@ export const de: Messages = {
   'notes.384.better': 'Lange Werkzeugdetails können im Arbeitsprotokoll nun verkürzt erscheinen.',
   'notes.385.better': 'Bei letzten Unterhaltungen siehst du vor dem Öffnen, welche fertig sind, auf dich warten oder beim Schließen von Faber angehalten wurden.',
   'notes.386.better': 'Du siehst früher einen dezenten Hinweis, wenn der Agent einen Schritt wiederholt oder nichts mehr meldet; der Hinweis lässt ihn weiterarbeiten.',
+  'notes.387.better': 'Deine Unterhaltungen und Einstellungen werden vor dem Wechsel zum neuen Faber gesichert.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

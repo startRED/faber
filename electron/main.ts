@@ -9,6 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
+import { readyWayback, startWayback } from './wayback.ts';
 import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
@@ -24,6 +25,12 @@ const FRAME = '#101012';
 const REVEAL_FAILSAFE_MS = 3000;
 /** How long closing waits for the host to save and stop before it is ended anyway. */
 const HOST_STOP_MS = 5000;
+
+// Only the instance that owns the data may back it up or count a launch.
+const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
+app.setPath('userData', path.join(dataDir, 'webview'));
+if (!app.requestSingleInstanceLock()) app.exit(0);
+void startWayback(dataDir);
 
 // Compiled into out/electron/, two folders below the repository.
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -54,14 +61,9 @@ app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 // Chromium's profile (caches, local storage, crash dumps) lives in `webview` inside Faber's data folder, as the Tauri
 // shell kept it, never loose beside the conversations: its default folder would be the data folder itself. The data
 // folder is the one the host reads (`data_dir_from_env` in host/src/lib.rs).
-const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
-app.setPath('userData', path.join(dataDir, 'webview'));
-
 // The screen test runner's switches, ignored by an installed Faber (testmode.ts).
 testmode.prepare();
 
-// A second Faber hands its arguments to the first and ends at once, before it starts a host of its own on the same data.
-if (!app.requestSingleInstanceLock()) app.exit(0);
 // Windows groups notices and the taskbar by this id; the installed Tauri Faber used the same one.
 if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.faber');
 
@@ -320,6 +322,7 @@ app.on('before-quit', (event) => {
 });
 
 void app.whenReady().then(() => {
+  readyWayback(dataDir);
   // The screen asks for nothing a browser grants: no camera, no notifications from the page, no geolocation, no devices.
   // The exceptions are the clipboard, which Copy and the right-click menu's Paste use (Tauri's window allowed it too).
   const clipboard = (permission: string) => permission === 'clipboard-read' || permission === 'clipboard-sanitized-write';

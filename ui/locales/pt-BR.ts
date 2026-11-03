@@ -2488,6 +2488,7 @@ export const ptBR: Messages = {
   'notes.384.better': 'Detalhes longos de ferramentas agora podem aparecer resumidos no registro de trabalho.',
   'notes.385.better': 'Você vê quais conversas recentes terminaram, precisam de você ou pararam quando o Faber fechou antes de abri-las.',
   'notes.386.better': 'Você vê mais cedo quando o agente repete etapas ou fica sem dar notícias; a linha discreta deixa o trabalho continuar.',
+  'notes.387.better': 'Suas conversas e configurações ganham uma cópia antes da mudança para o novo Faber.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
