@@ -376,6 +376,8 @@ async fn launch_context(vendor: Vendor, grouped: bool, resumed: bool) {
         assert_eq!(words.contains("Use our glossary, exactly as written."), grouped);
         assert!(!words.contains("Old group words"));
         support::emit(&mut output, json!({"id":thread["id"],"result":{"thread":{"id":"group-test"}}})).await;
+        let name = support::expect_method(&mut input, "thread/name/set").await;
+        assert_eq!(name["params"]["name"], "Explain widgets");
         turn = support::expect_method(&mut input, "turn/start").await;
     } else {
         turn = support::read_message(&mut input).await;

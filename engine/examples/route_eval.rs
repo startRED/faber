@@ -90,6 +90,7 @@ impl Router {
                 let (_, server) = self.codex.as_ref()?;
                 server.open(
                     CodexThread {
+                        title: None,
                         helper: Default::default(),
                         browse: false,
                         conversations: false,

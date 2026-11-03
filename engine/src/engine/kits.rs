@@ -773,6 +773,7 @@ mod tests {
                 let cli = core.opts.clis[&Vendor::Codex].clone();
                 core.codex_server(Area::Project, false, Permissions::Isolated, &cli).open_with_tools(
                     CodexThread {
+                        title: None,
                         helper: Default::default(),
                         browse: false,
                         conversations: false,

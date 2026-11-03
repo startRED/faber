@@ -61,6 +61,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                     start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch, spawn, sandbox: None }, sink)
                 } else {
                     let thread = CodexThread {
+                        title: None,
                         cwd: ".".into(),
                         model: None,
                         effort: None,

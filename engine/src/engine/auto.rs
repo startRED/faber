@@ -427,6 +427,7 @@ impl Core {
             Vendor::Gemini => return None,
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    title: None,
                     leave_plan: false,
                     helper: Default::default(),
                     browse: false,

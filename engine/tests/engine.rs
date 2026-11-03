@@ -6894,7 +6894,8 @@ async fn codex_overloaded_retries_on_the_same_thread_without_replaying_the_perso
     let starts: Vec<_> = f.wire.messages().into_iter().filter(|m| m["method"] == "turn/start").collect();
     assert_eq!(starts.len(), 2);
     assert_eq!(starts[0]["params"]["threadId"], starts[1]["params"]["threadId"]);
-    assert_eq!(f.wire.lines_with(SKY), 1);
+    // The thread-name request carries the title, which is the person's first words; only turns may hold them.
+    assert_eq!(f.wire.messages().iter().filter(|m| m["method"] != "thread/name/set" && m.to_string().contains(SKY)).count(), 1);
     assert_eq!(engine.open(&id).unwrap().messages.iter().filter(|m| m.role == Role::User).count(), 1);
     assert_eq!(f.args.lock().unwrap().len(), 1);
     let mismatches = f.mismatches.lock().unwrap().clone();

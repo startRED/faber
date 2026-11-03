@@ -780,6 +780,8 @@ pub struct CodexThread {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub resume: Option<String>,
+    /// The person's visible conversation title; internal questions leave it empty.
+    pub title: Option<String>,
     /// A side question (such as routing) with its own instructions: it reads nothing and runs nothing.
     pub instructions: Option<String>,
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
@@ -1852,6 +1854,11 @@ async fn serve(
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
+                                if t.params.instructions.is_none() && let Some(title) = t.params.title.take() {
+                                    // An untracked reply keeps older app-servers' unsupported-method errors silent.
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-name-{key}"), "method":"thread/name/set",
+                                        "params":{"threadId":id,"name":title.chars().take(60).collect::<String>()}})).await;
+                                }
                                 let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
                                     "params":{"cwds":[t.params.cwd]}})).await;
                                 if std::mem::take(&mut t.compact) {
@@ -2926,6 +2933,7 @@ mod rewind_tests {
             identity: None,
             unsubscribed: false,
             params: CodexThread {
+                title: None,
                 cwd: PathBuf::new(),
                 model: None,
                 effort: None,

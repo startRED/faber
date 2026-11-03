@@ -384,6 +384,7 @@ fn a_side_question_lists_neither_tool_in_either_cli() {
     use faber_engine::codex::{CodexThread, thread_params};
     use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
     let thread = CodexThread {
+        title: None,
         helper: Helper::Aside,
         instructions: Some("Record.".into()),
         progress: true,

@@ -36,6 +36,7 @@ fn words(language: Option<&str>) -> Value {
     let args = claude_args(&launch);
     let claude = args[args.iter().position(|a| a == "--append-system-prompt").expect("the persona is appended") + 1].clone();
     let thread = CodexThread {
+        title: None,
         cwd: ".".into(),
         model: None,
         effort: None,

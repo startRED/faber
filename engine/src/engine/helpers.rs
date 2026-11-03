@@ -208,6 +208,7 @@ impl Core {
             ),
             Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
+                    title: None,
                     leave_plan: false,
                     cwd,
                     model: model.clone(),

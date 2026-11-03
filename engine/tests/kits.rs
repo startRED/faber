@@ -126,6 +126,7 @@ async fn replay(
             });
             let session = app.open_with_tools(
                 CodexThread {
+                    title: None,
                     cwd: cwd.into(),
                     permissions,
                     model: None,
