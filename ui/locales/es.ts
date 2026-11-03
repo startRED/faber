@@ -2499,6 +2499,7 @@ export const es: Messages = {
   'notes.382.fixed': 'Los controles y las selecciones siguen visibles con los temas de contraste de Windows.',
   'notes.383.fixed': 'Las herramientas instaladas ya no desaparecen cuando el catálogo ofrece una actualización; tú decides cuándo revisarla y confirmarla.',
   'notes.384.better': 'Algunos detalles largos de herramientas se muestran abreviados en el registro de trabajo.',
+  'notes.385.better': 'Antes de abrir las conversaciones recientes, ves cuáles terminaron, te necesitan o se detuvieron al cerrarse Faber.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

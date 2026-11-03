@@ -1,8 +1,10 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Empty } from '../../ui/Empty.tsx';
-import { t, useLanguage } from '../../ui/i18n.ts';
+import type { Summary } from '../../ui/api.ts';
+import { ResumeRow } from '../../ui/Welcome.tsx';
+import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { de } from '../../ui/locales/de.ts';
 import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
@@ -20,6 +22,41 @@ const words = (text: unknown) =>
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
+
+check('recovery rows: finished, waiting and interrupted conversations are named and open', () => {
+  const before = lang();
+  useLanguage('de');
+  const [state, setState] = createSignal<Summary['state']>('concluded');
+  const conversation: Summary = { id: 'c', title: 'Recovery', area: 'chat', updatedAt: Date.now() };
+  const root = document.createElement('div');
+  root.style.width = '440px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  let opened = '';
+  const dispose = render(() => createComponent(ResumeRow, {
+    get conversation() { return { ...conversation, state: state() }; },
+    onOpen: (c) => { opened = c.id; },
+  }), root);
+  try {
+    for (const [value, key] of [['concluded', 'run.done'], ['waiting', 'run.needsYou'], ['interrupted', 'run.interrupted']] as const) {
+      setState(value);
+      ok(root.textContent?.includes(t(key)), `${value} shows its own state`);
+      ok(root.querySelector(`.st-${value}`), `${value} has its state glyph`);
+      ok(root.scrollWidth <= root.clientWidth, `${value} fits the narrow reading column`);
+    }
+    const button = root.querySelector<HTMLButtonElement>('button')!;
+    button.focus();
+    equal(document.activeElement, button, 'the row remains keyboard reachable');
+    button.click();
+    equal(opened, 'c');
+    setState(undefined);
+    equal(root.querySelector('.st'), null, 'older summaries do not invent a state');
+  } finally {
+    dispose();
+    root.remove();
+    useLanguage(before);
+  }
+});
 
 check('homes: the empty state is the peeking mark, a title in the heading size, one line and one button', () => {
   useLanguage('en');

@@ -2499,6 +2499,7 @@ export const fr: Messages = {
   'notes.382.fixed': 'Les commandes et les sélections restent visibles avec les thèmes contrastés de Windows.',
   'notes.383.fixed': 'Vos outils installés ne disparaissent plus quand le catalogue propose une mise à jour ; vous choisissez quand la vérifier et la confirmer.',
   'notes.384.better': 'Les détails longs des outils peuvent désormais être abrégés dans le journal de travail.',
+  'notes.385.better': "Avant d'ouvrir vos conversations récentes, vous voyez celles qui sont terminées, vous attendent ou se sont arrêtées à la fermeture de Faber.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

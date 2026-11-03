@@ -2499,6 +2499,7 @@ export const de: Messages = {
   'notes.382.fixed': 'Steuerelemente und Auswahl bleiben mit den Windows-Kontrastdesigns sichtbar.',
   'notes.383.fixed': 'Installierte Werkzeuge verschwinden nicht mehr, wenn der Katalog ein Update anbietet; du entscheidest, wann du den Austausch prüfst und bestätigst.',
   'notes.384.better': 'Lange Werkzeugdetails können im Arbeitsprotokoll nun verkürzt erscheinen.',
+  'notes.385.better': 'Bei letzten Unterhaltungen siehst du vor dem Öffnen, welche fertig sind, auf dich warten oder beim Schließen von Faber angehalten wurden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

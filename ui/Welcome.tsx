@@ -13,6 +13,7 @@ import { ProjectGoals } from './ProjectGoals.tsx';
 import { ProjectResults } from './Results.tsx';
 import { ProjectMemory } from './ProjectMemory.tsx';
 import { pickUp } from './running.ts';
+import { StateGlyph, stateKind } from './icons/kinds.tsx';
 
 const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
 
@@ -200,6 +201,8 @@ function Suggestions(props: { onSuggest: (text: string) => void }) {
 /** One conversation to pick up: its title, and under it where it is (unless the screen already says) and when, or what it
  * is doing now. Shared by the homes. */
 export function ResumeRow(props: { conversation: Summary; item?: RunningItem; where?: string; onOpen: (conversation: Summary) => void }) {
+  const state = () => props.conversation.state;
+  const stateText = () => state() === 'concluded' ? t('run.done') : state() === 'waiting' ? t('run.needsYou') : state() === 'interrupted' ? t('run.interrupted') : undefined;
   return (
     <button type="button" class="rrow" classList={{ ask: props.item?.state === 'needsYou' }} onClick={() => props.onOpen(props.conversation)}>
       <span class="t">{props.conversation.title}</span>
@@ -210,6 +213,7 @@ export function ResumeRow(props: { conversation: Summary; item?: RunningItem; wh
             <>
               {props.where ? `${props.where} · ` : ''}
               {when(props.conversation.updatedAt)}
+              <Show when={stateText()}>{(words) => <><StateGlyph state={stateKind(state()!)} small /><span>{words()}</span></>}</Show>
             </>
           }
         >

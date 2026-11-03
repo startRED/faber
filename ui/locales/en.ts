@@ -2379,6 +2379,7 @@ export const en = {
   'notes.382.fixed': 'Controls and selections stay visible with Windows contrast themes.',
   'notes.383.fixed': 'Installed tools no longer disappear when the catalog offers an update; you choose when to review and confirm it.',
   'notes.384.better': 'Long tool details may now appear shortened in the work log.',
+  'notes.385.better': 'You can see which recent conversations finished, need you or stopped when Faber closed before opening them.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
