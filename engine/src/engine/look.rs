@@ -28,13 +28,25 @@ impl Core {
     /// folder that passes the launch's check, starts no read.
     pub(super) fn look_around(&mut self, conv: &str, reply: &str) {
         let Some(m) = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == reply)) else { return };
-        let needles = look::removed(m);
-        if needles.is_empty() {
-            return;
-        }
+        let mut message = m.clone();
+        let pages = self.store.transcripts.clone();
         let Some(root) = self.conversation_folder(conv) else { return };
         let (me, runtime, conv, reply) = (self.me.clone(), self.opts.runtime.clone(), conv.to_string(), reply.to_string());
         self.opts.runtime.spawn_blocking(move || {
+            for tool in message.tools.iter_mut().flatten() {
+                if let Some(detail) = &tool.detail {
+                    let Ok(text) = pages.read_detail(&conv, &tool.id, detail.pages, detail.bytes) else { return };
+                    let Ok(input) = serde_json::from_str(&text) else { return };
+                    if crate::model::input_hash(&input) != detail.hash {
+                        return;
+                    }
+                    tool.input = input;
+                }
+            }
+            let needles = look::removed(&message);
+            if needles.is_empty() {
+                return;
+            }
             let places = look::search(&root, &needles, Limits::AFTER_TURN);
             if places.is_empty() {
                 return;

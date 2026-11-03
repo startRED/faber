@@ -223,3 +223,46 @@ fn invalid_ids_fail_without_creating_paths_outside_root() {
     assert!(!root.exists());
     assert!(!dir.path().join("outside").exists());
 }
+
+#[test]
+fn detail_and_helper_pages_share_a_call_without_overwriting() {
+    let dir = tempdir();
+    let store = TranscriptStore::new(dir.path());
+    let input = format!("{{\"content\":\"{}\"}}", "á🌎".repeat(6000));
+    store.append_page("parent", "call", 0, &[text(0, "helper")]).unwrap();
+    let pages = store.append_detail("parent", "call", &input).unwrap();
+    assert_eq!(store.read_detail("parent", "call", pages, input.len()).unwrap(), input);
+    assert_eq!(store.read_page("parent", "call", 0).unwrap().unwrap()[0].text, "helper");
+    store.copy_calls("parent", "branch", &[("call".into(), 1)]).unwrap();
+    store.copy_details("parent", "branch", &[("call".into(), pages)]).unwrap();
+    store.remove_conversation("parent").unwrap();
+    assert_eq!(store.read_detail("branch", "call", pages, input.len()).unwrap(), input);
+    assert_eq!(store.read_page("branch", "call", 0).unwrap().unwrap()[0].text, "helper");
+    assert_eq!(store.read_detail("branch", "call", pages + 1, input.len()), Err(Fault::Corrupt));
+}
+
+#[test]
+fn large_input_keeps_engine_keys_and_falls_back_when_storage_fails() {
+    let dir = tempdir();
+    let store = TranscriptStore::new(dir.path());
+    let long = "á🌎".repeat(2000);
+    let original = serde_json::json!({"file_path": long, "command": long, "content": long});
+    let mut input = original.clone();
+    let detail = store.keep_input("c1", "call", "Write", &mut input).unwrap();
+    assert_eq!(input["file_path"], original["file_path"]);
+    assert_eq!(input["command"], original["command"]);
+    assert!(input["content"].as_str().unwrap().len() < 270);
+    let full = store.read_detail("c1", "call", detail.pages, detail.bytes).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&full).unwrap(), original);
+    let mut helper = serde_json::json!({"prompt": long, "brief": long, "other": long});
+    store.keep_input("c1", "helper", "Helper", &mut helper).unwrap();
+    assert_eq!(helper["prompt"], long);
+    assert_eq!(helper["brief"], long);
+    assert!(helper["other"].as_str().unwrap().len() < 270);
+    for fail_at in [FailAt::Write, FailAt::Rename] {
+        let failing = TranscriptStore::with_disk(dir.path(), Arc::new(FailingDisk { fail_at }));
+        let mut input = original.clone();
+        assert!(failing.keep_input("c1", "failure", "Write", &mut input).is_none());
+        assert_eq!(input, original);
+    }
+}

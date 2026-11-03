@@ -122,6 +122,13 @@ pub struct Transcript {
     pub failed: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolDetail {
+    pub pages: u64,
+    pub bytes: usize,
+    pub hash: String,
+}
+
 /// A piece of a reply's thinking: it starts at `from` in the thinking (UTF-16 units) and came when the reply's text was
 /// `at` units long and the agent had started `steps` calls of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,6 +192,8 @@ pub struct ToolUse {
     /// Visible child-session pages, kept outside the conversation and read one at a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<ToolDetail>,
     /// Where the reply's words stood when the agent's own call started, in UTF-16 units of its text, so the thread draws
     /// the words and the steps in the order they happened (W1, 2026-10-31). None for a subagent's call (it sits in its
     /// subagent's row) and for calls recorded before it existed.
@@ -194,6 +203,11 @@ pub struct ToolUse {
     /// without the whole input. Absent on other steps and on conversations recorded before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change: Option<crate::change::Change>,
+}
+
+pub(crate) fn input_hash(input: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    crate::hex(&Sha256::digest(input.to_string().as_bytes()))
 }
 
 impl ToolUse {

@@ -2498,6 +2498,7 @@ export const fr: Messages = {
   'notes.381.better': 'Le guide des espaces explique le fonctionnement actuel des conversations de projet et du travail sans surveillance.',
   'notes.382.fixed': 'Les commandes et les sélections restent visibles avec les thèmes contrastés de Windows.',
   'notes.383.fixed': 'Vos outils installés ne disparaissent plus quand le catalogue propose une mise à jour ; vous choisissez quand la vérifier et la confirmer.',
+  'notes.384.better': 'Les détails longs des outils peuvent désormais être abrégés dans le journal de travail.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

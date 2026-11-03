@@ -1089,6 +1089,22 @@ impl Engine {
                 .ok_or_else(|| "error.store.corrupt".into())
         })
     }
+    /// Reads a call's complete input, including inputs stored in pages.
+    pub fn tool_detail(&self, id: &str, call_id: &str) -> Result<serde_json::Value, String> {
+        self.with(|core| {
+            let tool = core
+                .load(id)
+                .and_then(|c| c.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == call_id))
+                .ok_or("error.messageGone")?;
+            let Some(detail) = tool.detail.clone() else { return Ok(tool.input.clone()) };
+            let text = core.store.transcripts.read_detail(id, call_id, detail.pages, detail.bytes).map_err(|e| e.key().to_string())?;
+            let input = serde_json::from_str(&text).map_err(|_| "error.store.corrupt")?;
+            if crate::model::input_hash(&input) != detail.hash {
+                return Err("error.store.corrupt".into());
+            }
+            Ok(input)
+        })
+    }
     pub fn open_for_screen(&self, id: &str) -> Option<Conversation> {
         // One lock for both: an opening in between must not let this conversation leave memory before it is marked shown.
         self.with(|core| {
@@ -2814,6 +2830,9 @@ impl Core {
                     l.settled = false;
                 }
                 let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
+                let change = crate::change::of(&name, &input);
+                let mut input = input;
+                let detail = self.store.transcripts.keep_input(conv, &id, &name, &mut input);
                 let mut step = false;
                 if let Some(m) = self.turn(conv) {
                     // A subagent works while the agent waits for it, so its tools never move where the answer begins.
@@ -2836,6 +2855,7 @@ impl Core {
                         words_cut: false,
                         words_chars: None,
                         transcript: None,
+                        detail,
                         change: None,
                         check: false,
                         started: Some(now()),
@@ -2849,7 +2869,7 @@ impl Core {
                         tool.transcript = Some(crate::model::Transcript { pages: 0, failed: false });
                     }
                     tool.check = crate::nudge::is_check(&tool);
-                    tool.change = crate::change::of(&tool.name, &tool.input);
+                    tool.change = change;
                     step = tool.parent.is_none() && !crate::model::runs_in_background(&tool);
                     m.tools.get_or_insert_default().push(tool);
                 }
@@ -5067,7 +5087,17 @@ impl Core {
             .flat_map(|message| message.tools.iter().flatten())
             .filter_map(|tool| tool.transcript.as_ref().map(|status| (tool.id.clone(), status.pages)))
             .collect();
-        if let Err(fault) = self.store.transcripts.copy_calls(&source.id, &id, &calls) {
+        let details: Vec<_> = retained
+            .iter()
+            .flat_map(|message| message.tools.iter().flatten())
+            .filter_map(|tool| tool.detail.as_ref().map(|detail| (tool.id.clone(), detail.pages)))
+            .collect();
+        if let Err(fault) = self
+            .store
+            .transcripts
+            .copy_calls(&source.id, &id, &calls)
+            .and_then(|()| self.store.transcripts.copy_details(&source.id, &id, &details))
+        {
             let _ = self.store.transcripts.remove_conversation(&id);
             return Err(fault.key().into());
         }

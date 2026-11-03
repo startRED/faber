@@ -61,7 +61,7 @@ pub struct Child {
 }
 
 fn key(tool: &ToolUse) -> String {
-    format!("{}\u{0}{}", tool.name, tool.input)
+    format!("{}\u{0}{}", tool.name, tool.detail.as_ref().map(|d| d.hash.clone()).unwrap_or_else(|| crate::model::input_hash(&tool.input)))
 }
 
 /// A step that runs a command: it says nothing until it ends.
@@ -180,6 +180,7 @@ mod tests {
             words_chars: None,
             at: None,
             transcript: None,
+            detail: None,
             change: None,
             check: false,
             started: None,
@@ -190,6 +191,15 @@ mod tests {
     fn ended(mut tool: ToolUse, ok: bool) -> ToolUse {
         tool.ok = Some(ok);
         tool
+    }
+
+    #[test]
+    fn large_inputs_compare_using_the_full_input_hash() {
+        let full = json!({"content": "x".repeat(5000)});
+        let mut preview = step("a", "Write", json!({"content": "x".repeat(256)}));
+        preview.detail = Some(crate::model::ToolDetail { pages: 1, bytes: 5000, hash: crate::model::input_hash(&full) });
+        assert_eq!(key(&preview), key(&step("b", "Write", full)));
+        assert_ne!(key(&preview), key(&step("b", "Write", json!({"content": format!("{}y", "x".repeat(4999))}))));
     }
 
     #[test]

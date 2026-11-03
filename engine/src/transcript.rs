@@ -48,6 +48,7 @@ struct CallRecord {
 }
 
 /// Uses immutable, atomic page files so a crash can lose the current buffer, never corrupt an earlier page.
+#[derive(Clone)]
 pub struct TranscriptStore {
     root: PathBuf,
     disk: Arc<dyn Disk>,
@@ -64,6 +65,10 @@ impl TranscriptStore {
 
     /// Saves one immutable numbered page. The caller advances its page count only after success.
     pub fn append_page(&self, conversation: &str, call: &str, page: u64, entries: &[TranscriptEntry]) -> Result<(), Fault> {
+        self.append_named_page(conversation, call, page, entries, false)
+    }
+
+    fn append_named_page(&self, conversation: &str, call: &str, page: u64, entries: &[TranscriptEntry], detail: bool) -> Result<(), Fault> {
         let bytes = encode_page(entries)?;
         validate_conversation_id(conversation)?;
         validate_call_id(call)?;
@@ -72,13 +77,18 @@ impl TranscriptStore {
         ensure_directory(&conversation_dir)?;
         let directory = conversation_dir.join(call_component(call));
         ensure_directory(&directory)?;
-        let path = directory.join(page_component(page));
-        let temp = path.with_file_name(format!("{}.tmp", page_component(page)));
+        let name = if detail { format!("{page:020}.input.json") } else { page_component(page) };
+        let path = directory.join(&name);
+        let temp = path.with_file_name(format!("{name}.tmp"));
         reject_symlink(&temp)?;
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Err(Fault::Corrupt),
             Ok(metadata) if metadata.is_file() => {
-                return if self.read_page(conversation, call, page)?.as_deref() == Some(entries) { Ok(()) } else { Err(Fault::Write) };
+                return if self.read_named_page(conversation, call, page, detail)?.as_deref() == Some(entries) {
+                    Ok(())
+                } else {
+                    Err(Fault::Write)
+                };
             }
             Ok(_) => return Err(Fault::Corrupt),
             Err(error) if error.kind() == io::ErrorKind::NotFound => (),
@@ -89,13 +99,75 @@ impl TranscriptStore {
 
     /// Reads only the requested page; missing is distinct from a corrupt or unreadable page.
     pub fn read_page(&self, conversation: &str, call: &str, page: u64) -> Result<Option<Vec<TranscriptEntry>>, Fault> {
+        self.read_named_page(conversation, call, page, false)
+    }
+
+    fn read_named_page(&self, conversation: &str, call: &str, page: u64, detail: bool) -> Result<Option<Vec<TranscriptEntry>>, Fault> {
         let Some(directory) = self.existing_call_dir(conversation, call)? else { return Ok(None) };
-        let path = directory.join(page_component(page));
+        let name = if detail { format!("{page:020}.input.json") } else { page_component(page) };
+        let path = directory.join(name);
         let Some(bytes) = read_bounded(&path)? else { return Ok(None) };
         decode_page(&bytes).map(Some)
     }
 
-    /// Keeps the child tool a `Tool` page describes beside that page. The conversation record is written at most every two
+    /// Keeps the full input only after every page has been written successfully.
+    pub fn keep_input(
+        &self,
+        conversation: &str,
+        call: &str,
+        name: &str,
+        input: &mut serde_json::Value,
+    ) -> Option<crate::model::ToolDetail> {
+        let text = input.to_string();
+        if text.len() <= 4096 {
+            return None;
+        }
+        let pages = self.append_detail(conversation, call, &text).ok()?;
+        let detail = crate::model::ToolDetail { pages, bytes: text.len(), hash: crate::hex(&Sha256::digest(text.as_bytes())) };
+        let keep_root = name == "commandExecution" && input.is_string();
+        preview_input(input, keep_root, matches!(name, "Agent" | "Task" | "Helper"));
+        Some(detail)
+    }
+
+    /// Saves input separately from a helper transcript for the same call.
+    pub fn append_detail(&self, conversation: &str, call: &str, input: &str) -> Result<u64, Fault> {
+        let mut pages = 0;
+        for part in split_text(input) {
+            let entry = TranscriptEntry { at: 0, kind: TranscriptKind::Text, tool: None, text: part.to_string() };
+            self.append_named_page(conversation, call, pages, &[entry], true)?;
+            pages += 1;
+        }
+        Ok(pages)
+    }
+
+    pub fn read_detail(&self, conversation: &str, call: &str, pages: u64, bytes: usize) -> Result<String, Fault> {
+        let mut result = String::new();
+        for page in 0..pages {
+            let entries = self.read_named_page(conversation, call, page, true)?.ok_or(Fault::Corrupt)?;
+            for entry in entries {
+                if entry.kind != TranscriptKind::Text || result.len().saturating_add(entry.text.len()) > bytes {
+                    return Err(Fault::Corrupt);
+                }
+                result.push_str(&entry.text);
+            }
+        }
+        if result.len() != bytes {
+            return Err(Fault::Corrupt);
+        }
+        Ok(result)
+    }
+
+    pub fn copy_details(&self, source: &str, destination: &str, calls: &[(String, u64)]) -> Result<(), Fault> {
+        for (call, pages) in calls {
+            for page in 0..*pages {
+                let entries = self.read_named_page(source, call, page, true)?.ok_or(Fault::Corrupt)?;
+                self.append_named_page(destination, call, page, &entries, true)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Keeps the child tool described beside its page. The conversation record is written at most every two
     /// seconds, so after a crash the record may not hold the step yet, and the page alone only names it.
     pub fn append_tool(&self, conversation: &str, call: &str, page: u64, tool: &crate::model::ToolUse) -> Result<(), Fault> {
         self.append_json(conversation, call, &format!("{page:020}.tool.json"), tool)
@@ -277,6 +349,32 @@ impl TranscriptStore {
             return Ok(None);
         }
         Ok(Some(call_dir))
+    }
+}
+
+fn preview_input(value: &mut serde_json::Value, keep: bool, helper: bool) {
+    match value {
+        serde_json::Value::String(text) if !keep && text.len() > 256 => {
+            let end = text.char_indices().map(|(i, _)| i).take_while(|&i| i <= 256).last().unwrap_or(0);
+            text.truncate(end);
+            text.push('…');
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                preview_input(item, keep, helper);
+            }
+        }
+        serde_json::Value::Object(items) => {
+            for (key, value) in items {
+                preview_input(
+                    value,
+                    keep || matches!(key.as_str(), "command" | "file_path" | "notebook_path" | "path")
+                        || (helper && matches!(key.as_str(), "prompt" | "brief")),
+                    helper,
+                );
+            }
+        }
+        _ => (),
     }
 }
 

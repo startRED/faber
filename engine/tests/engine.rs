@@ -7117,3 +7117,32 @@ fn faber_acts_wire_shape_and_unicode_limit() {
     assert_eq!(recovery["params"], json!({"vendor":"codex"}));
     assert!(recovery.get("why").is_none(), "the sentence already says why");
 }
+
+#[tokio::test]
+async fn large_tool_input_survives_branch_and_deletion() {
+    let content = "x".repeat(5_000_000);
+    let input = json!({"file_path": "src/large.txt", "content": content});
+    let mut entries = claude_agents_start("go", &[], false);
+    entries.push(Entry {
+        input: false,
+        msg: json!({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "large", "name": "Write", "input": input}
+        ]}}),
+    });
+    entries.extend(claude_agents_end(&["large"]));
+    let dir = support::DataFolder::new();
+    let replay = fake(entries);
+    let (engine, _) = engine(&dir, Vendor::Claude, replay.spawn);
+    let id = engine.send(ask(Area::Chat, "go", choice("claude", Some("haiku")))).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    let tool = c.messages[1].tools.as_ref().unwrap().iter().find(|t| t.id == "large").unwrap();
+    assert!(serde_json::to_vec(tool).unwrap().len() < 5000);
+    assert_eq!(tool.input["file_path"], "src/large.txt");
+    assert!(std::fs::metadata(dir.path().join("conversations").join(format!("{id}.json"))).unwrap().len() < 5000);
+    assert_eq!(engine.tool_detail(&id, "large").unwrap(), input);
+    let branch = engine.branch_here(&id, &c.messages[1].id).unwrap();
+    engine.remove(&id);
+    assert!(!dir.path().join("child-transcripts").join(&id).exists());
+    assert_eq!(engine.tool_detail(&branch, "large").unwrap(), input);
+    engine.shutdown();
+}

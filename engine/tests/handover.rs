@@ -79,6 +79,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         words_chars: None,
         at: None,
         transcript: None,
+        detail: None,
         change: None,
         check: false,
         started: None,

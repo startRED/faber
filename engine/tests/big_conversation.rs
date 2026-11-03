@@ -174,3 +174,30 @@ async fn a_huge_conversation_opens_with_its_newest_messages_and_walks_back_witho
     assert_eq!(engine.messages_before("huge", "gone", WINDOW), None, "a message that is gone has nothing before it");
     engine.shutdown();
 }
+
+/// Models new calls with the same inputs as the old fixture, without migrating existing records.
+#[test]
+fn big_conversation_100mb_new_inputs_are_paged() {
+    let dir = support::DataFolder::new();
+    let mut conversation = support::big_conversation(dir.path(), 100_000_000);
+    let file = dir.path().join("conversations").join(format!("{}.json", conversation.id));
+    let before = std::fs::metadata(&file).unwrap().len();
+    let store = Store::new(dir.path());
+    let pages = faber_engine::transcript::TranscriptStore::new(dir.path().join("child-transcripts"));
+    let start = Instant::now();
+    let mut paged = 0;
+    for tool in conversation.messages.iter_mut().flat_map(|m| m.tools.iter_mut().flatten()) {
+        tool.change = faber_engine::change::of(&tool.name, &tool.input);
+        tool.detail = pages.keep_input(&conversation.id, &tool.id, &tool.name, &mut tool.input);
+        paged += usize::from(tool.detail.is_some());
+    }
+    let elapsed = start.elapsed();
+    store.save_checked(&conversation).unwrap();
+    let after = std::fs::metadata(&file).unwrap().len();
+    let report = format!("before {before} bytes, after {after} bytes, {paged} calls paged in {} ms", elapsed.as_millis());
+    eprintln!("{report}");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/faber-big-input-measurement.txt");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, report).unwrap();
+    assert!(paged > 0 && after < before, "the new record must be smaller");
+}

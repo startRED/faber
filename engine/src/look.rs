@@ -265,6 +265,7 @@ mod tests {
             words_chars: None,
             at: None,
             transcript: None,
+            detail: None,
             change: None,
             check: false,
             started: None,

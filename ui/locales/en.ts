@@ -2378,6 +2378,7 @@ export const en = {
   'notes.381.better': 'The areas guide now explains project conversations and unattended work as they exist today.',
   'notes.382.fixed': 'Controls and selections stay visible with Windows contrast themes.',
   'notes.383.fixed': 'Installed tools no longer disappear when the catalog offers an update; you choose when to review and confirm it.',
+  'notes.384.better': 'Long tool details may now appear shortened in the work log.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

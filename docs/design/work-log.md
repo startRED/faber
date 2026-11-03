@@ -21,7 +21,7 @@ and a useful file location is allowed when the person needs to find or open an a
   "Used a tool"), its server.
 - A click on a step row (`aria-expanded`) opens `div.step-detail` below it: for a file change, the changed lines
   (`ChangedLines`, up to 40 lines, then "N more lines"); otherwise the full command or path (`code.step-what`) and what
-  it returned (`pre.step-out`, up to 30 lines, then "N more lines").
+  it returned (`pre.step-out`, up to 30 lines, then "N more lines"). Long input text may show a short preview; commands and file paths stay whole.
 - Thinking (`Thought`, `div.step.thought`) is a quiet row in its place among the steps: the shared thought icon (or the working ring
   while thinking), "Thought" (or "Thinking" while live) in bold, and its first line (or latest line while live) in one
   middle-cut line. A click opens `div.step-detail.thought-text` with all of its paragraphs (`thinkingParts`).

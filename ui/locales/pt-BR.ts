@@ -2485,6 +2485,7 @@ export const ptBR: Messages = {
   'notes.381.better': 'O guia das áreas explica como funcionam hoje as conversas de projeto e o trabalho sem acompanhamento.',
   'notes.382.fixed': 'Os controles e as seleções continuam visíveis com os temas de contraste do Windows.',
   'notes.383.fixed': 'Ferramentas instaladas não somem mais quando o catálogo oferece uma atualização; você escolhe quando revisar e confirmar a troca.',
+  'notes.384.better': 'Detalhes longos de ferramentas agora podem aparecer resumidos no registro de trabalho.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

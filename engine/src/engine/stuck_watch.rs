@@ -34,7 +34,9 @@ fn is_subagent_call(tool: &ToolUse) -> bool {
 fn asks_about(question: &Permission, step: &ToolUse) -> bool {
     let same = question.tool == step.name
         || matches!((question.tool.as_str(), step.name.as_str()), ("command", "commandExecution") | ("file" | "fileChange", "fileChange"));
-    step.ok.is_none() && same && question.input == step.input
+    step.ok.is_none()
+        && same
+        && step.detail.as_ref().map_or_else(|| question.input == step.input, |d| d.hash == crate::model::input_hash(&question.input))
 }
 
 impl Core {
@@ -240,6 +242,7 @@ mod tests {
             words_chars: None,
             at: None,
             transcript: None,
+            detail: None,
             change: None,
             check: false,
             started: None,
