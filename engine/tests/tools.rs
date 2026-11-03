@@ -129,7 +129,7 @@ fn item() -> Item {
 }
 
 #[test]
-fn moved_catalog_pin_survives_other_removals_and_undo_until_manual_replacement() {
+fn moved_catalog_pin_survives_removal_and_undo_until_manual_replacement() {
     use faber_engine::model::{Area, Permissions};
     for enabled in [true, false] {
         let data = tempfile::tempdir().unwrap();
@@ -141,6 +141,9 @@ fn moved_catalog_pin_survives_other_removals_and_undo_until_manual_replacement()
         store.set_enabled(&first.id, enabled).unwrap();
         let mut second = first.clone();
         second.commit = "second-pin".into();
+        let second_skill = [SKILL, b"\nSecond instructions."].concat();
+        std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", &second_skill)])).unwrap();
+        second.digest = faber_engine::tools::digest_of(&archive, &second.path).unwrap();
         let store = Store::with_catalog(data.path(), vec![second.clone()]);
         store.install_from(&second, &archive).unwrap();
         let previous_kit = enabled.then(|| store.kit("debug", None, Area::Project, Permissions::FullAccess, &[]).0);
@@ -167,21 +170,39 @@ fn moved_catalog_pin_survives_other_removals_and_undo_until_manual_replacement()
         if enabled {
             assert!(store.delivery().plugin.is_none(), "legacy discovery cannot expose the retained old pin");
         }
-        store.remove(&other.id).unwrap();
-        store.restore(&other.id).unwrap();
+        store.remove(&newer.id).unwrap();
+        assert!(store.restore(&newer.id).is_err(), "an obsolete copy cannot be restored against the new catalog");
+        let old_catalog = Store::with_catalog(data.path(), vec![second.clone(), other.clone()]);
+        old_catalog.restore(&newer.id).unwrap();
         assert_eq!(store.installed().get(&newer.id), Some(&second.commit));
         assert_eq!(store.enabled(&newer.id), enabled);
+        store.remove(&other.id).unwrap();
         assert_eq!(store.capture_replacement(&newer.id).unwrap(), plan, "cleanup preserves exact bytes, switches and recovery receipt");
         assert_eq!(std::fs::read(&backup).unwrap(), SKILL);
         assert!(store.replace_sources(&plan, &other_archive, &Default::default()).is_err(), "failed updates keep the old copy");
         assert_eq!(store.capture_replacement(&newer.id).unwrap(), plan);
+        #[cfg(windows)]
+        let plan = {
+            use std::os::windows::fs::OpenOptionsExt;
+            let ledger = data.path().join("tools/installed.json");
+            let held = std::fs::OpenOptions::new().read(true).share_mode(3).open(&ledger).unwrap();
+            assert!(store.replace_sources(&plan, &archive, &Default::default()).is_err());
+            drop(held);
+            let recovered = store.capture_replacement(&newer.id).unwrap();
+            let original = if enabled { "tools/plugin/skills/careful/SKILL.md" } else { "tools/disabled/careful/SKILL.md" };
+            assert_eq!(std::fs::read(data.path().join(original)).unwrap(), second_skill);
+            assert_eq!(store.installed().get(&newer.id), Some(&second.commit));
+            assert_eq!(store.enabled(&newer.id), enabled);
+            assert_eq!(std::fs::read(&backup).unwrap(), second_skill, "rollback retains the replaced bytes");
+            recovered
+        };
         store.replace_sources(&plan, &archive, &Default::default()).unwrap();
         assert_eq!(store.installed().get(&newer.id), Some(&newer.commit));
         assert_eq!(store.enabled(&newer.id), enabled);
-        assert_eq!(std::fs::read(&backup).unwrap(), SKILL, "manual update retains the previous installed bytes");
+        assert_eq!(std::fs::read(&backup).unwrap(), second_skill, "manual update retains the previous installed bytes");
         assert_eq!(std::fs::read(&held_skill).unwrap(), SKILL, "existing kits survive a manual update");
         if let Some(previous) = previous_kit {
-            assert_eq!(std::fs::read(previous.skills.unwrap().join("careful/SKILL.md")).unwrap(), SKILL);
+            assert_eq!(std::fs::read(previous.skills.unwrap().join("careful/SKILL.md")).unwrap(), second_skill);
         }
         assert!(!store.checked_statuses().contains_key(&newer.id));
     }
