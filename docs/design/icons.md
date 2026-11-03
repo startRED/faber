@@ -58,3 +58,5 @@ and the name always comes with the mark.
 ## Where it is used
 
 `Details.tsx` (a helper's or a command's state in the Technical details list) uses the state drawings from this change. The work log uses the shared step drawings and state marks, including helpers, thinking and end rows. The running column and sidebar adopt them in their own lanes.
+
+The running column and sidebar use the shared state drawings beside their existing words; project rows label the working drawing for screen readers. Faber decision and wake rows, and helper rows with a known AI, use actor marks.

@@ -142,7 +142,7 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .crow.child { padding-left: 14px; }
 .crow.child::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 1px; background: var(--line-2); }
 .item .tag-quiet, .hit-heading .tag-quiet { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
-.item .state-mark { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--amber-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.item .state-mark { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--amber-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
 .item .state-mark + .unseen, .item .unseen + .state-mark { margin-left: 6px; }
 .item .unseen { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }
 
@@ -270,6 +270,7 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .vm.claude { color: var(--claude-ink); }
 .vm.codex { color: var(--codex-ink); }
 .vm .verb { color: var(--ink-2); font-weight: 400; }
+.vm .verb .st, .ask.stuck b .st { margin-right: .25em; }
 .amber-tag { display: inline-flex; align-items: center; gap: 5px; color: var(--amber-ink); font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; }
 svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 svg.i.sm { width: 14px; height: 14px; }

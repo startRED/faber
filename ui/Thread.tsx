@@ -19,7 +19,7 @@ import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
+import { ActorMark, StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { StallNote } from './StallNote.tsx';
 import { ResultsNote } from './Results.tsx';
@@ -171,7 +171,7 @@ function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
 // is still working; opened, what it ran and the report it gave back. Never a board: the agent decides, this only shows it.
 // One that seems stuck turns amber with what the engine saw and two ways in (R161 step 6); one waiting on the person's
 // answer says so, and the card below the rows is that answer.
-function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conversationId: string; messageId: string }) {
+function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conversationId: string; messageId: string; vendor?: 'claude' | 'codex' }) {
   const step = () => props.step();
   const state = () => agentState(step(), props.streaming);
   const open = () => showAgent({ conversationId: props.conversationId, messageId: props.messageId, callId: step().call.id });
@@ -185,6 +185,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conver
         <span class="agent-mark" aria-hidden="true">
           <StateGlyph state={state() === 'done' && !(step().call.facts?.checks && !step().call.facts?.failed) ? 'ended' : stateKind(state())} small />
         </span>
+        <Show when={step().helper && props.vendor}><ActorMark actor={props.vendor === 'claude' ? 'codex' : 'claude'} /></Show>
         <b>{step().title || t('agent.untitled')}</b>
         <span class="agent-meta">{agentMeta(step(), props.streaming)}</span>
         <Show when={agentActivity(step(), props.streaming)}>{(current) => <span class="agent-now" title={current()}>{current()}</span>}</Show>
@@ -664,7 +665,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               </Match>
               <Match when={step()}>
                 <div class="agents" role="list" aria-label={t('agent.label')}>
-                  <AgentRow step={shownStep} streaming={working()} conversationId={props.conversationId} messageId={m().id} />
+                  <AgentRow step={shownStep} vendor={m().vendor === 'claude' || m().vendor === 'codex' ? m().vendor as 'claude' | 'codex' : undefined} streaming={working()} conversationId={props.conversationId} messageId={m().id} />
                 </div>
               </Match>
             </Switch>
@@ -1140,7 +1141,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
             }
           >
             <Show when={m().wake && m().acts?.length}><FaberActs acts={m().acts} onChange={props.onActChange} /></Show>
-            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><ToolGlyph kind="decision" small /><span>{t('wake.conclusion')}</span></div></div></Show>
+            <Show when={m().wake?.why === 'wake.conclusion' && !m().acts?.length}><div class="faber-act"><div class="faber-act-line"><ActorMark actor="faber" /><span>{t('wake.conclusion')}</span></div></div></Show>
             <Show when={!m().wake}>
               <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
                 {(editKey) => (

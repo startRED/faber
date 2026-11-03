@@ -2383,6 +2383,7 @@ export const en = {
   'notes.386.better': 'You see a quiet line sooner when the agent repeats a step or goes silent; the sign lets it keep working.',
   'notes.387.better': 'Your conversations and settings get a backup before the move to the new Faber.',
   'notes.388.fixed': 'Waiting for a conversation now continues while it needs an answer and reports how it ended.',
+  'notes.389.better': 'You can spot who is speaking and how work ended from the marks beside the words.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

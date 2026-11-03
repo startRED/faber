@@ -2503,6 +2503,7 @@ export const es: Messages = {
   'notes.386.better': 'Ves antes una línea discreta si el agente repite un paso o deja de dar noticias; el aviso le permite seguir trabajando.',
   'notes.387.better': 'Tus conversaciones y ajustes tienen una copia antes del cambio al nuevo Faber.',
   'notes.388.fixed': 'La espera de una conversación continúa mientras necesita una respuesta y muestra cómo terminó.',
+  'notes.389.better': 'Puedes identificar quién habla y cómo terminó el trabajo por las marcas junto a las palabras.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

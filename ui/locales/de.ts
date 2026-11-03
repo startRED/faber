@@ -2503,6 +2503,7 @@ export const de: Messages = {
   'notes.386.better': 'Du siehst früher einen dezenten Hinweis, wenn der Agent einen Schritt wiederholt oder nichts mehr meldet; der Hinweis lässt ihn weiterarbeiten.',
   'notes.387.better': 'Deine Unterhaltungen und Einstellungen werden vor dem Wechsel zum neuen Faber gesichert.',
   'notes.388.fixed': 'Das Warten auf eine Unterhaltung läuft weiter, solange sie eine Antwort braucht, und zeigt ihr Ende an.',
+  'notes.389.better': 'An den Zeichen neben dem Text erkennst du, wer spricht und wie die Arbeit endete.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

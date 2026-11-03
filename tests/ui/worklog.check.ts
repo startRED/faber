@@ -1,6 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
+import { FaberActs } from '../../ui/FaberAct.tsx';
 import { App } from '../../ui/App.tsx';
 import { ToolGlyph } from '../../ui/icons/kinds.tsx';
 import { keepParts, timeline } from '../../ui/timeline.ts';
@@ -501,4 +502,18 @@ check('worklog: completed steps use past tense and summaries count ended work', 
   equal(stepsSummary([read, run, { ...read, id: 'pending', ok: undefined }, { id: 'other', name: 'Unknown', input: {}, ok: false }]),
     'Read 1 file · Ran 1 command · 1 other step');
   equal(stepsSummary([{ ...run, ok: undefined }]), '');
+});
+
+check('worklog: automatic decisions show the actor mark and keep their words', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const dispose = render(() => createComponent(FaberActs, { acts: [
+    { kind: 'wake', actor: { who: 'faber' }, what: 'wake.keepGoing' },
+    { kind: 'route', actor: { who: 'ai', vendor: 'codex', role: 'router' }, what: 'act.route.chose', params: { model: 'A', effort: 'medium' } },
+  ] }), root);
+  try {
+    const rows = root.querySelectorAll('.faber-act');
+    ok(rows[0]?.querySelector('.mk-faber'));
+    ok(rows[1]?.querySelector('.mk.codex'));
+    ok(rows[0]?.textContent && rows[1]?.textContent);
+  } finally { dispose(); root.remove(); }
 });

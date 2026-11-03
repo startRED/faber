@@ -2490,6 +2490,7 @@ export const ptBR: Messages = {
   'notes.386.better': 'Você vê mais cedo quando o agente repete etapas ou fica sem dar notícias; a linha discreta deixa o trabalho continuar.',
   'notes.387.better': 'Suas conversas e configurações ganham uma cópia antes da mudança para o novo Faber.',
   'notes.388.fixed': 'A espera por uma conversa continua enquanto ela precisa de uma resposta e mostra como terminou.',
+  'notes.389.better': 'Você identifica quem está falando e como o trabalho terminou pelas marcas ao lado das palavras.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

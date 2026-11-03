@@ -6,6 +6,7 @@ import { api, type Area, type ChatGroup, type Conversation, type MessageHit, typ
 import { windowHidden } from './appearance.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { percent, t } from './i18n.ts';
 import { keysOf } from './keys.ts';
 import { en, type Key } from './locales/en.ts';
@@ -406,7 +407,7 @@ export function Sidebar(props: Props) {
           <Show when={row.c.ended && row.c.id !== props.place.id}>
             <span class="unseen" role="img" aria-label={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} title={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} />
           </Show>
-          <Show when={!row.c.archived && stateWords(row.c.state)}>{(words) => <span class="state-mark" data-state={row.c.state} title={words()}>{words()}</span>}</Show>
+          <Show when={!row.c.archived && stateWords(row.c.state)}>{(words) => <span class="state-mark" data-state={row.c.state} title={words()}><StateGlyph state={stateKind(row.c.state!)} small />{words()}</span>}</Show>
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>
@@ -517,7 +518,7 @@ export function Sidebar(props: Props) {
                       >
                         <span class="t">{p.name}</span>
                         <Show when={tail().running && tail().needs === 0}>
-                          <span class="tail run-dot" role="img" aria-label={t('side.running')} />
+                          <StateGlyph state="working" small label={t('side.running')} />
                         </Show>
                         {/* Amber always comes with its words, as on the run button and in the running column. */}
                         <Show when={tail().needs > 0}>

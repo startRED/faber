@@ -7,6 +7,7 @@ import { FilePane } from './FileView.tsx';
 import { Commands } from './Commands.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { Grip } from './Grip.tsx';
 import type { Limits } from './layout.ts';
 import { everyWhileShown } from './idle.ts';
@@ -179,7 +180,7 @@ export function Running(props: {
                               <div class="rhead">
                                 <Show when={item().state === 'needsYou'}>
                                   <span class="ask-label">
-                                    <Icon name="ask" small />
+                                    <StateGlyph state="waiting" small />
                                     {words(item())}
                                   </span>
                                 </Show>
@@ -187,7 +188,7 @@ export function Running(props: {
                                   <VendorMark vendor={item().vendor} />
                                   <Show when={item().vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
                                   <Show when={item().state !== 'needsYou'}>
-                                    <span class="verb">{words(item())}</span>
+                                    <span class="verb"><StateGlyph state={item().waitUntil || item().keepWait ? 'waiting' : 'working'} small />{words(item())}</span>
                                   </Show>
                                 </span>
                                 <span class="time num">{since(item())}</span>
@@ -216,7 +217,7 @@ export function Running(props: {
                               {/* Amber only because a helper seems stuck: no card to answer, so it says so and opens the conversation. */}
                               <Show when={item().stuck?.length}>
                                 <div class="ask stuck" role="status">
-                                  <b>{t('run.stuck', { n: item().stuck?.length ?? 0 })}</b>
+                                  <b><StateGlyph state="stuck" small />{t('run.stuck', { n: item().stuck?.length ?? 0 })}</b>
                                   <span class="note">{t('run.stuckHint')}</span>
                                   <div>
                                     <button class="btn primary" onClick={() => props.onOpen(item())}>
@@ -229,7 +230,7 @@ export function Running(props: {
                               <Show when={item().stall}>
                                 {(stall) => (
                                   <div class="ask stuck" role="status">
-                                    <b>{stallText(stall())}</b>
+                                    <b><StateGlyph state="stuck" small />{stallText(stall())}</b>
                                     <div>
                                       <button class="btn primary" onClick={() => props.onOpen(item())}>
                                         {t('run.stuckOpen')}
@@ -247,7 +248,7 @@ export function Running(props: {
                             <li class="ri done" classList={{ need: ended(c).kind !== 'done' }} ref={animateList}>
                               <div class="rhead">
                                 <span class="vm end">
-                                  <Icon name={ended(c).kind === 'done' ? 'check' : 'ask'} small />
+                                  <StateGlyph state={stateKind(ended(c).kind)} small />
                                   <span class="verb">{endWords(c)}</span>
                                 </span>
                                 <span class="time num">{worked(c)}</span>

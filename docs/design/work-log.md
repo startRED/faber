@@ -79,3 +79,5 @@ error uses the existing quiet kit fold, and a later retry does not insert resour
 
 Agent catalog changes share the existing self-change permission card; [Catalog](catalog.md#agent-requests) describes
 their separate grants, version disclosure, backups and preservation of current conversation tools.
+
+Helper rows with a known AI show its actor mark beside its name and state.

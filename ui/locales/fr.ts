@@ -2503,6 +2503,7 @@ export const fr: Messages = {
   'notes.386.better': 'Une ligne discrète signale plus tôt les répétitions ou le silence de l’agent ; ce signal le laisse travailler.',
   'notes.387.better': 'Vos conversations et réglages sont sauvegardés avant le passage au nouveau Faber.',
   'notes.388.fixed': 'L’attente d’une conversation continue tant qu’elle demande une réponse et indique comment elle s’est terminée.',
+  'notes.389.better': "Les repères à côté du texte indiquent qui parle et comment le travail s'est terminé.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

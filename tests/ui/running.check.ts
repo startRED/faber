@@ -1,3 +1,6 @@
+import { createComponent } from 'solid-js';
+import { render } from 'solid-js/web';
+import { Running } from '../../ui/Running.tsx';
 import type { QuotaReading, RunningItem, Summary } from '../../ui/api.ts';
 import { widthClass } from '../../ui/layout.ts';
 import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, doneCards, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys, warmLeft } from '../../ui/running.ts';
@@ -216,4 +219,19 @@ check('quota R177: the sidebar line shows the weekly window, the five-hour one m
   quotas = withQuota(quotas, reading('seven_day', 0.3, 900));
   equal(lineReading(quotas, 'claude', now), undefined, 'a weekly reading past its reset is not replaced by the five-hour one');
   equal(lineReading({}, 'claude', now), undefined);
+});
+
+check('running: ended states keep their words and distinct shared drawings', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const done: Summary[] = ['done', 'unconcluded', 'interrupted', 'failed'].map((kind, index) => ({
+    id: String(index), title: kind, area: 'chat', updatedAt: 0,
+    ended: { at: index + 1, kind: kind as NonNullable<Summary['ended']>['kind'], workMs: 0 },
+  }));
+  const dispose = render(() => createComponent(Running, { items: [item()], done, projects: [], onOpen: () => {}, onOpenDone: () => {}, onDismiss: () => {}, onClose: () => {}, modal: false, ref: () => {} }), root);
+  try {
+    for (const state of ['working', 'concluded', 'ended', 'interrupted', 'failed']) {
+      ok(root.querySelector('.st-' + state + '[aria-hidden="true"]'), state);
+    }
+    ok(root.querySelector('.ri.done .verb')?.textContent, 'the state words stay visible');
+  } finally { dispose(); root.remove(); }
 });

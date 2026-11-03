@@ -132,3 +132,5 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
 
 Copy/Edit's menu adds Go back, Redo or pending recovery, including after restart. Its confirmation and saved-message
 notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
+
+Faber's decision and automatic-message rows use the actor's mark beside the existing words.
