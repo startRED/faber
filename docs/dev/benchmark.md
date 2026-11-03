@@ -67,6 +67,15 @@ Each run needs a new run folder: an existing `--run-id` is rejected before savin
 
 The eight-request sample has five Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, and summarize a CSV export) and three Chat requests. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
 
+## First-word engine budget
+
+`engine/tests/first_word_cost.rs` runs in the CI Rust suite without an account: an immediate fake CLI answers one cold
+turn, then 20 warm turns through public `Engine::send` for each vendor, reusing the running session. It timestamps the
+first reply-text `AppEvent` at emission, reports the cold time, warm fastest and median, and caps only the fastest warm
+sample at 400 ms to allow shared CI contention while rejecting a fixed 500 ms delay before send. Auto is off, so no
+routing model is called. This covers the engine's own share, including the prompt,
+pipe and parser; model latency is measured only by hand with a live account, and screen handling/rendering are excluded.
+
 ## What it does not do yet
 
 - Codex: the harness runs plain Codex (`--plain codex`) and lets Faber use it (`--vendors claude,codex`), but its event reader was written from the documented format and has not met a live account.
@@ -77,6 +86,6 @@ The eight-request sample has five Projects (organize files, build a to-do app, f
 - `spawns.log` writes each argument, except the values of `--settings`, `--mcp-config` and the system-prompt flags, which are logged as their length.
 - The proofs run the agent's code on this PC, as the agent itself already did.
 - The research proof checks at most 20 distinct cited links; extra links make coverage incomplete and the proof fails. Reachability (including 401, 403 and 429) does not verify the cited facts, official authorship or page contents. A passing link check alone does not qualify research accuracy.
-- The full ~40 requests, creative media (thumbnail, video, 3D, mod) and the goals that are not quality (speed to first token, precision, memory) are measured elsewhere or not yet.
+- The full ~40 requests, creative media (thumbnail, video, 3D, mod), live-model speed to first token, precision and memory are measured elsewhere or not yet. The engine-only first-word budget above does not certify the full 2 s goal.
 
 A dated report of a run lives in [research/](../research/) (the first: [2026-10-22/benchmark-light.md](../research/2026-10-22/benchmark-light.md)). Its pure parts (request files, the deal, the verdict, what a CLI reported, the cap, the tables) are `bench/pure.rs`, tested by `engine/tests/all.rs`; the runner is `engine/examples/bench.rs`.

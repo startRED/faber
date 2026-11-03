@@ -202,6 +202,7 @@ fn every_test_file_is_listed() {
             "verify_cost.rs",
             "adopted_read_cost.rs",
             "project_facts_cost.rs",
+            "first_word_cost.rs",
         ]
         .contains(&name.as_str());
         if name.ends_with(".rs") && !alone && !this.contains(&format!("#[path = \"{name}\"]")) {

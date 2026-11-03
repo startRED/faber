@@ -55,6 +55,12 @@ Creative results are judged blind, shown as "A" and "B", and the answer is revea
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
 | Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | under 500 MB (the test fails above 400 MB, R125); ≤ 120 MB; 0 |
 
+`engine/tests/first_word_cost.rs` caps Faber's own warm-session share at 400 ms for the fastest of 20 sends per vendor,
+from public `Engine::send` to the first reply-text `AppEvent`, with an immediate fake CLI and Auto off. It also reports
+the median and uncapped cold send. The generous cap allows shared CI contention but rejects a fixed 500 ms delay before
+send. Model latency still needs a manual measurement with a live account; screen
+handling and rendering are outside this engine budget.
+
 ### Measuring without burning the user's quota
 
 - Cost is measured in tokens reported by each CLI, priced at API rates, never as a share of the subscription.
