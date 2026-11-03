@@ -492,7 +492,8 @@
     },
     "kind": "write",
     "reach": "own",
-    "conversation": "/id"
+    "conversation": "/id",
+    "about": "Leave a recoverable reply queued for its turn; this is not the `faber wait` conversation command."
   },
   {
     "name": "continue_closed",

@@ -197,6 +197,7 @@ table! {
     Write Screen fn parked_seen(h, id: String, turn_id: String) -> () {
         h.engine.parked_seen(&id, &turn_id)
     }
+    /// Leave a recoverable reply queued for its turn; this is not the `faber wait` conversation command.
     Write Own("/id") fn wait_turn(h, id: String, turn_id: String) -> () {
         h.engine.wait_turn(&id, &turn_id)
     }

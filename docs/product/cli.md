@@ -123,7 +123,7 @@ Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--ti
 | `projects` / `quota` / `settings` | | `projects`, `quota`, `settings` |
 | `asks` | | `asks` (the calling conversation's permission requests) |
 | `watch` | `[--id <id>] [--family <id>] [--project <id>]` | Subscribes to channel events and emits state-transition JSON lines |
-| `wait` | `<id> [--timeout <s>]` | Waits until `<id>` is no longer `working`, prints `conversation {id, last: 1}` (default timeout 300 s; `0` = none) |
+| `wait` | `<id> [--timeout <s>]` | Waits until `<id>` reaches an ending state, prints `conversation {id, last: 1}` (default timeout 300 s; `0` = none) |
 | `call` | `<command> [<arguments as JSON> \| -]` | Any non-`screen` command in `host/src/table.rs` |
 
 ## Output, exit codes, `watch` and `wait`
@@ -158,9 +158,7 @@ once after `lagged`), and prints a line only when `(state, status, title)` chang
 When a conversation leaves `working` or `waiting` for `idle`, `watch` calls `conversation {id, last: 0}` so the emitted
 line carries its exact end state (`concluded`, `ended`, `stopped`, `failed`, `interrupted`) and `conclusion`.
 
-`faber wait <id>` checks `conversation {id, last: 1}` first; if `<id>` is already not `working`, it prints that view and
-exits `0`. Otherwise it watches until `<id>` leaves `working` (including for `waiting`, so an AI never hangs while a card
-waits for the person), prints `conversation {id, last: 1}` and exits `0`, or exits `5` on timeout.
+`faber wait <id>` checks `conversation {id, last: 1}` until it reaches `concluded`, `ended`, `interrupted`, `stopped` or `failed`, then prints that view and exits `0`. It keeps waiting while the conversation is `working`, `waiting` for the person or other conversations, or `new`; it exits `5` on timeout. Only `concluded` means the AI concluded the request.
 
 ## Limits
 

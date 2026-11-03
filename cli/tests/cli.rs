@@ -41,7 +41,12 @@ impl Backend for Fake {
                     Ok(json!([{ "id":"c1", "title":"Example", "family":"c1", "state":if working {"working"} else {"idle"} }]))
                 }
                 "conversation" => {
-                    Ok(json!({"id":args["id"],"state":if working {"working"} else {"concluded"},"conclusion":{"recap":"Done","done":true}}))
+                    let state = args["id"].as_str().filter(|id| *id != "c1").unwrap_or(if working { "working" } else { "concluded" });
+                    let mut view = json!({"id":args["id"],"state":state});
+                    if state == "concluded" {
+                        view["conclusion"] = json!({"recap":"Done","done":true});
+                    }
+                    Ok(view)
                 }
                 "conversation_markdown" => Ok(json!({"markdown":"# Example\n"})),
                 "search_messages" => Ok(json!({"ready":true,"hits":[{"conversationId":"c1","title":"Example","snippet":"hello"}]})),
@@ -336,4 +341,22 @@ async fn export_and_search_use_the_host_commands() {
     assert_eq!(search.code, 0);
     assert_eq!(lines(&search.stdout)[0]["hits"][0]["conversationId"], "c1");
     assert_eq!(fake.calls.lock().unwrap()[0], ("search_messages".into(), json!({"query":"hello world","area":"project"})));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wait_reports_each_ending_and_keeps_waiting_for_people_or_children() {
+    for state in ["concluded", "ended", "interrupted", "stopped", "failed"] {
+        let (result, _) = faber(false, &["wait", state], "", &[]).await;
+        assert_eq!(result.code, 0);
+        assert_eq!(lines(&result.stdout)[0]["state"], state);
+        if state != "concluded" {
+            assert!(lines(&result.stdout)[0].get("conclusion").is_none());
+        }
+    }
+    for state in ["working", "waiting", "new"] {
+        let (result, fake) = faber(false, &["wait", state, "--timeout", "1"], "", &[]).await;
+        assert_eq!(result.code, 5);
+        assert_eq!(lines(&result.stdout)[0]["state"], state);
+        assert!(fake.calls.lock().unwrap().len() > 1);
+    }
 }

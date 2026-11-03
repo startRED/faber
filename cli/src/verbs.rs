@@ -336,7 +336,7 @@ async fn wait(client: &Client, out: &Out, id: &str, timeout: u64) -> i32 {
             Ok(v) => v,
             Err(e) => return e,
         };
-        if v["state"] != "working" {
+        if !matches!(v["state"].as_str(), Some("working" | "waiting" | "new")) {
             out.result(&v);
             return out::DONE;
         }

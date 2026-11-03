@@ -2502,6 +2502,7 @@ export const es: Messages = {
   'notes.385.better': 'Antes de abrir las conversaciones recientes, ves cuáles terminaron, te necesitan o se detuvieron al cerrarse Faber.',
   'notes.386.better': 'Ves antes una línea discreta si el agente repite un paso o deja de dar noticias; el aviso le permite seguir trabajando.',
   'notes.387.better': 'Tus conversaciones y ajustes tienen una copia antes del cambio al nuevo Faber.',
+  'notes.388.fixed': 'La espera de una conversación continúa mientras necesita una respuesta y muestra cómo terminó.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
