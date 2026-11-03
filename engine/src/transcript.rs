@@ -3,9 +3,14 @@ use crate::store::{self, Disk, Fault, RealDisk};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+static PAGE_LOCKS: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const MAX_PAGE_BYTES: usize = 64 * 1024;
 pub const MAX_TEXT_CHUNK_BYTES: usize = 8 * 1024;
@@ -79,8 +84,9 @@ impl TranscriptStore {
         ensure_directory(&directory)?;
         let name = if detail { format!("{page:020}.input.json") } else { page_component(page) };
         let path = directory.join(&name);
-        let temp = path.with_file_name(format!("{name}.tmp"));
-        reject_symlink(&temp)?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut hasher);
+        let _guard = PAGE_LOCKS[hasher.finish() as usize % PAGE_LOCKS.len()].lock().unwrap_or_else(|e| e.into_inner());
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Err(Fault::Corrupt),
             Ok(metadata) if metadata.is_file() => {
@@ -94,7 +100,14 @@ impl TranscriptStore {
             Err(error) if error.kind() == io::ErrorKind::NotFound => (),
             Err(_) => return Err(Fault::Read),
         }
-        store::replace(self.disk.as_ref(), &path, &bytes)
+        let temp = path.with_file_name(format!("{name}.{}.{}.tmp", std::process::id(), TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+        reject_symlink(&temp)?;
+        // Disk::write syncs the temp file before rename, as Store::save_checked does for the record.
+        self.disk.write(&temp, &bytes).and_then(|()| crate::tools::retry_busy(|| self.disk.rename(&temp, &path))).map_err(|e| {
+            drop(fs::remove_file(&temp));
+            Fault::of_write(&e)
+        })?;
+        if self.read_named_page(conversation, call, page, detail)?.as_deref() == Some(entries) { Ok(()) } else { Err(Fault::Write) }
     }
 
     /// Reads only the requested page; missing is distinct from a corrupt or unreadable page.
@@ -123,10 +136,36 @@ impl TranscriptStore {
             return None;
         }
         let pages = self.append_detail(conversation, call, &text).ok()?;
-        let detail = crate::model::ToolDetail { pages, bytes: text.len(), hash: crate::hex(&Sha256::digest(text.as_bytes())) };
+        let hash = crate::hex(&Sha256::digest(text.as_bytes()));
+        let mut verified = Sha256::new();
+        let mut length = 0usize;
+        for page in 0..pages {
+            for entry in self.read_named_page(conversation, call, page, true).ok()?? {
+                if entry.kind != TranscriptKind::Text {
+                    return None;
+                }
+                length = length.checked_add(entry.text.len())?;
+                verified.update(entry.text.as_bytes());
+            }
+        }
+        if length != text.len() || crate::hex(&verified.finalize()) != hash {
+            return None;
+        }
+        self.flush(conversation, call).ok()?;
+        let detail = crate::model::ToolDetail { pages, bytes: text.len(), hash };
         let keep_root = name == "commandExecution" && input.is_string();
         preview_input(input, keep_root, matches!(name, "Agent" | "Task" | "Helper"));
         Some(detail)
+    }
+
+    /// Flushes the call, conversation, transcript root and data directory before dropping inline input.
+    fn flush(&self, conversation: &str, call: &str) -> Result<(), Fault> {
+        let directory = self.existing_call_dir(conversation, call)?.ok_or(Fault::Corrupt)?;
+        for path in directory.ancestors().take(4) {
+            let path = if path.as_os_str().is_empty() { Path::new(".") } else { path };
+            self.disk.flush(path).map_err(|error| Fault::of_write(&error))?;
+        }
+        Ok(())
     }
 
     /// Saves input separately from a helper transcript for the same call.
@@ -350,6 +389,10 @@ impl TranscriptStore {
         }
         Ok(Some(call_dir))
     }
+}
+
+pub(crate) fn input_hash(value: &serde_json::Value) -> String {
+    crate::hex(&Sha256::digest(value.to_string().as_bytes()))
 }
 
 fn preview_input(value: &mut serde_json::Value, keep: bool, helper: bool) {

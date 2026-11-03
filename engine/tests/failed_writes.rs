@@ -393,6 +393,55 @@ struct DelayedDisk {
     writes: std::sync::atomic::AtomicUsize,
 }
 
+struct PageFlushDisk {
+    fail_at: usize,
+    flushes: std::sync::atomic::AtomicUsize,
+}
+
+impl faber_engine::store::Disk for PageFlushDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        faber_engine::store::Disk::write(&faber_engine::store::RealDisk, path, bytes)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        faber_engine::store::Disk::rename(&faber_engine::store::RealDisk, from, to)
+    }
+    fn flush(&self, path: &Path) -> std::io::Result<()> {
+        if self.flushes.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == self.fail_at {
+            return Err(std::io::ErrorKind::StorageFull.into());
+        }
+        faber_engine::store::Disk::flush(&faber_engine::store::RealDisk, path)
+    }
+}
+
+#[test]
+fn failed_page_flush_keeps_old_inline_input() {
+    use faber_engine::transcript::TranscriptStore;
+    use std::sync::atomic::Ordering;
+
+    for fail_at in 0..4 {
+        let dir = support::DataFolder::new();
+        let mut conversation = support::big_conversation(dir.path(), 20_000);
+        let file = dir.path().join("conversations").join(format!("{}.json", conversation.id));
+        let original = std::fs::read(&file).unwrap();
+        let disk = Arc::new(PageFlushDisk { fail_at, flushes: Default::default() });
+        let store = Store::with_disk(dir.path(), disk.clone());
+        let pages = TranscriptStore::with_disk(dir.path().join("child-transcripts"), disk.clone());
+        let tool =
+            conversation.messages.iter_mut().flat_map(|m| m.tools.iter_mut().flatten()).find(|t| t.input.to_string().len() > 4096).unwrap();
+        let input = tool.input.clone();
+        for _ in 0..2 {
+            disk.flushes.store(0, Ordering::Relaxed);
+            assert!(pages.keep_input(&conversation.id, &tool.id, &tool.name, &mut tool.input).is_none());
+            assert_eq!(tool.input, input);
+            assert!(tool.detail.is_none());
+            assert_eq!(disk.flushes.load(Ordering::Relaxed), fail_at + 1);
+        }
+        store.save_checked(&conversation).unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), original);
+        assert_eq!(store.get(&conversation.id).unwrap(), conversation);
+    }
+}
+
 impl faber_engine::store::Disk for DelayedDisk {
     fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let number = self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

@@ -489,6 +489,10 @@ struct Core {
     /// The conversations whose helper transcript activity is not in their record yet. Any successful save of a conversation,
     /// or its leaving memory, takes it out; `transcript_timer` says a save is already waiting for them.
     dirty_transcripts: Mutex<HashSet<String>>,
+    old_inputs_pending: HashSet<String>,
+    old_inputs_active: HashSet<String>,
+    old_inputs_checked: HashSet<String>,
+    old_inputs_deleted: HashSet<String>,
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
@@ -732,6 +736,10 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 dirty_transcripts: Mutex::new(HashSet::new()),
+                old_inputs_pending: HashSet::new(),
+                old_inputs_active: HashSet::new(),
+                old_inputs_checked: HashSet::new(),
+                old_inputs_deleted: HashSet::new(),
                 transcript_timer: false,
                 parent_reports,
                 stage_told: HashMap::new(),
@@ -1758,9 +1766,29 @@ impl Core {
             tokio::time::sleep(TRANSCRIPT_SAVE_EVERY).await;
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            let core = &mut *core;
             core.transcript_timer = false;
             // `shutdown` writes what is left itself.
             if !core.closing {
+                for id in std::mem::take(&mut core.old_inputs_pending) {
+                    if !core.old_inputs_active.insert(id.clone()) {
+                        continue;
+                    }
+                    let me = core.me.clone();
+                    core.opts.runtime.spawn_blocking(move || {
+                        Self::page_old_inputs(me.clone(), id.clone());
+                        if let Some(shared) = me.upgrade() {
+                            let mut core = shared.lock().unwrap_or_else(|e| e.into_inner());
+                            if !core.convs.contains_key(&id) {
+                                core.old_inputs_checked.remove(&id);
+                            }
+                            if core.old_inputs_deleted.remove(&id) {
+                                let _ = core.store.transcripts.remove_conversation(&id);
+                            }
+                            core.old_inputs_active.remove(&id);
+                        }
+                    });
+                }
                 core.save_dirty(false);
                 // A write that failed is tried again on the next tick, not left for an event that may never come.
                 if !core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
@@ -1768,6 +1796,69 @@ impl Core {
                 }
             }
         });
+    }
+
+    fn page_old_inputs(me: Weak<Mutex<Core>>, id: String) {
+        let Some(shared) = me.upgrade() else { return };
+        let (pages, positions) = {
+            let core = shared.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(conversation) = core.convs.get(&id) else { return };
+            let positions = conversation
+                .messages
+                .iter()
+                .enumerate()
+                .flat_map(|(m, message)| {
+                    message.tools.iter().flatten().enumerate().filter_map(move |(t, tool)| tool.detail.is_none().then_some((m, t)))
+                })
+                .collect::<Vec<_>>();
+            (core.store.transcripts.clone(), positions)
+        };
+        let mut saved = 0usize;
+        let mut changed = false;
+        for (m, t) in positions {
+            let candidate = {
+                let core = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if core.closing {
+                    return;
+                }
+                core.convs
+                    .get(&id)
+                    .and_then(|c| c.messages.get(m))
+                    .and_then(|m| m.tools.as_ref())
+                    .and_then(|tools| tools.get(t))
+                    .filter(|tool| tool.detail.is_none())
+                    .map(|tool| (tool.id.clone(), tool.name.clone(), tool.input.clone()))
+            };
+            let Some((call, name, mut preview)) = candidate else { continue };
+            let Some(detail) = pages.keep_input(&id, &call, &name, &mut preview) else { continue };
+            let reduction =
+                detail.bytes.saturating_sub(preview.to_string().len() + serde_json::to_string(&detail).map_or(0, |s| s.len()) + 10);
+            let mut core = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if core.closing {
+                return;
+            }
+            let Some(tool) = core
+                .convs
+                .get_mut(&id)
+                .and_then(|c| c.messages.get_mut(m))
+                .and_then(|m| m.tools.as_mut())
+                .and_then(|tools| tools.get_mut(t))
+            else {
+                continue;
+            };
+            if tool.id != call || tool.name != name || tool.detail.is_some() || crate::transcript::input_hash(&tool.input) != detail.hash {
+                continue;
+            }
+            saved += reduction;
+            changed = true;
+            tool.input = preview;
+            tool.detail = Some(detail);
+            core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
+        }
+        if changed {
+            eprintln!("conversation {id}: paged old inputs, reducing the record by {saved} bytes");
+            shared.lock().unwrap_or_else(|e| e.into_inner()).save_soon();
+        }
     }
 
     /// Writes every conversation that holds helper activity its record lacks. A write that fails leaves it dirty, told like
@@ -2093,6 +2184,10 @@ impl Core {
     /// A copy of the conversation with only its newest `newest` messages cloned, and how many came before them.
     fn opened_window(&mut self, id: &str, newest: usize) -> Option<Conversation> {
         self.load(id)?;
+        if self.old_inputs_checked.insert(id.to_string()) {
+            self.old_inputs_pending.insert(id.to_string());
+            self.save_soon();
+        }
         let conv = self.convs.get_mut(id)?;
         let needs = reply_needs_you(conv, self.live.get(id));
         // The other messages never leave the loaded conversation, so a window of a huge one costs only its own messages.
@@ -5305,6 +5400,9 @@ impl Core {
                 l.session.close();
             }
             self.rewind_forget(&old);
+            if self.old_inputs_active.contains(&old) {
+                self.old_inputs_deleted.insert(old.clone());
+            }
             self.convs.remove(&old);
             self.try_seal_rewind(&old);
             let _ = std::fs::remove_dir_all(self.scratch_of(&old));
@@ -5401,6 +5499,9 @@ impl Core {
             self.keep_family(id, heir);
             self.rewind_forget(id);
             self.draft_routes.remove(id);
+            if self.old_inputs_active.contains(id) {
+                self.old_inputs_deleted.insert(id.to_string());
+            }
             self.convs.remove(id);
             self.transcript_saved(id);
             self.try_seal_rewind(id);

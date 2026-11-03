@@ -67,12 +67,21 @@ impl Fault {
     }
 }
 
-/// The two file operations an atomic replacement needs. Tests swap in one that fails like a full disk.
+/// The file operations durable publication needs. Tests swap in one that fails like a full disk.
 pub trait Disk: Send + Sync {
     /// Creates or truncates `path`, writes all of `bytes` and flushes them to the disk.
     fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
     /// Moves `from` over `to`, replacing it.
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Flushes directory entries after renames, before another file can depend on them.
+    fn flush(&self, path: &Path) -> io::Result<()> {
+        #[cfg(unix)]
+        fs::File::open(path)?.sync_all()?;
+        // Windows cannot open directories for sync; Disk::write syncs each file before its rename.
+        #[cfg(not(unix))]
+        let _ = path;
+        Ok(())
+    }
 }
 
 /// The computer's own disk.

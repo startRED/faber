@@ -201,3 +201,142 @@ fn big_conversation_100mb_new_inputs_are_paged() {
     std::fs::write(path, report).unwrap();
     assert!(paged > 0 && after < before, "the new record must be smaller");
 }
+
+#[tokio::test]
+async fn old_inputs_are_paged_after_open_and_remain_readable() {
+    let dir = support::DataFolder::new();
+    let conversation = support::big_conversation(dir.path(), 1_000_000);
+    let mut unopened = conversation.clone();
+    unopened.id = "not-opened".into();
+    Store::new(dir.path()).save_checked(&unopened).unwrap();
+    let unopened_file = dir.path().join("conversations/not-opened.json");
+    let unopened_bytes = std::fs::read(&unopened_file).unwrap();
+    let id = conversation.id.clone();
+    let inputs: Vec<_> =
+        conversation.messages.iter().flat_map(|m| m.tools.iter().flatten()).map(|tool| (tool.id.clone(), tool.input.clone())).collect();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let before = std::fs::metadata(&file).unwrap().len();
+    let app = engine(&dir);
+    app.open_for_screen(&id).unwrap();
+    assert_eq!(std::fs::metadata(&file).unwrap().len(), before, "opening does not write the record");
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if std::fs::metadata(&file).unwrap().len() < before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the background save finishes");
+    let after = std::fs::metadata(&file).unwrap().len();
+    assert_eq!(std::fs::read(&unopened_file).unwrap(), unopened_bytes);
+    eprintln!("old inputs: before {before} bytes, after {after} bytes, saved {} bytes", before - after);
+    let saved = Store::new(dir.path()).get(&id).unwrap();
+    for tool in saved.messages.iter().flat_map(|m| m.tools.iter().flatten()) {
+        let original = inputs.iter().find(|(call, _)| call == &tool.id).unwrap();
+        if original.1.to_string().len() > 4096 {
+            assert!(tool.detail.is_some(), "large input {} was not paged", tool.id);
+        }
+    }
+    for (call, input) in &inputs {
+        assert_eq!(&app.tool_detail(&id, call).unwrap(), input, "input {call}");
+    }
+    app.shutdown();
+    let reopened = engine(&dir);
+    for (call, input) in inputs {
+        assert_eq!(reopened.tool_detail(&id, &call).unwrap(), input, "reopened input {call}");
+    }
+    reopened.shutdown();
+}
+
+#[test]
+fn failed_record_replacement_after_pages_keeps_old_inputs() {
+    use faber_engine::store::{Disk, RealDisk};
+    struct FailRecord;
+    impl Disk for FailRecord {
+        fn write(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+            RealDisk.write(path, bytes)
+        }
+        fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+            if to.parent().is_some_and(|p| p.ends_with("conversations")) {
+                Err(std::io::ErrorKind::StorageFull.into())
+            } else {
+                RealDisk.rename(from, to)
+            }
+        }
+    }
+    let dir = support::DataFolder::new();
+    let old = support::big_conversation(dir.path(), 1_000_000);
+    let disk = Arc::new(FailRecord);
+    let store = Store::with_disk(dir.path(), disk.clone());
+    let pages = faber_engine::transcript::TranscriptStore::with_disk(dir.path().join("child-transcripts"), disk);
+    let mut changed = store.get(&old.id).unwrap();
+    let mut paged = 0;
+    for tool in changed.messages.iter_mut().flat_map(|m| m.tools.iter_mut().flatten()) {
+        tool.detail = pages.keep_input(&changed.id, &tool.id, &tool.name, &mut tool.input);
+        paged += usize::from(tool.detail.is_some());
+    }
+    assert!(paged > 0);
+    assert!(store.save_checked(&changed).is_err());
+    assert_eq!(store.get(&old.id).unwrap(), old);
+}
+
+#[test]
+fn concurrent_different_inputs_never_share_the_wrong_page() {
+    use faber_engine::transcript::TranscriptStore;
+    use sha2::{Digest, Sha256};
+    for round in 0..40 {
+        let dir = support::DataFolder::new();
+        let pages = TranscriptStore::new(dir.path().join("child-transcripts"));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|letter| {
+                let pages = pages.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let original = json!(letter.repeat(16000));
+                    let mut input = original.clone();
+                    barrier.wait();
+                    let detail = pages.keep_input("conversation", "same-call", "tool", &mut input);
+                    (original, input, detail)
+                })
+            })
+            .collect();
+        let mut saved = 0;
+        for handle in handles {
+            let (original, input, detail) = handle.join().unwrap();
+            if let Some(detail) = detail {
+                saved += 1;
+                let text = pages.read_detail("conversation", "same-call", detail.pages, detail.bytes).unwrap();
+                assert_eq!(text, original.to_string(), "round {round}");
+                assert_eq!(faber_engine::hex(&Sha256::digest(text.as_bytes())), detail.hash);
+            } else {
+                assert_eq!(input, original);
+            }
+        }
+        assert_eq!(saved, 1, "exactly one input must be safely paged");
+    }
+}
+
+#[tokio::test]
+async fn deleting_during_old_input_migration_leaves_no_pages() {
+    let dir = support::DataFolder::new();
+    let conversation = support::big_conversation(dir.path(), 20_000_000);
+    let id = conversation.id;
+    let root = dir.path().join("child-transcripts").join(&id);
+    let app = engine(&dir);
+    app.open_for_screen(&id).unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !root.exists() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("migration started");
+    app.remove(&id);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(!root.exists(), "migration recreated the deleted conversation's pages");
+    app.shutdown();
+}
