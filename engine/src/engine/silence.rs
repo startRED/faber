@@ -5,6 +5,7 @@
 //! and Faber cannot see it end, but it no longer hides the silence either (task 110): once it has said nothing for longer
 //! than its kind of work allows (`stuck::QUIET`, `stuck::QUIET_COMMAND` while a command runs), the reply says so, with Stop,
 //! until the CLI speaks again. A subagent at work has its own signs (`stuck_watch.rs`).
+//! With no open step the same ten-minute sign precedes the existing fifteen-minute stop.
 //! Cost: one map entry per running reply, written on events that already arrive, and one task that sleeps `EVERY` between two
 //! looks, alive only while a reply runs. No process and no timer per reply.
 use super::*;
@@ -142,7 +143,7 @@ impl Core {
                     Look::Quiet((quiet >= limit).then(|| (quiet / 60.0) as u32))
                 }
                 None if quiet >= BOUND => Look::Cut,
-                None => Look::Quiet(None),
+                None => Look::Quiet((quiet >= crate::stuck::QUIET).then(|| (quiet / 60.0) as u32)),
             };
             looked.push((conv.clone(), next));
         }

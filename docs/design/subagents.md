@@ -119,11 +119,11 @@ runs.
 
 The main agent gets the same line, under its reply's status line instead of under a row (`ui/StallNote.tsx`, task 110):
 the same `.agent-stuck` amber box and entrance, its words, and Stop (which asks first, like the composer's, when helpers
-would end with it). It says that a step of its own has given no news for N minutes (10, or 30 while a command runs; the
-number moves once a minute), that compacting the conversation has taken N minutes (past 5), that it keeps running the same
-step (10 times with no file changed between, whatever came between), or that the same step failed three times. It
-stops nothing: the person decides. The running column shows the same words on the row, with "Open conversation", like a
-stuck helper's.
+would end with it). It says that the agent has given no news for N minutes (10 even with no open step, or 30 while a
+command runs; the number moves once a minute), that compacting the conversation has taken N minutes (past 5), that it keeps running the same
+step (six times in a row, or 10 with no file changed whatever came between), or that the same step failed three times
+with no file changed. The sign stops nothing: the existing 15-minute stop with no open step still applies.
+The running column shows the same words on the row, with "Open conversation", like a stuck helper's.
 
 A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
 ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person

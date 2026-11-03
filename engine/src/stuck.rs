@@ -133,14 +133,14 @@ impl Child {
     }
 }
 
-/// What the main agent's own steps say: the same step many times, or the same step failing, with no file changed between.
+/// What the main agent's own steps say: six identical steps in a row, ten between edits, or three unchanged failures.
 /// Its silence is the reply's (`engine/src/engine/silence.rs`), so time plays no part here.
 impl Child {
     pub fn main_sign(&self) -> Option<Sign> {
         if self.failed.values().any(|n| *n >= FAILS) {
             return Some(Sign::Failing);
         }
-        self.seen.values().any(|n| *n >= MAIN_REPEATS).then_some(Sign::Repeat)
+        (self.repeats >= REPEATS || self.seen.values().any(|n| *n >= MAIN_REPEATS)).then_some(Sign::Repeat)
     }
 }
 

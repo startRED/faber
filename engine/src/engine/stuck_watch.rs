@@ -178,8 +178,9 @@ impl Core {
 
     /// The reply ended: nothing is followed, and no sign outlives it.
     pub(super) fn unwatch(&mut self, conv: &str) {
-        let Some(watched) = self.watched.remove(conv) else { return };
-        if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == watched.turn)) {
+        let turn = self.watched.remove(conv).map(|w| w.turn).or_else(|| self.live.get(conv).and_then(|l| l.turn.clone()));
+        let Some(turn) = turn else { return };
+        if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == turn)) {
             m.tools.iter_mut().flatten().for_each(|t| t.sign = None);
             m.stall = None;
         }

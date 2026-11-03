@@ -341,6 +341,81 @@ async fn task110_the_main_agent_repeating_a_failing_step_shows_a_sign_and_keeps_
     engine.shutdown();
 }
 
+/// Six consecutive identical steps must sign the main reply before the ten-interleaved-step fallback.
+#[tokio::test]
+async fn w10_main_six_consecutive_steps_show_in_the_reply_without_stopping_it() {
+    use faber_engine::model::{StallKind, Status};
+    let dir = crate::support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, spawn);
+    let id = send(&engine, "claude", "haiku", "read the file");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    for n in 1..=6 {
+        pipe.say(step(&format!("r{n}"), "Read", json!({ "file_path": "src/lib.rs" }), None)).await;
+        pipe.say(result(&format!("r{n}"), true, None)).await;
+        let reply =
+            reply_until(&engine, &id, "the next read ended", |m| m.tools.as_ref().is_some_and(|t| t.len() == n && t[n - 1].ok.is_some()))
+                .await;
+        assert_eq!(reply.stall.map(|s| s.kind), (n == 6).then_some(StallKind::Repeat));
+        assert_eq!(reply.status, Some(Status::Streaming), "a sign never stops work");
+    }
+    assert_eq!(running_item(&engine, &id).state, RunState::NeedsYou);
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|e| matches!(e,
+            AppEvent::Message { message, .. } if message.stall.is_some_and(|s| s.kind == StallKind::Repeat)
+        )),
+        "the conversation receives the sign, not just the running list"
+    );
+    pipe.say(step("other", "Grep", json!({ "pattern": "fn main" }), None)).await;
+    pipe.say(result("other", true, None)).await;
+    let reply =
+        reply_until(&engine, &id, "a different step", |m| m.tools.as_ref().is_some_and(|t| t.len() == 7 && t[6].ok.is_some())).await;
+    assert_eq!(reply.stall, None);
+    assert_eq!(running_item(&engine, &id).state, RunState::Working);
+    pipe.say(json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} })).await;
+    let reply = reply_until(&engine, &id, "the reply ended", |m| m.status == Some(Status::Done)).await;
+    assert_eq!(reply.stall, None);
+    engine.shutdown();
+}
+
+/// Thinking with no open tool needs the same ten-minute line as a silent non-command step.
+#[tokio::test]
+async fn w10_main_ten_silent_minutes_without_an_open_step_show_then_clear_on_stop() {
+    use faber_engine::model::{StallKind, Status};
+    let dir = crate::support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(&dir, Vendor::Claude, spawn);
+    let clock = Arc::new(AtomicU64::new(1_000_000));
+    let time = clock.clone();
+    engine.set_time_source(Arc::new(move || time.load(Ordering::SeqCst) as f64));
+    let id = send(&engine, "claude", "haiku", "think about this file");
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(json!({ "type": "stream_event", "event": {
+        "type": "content_block_delta", "delta": { "type": "text_delta", "text": "Thinking" }
+    } }))
+    .await;
+    reply_until(&engine, &id, "thinking without a step", |m| m.text == "Thinking").await;
+    for seconds in (60..600).step_by(60).chain([599, 600]) {
+        clock.store(1_000_000 + seconds, Ordering::SeqCst);
+        engine.check_silence();
+        let reply = engine.open(&id).unwrap().messages.pop().unwrap();
+        assert_eq!(reply.stall.map(|s| (s.kind, s.minutes)), (seconds == 600).then_some((StallKind::Quiet, Some(10))));
+        assert_eq!(reply.status, Some(Status::Streaming));
+    }
+    assert_eq!(running_item(&engine, &id).state, RunState::NeedsYou);
+    for seconds in (660..=900).step_by(60) {
+        clock.store(1_000_000 + seconds, Ordering::SeqCst);
+        engine.check_silence();
+    }
+    pipe.say(json!({ "type": "result", "subtype": "error_during_execution", "is_error": true, "total_cost_usd": 0.0, "usage": {} })).await;
+    let reply = reply_until(&engine, &id, "the silent reply stopped", |m| m.status == Some(Status::Stopped)).await;
+    assert_eq!(reply.stall, None, "a reply with no watcher must leave no warning or Stop button after it ends");
+    assert_eq!(reply.error.as_deref(), Some("reason.silent"));
+    engine.shutdown();
+}
+
 /// A file a helper changed is a change for the main agent too: its next failure of the same step is a new try.
 #[tokio::test]
 async fn task110_a_helper_that_changes_a_file_resets_the_main_agents_count() {
