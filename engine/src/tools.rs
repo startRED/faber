@@ -401,6 +401,10 @@ impl Store {
             return Delivery::default();
         };
         let installed = self.installed();
+        // Legacy plugin discovery sees the whole root; an older pin must never leak beside healthy skills.
+        if self.items.iter().any(|item| installed.get(&item.id).is_some_and(|commit| *commit != item.commit)) {
+            return Delivery::default();
+        }
         let selection = self.selection();
         let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id) && !selection.disabled.contains(&i.id);
         let skill = self.items.iter().filter(on).any(|i| i.server.is_none());
@@ -464,13 +468,16 @@ impl Store {
                     clean &= self.discard(&entry.path()).is_ok();
                     continue;
                 }
-                // shortcut: a catalog that pins a newer commit drops the old copy here; reinstall it on update once one exists.
                 let item = self.items.iter().find(|i| {
                     i.id == name
                         && (server.is_none()
                             || (i.server.is_some() == server.unwrap_or(false)
                                 && (parent == self.root.join("plugins")) == self.plugin_definition(&i.id).is_some()))
                 });
+                // Only an explicit replacement may consume an older installed pin and its recovery copy.
+                if item.is_some_and(|i| ledger.get(&name).is_some_and(|commit| *commit != i.commit)) {
+                    continue;
+                }
                 if ledger.contains_key(&name)
                     && (server.is_none() || !self.disabled().join(&name).exists())
                     && item.is_some_and(|i| server.is_none() || self.verify_item(&entry.path(), i))

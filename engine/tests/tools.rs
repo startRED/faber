@@ -128,6 +128,86 @@ fn item() -> Item {
     }
 }
 
+#[test]
+fn moved_catalog_pin_survives_other_removals_and_undo_until_manual_replacement() {
+    use faber_engine::model::{Area, Permissions};
+    for enabled in [true, false] {
+        let data = tempfile::tempdir().unwrap();
+        let archive = data.path().join("source.zip");
+        std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+        let first = item();
+        let store = Store::with_catalog(data.path(), vec![first.clone()]);
+        store.install_from(&first, &archive).unwrap();
+        store.set_enabled(&first.id, enabled).unwrap();
+        let mut second = first.clone();
+        second.commit = "second-pin".into();
+        let store = Store::with_catalog(data.path(), vec![second.clone()]);
+        store.install_from(&second, &archive).unwrap();
+        let previous_kit = enabled.then(|| store.kit("debug", None, Area::Project, Permissions::FullAccess, &[]).0);
+        let backup = data.path().join("tools/replacements/careful/old/SKILL.md");
+        assert_eq!(std::fs::read(&backup).unwrap(), SKILL);
+
+        let mut newer = second.clone();
+        newer.commit = "third-pin".into();
+        let new_skill = [SKILL, b"\nUpdated instructions."].concat();
+        std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", &new_skill)])).unwrap();
+        newer.digest = faber_engine::tools::digest_of(&archive, &newer.path).unwrap();
+        let mut other = first.clone();
+        other.id = "other".into();
+        let other_archive = data.path().join("other.zip");
+        std::fs::write(&other_archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+        let store = Store::with_catalog(data.path(), vec![newer.clone(), other.clone()]);
+        store.install_from(&other, &other_archive).unwrap();
+        let plan = store.capture_replacement(&newer.id).unwrap();
+        let (held, report) = store.kit("debug", None, Area::Project, Permissions::FullAccess, &[]);
+        assert_eq!(report.ids, ["other"], "new sessions keep healthy tools and exclude outdated bytes");
+        let held_skill = held.skills.as_ref().unwrap().join("other/SKILL.md");
+        assert_eq!(store.item_status(&newer.id).as_deref(), Some("error.tools.update"));
+        assert_eq!(store.checked_statuses().get(&newer.id).map(String::as_str), Some("error.tools.update"));
+        if enabled {
+            assert!(store.delivery().plugin.is_none(), "legacy discovery cannot expose the retained old pin");
+        }
+        store.remove(&other.id).unwrap();
+        store.restore(&other.id).unwrap();
+        assert_eq!(store.installed().get(&newer.id), Some(&second.commit));
+        assert_eq!(store.enabled(&newer.id), enabled);
+        assert_eq!(store.capture_replacement(&newer.id).unwrap(), plan, "cleanup preserves exact bytes, switches and recovery receipt");
+        assert_eq!(std::fs::read(&backup).unwrap(), SKILL);
+        assert!(store.replace_sources(&plan, &other_archive, &Default::default()).is_err(), "failed updates keep the old copy");
+        assert_eq!(store.capture_replacement(&newer.id).unwrap(), plan);
+        store.replace_sources(&plan, &archive, &Default::default()).unwrap();
+        assert_eq!(store.installed().get(&newer.id), Some(&newer.commit));
+        assert_eq!(store.enabled(&newer.id), enabled);
+        assert_eq!(std::fs::read(&backup).unwrap(), SKILL, "manual update retains the previous installed bytes");
+        assert_eq!(std::fs::read(&held_skill).unwrap(), SKILL, "existing kits survive a manual update");
+        if let Some(previous) = previous_kit {
+            assert_eq!(std::fs::read(previous.skills.unwrap().join("careful/SKILL.md")).unwrap(), SKILL);
+        }
+        assert!(!store.checked_statuses().contains_key(&newer.id));
+    }
+}
+
+#[test]
+fn moved_catalog_pin_offers_manual_update_even_with_identical_bytes_or_a_disabled_copy() {
+    for enabled in [true, false] {
+        let data = tempfile::tempdir().unwrap();
+        let archive = data.path().join("source.zip");
+        std::fs::write(&archive, zip_of(&[("skills/careful/SKILL.md", SKILL)])).unwrap();
+        let old = item();
+        let store = Store::with_catalog(data.path(), vec![old.clone()]);
+        store.install_from(&old, &archive).unwrap();
+        store.set_enabled(&old.id, enabled).unwrap();
+        let mut newer = old.clone();
+        newer.commit = "new-pin".into();
+        let store = Store::with_catalog(data.path(), vec![newer]);
+        assert_eq!(store.checked_statuses().get(&old.id).map(String::as_str), Some("error.tools.update"));
+        assert_eq!(store.item_status(&old.id).as_deref(), Some("error.tools.update"));
+        assert_eq!(store.installed().get(&old.id), Some(&old.commit));
+        assert_eq!(store.enabled(&old.id), enabled);
+        assert!(!data.path().join("tools/replacements").exists(), "noticing a pin never downloads or replaces a copy");
+    }
+}
+
 #[tokio::test]
 async fn a_skill_downloads_from_its_repository_and_installs_only_with_the_catalog_s_files() {
     let good = zip_of(&[("skills/careful/SKILL.md", SKILL), ("README.md", b"readme")]);

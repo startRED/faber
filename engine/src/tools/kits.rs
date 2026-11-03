@@ -1101,6 +1101,9 @@ impl Store {
     /// A corrupt or outdated installation remains visible so the Catalog can offer reinstalling it.
     pub fn item_status(&self, id: &str) -> Option<String> {
         let data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
+        if self.items.iter().any(|item| item.id == id && data.installed.get(id).is_some_and(|commit| *commit != item.commit)) {
+            return Some("error.tools.update".into());
+        }
         data.failed_items.contains(id).then(|| "error.tools.reinstall".into())
     }
 
@@ -1123,7 +1126,13 @@ impl Store {
             self.start_prepare();
         }
         let data = self.ready.data.lock().unwrap_or_else(|e| e.into_inner());
-        data.failed_items.iter().map(|id| (id.clone(), "error.tools.reinstall".into())).collect()
+        let mut statuses: BTreeMap<_, _> = data.failed_items.iter().map(|id| (id.clone(), "error.tools.reinstall".into())).collect();
+        for item in &self.items {
+            if data.installed.get(&item.id).is_some_and(|commit| *commit != item.commit) {
+                statuses.insert(item.id.clone(), "error.tools.update".into());
+            }
+        }
+        statuses
     }
 
     pub(super) fn read_selection(&self) -> Option<Selection> {

@@ -96,6 +96,11 @@ instructions and takes the next matching item that fits. Claude Projects names n
 file reads when its CLI supports the plugin flag; older CLIs and helpers receive the lazy Read fallback. An unchanged
 native resume, including warm-up, sends no repeated index.
 
+A moved catalog pin keeps the installed copy, its on/off choice and its previous recovery copy, including while removing
+or undoing another item. Its card, detail and Installed row show a localized update-available line, even when off or
+the new pin has identical bytes. Review replacement is the existing manual update path; nothing downloads automatically.
+New sessions omit bytes that fail the current digest check; healthy tools and existing conversation kits remain available.
+
 An installed item with a failed source digest check stays listed with one localized reinstall line on its card, detail
 and installed catalog row. It is unavailable to new sessions; healthy items remain available. The repair shortcut opens this same detail. Review replacement captures the exact old copy before showing old and curated pins, the preserved on/off choice, and one retained backup. Confirm revalidates that snapshot and replaces through the journal; a later confirmed replacement supersedes that backup. Cancel, Back and Escape discard the question. Failure requires a new review. Batch installs accept only new copies; initial installation refuses occupied paths and Undo even without a ledger entry, and preserves off switches and unrelated ledger entries when current files are absent. Install errors keep their retry; transient snapshot I/O
 errors do not mark healthy source files as needing reinstall. Catalog returns its current cached status without waiting
