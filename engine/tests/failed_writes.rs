@@ -386,3 +386,190 @@ async fn a_delete_that_stops_after_closing_a_live_answer_leaves_a_stopped_reply_
     drop(held);
     app.shutdown();
 }
+
+struct DelayedDisk {
+    entered: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    writes: std::sync::atomic::AtomicUsize,
+}
+
+impl faber_engine::store::Disk for DelayedDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        let number = self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.entered.send(()).unwrap();
+        if number == 0 {
+            self.release.lock().unwrap().recv().unwrap();
+        }
+        faber_engine::store::Disk::write(&faber_engine::store::RealDisk, path, bytes)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        faber_engine::store::Disk::rename(&faber_engine::store::RealDisk, from, to)
+    }
+}
+
+#[tokio::test]
+async fn snapshots_keep_the_newest_and_never_share_a_temp_file() {
+    let source = support::DataFolder::new();
+    let (app, _) = engine(&source);
+    let (id, _) = chat(&app, source.path());
+    let mut conversation = app.open(&id).unwrap();
+    app.shutdown();
+    conversation.title = "newest".into();
+    let newest = Store::snapshot(&conversation);
+    conversation.title = "older".into();
+    let older = Store::snapshot(&conversation);
+    let target = support::tempdir();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+    let disk = Arc::new(DelayedDisk { entered: entered_tx, release: Mutex::new(release_rx), writes: Default::default() });
+    let store = Arc::new(Store::with_disk(target.path(), disk.clone()));
+    let first = store.clone();
+    let first_id = id.clone();
+    let first_bytes = newest.clone();
+    let first = std::thread::spawn(move || first.save_snapshot(&first_id, 6, first_bytes));
+    entered_rx.recv().unwrap();
+    let second = store.clone();
+    let second_id = id.clone();
+    let second_bytes = newest.clone();
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+    let second = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        second.save_snapshot(&second_id, 7, second_bytes)
+    });
+    started_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    first.join().unwrap().unwrap();
+    second.join().unwrap().unwrap();
+    store.save_snapshot(&id, 5, older).unwrap();
+    assert_eq!(store.get(&id).unwrap().title, "newest");
+    assert_eq!(disk.writes.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    conversation.title = "failed".into();
+    let blocker = target.path().join("conversations").join(format!("{id}.json.tmp"));
+    std::fs::create_dir(&blocker).unwrap();
+    assert_eq!(store.save_snapshot(&id, 8, Store::snapshot(&conversation)), Err(faber_engine::store::Fault::Write));
+    assert_eq!(store.get(&id).unwrap().title, "newest");
+    std::fs::remove_dir(&blocker).unwrap();
+    store.save_snapshot(&id, 8, Store::snapshot(&conversation)).unwrap();
+    assert_eq!(store.get(&id).unwrap().title, "failed");
+    conversation.title = "synchronous".into();
+    store.save_checked(&conversation).unwrap();
+    assert_eq!(store.next_generation(&id), 10);
+}
+
+#[tokio::test]
+async fn deleted_conversation_is_not_recreated_by_a_delayed_snapshot() {
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
+    let (id, _) = chat(&app, dir.path());
+    let conversation = app.open(&id).unwrap();
+    app.shutdown();
+    let store = Store::new(dir.path());
+    let generation = store.next_generation(&id);
+    store.remove_checked(&id).unwrap();
+    store.save_snapshot(&id, generation, Store::snapshot(&conversation)).unwrap();
+    assert!(!dir.path().join("conversations").join(format!("{id}.json")).exists());
+}
+
+#[tokio::test]
+async fn move_refuses_a_conversation_deleted_after_it_was_loaded() {
+    let dir = support::DataFolder::new();
+    let folder = support::work_folder();
+    let (app, _) = engine(&dir);
+    let group = app.create_chat_group("Work").unwrap();
+    let chat = app.new_group_chat(&group.id).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+    let store = Store::new(dir.path());
+    store.remove_checked(&chat.id).unwrap();
+
+    assert!(app.move_to_project(&chat.id, &project.id).is_err());
+    assert!(store.get(&chat.id).is_none());
+    assert_eq!(store.chat_groups().unwrap()[0].conversation_ids, vec![chat.id]);
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn move_preserves_the_latest_saved_conversation_and_caches_it() {
+    let dir = support::DataFolder::new();
+    let folder = support::work_folder();
+    let (app, _) = engine(&dir);
+    let group = app.create_chat_group("Work").unwrap();
+    let mut chat = app.new_group_chat(&group.id).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+    let store = Store::new(dir.path());
+    app.rename(&chat.id, "newer title");
+    chat.title = "older disk title".into();
+    store.save_checked(&chat).unwrap();
+
+    let moved = app.move_to_project(&chat.id, &project.id).unwrap();
+    assert_eq!(moved.title, "newer title");
+    assert_eq!(app.open(&chat.id).unwrap().title, "newer title");
+    assert_eq!(store.get(&chat.id).unwrap().title, "newer title");
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn move_copies_attachments_from_the_latest_saved_folder() {
+    let dir = support::DataFolder::new();
+    let folder = support::work_folder();
+    let source = support::work_folder();
+    let (app, _) = engine(&dir);
+    let group = app.create_chat_group("Work").unwrap();
+    let chat = app.new_group_chat(&group.id).unwrap();
+    let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+    let store = Store::new(dir.path());
+    let mut latest = store.get(&chat.id).unwrap();
+    let fixture: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    latest.messages = fixture.messages;
+    for message in &mut latest.messages {
+        message.attachments = None;
+    }
+    latest.messages[0].attachments = Some(vec!["latest.txt".into()]);
+    latest.working_folder = Some(source.path().to_string_lossy().into_owned());
+    std::fs::create_dir_all(source.path().join("attachments")).unwrap();
+    std::fs::write(source.path().join("attachments/latest.txt"), "latest attachment").unwrap();
+    store.save_checked(&latest).unwrap();
+    app.shutdown();
+    drop(app);
+    let (app, _) = engine(&dir);
+    let moved = app.move_to_project(&chat.id, &project.id).unwrap();
+    assert_eq!(moved.messages, latest.messages);
+    assert_eq!(std::fs::read_to_string(dir.path().join("attachments").join(&chat.id).join("latest.txt")).unwrap(), "latest attachment");
+    app.shutdown();
+}
+
+#[tokio::test]
+async fn group_recovery_and_snapshot_writes_use_the_same_lock() {
+    let dir = support::DataFolder::new();
+    let (app, _) = engine(&dir);
+    let group = app.create_chat_group("Work").unwrap();
+    let conversation = app.new_group_chat(&group.id).unwrap();
+    let groups = app.state().groups;
+    app.shutdown();
+    std::fs::write(
+        dir.path().join("chat-group-move.json"),
+        serde_json::json!({"conversationId": conversation.id, "groups": groups}).to_string(),
+    )
+    .unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+    let disk = Arc::new(DelayedDisk { entered: entered_tx, release: Mutex::new(release_rx), writes: Default::default() });
+    let store = Arc::new(Store::with_disk(dir.path(), disk));
+    let recovery = store.clone();
+    let recovery = std::thread::spawn(move || recovery.chat_groups());
+    entered_rx.recv().unwrap();
+    let writer = store.clone();
+    let id = conversation.id.clone();
+    let bytes = Store::snapshot(&conversation);
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+    let writer = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        writer.save_snapshot(&id, 1, bytes)
+    });
+    started_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    recovery.join().unwrap().unwrap();
+    writer.join().unwrap().unwrap();
+    assert_eq!(store.get(&conversation.id).unwrap().id, conversation.id);
+}

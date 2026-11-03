@@ -25,30 +25,40 @@ impl Engine {
             let project =
                 core.store.projects_checked().map_err(|e| e.key())?.into_iter().find(|p| p.id == project_id).ok_or("error.projectGone")?;
             crate::permissions::checked_folder(Path::new(&project.path)).ok_or("error.workingFolder")?;
-            // Copy before the record changes; keep the originals so a failed write or a crash loses nothing.
-            core.copy_project_attachments(&moved, id, &moved.messages)?;
-            moved.area = Area::Project;
-            moved.project_id = Some(project.id);
-            // Keep the old folder for file cards; project sessions resolve their folder independently.
-            moved.project_start_pending = true;
-            moved.sessions.clear();
-            moved.session_kits.clear();
-            moved.tentative.clear();
-            moved.cost_base.clear();
-            moved.commands.clear();
-            moved.context = None;
-            moved.reported = (None, None);
-            moved.command_gate = false;
-            core.store.move_chat_to_project(&moved).map_err(|e| e.key())?;
-            // The moved record is the one in memory, so it holds every page the conversation counts.
-            core.transcript_saved(id);
-            if let Some(live) = core.retire(id) {
-                live.session.close();
+            for attempt in 0..2 {
+                let generation = core.store.next_generation(id);
+                moved = core.load(id).ok_or("error.conversationGone")?.clone();
+                let source = moved.clone();
+                moved.area = Area::Project;
+                moved.project_id = Some(project.id.clone());
+                // Keep the old folder for file cards; project sessions resolve their folder independently.
+                moved.project_start_pending = true;
+                moved.sessions.clear();
+                moved.session_kits.clear();
+                moved.tentative.clear();
+                moved.cost_base.clear();
+                moved.commands.clear();
+                moved.context = None;
+                moved.reported = (None, None);
+                moved.command_gate = false;
+                // Copy the latest attachments before committing; a failed move keeps the originals.
+                if !core.store.move_chat_to_project(&moved, generation, |_| core.copy_project_attachments(&source, id, &source.messages))? {
+                    if attempt == 0 {
+                        continue;
+                    }
+                    return Err(crate::store::Fault::Write.key().into());
+                }
+                // The moved record is the one in memory, so it holds every page the conversation counts.
+                core.transcript_saved(id);
+                if let Some(live) = core.retire(id) {
+                    live.session.close();
+                }
+                core.asides.remove(id);
+                core.convs.insert(id.to_string(), moved.clone());
+                core.list_changed();
+                return Ok(moved);
             }
-            core.asides.remove(id);
-            core.convs.insert(id.to_string(), moved.clone());
-            core.list_changed();
-            Ok(moved)
+            unreachable!()
         })
     }
 }

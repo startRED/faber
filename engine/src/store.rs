@@ -161,6 +161,15 @@ pub struct Store {
     unreadable: Mutex<HashMap<PathBuf, (Stamp, bool)>>,
     /// How many times a conversation record was written, so a test can tell one write from a hundred.
     writes: std::sync::atomic::AtomicU64,
+    group_move: Mutex<()>,
+    // Entries, including deletion tombstones, stay for the session: their number is bounded by IDs touched in it.
+    snapshot_writes: Mutex<HashMap<String, Arc<SnapshotWrites>>>,
+}
+
+#[derive(Default)]
+struct SnapshotWrites {
+    next: std::sync::atomic::AtomicU64,
+    written: Mutex<Option<u64>>,
 }
 
 /// A file's length and last change: the same pair means the file was not written since.
@@ -266,6 +275,8 @@ impl Store {
             summaries: Mutex::default(),
             unreadable: Mutex::default(),
             writes: std::sync::atomic::AtomicU64::new(0),
+            group_move: Mutex::default(),
+            snapshot_writes: Mutex::default(),
         }
     }
 
@@ -510,16 +521,58 @@ impl Store {
         self.save_checked_with(conversation, true)
     }
 
+    /// Serialize a conversation for a later call to `save_snapshot`.
+    pub fn snapshot(conversation: &Conversation) -> Vec<u8> {
+        serde_json::to_vec(conversation).expect("plain data always serializes")
+    }
+
+    fn snapshot_lock(&self, id: &str) -> Arc<SnapshotWrites> {
+        self.snapshot_writes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(id.to_owned()).or_default().clone()
+    }
+
+    /// Reserve a generation before taking a snapshot, using the same sequence as synchronous saves.
+    pub fn next_generation(&self, id: &str) -> u64 {
+        self.snapshot_lock(id)
+            .next
+            .try_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |n| n.checked_add(1))
+            .expect("conversation generation exhausted")
+            + 1
+    }
+
+    /// Writes a snapshot only if no equal or newer generation has been written for this conversation.
+    /// All callers must share one increasing generation sequence per conversation.
+    pub fn save_snapshot(&self, id: &str, generation: u64, bytes: Vec<u8>) -> Result<(), Fault> {
+        let conversation: Conversation = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+        if conversation.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(Fault::Corrupt);
+        }
+        self.save_snapshot_with(&conversation, generation, &bytes, true)
+    }
+
     /// [`Store::save_checked`], where `patient` false does not wait for a busy rename (see [`replace_with`]).
     pub fn save_checked_with(&self, conversation: &Conversation, patient: bool) -> Result<(), Fault> {
+        let generation = self.next_generation(&conversation.id);
+        let bytes = Self::snapshot(conversation);
+        self.save_snapshot_with(conversation, generation, &bytes, patient)
+    }
+
+    fn save_snapshot_with(&self, conversation: &Conversation, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lock = self.snapshot_lock(&conversation.id);
+        lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if written.is_some_and(|last| last >= generation) {
+            return Ok(());
+        }
         if let Some((pending, area)) = self.read_group_move()?
             && pending.conversation_id == conversation.id
             && area != conversation.area
         {
-            self.recover_group_move()?;
+            self.recover_group_move_locked(&conversation.id)?;
         }
         let path = self.file(&conversation.id);
-        self.write_compact(&path, conversation, patient)?;
+        replace_with(&*self.disk, &path, bytes, patient)?;
+        *written = Some(generation);
         self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.written(path, conversation);
         self.search.saved(conversation);
@@ -545,14 +598,18 @@ impl Store {
         if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Ok(());
         }
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lock = self.snapshot_lock(id);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.read_group_move()?.is_some_and(|(pending, _)| pending.conversation_id == id) {
-            self.recover_group_move()?;
+            self.recover_group_move_locked(id)?;
         }
         match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
             Ok(()) => self.search.removed(id),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(Fault::of_write(&e)),
         }
+        *written = Some(u64::MAX);
         // Its side chat goes with it; best effort, the conversation is gone already.
         let _ = self.save_side_chat::<()>(id, &[]);
         Ok(())
@@ -614,6 +671,11 @@ impl Store {
     }
 
     pub fn chat_groups(&self) -> Result<Vec<crate::engine::ChatGroup>, Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.chat_groups_locked()
+    }
+
+    fn chat_groups_locked(&self) -> Result<Vec<crate::engine::ChatGroup>, Fault> {
         let pending = self.read_group_move()?;
         let groups: Vec<crate::engine::ChatGroup> = match &pending {
             Some((pending, crate::model::Area::Chat)) => pending.groups.clone(),
@@ -621,7 +683,7 @@ impl Store {
         };
         if pending.is_some() {
             // A blocked rollback still reads the old membership; mutations must finish recovery first.
-            let _ = self.recover_group_move();
+            let _ = self.recover_group_move_transaction();
         }
         if groups.iter().any(|g| {
             uuid::Uuid::parse_str(&g.id).is_err()
@@ -648,19 +710,41 @@ impl Store {
     }
 
     pub fn save_chat_groups(&self, groups: &[crate::engine::ChatGroup]) -> Result<(), Fault> {
-        self.recover_group_move()?;
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction()?;
         self.write(&self.chat_groups, &groups)
     }
 
     /// Remove membership and replace the area under one commit point, without touching the group's knowledge files.
-    pub(crate) fn move_chat_to_project(&self, conversation: &Conversation) -> Result<(), Fault> {
-        self.recover_group_move()?;
-        let groups = self.chat_groups()?;
-        if !groups.iter().any(|g| g.conversation_ids.contains(&conversation.id)) {
-            return self.save_checked(conversation);
+    pub(crate) fn move_chat_to_project(
+        &self,
+        conversation: &Conversation,
+        generation: u64,
+        prepare: impl FnOnce(&Conversation) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction().map_err(|e| e.key())?;
+        let groups = self.chat_groups_locked().map_err(|e| e.key())?;
+        let lock = self.snapshot_lock(&conversation.id);
+        lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *written == Some(u64::MAX) || !self.file(&conversation.id).try_exists().map_err(|_| Fault::Read.key())? {
+            return Err(Fault::Corrupt.key().into());
+        }
+        if written.is_some_and(|last| last >= generation) {
+            return Ok(false);
+        }
+        prepare(conversation)?;
+        if !groups.iter().any(|group| group.conversation_ids.contains(&conversation.id)) {
+            self.write_compact(&self.file(&conversation.id), &conversation, true).map_err(|e| e.key())?;
+            *written = Some(generation);
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.written(self.file(&conversation.id), conversation);
+            self.search.saved(conversation);
+            return Ok(true);
         }
         let journal = self.chat_groups.with_file_name("chat-group-move.json");
-        self.write(&journal, &GroupMove { conversation_id: conversation.id.clone(), groups: groups.clone() })?;
+        self.write(&journal, &GroupMove { conversation_id: conversation.id.clone(), groups: groups.clone() }).map_err(|e| e.key())?;
         let mut after = groups;
         for group in &mut after {
             group.conversation_ids.retain(|id| id != &conversation.id);
@@ -668,18 +752,20 @@ impl Store {
         if let Err(error) = self.write(&self.chat_groups, &after) {
             // Atomic replacement failed: both original files are untouched.
             let _ = fs::remove_file(journal);
-            return Err(error);
+            return Err(error.key().into());
         }
-        if let Err(error) = self.write_compact(&self.file(&conversation.id), conversation, true) {
+        if let Err(error) = self.write_compact(&self.file(&conversation.id), &conversation, true) {
             // Keep the journal if rollback also fails, so the next reader retries before using membership.
-            let _ = self.recover_group_move();
-            return Err(error);
+            let _ = self.recover_group_move_locked(&conversation.id);
+            return Err(error.key().into());
         }
+        *written = Some(generation);
+        self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.written(self.file(&conversation.id), conversation);
         // Area is now committed; recovery can only finish cleanup, never put this conversation back in its group.
         let _ = fs::remove_file(journal);
         self.search.saved(conversation);
-        Ok(())
+        Ok(true)
     }
 
     fn read_group_move(&self) -> Result<Option<(GroupMove, crate::model::Area)>, Fault> {
@@ -695,13 +781,36 @@ impl Store {
     }
 
     pub(crate) fn recover_group_move(&self) -> Result<(), Fault> {
-        let Some((pending, area)) = self.read_group_move()? else {
-            return Ok(());
-        };
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction()
+    }
+
+    fn recover_group_move_transaction(&self) -> Result<(), Fault> {
+        loop {
+            let Some(pending) = read_checked::<GroupMove>(&self.chat_groups.with_file_name("chat-group-move.json"))? else {
+                return Ok(());
+            };
+            if uuid::Uuid::parse_str(&pending.conversation_id).is_err() {
+                return Err(Fault::Corrupt);
+            }
+            let lock = self.snapshot_lock(&pending.conversation_id);
+            let _write = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.recover_group_move_locked(&pending.conversation_id)? {
+                return Ok(());
+            }
+        }
+    }
+
+    fn recover_group_move_locked(&self, id: &str) -> Result<bool, Fault> {
+        let Some((pending, area)) = self.read_group_move()? else { return Ok(true) };
+        if pending.conversation_id != id {
+            return Ok(false);
+        }
         if area == crate::model::Area::Chat {
             self.write(&self.chat_groups, &pending.groups)?;
         }
-        fs::remove_file(self.chat_groups.with_file_name("chat-group-move.json")).map_err(|e| Fault::of_write(&e))
+        fs::remove_file(self.chat_groups.with_file_name("chat-group-move.json")).map_err(|e| Fault::of_write(&e))?;
+        Ok(true)
     }
 
     /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer
@@ -987,6 +1096,114 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_snapshot_and_recovery_hold_the_move_lock_during_writes() {
+        struct CheckingDisk(Mutex<Option<std::sync::Weak<Store>>>, std::sync::atomic::AtomicUsize);
+        impl Disk for CheckingDisk {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                let store = self.0.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
+                assert!(store.group_move.try_lock().is_err());
+                self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                RealDisk.rename(from, to)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let disk = Arc::new(CheckingDisk(Mutex::new(None), Default::default()));
+        let store = Arc::new(Store::with_disk(dir.path(), disk.clone()));
+        *disk.0.lock().unwrap() = Some(Arc::downgrade(&store));
+        let id = uuid::Uuid::new_v4().to_string();
+        let conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": id, "title": "chat", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&conversation).unwrap();
+        fs::write(dir.path().join("chat-group-move.json"), serde_json::json!({"conversationId": id, "groups": []}).to_string()).unwrap();
+        store.chat_groups().unwrap();
+        assert_eq!(disk.1.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn move_rejects_a_newer_snapshot_and_accepts_a_fresh_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": id, "title": "old", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&conversation).unwrap();
+        let stale_generation = store.next_generation(&id);
+        conversation.title = "new".into();
+        store.save_checked(&conversation).unwrap();
+        let mut moved = conversation.clone();
+        moved.title = "old".into();
+        moved.area = crate::model::Area::Project;
+        assert!(!store.move_chat_to_project(&moved, stale_generation, |_| Ok(())).unwrap());
+        assert_eq!(store.get(&id).unwrap().title, "new");
+        let generation = store.next_generation(&id);
+        moved.title = conversation.title;
+        let writes = store.conversation_writes();
+        assert!(store.move_chat_to_project(&moved, generation, |_| Ok(())).unwrap());
+        assert_eq!(store.conversation_writes(), writes + 1);
+        assert_eq!(store.get(&id).unwrap().title, "new");
+        moved.title = "later".into();
+        store.save_checked(&moved).unwrap();
+        assert_eq!(store.get(&id).unwrap().title, "later");
+    }
+
+    #[test]
+    fn move_serializes_different_conversations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::new(dir.path()));
+        let conversation = |id: &str| -> Conversation {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "title": id, "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+            }))
+            .unwrap()
+        };
+        let first_id = uuid::Uuid::new_v4().to_string();
+        let second_id = uuid::Uuid::new_v4().to_string();
+        let first = conversation(&first_id);
+        let second = conversation(&second_id);
+        store.save_checked(&first).unwrap();
+        store.save_checked(&second).unwrap();
+        let group = crate::engine::ChatGroup {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "group".into(),
+            instructions: String::new(),
+            files: vec![],
+            conversation_ids: vec![first.id.clone(), second.id.clone()],
+        };
+        store.save_chat_groups(&[group]).unwrap();
+        let mut first_move = first;
+        first_move.area = crate::model::Area::Project;
+        let mut second_move = second;
+        second_move.area = crate::model::Area::Project;
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let moving = store.clone();
+        let first_thread = std::thread::spawn(move || {
+            moving.move_chat_to_project(&first_move, 2, |_| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        entered_rx.recv().unwrap();
+        assert!(store.group_move.try_lock().is_err());
+        let moving = store.clone();
+        let second_thread = std::thread::spawn(move || moving.move_chat_to_project(&second_move, 2, |_| Ok(())));
+        release_tx.send(()).unwrap();
+        first_thread.join().unwrap().unwrap();
+        second_thread.join().unwrap().unwrap();
+        assert!(store.chat_groups().unwrap()[0].conversation_ids.is_empty());
+        assert_eq!(store.get(&first_id).unwrap().area, crate::model::Area::Project);
+        assert_eq!(store.get(&second_id).unwrap().area, crate::model::Area::Project);
+    }
 
     #[test]
     fn rules_registry_preserves_other_projects_approvals_and_refuses_unsafe_output() {
