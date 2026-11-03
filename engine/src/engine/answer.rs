@@ -467,6 +467,7 @@ pub(super) mod tests {
             }
             let live = Live {
                 tool_kit: Default::default(),
+                digests_pending: false,
                 start_card: None,
                 kit_identity: None,
                 kit_resource_digest: None,

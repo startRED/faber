@@ -191,6 +191,91 @@ async fn after_one_turn(dir: &crate::support::DataFolder, disk: &Shared, text: &
     id
 }
 
+#[tokio::test]
+async fn guide_and_kit_digests_wait_for_a_reply_and_retry_the_same_native_session() {
+    use crate::support::{controlled, emit, fixture, read_message};
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let dir = crate::support::DataFolder::new();
+        let item = super::kits::session_skill(dir.path());
+        let catalog = faber_engine::tools::Store::with_catalog(dir.path(), vec![item.clone()]);
+        // Keep a verified fixture snapshot alive across engine restarts; catalog preparation runs in the background.
+        let (_kit, report) =
+            catalog.kit_for(Vendor::Codex, "Debug this failing test.", None, Area::Chat, faber_engine::model::Permissions::Ask, &[]);
+        assert_eq!(report.ids, ["debug"]);
+        let native = if vendor == Vendor::Claude { "kit-session" } else { "kit-thread" };
+        let saved = json!({
+            "id":"retry-kit", "title":"Kit", "area":"chat", "createdAt":1, "updatedAt":1,
+            "messages":[], "sessions":{vendor.name():native}
+        });
+        std::fs::create_dir_all(dir.path().join("conversations")).unwrap();
+        std::fs::write(dir.path().join("conversations/retry-kit.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
+        for attempt in 0..3 {
+            let (spawn, mut input, mut output) = controlled();
+            let process = tokio::spawn(async move {
+                let replies = fixture(vendor.name(), "kits");
+                loop {
+                    let message = read_message(&mut input).await;
+                    if message["type"] == "user" || message["method"] == "turn/start" {
+                        if attempt > 0 {
+                            let turn = replies
+                                .iter()
+                                .position(|e| e.input && (e.msg["type"] == "user" || e.msg["method"] == "turn/start"))
+                                .unwrap();
+                            for entry in replies.into_iter().skip(turn + 1).filter(|e| !e.input) {
+                                if attempt == 1 && (entry.msg["type"] == "assistant" || entry.msg["method"] == "item/agentMessage/delta") {
+                                    continue;
+                                }
+                                emit(&mut output, entry.msg).await;
+                            }
+                        }
+                        return message;
+                    }
+                    if message["method"] == "config/read" {
+                        emit(&mut output, json!({"id":message["id"], "result":{"config":{}}})).await;
+                    } else if let Some(reply) = replies.iter().find(|e| !e.input && !e.msg["id"].is_null() && e.msg["id"] == message["id"])
+                    {
+                        emit(&mut output, reply.msg.clone()).await;
+                    }
+                }
+            });
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let engine = Engine::new(
+                EngineOptions {
+                    data_dir: dir.path().into(),
+                    #[cfg(windows)]
+                    chat_dir: dir.chat_path().into(),
+                    clis: [(vendor, Cli { command: vendor.name().into(), prefix: vec![] })].into(),
+                    spawn,
+                    windows: false,
+                    claude_env_billed: false,
+                    max_warm: 3,
+                    idle: Duration::from_secs(120),
+                    runtime: tokio::runtime::Handle::current(),
+                    ask: None,
+                },
+                Arc::new(move |event| drop(tx.send(event))),
+            )
+            .unwrap();
+            engine.set_catalog_items(vec![item.clone()]);
+            let mut request = send(Some("retry-kit"), "Debug this failing test.", Effort::High);
+            request.choice.vendor = vendor.name().into();
+            engine.send(request).unwrap();
+            let reply = finished(&mut rx).await;
+            assert_eq!(reply.status, Some(if attempt == 0 { Status::Error } else { Status::Done }), "{vendor:?}: {:?}", reply.error);
+            let message = process.await.unwrap();
+            let text = if vendor == Vendor::Claude { &message["message"]["content"] } else { &message["params"]["input"][0]["text"] };
+            let text = text.as_str().unwrap();
+            assert_eq!(text.contains("Faber's own guide:"), attempt < 2, "{vendor:?}, attempt {attempt}: {text}");
+            assert_eq!(text.contains("DEBUG_KIT_INSTRUCTIONS"), attempt < 2, "{vendor:?}, attempt {attempt}: {text}");
+            let saved = engine.open("retry-kit").unwrap();
+            assert_eq!(saved.sessions[&vendor], native, "the retry keeps its native history");
+            assert_eq!(saved.session_guide_digests.contains_key(&vendor), attempt > 0);
+            assert_eq!(saved.session_resource_digests.contains_key(&vendor), attempt > 0);
+            engine.shutdown();
+        }
+    }
+}
+
 /// What an older Faber left after the bug: the only reply failed, and the conversation names a thread that never ran.
 fn leave_a_stale_thread(dir: &crate::support::DataFolder, id: &str, engine: &Engine) {
     let mut saved = engine.open(id).unwrap();
@@ -339,7 +424,17 @@ async fn a_crash_after_codex_accepts_a_turn_resumes_that_thread_and_never_starts
     assert_eq!((reply.status, reply.text.as_str()), (Some(Status::Done), "pong"), "{:?}", reply.error);
     let d = disk.lock().unwrap();
     assert_eq!(d.asked, vec!["thread/start", "thread/resume thread-1"]);
-    assert_eq!(d.turns.last().map(String::as_str), Some("second"), "no history text: the thread still has the context");
+    assert_eq!(
+        d.turns,
+        [
+            "first",
+            concat!(
+                "Current catalog resources for this session, replacing earlier catalog selections and paths (within current permissions):\n",
+                "No catalog skill instructions apply to this session. Earlier catalog skill selections and paths no longer apply.\n\nsecond"
+            ),
+        ],
+        "retry resources before the first reply, without replaying history: the thread still has the context"
+    );
     drop(d);
     let c = engine.open(&id).unwrap();
     assert_eq!((c.sessions[&Vendor::Codex].as_str(), c.tentative.is_empty()), ("thread-1", true));

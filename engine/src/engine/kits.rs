@@ -172,9 +172,13 @@ pub(super) fn record_native_kit(conversation: &mut Conversation, native: String,
         }
     }
     conversation.session_kits.insert(live.vendor, (native, ids, live.kit_identity.clone()));
-    // shortcut: the kit's digest is saved when the session starts, even if its resources wait behind a `/` first message, so a
-    // process that ends before the next ordinary message never resends them; upgrade by saving it when the text goes out, as the guide's is.
-    if let Some(digest) = &live.kit_resource_digest {
+    if !live.digests_pending {
+        record_digests(conversation, live);
+    }
+}
+
+pub(super) fn record_digests(conversation: &mut Conversation, live: &Live) {
+    if let Some(digest) = live.kit_resource_digest.as_ref().filter(|_| live.kit_resources.is_none()) {
         conversation.session_resource_digests.insert(live.vendor, digest.clone());
     } else {
         conversation.session_resource_digests.remove(&live.vendor);
@@ -340,6 +344,7 @@ mod tests {
                     let result = match msg["method"].as_str() {
                         Some("initialize") => Some(json!({})),
                         Some("config/read") => Some(json!({"config":{}})),
+                        Some("thread/unsubscribe") => Some(json!({"status":"unsubscribed"})),
                         Some("thread/start" | "thread/resume") if effective.is_some() => {
                             let id = msg["params"]["threadId"].as_str().map(str::to_owned).unwrap_or_else(|| format!("kit-{}", msg["id"]));
                             // A loaded native thread ignores later resume instruction overrides.
@@ -1694,6 +1699,10 @@ mod tests {
             if !told && kit_current {
                 assert_eq!(text, "Debug this failure", "{which}");
             }
+            engine.with(|core| {
+                let sid = core.live["kit"].sid;
+                core.handle("kit", sid, EngineEvent::Text("answer".into()));
+            });
             let saved = engine.with(|core| core.convs["kit"].session_guide_digests.get(&Vendor::Claude).cloned());
             assert_eq!(saved, Some(guide_digest(Some(&note))), "{which}: what the session was told is what is saved");
             engine.shutdown();
@@ -1745,18 +1754,23 @@ mod tests {
         let first = engine(&dir, spawn);
         let note = first.with(|core| {
             set_screen(core, "en", Permissions::Ask);
-            conversation(core, Area::Chat, None, &folder, "/compact");
+            conversation(core, Area::Chat, None, &folder, "/compact Debug this failing test");
             core.rewind.captured_for_test("reply");
-            core.start("kit", "reply", &pick(Vendor::Claude), "/compact".into(), vec![], true).unwrap();
+            core.start("kit", "reply", &pick(Vendor::Claude), "/compact Debug this failing test".into(), vec![], true).unwrap();
             guide_note(core, Vendor::Claude, Area::Chat).unwrap()
         });
-        assert_eq!(claude_input(&messages).await, "/compact", "a slash command is not preceded by anything");
+        assert_eq!(claude_input(&messages).await, "/compact Debug this failing test", "a slash command is not preceded by anything");
         first.with(|core| {
             assert_eq!(core.live["kit"].guide.pending.as_deref(), Some(note.as_str()));
             assert!(core.live["kit"].guide.digest.is_none() && core.convs["kit"].session_guide_digests.is_empty(), "not told yet");
+            assert!(core.live["kit"].kit_resources.is_some(), "the command selected resources to defer");
+            let sid = core.live["kit"].sid;
+            core.handle("kit", sid, EngineEvent::Text("slash reply".into()));
+            assert!(core.convs["kit"].session_resource_digests.is_empty(), "resources still wait behind the slash command");
             let l = core.live.get_mut("kit").unwrap();
             let next = first_input("How do I switch the theme?".into(), &mut l.kit_resources, &mut l.guide);
             assert!(next.starts_with(&note) && next.ends_with("How do I switch the theme?"), "{next}");
+            assert!(next.contains("debug_KIT_INSTRUCTIONS"), "deferred kit instructions reach the ordinary message: {next}");
             assert!(l.guide.pending.is_none() && l.guide.digest.is_some(), "told now");
             let again = first_input("And the language?".into(), &mut l.kit_resources, &mut l.guide);
             assert_eq!(again, "And the language?", "told once");

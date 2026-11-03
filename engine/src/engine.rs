@@ -283,6 +283,8 @@ struct Live {
     tool_kit: crate::tools::kits::Report,
     kit_identity: Option<String>,
     kit_resource_digest: Option<String>,
+    /// Digests sent with a turn, awaiting its first reply event before they are saved.
+    digests_pending: bool,
     /// What this session knows of Faber's own guide (R18).
     guide: kits::LiveGuide,
     kit_pending: bool,
@@ -2611,6 +2613,15 @@ impl Core {
                 self.save(conv);
             }
         }
+        if (event.moves_reply().is_some() || matches!(event, EngineEvent::Done { .. }))
+            && let Some(live) = self.live.get_mut(conv).filter(|live| live.digests_pending)
+        {
+            live.digests_pending = false;
+            if let Some(c) = self.convs.get_mut(conv) {
+                kits::record_digests(c, live);
+            }
+            self.save(conv);
+        }
         // While the context is compacted only its end matters (`compact.rs`).
         if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
             return;
@@ -4345,11 +4356,7 @@ impl Core {
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
             let text = kits::first_input(text, &mut l.kit_resources, &mut l.guide);
-            // shortcut: saved when the message is dispatched, not when the CLI accepted it, so a process that dies before reading it
-            // and a retry that resumes the same native session skip the line once; upgrade by saving it on the first reply event.
-            if let (Some(c), Some(digest)) = (self.convs.get_mut(id), &l.guide.digest) {
-                c.session_guide_digests.insert(l.vendor, digest.clone());
-            }
+            l.digests_pending = true;
             let (text, images) = match l.group_files.take() {
                 Some((paths, mut group_images)) => {
                     group_images.extend(images);
@@ -4714,6 +4721,7 @@ impl Core {
                 tool_kit,
                 kit_identity,
                 kit_resource_digest,
+                digests_pending: false,
                 guide,
                 kit_pending: mode != kits::SessionStart::Compact,
                 prepared: mode != kits::SessionStart::Turn,
@@ -5821,6 +5829,7 @@ mod tool_in_tests {
             start_card: None,
             kit_identity: None,
             kit_resource_digest: None,
+            digests_pending: false,
             guide: Default::default(),
             kit_pending: false,
             prepared: false,
@@ -5915,6 +5924,7 @@ mod tool_in_tests {
                         start_card: None,
                         kit_identity: None,
                         kit_resource_digest: None,
+                        digests_pending: false,
                         guide: Default::default(),
                         kit_pending: false,
                         prepared: false,

@@ -50,6 +50,13 @@ fn skills(root: &Path) -> Store {
     store
 }
 
+pub(super) fn session_skill(root: &Path) -> Item {
+    let item = skill("debug", "debugging", DEBUG);
+    let store = Store::with_catalog(root, vec![item.clone()]);
+    install_skill(&store, &item, DEBUG, root);
+    item
+}
+
 async fn replay(
     vendor: Vendor,
     area: Area,

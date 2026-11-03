@@ -583,7 +583,10 @@ frontend checklist go as text. These instructions do not grant execution, instal
 The line precedes Claude Code's first ordinary input, and a new Codex thread receives it at thread/start. A resumed
 Codex thread keeps its original instructions and receives the changed line once with its next ordinary input.
 The saved sessionGuideDigests value remains separate from catalog-resource identity: changing a kit does not resend
-the guide. A first slash command goes alone; after compaction the line is resent where it lived in ordinary input.
+the guide. Both guide and resource digests are saved on the first reply output or turn end; a process that exits before
+either leaves them unsaved, so a retry on the same native session sends them again (`engine/tests/session_resume.rs`,
+`guide_and_kit_digests_wait_for_a_reply_and_retry_the_same_native_session`). A first slash command goes alone and leaves
+waiting resources unsaved; after compaction the line is resent where it lived in ordinary input.
 The folder stays denied to Edit and Write and is healed at launch; full-access shell commands can still modify it,
 as they can the catalog. It has no catalog card, switch or report entry and never reaches Isolated requests.
 

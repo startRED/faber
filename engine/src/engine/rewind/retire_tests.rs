@@ -6,11 +6,15 @@ use crate::router::Effort;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
-async fn read(input: &mut tokio::io::Lines<BufReader<DuplexStream>>, method: &str) -> Value {
+async fn read(input: &mut tokio::io::Lines<BufReader<DuplexStream>>, output: &mut DuplexStream, method: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let msg: Value = serde_json::from_str(&input.next_line().await.unwrap().expect("server input closed early")).unwrap();
             if msg["method"] == "skills/list" {
+                continue;
+            }
+            if msg["method"] == "thread/unsubscribe" {
+                write(output, json!({"id":msg["id"],"result":{"status":"unsubscribed"}})).await;
                 continue;
             }
             assert_eq!(msg["method"], method);
@@ -26,9 +30,9 @@ async fn write(output: &mut DuplexStream, msg: Value) {
 }
 
 async fn start(input: &mut tokio::io::Lines<BufReader<DuplexStream>>, output: &mut DuplexStream, method: &str, thread: &str, turn: &str) {
-    let open = read(input, method).await;
+    let open = read(input, output, method).await;
     write(output, json!({"id":open["id"],"result":{"thread":{"id":thread}}})).await;
-    let send = read(input, "turn/start").await;
+    let send = read(input, output, "turn/start").await;
     write(output, json!({"id":send["id"],"result":{"turn":{"id":turn}}})).await;
 }
 
@@ -97,9 +101,9 @@ async fn retired_shared_server_closes_after_replacing_a_session_before_settings_
         choice: Choice { vendor: "codex".into(), model: None, effort: Some(effort) },
     };
     let a = app.send(request(None, Effort::Medium)).unwrap();
-    let init = read(&mut input, "initialize").await;
+    let init = read(&mut input, &mut output, "initialize").await;
     write(&mut output, json!({"id":init["id"],"result":{}})).await;
-    read(&mut input, "initialized").await;
+    read(&mut input, &mut output, "initialized").await;
     start(&mut input, &mut output, "thread/start", "a", "a1").await;
     write(&mut output, json!({"method":"turn/completed","params":{"threadId":"a","turn":{"id":"a1","status":"completed"}}})).await;
     until(|| app.open(&a).unwrap().messages.last().unwrap().status == Some(Status::Done)).await;
