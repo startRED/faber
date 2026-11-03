@@ -2,6 +2,7 @@ import { createComponent, createSignal, ErrorBoundary, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type AppState, type Conversation, type Message, type VisualAnswer } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
+import { invoke } from '../../ui/shell.ts';
 import { applyLook } from '../../ui/appearance.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { openedVisual, showVisual, VisualFiles, VisualPane, VisualReply, visualDocument, VISUAL_CSP, VISUAL_LIVE_CSP } from '../../ui/VisualAnswer.tsx';
@@ -1127,29 +1128,37 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
   };
   document.addEventListener('securitypolicyviolation', violation);
   let result: Record<string, boolean> | undefined;
+  let stage = 'no report';
   const listen = (e: MessageEvent) => {
     if (e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) {
-      if (e.data.navigationBlocked) navigationBlocked = true; else result = e.data;
+      if (e.data.stage) stage = e.data.stage;
+      else if (e.data.navigationBlocked) navigationBlocked = true; else result = e.data;
     }
   };
   window.addEventListener('message', listen);
   const script = `<button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button><script>
     (async () => {
-      let fetchBlocked=false, fetchPolicy=false, parentBlocked=false, nativeDenied=false, rtcBlocked=false, nestedBlocked=false;
+      const report = stage => parent.postMessage({probe:${JSON.stringify(probe)},stage},'*');
+      report('started');
+      let fetchBlocked=false, fetchPolicy=false, parentBlocked=false, nativeDenied=false, electronDenied=false, rtcBlocked=false, nestedBlocked=false;
       document.addEventListener('securitypolicyviolation', e => {
         if(e.effectiveDirective==='connect-src' && e.originalPolicy.includes("default-src 'none'") && e.originalPolicy.includes("script-src 'unsafe-inline'") && e.blockedURI.startsWith('https://example.com')) fetchPolicy=true;
       });
       try { await fetch('https://example.com/visual-probe'); } catch { fetchBlocked=true; }
+      report('fetch finished');
       try { parent.document.body; } catch { parentBlocked=true; }
       try { nativeDenied=await Promise.race([window.__TAURI_INTERNALS__.invoke('state').then(()=>false,()=>true),new Promise(r=>setTimeout(()=>r(true),250))]); } catch { nativeDenied=true; }
+      try { electronDenied=await window.faberShell.invoke('state').then(()=>false,()=>true); } catch { electronDenied=true; }
       try { new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:9'}]}); } catch { rtcBlocked=true; }
       const child=document.createElement('iframe'); document.body.append(child);
       try { new child.contentWindow.RTCPeerConnection(); } catch { nestedBlocked=true; }
       child.remove();
+      report('child removed');
       await new Promise(r=>setTimeout(r,40));
       document.querySelector('#counter').click();
       const interactive=document.querySelector('#counter').textContent==='1';
-      parent.postMessage({probe:${JSON.stringify(probe)},fetchBlocked,fetchPolicy,parentBlocked,nativeDenied,rtcBlocked,nestedBlocked,interactive},'*');
+      parent.postMessage({probe:${JSON.stringify(probe)},fetchBlocked,fetchPolicy,parentBlocked,nativeDenied,electronDenied,rtcBlocked,nestedBlocked,interactive},'*');
+      report('result sent');
       location.href=${JSON.stringify(navigation)};
       setTimeout(()=>parent.postMessage({probe:${JSON.stringify(probe)},navigationBlocked:true},'*'),150);
     })();
@@ -1157,15 +1166,22 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
   const a = answer(); a.versions = [{ ...a.versions[0]!, source: script }];
   const dispose = render(() => createComponent(VisualPane, { answer: a, open: { conversationId: 'security', answerId: a.id }, onBack: () => {}, onClose: () => {} }), host);
   try {
-    await until(() => host.querySelector('iframe'));
+    await until(() => host.querySelector('iframe'), () => `frame was not inserted; stage ${stage}`);
     const frame = host.querySelector('iframe')!;
     equal(frame.getAttribute('sandbox'), 'allow-scripts');
     ok(frame.src.includes('faber-visual'), 'the page has its own protocol origin');
     equal(frame.getAttribute('srcdoc'), null);
     equal(frame.referrerPolicy, 'no-referrer');
     equal(prepared.get(frame.src)!.live, false);
-    await until(() => result);
-    for (const name of ['fetchBlocked', 'fetchPolicy', 'parentBlocked', 'nativeDenied', 'rtcBlocked', 'nestedBlocked', 'interactive']) equal(result![name], true, name);
-    await until(() => navigationBlocked);
+    await until(() => result, () => `frame did not report its result; stage ${stage}, asked ${frame.dataset.asked ?? 'nothing'}, src ${frame.src}`);
+    for (const name of ['fetchBlocked', 'fetchPolicy', 'parentBlocked', 'nativeDenied', 'electronDenied', 'rtcBlocked', 'nestedBlocked', 'interactive']) equal(result![name], true, name);
+    if ('faberShell' in globalThis) {
+      const end = performance.now() + 15000;
+      while (!navigationBlocked && performance.now() < end) {
+        navigationBlocked = await invoke<boolean>('test_visual_navigation_blocked', { url: navigation });
+        if (!navigationBlocked) await settle();
+      }
+    }
+    await until(() => navigationBlocked, () => `frame navigation was not reported blocked; stage ${stage}, src ${frame.src}`);
   } finally { dispose(); host.remove(); window.removeEventListener('message', listen); document.removeEventListener('securitypolicyviolation', violation); }
 });

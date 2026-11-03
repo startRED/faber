@@ -16,6 +16,11 @@ const env = (name: string): string | undefined => (app.isPackaged ? undefined : 
 /** A run the test runner started: hidden, offscreen, inside a sandbox it made. */
 export const testing = !app.isPackaged && process.env.FABER_HIDDEN === '1';
 const checksOut = env('FABER_CHECKS_OUT');
+let blockedVisualNavigation = '';
+
+export function reportBlockedVisualNavigation(url: string): void {
+  if (testing) blockedVisualNavigation = url;
+}
 
 /** Called before the app is ready, when Chromium still takes switches and paths. */
 export function prepare(): void {
@@ -80,6 +85,7 @@ export function commands(window: () => BrowserWindow | null): Map<string, (args:
     // Leaving through the normal quit lets the host save and stop before the process ends.
     setImmediate(() => app.quit());
   });
+  if (testing) own.set('test_visual_navigation_blocked', ({ url }) => blockedVisualNavigation === url);
   // Resizes the real hidden window, rather than emulating the page's viewport.
   own.set('test_host_size', ({ width, height }) => {
     if (typeof width !== 'number' || typeof height !== 'number') throw new Error('error.host.badArgs');

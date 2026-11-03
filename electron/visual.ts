@@ -6,6 +6,7 @@ import { type BrowserWindow, protocol, session, type WebContents, type WebFrameM
 import { lookup } from 'node:dns/promises';
 import { navigationAllowed, publicAddress, publicHttps } from './visualrules.ts';
 import type { Sidecar } from './sidecar.ts';
+import { reportBlockedVisualNavigation } from './testmode.ts';
 
 export const VISUAL_SCHEME = 'faber-visual';
 export const VISUAL_ORIGIN = `${VISUAL_SCHEME}://app`;
@@ -28,6 +29,7 @@ export function guardVisualFrames(contents: WebContents): void {
     }
     if (!sameFrame(details.frame?.parent, contents.mainFrame) || !navigationAllowed(details.url)) {
       details.preventDefault();
+      reportBlockedVisualNavigation(details.url);
     }
   });
 }
@@ -94,7 +96,9 @@ export function installVisual(host: () => Sidecar | null, screen: () => BrowserW
     if (leases.has(details.id) || (frame && main && !sameFrame(frame, main))) {
       const directChild = leases.has(details.id) || Boolean(frame && sameFrame(frame.parent, main));
       if (details.resourceType === 'subFrame') {
-        callback({ cancel: !(directChild && details.method === 'GET' && navigationAllowed(details.url)) });
+        const cancel = !(directChild && details.method === 'GET' && navigationAllowed(details.url));
+        if (cancel) reportBlockedVisualNavigation(details.url);
+        callback({ cancel });
         return;
       }
       if (!directChild || (details.method !== 'GET' && details.method !== 'HEAD')) {
