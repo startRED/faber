@@ -2516,6 +2516,7 @@ export const fr: Messages = {
   'notes.388.fixed': 'L’attente d’une conversation continue tant qu’elle demande une réponse et indique comment elle s’est terminée.',
   'notes.389.better': "Les repères à côté du texte indiquent qui parle et comment le travail s'est terminé.",
   'notes.390.new': 'Vous pouvez autoriser un agent à réessayer une demande une fois depuis sa conversation.',
+  'notes.391.better': 'Vous pouvez continuer à utiliser Faber pendant l’enregistrement de l’activité des assistants dans une longue conversation.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

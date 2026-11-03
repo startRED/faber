@@ -2516,6 +2516,7 @@ export const es: Messages = {
   'notes.388.fixed': 'La espera de una conversación continúa mientras necesita una respuesta y muestra cómo terminó.',
   'notes.389.better': 'Puedes identificar quién habla y cómo terminó el trabajo por las marcas junto a las palabras.',
   'notes.390.new': 'Puedes permitir que un agente vuelva a intentar una solicitud una vez desde su conversación.',
+  'notes.391.better': 'Puedes seguir usando Faber mientras se guarda la actividad de los ayudantes en una conversación larga.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

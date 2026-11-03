@@ -4,7 +4,7 @@ use super::*;
 impl Engine {
     /// Finds interrupted conversations at startup and resumes eligible work after accounts are ready.
     pub fn resume_interrupted(&self) {
-        let (cut, wait, runtime) = self.with(|c| {
+        let (cut, wait, runtime) = self.with_saves(false, |c| {
             let rows = c.store.list();
             let mut cut = Vec::new();
             for row in rows {

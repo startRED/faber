@@ -78,7 +78,7 @@ mod tests {
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
         let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             core.live.clear();
             let c = core.convs.get_mut(&parent).unwrap();
             c.stopped = true;
@@ -121,7 +121,7 @@ mod tests {
         engine.shutdown();
         drop(engine);
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let saved = core.store.get(&parent).unwrap();
             assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must recognize the already saved report without duplication");
             assert_eq!(saved.queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).count(), 1);
@@ -135,7 +135,7 @@ mod tests {
         engine.shutdown();
         drop(engine);
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let saved = core.store.get(&parent).unwrap();
             assert_eq!(saved.queued.len(), MAX_QUEUED - 1, "startup must retry a pending report when a slot is already free");
             assert!(saved.queued.last().unwrap().text.contains("The requested documentation is saved."));
@@ -156,7 +156,7 @@ mod tests {
             let dir = crate::workspace::TestRoot::new();
             let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 core.live.clear();
                 core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
                 core.ledger.claude.billing = Billing::Subscription;
@@ -182,7 +182,7 @@ mod tests {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             core.live.clear();
             core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
             core.ledger.claude.billing = Billing::Subscription;
@@ -206,7 +206,7 @@ mod tests {
             let dir = crate::workspace::TestRoot::new();
             let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 core.live.clear();
                 core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
                 assert_eq!(core.send_by_itself(&id, "Synthetic refused message".into(), Wake::of(why)), Err("error.noSubscription".into()));
@@ -224,7 +224,7 @@ mod tests {
             let (engine, _) = super::super::answer::tests::engine(&dir);
             let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
             let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 core.installing = installing;
                 core.live.clear();
                 core.convs.get_mut(&parent).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
@@ -272,7 +272,7 @@ mod tests {
             let held = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("held", &[])]);
             let claude = Cli { command: "claude".into(), prefix: vec![] };
             let guard = (back == "install").then(|| engine.install_admission_stopping().unwrap());
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 core.live.clear();
                 if back != "clis" {
                     core.opts.clis.insert(Vendor::Claude, claude.clone());
@@ -303,7 +303,7 @@ mod tests {
                 assert_eq!(core.store.get(&parent).unwrap().queued.len(), 1, "the refused report waits: {back}");
             });
             drop(guard);
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 if back == "clis" {
                     let mut found = core.opts.clis.clone();
                     found.insert(Vendor::Claude, claude.clone());
@@ -342,7 +342,7 @@ mod tests {
                     }
                 });
                 let id = super::super::answer::tests::seed(&engine, session, &[("reply", &[])]);
-                engine.with(|core| {
+                engine.with_saves(false, |core| {
                     core.ledger.claude.billing = Billing::Subscription;
                     if tools_open {
                         core.live.get_mut(&id).unwrap().open_tools.push("read".into());
@@ -383,7 +383,7 @@ mod tests {
                 }
             });
             let id = super::super::answer::tests::seed(&engine, session, &[("reply", &[])]);
-            engine.with(|core| {
+            engine.with_saves(false, |core| {
                 core.ledger.claude.billing = match blocked {
                     "unknown" => Billing::Unknown,
                     "billed" => Billing::UsageBilled,
@@ -446,7 +446,7 @@ mod tests {
                     }
                 });
                 let id = super::super::answer::tests::seed(&engine, session, &[("reply", &[])]);
-                engine.with(|core| {
+                engine.with_saves(false, |core| {
                     core.ledger.claude.billing = if older_agent { Billing::Unknown } else { Billing::Subscription };
                     if older_agent {
                         core.send_by_itself(&id, "Older agent message".into(), Wake::of("wake.asked")).unwrap();

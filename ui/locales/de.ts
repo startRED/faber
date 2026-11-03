@@ -2516,6 +2516,7 @@ export const de: Messages = {
   'notes.388.fixed': 'Das Warten auf eine Unterhaltung läuft weiter, solange sie eine Antwort braucht, und zeigt ihr Ende an.',
   'notes.389.better': 'An den Zeichen neben dem Text erkennst du, wer spricht und wie die Arbeit endete.',
   'notes.390.new': 'Sie können einem Agenten in seiner Unterhaltung einen einmaligen erneuten Versuch erlauben.',
+  'notes.391.better': 'Du kannst Faber weiter nutzen, während die Aktivitäten der Helfer in einer langen Unterhaltung gespeichert werden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

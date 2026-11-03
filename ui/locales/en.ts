@@ -2396,6 +2396,7 @@ export const en = {
   'notes.388.fixed': 'Waiting for a conversation now continues while it needs an answer and reports how it ended.',
   'notes.389.better': 'You can spot who is speaking and how work ended from the marks beside the words.',
   'notes.390.new': 'You can allow an agent to retry a request once from its conversation.',
+  'notes.391.better': 'You can keep using Faber while helper activity is being saved in a long conversation.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

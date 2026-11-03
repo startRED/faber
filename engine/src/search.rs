@@ -325,30 +325,27 @@ impl Search {
     }
 
     pub(crate) fn saved(&self, c: &Conversation) {
-        if c.id.is_empty() || !c.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        self.saved_metadata(&c.id, c.area, c.project_id.clone(), c.updated_at);
+    }
+
+    pub(crate) fn saved_metadata(&self, id: &str, area: Area, project_id: Option<String>, updated: u64) {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return;
         }
         let mut index = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !index.ready {
-            index.touched.insert(c.id.clone());
+            index.touched.insert(id.to_string());
         }
         index.revision += 1;
         let revision = index.revision;
         // Only metadata crosses the save path. Pending records remain searchable through the file fallback.
-        if let Some(old) = index.documents.insert(
-            c.id.clone(),
-            Arc::new(Document {
-                area: c.area,
-                project_id: c.project_id.clone(),
-                updated: c.updated_at,
-                words: "".into(),
-                complete: false,
-                revision,
-            }),
-        ) {
+        if let Some(old) = index
+            .documents
+            .insert(id.to_string(), Arc::new(Document { area, project_id, updated, words: "".into(), complete: false, revision }))
+        {
             index.payload -= old.words.len();
         }
-        index.pending.insert(c.id.clone());
+        index.pending.insert(id.to_string());
         self.wake.notify_one();
     }
 

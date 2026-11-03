@@ -20,7 +20,7 @@ mod tests {
         let clock = Arc::new(Mutex::new(4600.0));
         let read = clock.clone();
         engine.set_time_source(Arc::new(move || *read.lock().unwrap()));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let id = core.blank(Area::Chat, None);
             let c = core.convs.get_mut(&id).unwrap();
             add_dry(c, 11, 1_000_000);
@@ -62,7 +62,7 @@ mod child_tests {
         let clock = Arc::new(Mutex::new(4600.0));
         let read = clock.clone();
         engine.set_time_source(Arc::new(move || *read.lock().unwrap()));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let parent = core.blank(Area::Chat, None);
             let child = core.blank(Area::Chat, None);
             let c = core.convs.get_mut(&parent).unwrap();
@@ -96,7 +96,7 @@ mod child_tests {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = engine(&dir);
         engine.set_time_source(Arc::new(|| 4600.0));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let id = core.blank(Area::Chat, None);
             let c = core.convs.get_mut(&id).unwrap();
             for n in 0..12 {
@@ -250,7 +250,7 @@ mod send_tests {
         let clock = Arc::new(Mutex::new(4600.0));
         let read = clock.clone();
         engine.set_time_source(Arc::new(move || *read.lock().unwrap()));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let id = core.blank(Area::Project, None);
             let c = core.convs.get_mut(&id).unwrap();
             c.keep_going = Some(KeepGoing::default());
@@ -289,7 +289,7 @@ mod delivery_tests {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = engine(&dir);
         engine.set_time_source(Arc::new(|| 4600.0));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             for answer in [false, true] {
                 let id = core.blank(Area::Chat, None);
                 let c = core.convs.get_mut(&id).unwrap();

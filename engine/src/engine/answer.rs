@@ -559,7 +559,7 @@ pub(super) mod tests {
         assert_eq!(engine.open(&id).unwrap().messages.last().unwrap().commits, ["commit"]);
         engine.with(|c| {
             c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().commits.clear();
-            c.save(&id);
+            c.try_save(&id).unwrap();
             c.convs.remove(&id);
         });
         let reply = engine.open(&id).unwrap().messages.pop().unwrap();

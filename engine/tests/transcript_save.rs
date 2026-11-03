@@ -14,6 +14,23 @@ use std::time::{Duration, Instant};
 
 const CALL: &str = "toolu_A";
 
+#[tokio::test]
+#[ignore]
+async fn measure_save_lock_on_big_conversations() {
+    for size in [20, 100] {
+        let dir = support::DataFolder::new();
+        let conversation = support::big_conversation(dir.path(), size * 1_000_000);
+        let id = conversation.id.clone();
+        drop(conversation);
+        let (engine, _) = engine(&dir);
+        engine.open(&id).unwrap();
+        let start = Instant::now();
+        engine.rename(&id, "Measured save");
+        eprintln!("{size} MB rename save: {} ms", start.elapsed().as_millis());
+        engine.shutdown();
+    }
+}
+
 fn engine(dir: &support::DataFolder) -> (Engine, Arc<std::sync::Mutex<Vec<Pipe>>>) {
     let (spawn, made) = pipes();
     let opts = EngineOptions {

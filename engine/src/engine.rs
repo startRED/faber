@@ -78,6 +78,7 @@ mod recovery;
 mod research;
 mod resume_cut;
 mod rewind;
+mod save;
 mod session;
 mod settings_change;
 mod siblings;
@@ -481,14 +482,15 @@ struct Core {
     background: crate::background::Commands,
     background_pending: bool,
     opts: EngineOptions,
-    store: Store,
+    store: Arc<Store>,
+    saves: save::Saves,
     emit: Emit,
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs.
     convs: HashMap<String, Conversation>,
     /// The conversations whose helper transcript activity is not in their record yet. Any successful save of a conversation,
     /// or its leaving memory, takes it out; `transcript_timer` says a save is already waiting for them.
-    dirty_transcripts: Mutex<HashSet<String>>,
+    dirty_transcripts: Mutex<HashMap<String, u64>>,
     old_inputs_pending: HashSet<String>,
     old_inputs_active: HashSet<String>,
     old_inputs_checked: HashSet<String>,
@@ -731,11 +733,12 @@ impl Engine {
                 background_pending: false,
                 opts,
                 chat_dir,
-                store,
+                store: Arc::new(store),
+                saves: Default::default(),
                 emit,
                 me: me.clone(),
                 convs: HashMap::new(),
-                dirty_transcripts: Mutex::new(HashSet::new()),
+                dirty_transcripts: Mutex::new(HashMap::new()),
                 old_inputs_pending: HashSet::new(),
                 old_inputs_active: HashSet::new(),
                 old_inputs_checked: HashSet::new(),
@@ -875,8 +878,25 @@ impl Engine {
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut Core) -> T) -> T {
+        self.with_saves(true, f)
+    }
+
+    // Save-before-unload paths must not expose an older file to another entry.
+    fn with_saves<T>(&self, deferred: bool, f: impl FnOnce(&mut Core) -> T) -> T {
         let _inside = self.runtime.enter();
-        f(&mut self.core.lock().unwrap_or_else(|e| e.into_inner()))
+        let (answer, batch) = {
+            let mut core = self.core.lock().unwrap_or_else(|e| e.into_inner());
+            core.finish_saves();
+            core.saves.deferred = deferred.then(|| Mutex::new(Vec::new()));
+            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut core)));
+            (answer, core.take_saves())
+        };
+        batch.write();
+        self.core.lock().unwrap_or_else(|e| e.into_inner()).finish_saves();
+        match answer {
+            Ok(answer) => answer,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
     }
 
     pub fn vendors(&self) -> Vec<Vendor> {
@@ -1652,6 +1672,12 @@ impl Engine {
         self.with(|c| c.keep_pace = scale)
     }
     pub fn shutdown(&self) {
+        let flights = {
+            let mut core = self.core.lock().unwrap_or_else(|e| e.into_inner());
+            core.closing = true;
+            core.saves.flights.clone()
+        };
+        flights.wait();
         self.with(|c| {
             c.closing = true;
             let active: Vec<_> = c.live.keys().cloned().collect();
@@ -1744,7 +1770,7 @@ impl Core {
         if let Some(call) = self.tool_of(conv, call) {
             call.transcript = Some(status);
         }
-        self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(conv.to_string());
+        self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(conv.to_string(), self.store.next_generation(conv));
         if failed {
             // The record must say the history is incomplete; later events of a call that already failed wait like the rest.
             self.save(conv);
@@ -1766,8 +1792,8 @@ impl Core {
             tokio::time::sleep(TRANSCRIPT_SAVE_EVERY).await;
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-            let core = &mut *core;
-            core.transcript_timer = false;
+            core.finish_saves();
+            core.saves.deferred = Some(Mutex::new(Vec::new()));
             // `shutdown` writes what is left itself.
             if !core.closing {
                 for id in std::mem::take(&mut core.old_inputs_pending) {
@@ -1790,11 +1816,28 @@ impl Core {
                     });
                 }
                 core.save_dirty(false);
-                // A write that failed is tried again on the next tick, not left for an event that may never come.
-                if !core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
-                    core.save_soon();
-                }
             }
+            let batch = core.take_saves();
+            let me = core.me.clone();
+            drop(core);
+            tokio::task::spawn_blocking(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| batch.write()));
+                if let Some(shared) = me.upgrade() {
+                    let mut core = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    core.finish_saves();
+                    core.transcript_timer = false;
+                    // Keep one helper snapshot in flight even when the disk takes longer than the timer interval.
+                    if !core.closing
+                        && (!core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+                            || !core.old_inputs_pending.is_empty())
+                    {
+                        core.save_soon();
+                    }
+                }
+                if let Err(panic) = result {
+                    std::panic::resume_unwind(panic);
+                }
+            });
         });
     }
 
@@ -1853,7 +1896,7 @@ impl Core {
             changed = true;
             tool.input = preview;
             tool.detail = Some(detail);
-            core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
+            core.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), core.store.next_generation(&id));
         }
         if changed {
             eprintln!("conversation {id}: paged old inputs, reducing the record by {saved} bytes");
@@ -1864,9 +1907,12 @@ impl Core {
     /// Writes every conversation that holds helper activity its record lacks. A write that fails leaves it dirty, told like
     /// any failed save, and the timer tries it again.
     fn save_dirty(&self, patient: bool) {
-        let ids: Vec<_> = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+        let ids: Vec<_> = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
         for id in ids {
-            if patient { self.save_with(&id, true) } else { self.save(&id) }
+            let patient = patient || !self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(&id);
+            if !self.defer_save(&id, Some(patient), false) {
+                let _ = self.save_result(&id, patient);
+            }
         }
     }
 
@@ -2233,19 +2279,27 @@ impl Core {
     /// it whole and `shutdown` tries once more) and is never silent: the screen's save-error toast says it when the first
     /// conversation starts failing, and again only after every failed one has been saved.
     fn save(&self, id: &str) {
-        let _ = self.try_save(id);
+        if !self.defer_save(id, None, true) {
+            let _ = self.try_save(id);
+        }
     }
 
     /// The record of `id` holds every page it counts, or the conversation is gone from memory: nothing waits for the timer.
     pub(super) fn transcript_saved(&self, id: &str) {
         self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        self.saves.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        self.saves.flights.queue.lock().unwrap_or_else(|e| e.into_inner()).pending.remove(id);
+        if let Some(pending) = &self.saves.deferred {
+            pending.lock().unwrap_or_else(|e| e.into_inner()).retain(|save| save.id != id);
+        }
     }
 
     /// Writes a conversation at once when helper activity is waiting for the timer: for a path that reads its file, or needs
     /// the person to see a card that survives a crash. Costs nothing when nothing waits.
     fn flush_transcript(&self, id: &str) -> Result<(), String> {
-        let dirty = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
-        if dirty { self.try_save(id) } else { Ok(()) }
+        let dirty = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id);
+        let pending = self.saves.pending.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id);
+        if dirty || pending { self.try_save(id) } else { Ok(()) }
     }
 
     fn try_save(&self, id: &str) -> Result<(), String> {
@@ -2255,18 +2309,48 @@ impl Core {
     }
 
     fn save_with(&self, id: &str, patient: bool) {
-        let _ = self.save_result(id, patient);
+        if !self.defer_save(id, Some(patient), true) {
+            let _ = self.save_result(id, patient);
+        }
     }
 
     fn save_result(&self, id: &str, patient: bool) -> Result<(), String> {
         // Nothing is written for a conversation that is not loaded, so that is neither a failure nor a success.
         if !self.convs.contains_key(id) {
             self.transcript_saved(id);
+            self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
             return Ok(());
         }
+        // The acknowledging save covers queued bytes, including activity that only marked them dirty.
+        self.saves.flights.queue.lock().unwrap_or_else(|e| e.into_inner()).pending.remove(id);
+        if let Some(pending) = &self.saves.deferred {
+            pending.lock().unwrap_or_else(|e| e.into_inner()).retain(|save| save.id != id);
+        }
+        let generation = self.store.next_generation(id);
         let result = self.save_checked(id, patient);
+        self.saved_result(id, generation, result)
+    }
+
+    fn saved_result(&self, id: &str, generation: u64, result: Result<(), crate::store::Fault>) -> Result<(), String> {
+        let mut completed = self.saves.completed.lock().unwrap_or_else(|e| e.into_inner());
+        let loaded = self.convs.contains_key(id);
+        let previous = completed.get(id).copied().unwrap_or((0, true));
+        let recovered = !loaded || (generation < previous.0 && previous.1);
+        if generation < previous.0 && result.is_ok() {
+            return Ok(());
+        }
+        if loaded && generation >= previous.0 {
+            completed.insert(id.to_string(), (generation, result.is_ok()));
+        }
         if result.is_ok() {
-            self.transcript_saved(id);
+            let mut dirty = self.dirty_transcripts.lock().unwrap_or_else(|e| e.into_inner());
+            if dirty.get(id).is_some_and(|changed| *changed <= generation) {
+                dirty.remove(id);
+            }
+            let mut pending = self.saves.pending.lock().unwrap_or_else(|e| e.into_inner());
+            if pending.get(id).is_some_and(|changed| *changed <= generation) {
+                pending.remove(id);
+            }
         }
         let first = {
             let mut failed = self.save_failed.lock().unwrap_or_else(|e| e.into_inner());
@@ -2277,6 +2361,8 @@ impl Core {
                     failed.remove(id);
                     false
                 }
+                // A late error is still told, but a newer durable save has already recovered this conversation.
+                Err(_) if recovered => failed.is_empty(),
                 Err(_) => failed.insert(id.to_string()) && failed.len() == 1,
             }
         };
@@ -2296,12 +2382,16 @@ impl Core {
     }
 
     fn save_checked(&self, id: &str, patient: bool) -> Result<(), crate::store::Fault> {
+        self.saved_conversation(id, |c| self.store.save_checked_with(c, patient)).unwrap_or(Ok(()))
+    }
+
+    fn saved_conversation<T>(&self, id: &str, f: impl FnOnce(&Conversation) -> T) -> Option<T> {
         if let Some(c) = self.convs.get(id) {
             if c.messages
                 .last()
                 .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
             {
-                return self.store.save_checked_with(c, patient);
+                return Some(f(c));
             }
             let mut saved = c.clone();
             if let Some(m) = saved.messages.last_mut() {
@@ -2321,9 +2411,9 @@ impl Core {
                         check: t.check.into(),
                     });
             }
-            return self.store.save_checked_with(&saved, patient);
+            return Some(f(&saved));
         }
-        Ok(())
+        None
     }
 
     fn state(&self) -> AppState {
@@ -2355,6 +2445,20 @@ impl Core {
     /// not loaded and was saved with a reply still streaming was cut by Faber closing or crashing mid-turn: interrupted.
     fn listed(&self) -> Vec<Summary> {
         let mut list: Vec<Summary> = self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect();
+        let pending = self.saves.pending.lock().unwrap_or_else(|e| e.into_inner());
+        for id in pending.keys() {
+            if let Some(c) = self.convs.get(id) {
+                let mut current = crate::store::summary(c);
+                current.ended = current.ended.filter(|e| e.current(now()));
+                if let Some(row) = list.iter_mut().find(|row| row.id == *id) {
+                    *row = current;
+                } else if !current.title.is_empty() {
+                    list.push(current);
+                }
+            }
+        }
+        list.retain(|row| !row.title.is_empty());
+        list.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
         for row in &mut list {
             row.state = match self.convs.get(&row.id) {
                 Some(c) => (!c.messages.is_empty()).then(|| ended::run_state(c, self.live.get(&row.id).is_some_and(|l| l.turn.is_some()))),
@@ -5493,6 +5597,9 @@ impl Core {
         }
         self.titles.remove(id);
         self.kit_checks.retain(|_, check| check.owner != id);
+        self.saves.completed.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        self.save_failed.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        self.transcript_saved(id);
         self.follows.remove(id);
         self.goals.at.remove(id);
         if existed {
@@ -5503,7 +5610,6 @@ impl Core {
                 self.old_inputs_deleted.insert(id.to_string());
             }
             self.convs.remove(id);
-            self.transcript_saved(id);
             self.try_seal_rewind(id);
             // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
             let _ = std::fs::remove_dir_all(self.scratch_of(id));

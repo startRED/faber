@@ -456,8 +456,7 @@ impl Core {
         let at = now();
         let copies = crate::project::copy::home(&self.opts.data_dir);
         let rows: Vec<sibling::Listed> = self
-            .store
-            .list()
+            .listed()
             .into_iter()
             .filter(|s| s.id != conv && !s.archived && !s.title.is_empty() && s.project_id.as_deref() == Some(project.as_str()))
             .take(MAX_LISTED)
@@ -853,7 +852,7 @@ mod tests {
     async fn list_and_read_do_not_finish_a_streaming_conversation_on_disk() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let parent = core.blank(Area::Project, Some("p".into()));
             let child = core.blank(Area::Project, Some("p".into()));
             let c = core.convs.get_mut(&child).unwrap();
@@ -893,7 +892,7 @@ mod tests {
     async fn child_summary_tracks_its_reply_and_wait() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             started(core, 1, false);
             let c = core.convs.values_mut().find(|c| c.started_by.is_some()).unwrap();
             assert_eq!(crate::engine::child_state(c), "working");
@@ -909,7 +908,7 @@ mod tests {
     async fn a_member_waiting_for_the_person_frees_a_working_place_but_stays_open() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             started(core, 3, true);
             assert_eq!(core.sibling_room("p"), Ok(()), "three waiting for the person leave room to work");
             started(core, 2, false);
@@ -926,7 +925,7 @@ mod tests {
     async fn a_worker_conversation_ending_never_marks_its_plan_step_done() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let parent = core.blank(Area::Project, Some("p".into()));
             let child = core.blank(Area::Project, Some("p".into()));
             let plan = crate::progress::plan(

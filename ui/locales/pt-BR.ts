@@ -2503,6 +2503,7 @@ export const ptBR: Messages = {
   'notes.388.fixed': 'A espera por uma conversa continua enquanto ela precisa de uma resposta e mostra como terminou.',
   'notes.389.better': 'Você identifica quem está falando e como o trabalho terminou pelas marcas ao lado das palavras.',
   'notes.390.new': 'Você pode permitir que um agente tente um pedido novamente uma vez na conversa.',
+  'notes.391.better': 'Você pode continuar usando o Faber enquanto a atividade dos ajudantes é salva numa conversa longa.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

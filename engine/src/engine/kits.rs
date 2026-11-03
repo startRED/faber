@@ -490,7 +490,7 @@ mod tests {
             assert!(core.session_tool_report("other", "reply", missing()).is_none(), "a new conversation does not repeat the hint");
             core.save_settings(Settings { language: Some("de".into()), ..Default::default() }).unwrap();
             assert!(folder.join("catalog-hint-seen").is_file(), "the marker persists independently of ordinary settings patches");
-            core.store = Store::new(&folder);
+            core.store = Arc::new(Store::new(&folder));
             assert!(
                 core.session_tool_report("kit", "reply", missing()).is_none(),
                 "a freshly opened settings store retains the once-only hint"

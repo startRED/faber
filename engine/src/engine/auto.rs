@@ -682,7 +682,7 @@ mod tests {
             let start = asked.lock().unwrap().take().unwrap();
             c.note_span(Vendor::Claude, start, "claude-sonnet-5-5", None, true);
             c.begin_unbounded(Vendor::Claude).unwrap(); // A different request is still active.
-            c.save(&id);
+            c.try_save(&id).unwrap();
             c.convs.remove(&id); // The stopped conversation can leave the in-memory cache before its final price arrives.
         });
         sink(EngineEvent::Error { message: "closed".into(), fatal: true });

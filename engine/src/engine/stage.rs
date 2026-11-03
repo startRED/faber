@@ -33,7 +33,9 @@ impl Core {
         let member = |started_by: Option<&str>| started_by == Some(id);
         // A member still working tells the leader when it stops (`tell_parent`), and the leader's next box is told then.
         let working = items.iter().any(|i| self.convs.get(&i.conversation_id).is_some_and(|m| member(m.started_by.as_deref())));
-        if working || !self.store.list().iter().any(|s| member(s.started_by.as_deref())) {
+        let has_member = self.convs.values().any(|c| member(c.started_by.as_deref()))
+            || self.store.list().iter().any(|s| member(s.started_by.as_deref()));
+        if working || !has_member {
             return;
         }
         let (title, vendor) = (c.title.clone(), reply.vendor);

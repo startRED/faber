@@ -136,7 +136,7 @@ impl Engine {
                     continue;
                 }
             }
-            self.with(|c| c.archive_now(&due, now));
+            self.with_saves(false, |c| c.archive_now(&due, now));
         }
     }
 

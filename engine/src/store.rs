@@ -156,7 +156,7 @@ pub struct Store {
     auto_learned: PathBuf,
     cache_health: PathBuf,
     disk: Arc<dyn Disk>,
-    budget_owner: Option<fs::File>,
+    budget_owner: Mutex<Option<fs::File>>,
     owner_required: bool,
     /// The grants epoch started when the settings could not be read. It lives here, in memory, and is the epoch in force
     /// until a save writes it: a read that works again later never brings the epoch on disk back.
@@ -175,6 +175,12 @@ pub struct Store {
     snapshot_writes: Mutex<HashMap<String, Arc<SnapshotWrites>>>,
 }
 
+// Constructed together from one conversation; publication needs only bytes and small index metadata.
+pub(crate) struct Snapshot {
+    pub(crate) bytes: Vec<u8>,
+    row: Summary,
+}
+
 #[derive(Default)]
 struct SnapshotWrites {
     next: std::sync::atomic::AtomicU64,
@@ -189,7 +195,7 @@ fn stamp(path: &Path) -> Option<Stamp> {
 }
 
 /// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
-fn summary(c: &Conversation) -> Summary {
+pub(crate) fn summary(c: &Conversation) -> Summary {
     Summary {
         reason: None,
         keep_going: c.keep_going.is_some(),
@@ -277,7 +283,7 @@ impl Store {
             budget: data_dir.join("budget.json"),
             auto_learned: data_dir.join("auto-learned.json"),
             disk,
-            budget_owner: None,
+            budget_owner: Mutex::new(None),
             owner_required: false,
             recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
@@ -305,12 +311,12 @@ impl Store {
             .open(self.budget.with_extension("lock"))
             .map_err(|e| Fault::of_write(&e))?;
         file.try_lock().map_err(|_| Fault::Write)?;
-        self.budget_owner = Some(file);
+        *self.budget_owner.get_mut().unwrap_or_else(|e| e.into_inner()) = Some(file);
         Ok(())
     }
 
-    pub(crate) fn release_budget(&mut self) {
-        self.budget_owner = None;
+    pub(crate) fn release_budget(&self) {
+        *self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
@@ -535,6 +541,17 @@ impl Store {
         serde_json::to_vec(conversation).expect("plain data always serializes")
     }
 
+    pub(crate) fn prepare_snapshot(conversation: &Conversation) -> Snapshot {
+        Snapshot { bytes: Self::snapshot(conversation), row: summary(conversation) }
+    }
+
+    pub(crate) fn save_prepared(&self, id: &str, snapshot: &Snapshot, generation: u64, patient: bool) -> Result<(), Fault> {
+        if snapshot.row.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(Fault::Corrupt);
+        }
+        self.save_record(&snapshot.row, generation, &snapshot.bytes, patient)
+    }
+
     fn snapshot_lock(&self, id: &str) -> Arc<SnapshotWrites> {
         self.snapshot_writes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(id.to_owned()).or_default().clone()
     }
@@ -566,33 +583,41 @@ impl Store {
     }
 
     fn save_snapshot_with(&self, conversation: &Conversation, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
+        self.save_record(&summary(conversation), generation, bytes, patient)
+    }
+
+    fn save_record(&self, row: &Summary, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
         let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let lock = self.snapshot_lock(&conversation.id);
+        let lock = self.snapshot_lock(&row.id);
         lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
         let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if written.is_some_and(|last| last >= generation) {
             return Ok(());
         }
         if let Some((pending, area)) = self.read_group_move()?
-            && pending.conversation_id == conversation.id
-            && area != conversation.area
+            && pending.conversation_id == row.id
+            && area != row.area
         {
-            self.recover_group_move_locked(&conversation.id)?;
+            self.recover_group_move_locked(&row.id)?;
         }
-        let path = self.file(&conversation.id);
+        let path = self.file(&row.id);
         replace_with(&*self.disk, &path, bytes, patient)?;
         *written = Some(generation);
         self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.written(path, conversation);
-        self.search.saved(conversation);
+        self.written_summary(path, row.clone());
+        self.search.saved_metadata(&row.id, row.area, row.project_id.clone(), row.updated_at);
         Ok(())
     }
 
     /// The file just written is the conversation in hand, so the next list need not read it back, and `unchanged` knows it.
     fn written(&self, path: PathBuf, conversation: &Conversation) {
+        self.written_summary(path, summary(conversation));
+    }
+
+    fn written_summary(&self, path: PathBuf, row: Summary) {
         self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
         if let Some(now_stamp) = stamp(&path) {
-            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, summary(conversation)));
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, row));
         }
     }
 
@@ -1067,7 +1092,7 @@ impl Store {
 
     /// Compact on purpose: it is rewritten often and a person never has to read it.
     pub fn save_ledger(&self, ledger: &Ledger) -> Result<(), Fault> {
-        if self.owner_required && self.budget_owner.is_none() {
+        if self.owner_required && self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
             return Err(Fault::Write);
         }
         replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())

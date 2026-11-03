@@ -104,7 +104,7 @@ mod tests {
     /// A conversation whose last reply was streaming when it was saved, read back from disk as after a restart.
     fn reloaded(engine: &Engine, status: Status) -> String {
         let id = super::super::answer::tests::seed(engine, Session::from_fn(|_| {}), &[("reply", &[])]);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().status = Some(status);
             core.save(&id);
             core.live.clear();
@@ -122,7 +122,7 @@ mod tests {
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let cut = reloaded(&engine, Status::Streaming);
         let stopped = reloaded(&engine, Status::Stopped);
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let reply = core.convs[&cut].messages.last().unwrap();
             assert_eq!((reply.status, reply.closed), (Some(Status::Stopped), true), "a streaming reply was cut by the close");
             assert!(!core.convs[&stopped].messages.last().unwrap().closed, "the person's own Stop is no close");
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(engine.continue_closed(&stopped, "reply"), Err("error.closed.stale".into()));
         // A branch from the cut reply never ran, so it has nothing to continue.
         let copy = engine.branch_here(&cut, "reply").unwrap();
-        engine.with(|core| assert!(!core.convs[&copy].messages.last().unwrap().closed));
+        engine.with_saves(false, |core| assert!(!core.convs[&copy].messages.last().unwrap().closed));
         assert_eq!(engine.continue_closed(&copy, "reply"), Err("error.closed.stale".into()));
         engine.shutdown();
     }
@@ -141,22 +141,22 @@ mod tests {
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let id = reloaded(&engine, Status::Streaming);
         // Three continues in the last five minutes: the fourth is refused and sends nothing.
-        engine.with(|core| core.closed_continues.insert(id.clone(), vec![now(); 3]));
+        engine.with_saves(false, |core| core.closed_continues.insert(id.clone(), vec![now(); 3]));
         assert_eq!(engine.continue_closed(&id, "reply"), Err("error.closed.tooMany".into()));
-        engine.with(|core| assert_eq!(core.convs[&id].messages.len(), 2));
+        engine.with_saves(false, |core| assert_eq!(core.convs[&id].messages.len(), 2));
         // A turn that would only wait (here behind the person's Stop) is refused, so clicks never stack turns in the queue.
-        engine.with(|core| core.convs.get_mut(&id).unwrap().stopped = true);
-        engine.with(|core| core.closed_continues.clear());
+        engine.with_saves(false, |core| core.convs.get_mut(&id).unwrap().stopped = true);
+        engine.with_saves(false, |core| core.closed_continues.clear());
         assert_eq!(engine.continue_closed(&id, "reply"), Err("error.closed.stale".into()));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let c = core.convs.get_mut(&id).unwrap();
             assert!(c.queued.is_empty(), "nothing waits");
             c.stopped = false;
         });
         // Older ones no longer count.
-        engine.with(|core| core.closed_continues.insert(id.clone(), vec![now() - CONTINUES_SECS * 1000 - 1; 3]));
+        engine.with_saves(false, |core| core.closed_continues.insert(id.clone(), vec![now() - CONTINUES_SECS * 1000 - 1; 3]));
         assert_eq!(engine.continue_closed(&id, "reply"), Ok(()));
-        engine.with(|core| {
+        engine.with_saves(false, |core| {
             let sent = core.convs[&id].messages.iter().find(|m| m.wake.is_some()).expect("one turn went out");
             assert_eq!(sent.wake.as_ref().unwrap().why, "wake.closed", "the turn is Faber's own, said as such");
             assert_eq!(sent.text, CONTINUE, "the person's message is never sent again");
