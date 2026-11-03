@@ -7,7 +7,7 @@
 // - `FABER_TEST_DIST`: the folder to serve in place of `dist/` (the Vite build in test mode).
 // - `FABER_CHECKS_OUT` (and `FABER_CHECKS_FILTER`): open the page that runs the screen's checks, and write its report there.
 
-import { app, type BrowserWindow, type WebContents } from 'electron';
+import { app, type BrowserWindow, type WebContents, type WebFrameMain } from 'electron';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -16,10 +16,14 @@ const env = (name: string): string | undefined => (app.isPackaged ? undefined : 
 /** A run the test runner started: hidden, offscreen, inside a sandbox it made. */
 export const testing = !app.isPackaged && process.env.FABER_HIDDEN === '1';
 const checksOut = env('FABER_CHECKS_OUT');
-let blockedVisualNavigation = '';
+let visualNavigationCounter = 0;
+const blockedVisualNavigations: { counter: number; url: string; processId: number; routingId: number }[] = [];
 
-export function reportBlockedVisualNavigation(url: string): void {
-  if (testing) blockedVisualNavigation = url;
+export function reportBlockedVisualNavigation(url: string, frame: WebFrameMain | null | undefined): void {
+  if (testing && frame) {
+    blockedVisualNavigations.push({ counter: ++visualNavigationCounter, url, processId: frame.processId, routingId: frame.routingId });
+    if (blockedVisualNavigations.length > 128) blockedVisualNavigations.shift();
+  }
 }
 
 /** Called before the app is ready, when Chromium still takes switches and paths. */
@@ -85,7 +89,15 @@ export function commands(window: () => BrowserWindow | null): Map<string, (args:
     // Leaving through the normal quit lets the host save and stop before the process ends.
     setImmediate(() => app.quit());
   });
-  if (testing) own.set('test_visual_navigation_blocked', ({ url }) => blockedVisualNavigation === url);
+  if (testing) {
+    own.set('test_visual_navigation_start', ({ frameUrl }) => {
+      const frame = window()?.webContents.mainFrame.frames.find((child) => child.url === frameUrl);
+      if (!frame) throw new Error('visual test frame not found');
+      return { counter: visualNavigationCounter, processId: frame.processId, routingId: frame.routingId };
+    });
+    own.set('test_visual_navigation_blocked', ({ url, counter, processId, routingId }) =>
+      blockedVisualNavigations.some((event) => event.counter > Number(counter) && event.url === url && event.processId === processId && event.routingId === routingId));
+  }
   // Resizes the real hidden window, rather than emulating the page's viewport.
   own.set('test_host_size', ({ width, height }) => {
     if (typeof width !== 'number' || typeof height !== 'number') throw new Error('error.host.badArgs');

@@ -1121,10 +1121,14 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
   ok(serialized.indexOf('Content-Security-Policy') < serialized.indexOf('<script'), 'CSP precedes authored scripts');
   delete (window as unknown as Record<string, unknown>).__visualParsingProbe;
   const probe = crypto.randomUUID();
-  const navigation = new URL(`visual-navigation-${probe}`, location.href).href;
+  const faberNavigation = new URL(`visual-navigation-${probe}`, location.href).href;
+  const electron = 'faberShell' in globalThis;
+  const navigation = electron ? `faber-visual://app/visual-navigation-${probe}` : faberNavigation;
   let navigationBlocked = false;
+  let faberBlocked = false;
   const violation = (e: SecurityPolicyViolationEvent) => {
-    if (e.effectiveDirective === 'frame-src' && e.originalPolicy.includes("frame-src faber-visual:") && e.blockedURI.startsWith(new URL(navigation).origin)) navigationBlocked = true;
+    if (e.effectiveDirective === 'frame-src' && e.blockedURI === 'faber') faberBlocked = true;
+    if (!('faberShell' in globalThis) && e.effectiveDirective === 'frame-src' && e.originalPolicy.includes("frame-src faber-visual:") && e.blockedURI.startsWith(new URL(navigation).origin)) navigationBlocked = true;
   };
   document.addEventListener('securitypolicyviolation', violation);
   let result: Record<string, boolean> | undefined;
@@ -1132,7 +1136,7 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
   const listen = (e: MessageEvent) => {
     if (e.source === host.querySelector('iframe')?.contentWindow && e.data?.probe === probe) {
       if (e.data.stage) stage = e.data.stage;
-      else if (e.data.navigationBlocked) navigationBlocked = true; else result = e.data;
+      else if (e.data.navigationBlocked) { if (!('faberShell' in globalThis)) navigationBlocked = true; } else result = e.data;
     }
   };
   window.addEventListener('message', listen);
@@ -1140,6 +1144,7 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
     (async () => {
       const report = stage => parent.postMessage({probe:${JSON.stringify(probe)},stage},'*');
       report('started');
+      const proceed = new Promise(resolve => addEventListener('message', e => { if (e.data === ${JSON.stringify(probe)}) resolve(); }, {once:true}));
       let fetchBlocked=false, fetchPolicy=false, parentBlocked=false, nativeDenied=false, electronDenied=false, rtcBlocked=false, nestedBlocked=false;
       document.addEventListener('securitypolicyviolation', e => {
         if(e.effectiveDirective==='connect-src' && e.originalPolicy.includes("default-src 'none'") && e.originalPolicy.includes("script-src 'unsafe-inline'") && e.blockedURI.startsWith('https://example.com')) fetchPolicy=true;
@@ -1159,7 +1164,9 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
       const interactive=document.querySelector('#counter').textContent==='1';
       parent.postMessage({probe:${JSON.stringify(probe)},fetchBlocked,fetchPolicy,parentBlocked,nativeDenied,electronDenied,rtcBlocked,nestedBlocked,interactive},'*');
       report('result sent');
-      location.href=${JSON.stringify(navigation)};
+      await proceed;
+      report('attempting navigation');
+      try { location.href=${JSON.stringify(navigation)}; report('navigation assigned'); } catch (e) { report('navigation threw ' + String(e)); }
       setTimeout(()=>parent.postMessage({probe:${JSON.stringify(probe)},navigationBlocked:true},'*'),150);
     })();
   </script>`;
@@ -1176,12 +1183,25 @@ check('visual answers: the real frame runs offline, blocks fetch and Faber acces
     await until(() => result, () => `frame did not report its result; stage ${stage}, asked ${frame.dataset.asked ?? 'nothing'}, src ${frame.src}`);
     for (const name of ['fetchBlocked', 'fetchPolicy', 'parentBlocked', 'nativeDenied', 'electronDenied', 'rtcBlocked', 'nestedBlocked', 'interactive']) equal(result![name], true, name);
     if ('faberShell' in globalThis) {
+      navigationBlocked = false;
+      const start = await invoke<{ counter: number; processId: number; routingId: number }>('test_visual_navigation_start', { frameUrl: frame.src });
+      frame.contentWindow!.postMessage(probe, '*');
       const end = performance.now() + 15000;
       while (!navigationBlocked && performance.now() < end) {
-        navigationBlocked = await invoke<boolean>('test_visual_navigation_blocked', { url: navigation });
+        navigationBlocked = await invoke<boolean>('test_visual_navigation_blocked', { url: navigation, ...start });
         if (!navigationBlocked) await settle();
       }
-    }
+      if (navigationBlocked) {
+        equal(await invoke<boolean>('test_visual_navigation_blocked', { url: navigation, ...start, counter: Number.MAX_SAFE_INTEGER }), false, 'old cancellations do not count');
+        equal(await invoke<boolean>('test_visual_navigation_blocked', { url: navigation, ...start, routingId: -1 }), false, 'another frame does not count');
+      }
+      const other = document.createElement('div'); document.body.append(other);
+      const blockedAnswer = answer();
+      blockedAnswer.versions = [{ ...blockedAnswer.versions[0]!, source: `<script>location.href=${JSON.stringify(faberNavigation)};</script>` }];
+      const disposeOther = render(() => createComponent(VisualPane, { answer: blockedAnswer, open: { conversationId: 'security-faber', answerId: blockedAnswer.id }, onBack: () => {}, onClose: () => {} }), other);
+      try { await until(() => faberBlocked, 'Faber navigation was not blocked by frame-src'); }
+      finally { disposeOther(); other.remove(); }
+    } else frame.contentWindow!.postMessage(probe, '*');
     await until(() => navigationBlocked, () => `frame navigation was not reported blocked; stage ${stage}, src ${frame.src}`);
   } finally { dispose(); host.remove(); window.removeEventListener('message', listen); document.removeEventListener('securitypolicyviolation', violation); }
 });

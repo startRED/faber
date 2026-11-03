@@ -29,7 +29,7 @@ export function guardVisualFrames(contents: WebContents): void {
     }
     if (!sameFrame(details.frame?.parent, contents.mainFrame) || !navigationAllowed(details.url)) {
       details.preventDefault();
-      reportBlockedVisualNavigation(details.url);
+      reportBlockedVisualNavigation(details.url, details.frame);
     }
   });
 }
@@ -97,7 +97,7 @@ export function installVisual(host: () => Sidecar | null, screen: () => BrowserW
       const directChild = leases.has(details.id) || Boolean(frame && sameFrame(frame.parent, main));
       if (details.resourceType === 'subFrame') {
         const cancel = !(directChild && details.method === 'GET' && navigationAllowed(details.url));
-        if (cancel) reportBlockedVisualNavigation(details.url);
+        if (cancel) reportBlockedVisualNavigation(details.url, details.frame);
         callback({ cancel });
         return;
       }
