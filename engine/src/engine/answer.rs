@@ -210,6 +210,15 @@ impl Core {
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
+        if let Some(call) = live.contract_calls.iter().find(|call| call.card == request_id && call.turn == turn_id) {
+            return Ok(Handed {
+                requests: vec![(request_id.into(), live.session.answer(&call.permission.request_id, false))],
+                tool,
+                sid: live.sid,
+                always: false,
+                epoch: None,
+            });
+        }
         // The card of `offer_bigger` is Faber's own: the CLI never asked it, so nothing goes to the CLI as a control response. The
         // person's choice (or the first one, for Skip and for Keep going) goes back as the tool's result, and the answer counts as
         // delivered at once. Only the process that made the card gets it; any other is stale like an install card.
@@ -266,6 +275,11 @@ impl Core {
         results: &[(String, Option<Delivery>)],
     ) -> Result<(), String> {
         self.live.get(conv).filter(|l| l.sid == sid && l.turn.as_deref() == Some(turn_id)).ok_or(STALE)?;
+        if matches!(results.first(), Some((_, Some(Delivery::Delivered | Delivery::Unknown))))
+            && let Some(result) = results.first().and_then(|(request, _)| self.answer_contract(conv, turn_id, request))
+        {
+            result?;
+        }
         let c = self.convs.get_mut(conv).ok_or(STALE)?;
         let reply = c.messages.iter_mut().find(|m| m.id == turn_id).ok_or(STALE)?;
         let clicked = results.first().and_then(|r| r.1);
@@ -320,6 +334,7 @@ impl Core {
         answers: serde_json::Value,
         chosen: Vec<AutoAnswer>,
     ) {
+        let contract = self.live.get(conv).is_some_and(|l| l.contract_calls.iter().any(|call| call.card == request_id));
         let Ok(Handed { requests, tool, sid, .. }) = self.prepare_answer(conv, turn_id, request_id, true, false, Some(answers)) else {
             return;
         };
@@ -335,7 +350,9 @@ impl Core {
             // The CLI took it: the choice is told even when the turn ended before this was settled.
             let delivered = matches!(results.first(), Some((_, Some(Delivery::Delivered))));
             if core.settle_answer(&conv, &turn, sid, &tool, None, &results).is_ok() || delivered {
-                core.note_answered_for_person(&conv, &turn, chosen);
+                if !contract {
+                    core.note_answered_for_person(&conv, &turn, chosen);
+                }
             } else {
                 // The CLI did not take it: the question is on the list again, and gets another try after the same wait.
                 core.watch_question(&conv, &turn, &request);
@@ -495,6 +512,7 @@ pub(super) mod tests {
                 answer_started: false,
                 settled: false,
                 open_tools: Vec::new(),
+                contract_calls: Vec::new(),
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,

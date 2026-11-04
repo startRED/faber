@@ -239,9 +239,11 @@ export interface PlanStep {
   member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
+export type WorkSize = 'small' | 'in_one_area' | 'across_areas' | 'security';
 export interface Plan {
   steps: PlanStep[];
-  contract?: { extends?: string; newBecause?: string; proof?: string; target?: string };
+  size?: WorkSize;
+  contract?: { size?: WorkSize; extends?: string; newBecause?: string; proof?: string; target?: string };
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };

@@ -2125,6 +2125,12 @@ async fn serve(
                                     let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
                                     continue;
                                 }
+                                // Keep the actual execution folder for host boundary sizing; raw approvals without it remain unknown.
+                                let input = match (params["cwd"].as_str(), input) {
+                                    (Some(cwd), Value::String(command)) => json!({"command": command, "cwd": cwd}),
+                                    (Some(cwd), Value::Array(changes)) => json!({"changes": changes, "cwd": cwd}),
+                                    (_, input) => input,
+                                };
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // A question to the person is a card in every mode, like Claude Code's `AskUserQuestion`; the

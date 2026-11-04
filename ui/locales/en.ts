@@ -2490,6 +2490,21 @@ export const en = {
   'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
   'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
+  'plan.contract.raised': "Work size raised to {size}: {reason}.",
+  'plan.contract.state': "State contract",
+  'plan.contract.wait': "The call waits while the agent states what it will change and how it will check it.",
+  'plan.size.small': "small",
+  'plan.size.in_one_area': "one area",
+  'plan.size.across_areas': "several areas",
+  'plan.size.security': "security",
+  'plan.boundary.data': "it touches Faber’s data",
+  'plan.boundary.credentials': "it touches sign-ins or secrets",
+  'plan.boundary.outside': "it leaves the project",
+  'plan.boundary.publish': "it publishes work",
+  'plan.boundary.delete': "it deletes outside a copy",
+  'plan.boundary.unknown': "the command cannot be classified",
+  'plan.boundary.edit': "it deletes files in a copy",
+  'wake.contract': "Stating the work contract",
 } as const;
 
 export type Key = keyof typeof en;

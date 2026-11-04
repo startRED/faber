@@ -714,6 +714,8 @@ pub struct KeepProgress {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
+    #[serde(default)]
+    pub size: WorkSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<PlanContract>,
     /// When the agent last sent it, in milliseconds.
@@ -728,6 +730,8 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanContract {
+    #[serde(default)]
+    pub size: WorkSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -736,6 +740,23 @@ pub struct PlanContract {
     pub proof: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+}
+
+/// The highest boundary encountered during this job; a new plan cannot lower it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkSize {
+    #[default]
+    Small,
+    InOneArea,
+    AcrossAreas,
+    Security,
+}
+
+impl PlanContract {
+    pub fn covers(&self, size: WorkSize) -> bool {
+        self.size >= size && (self.extends.is_some() || self.new_because.is_some()) && self.proof.is_some()
+    }
 }
 
 /// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.

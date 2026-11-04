@@ -23,7 +23,7 @@ impl Core {
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
-        let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
+        let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone" | "wake.contract");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
         // Compaction owns the session until its continuation can start.
         if busy

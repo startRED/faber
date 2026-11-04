@@ -170,6 +170,7 @@ mod tests {
                     answer_started: false,
                     settled: false,
                     open_tools: Vec::new(),
+                    contract_calls: Vec::new(),
                     used: 0,
                     cli: Cli { command: "not-a-cli".into(), prefix: vec![] },
                     resumed: false,

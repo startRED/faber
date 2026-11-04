@@ -3,7 +3,7 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
-use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanStep, StepState, WrapUp};
+use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanStep, StepState, WorkSize, WrapUp};
 use serde_json::{Value, json};
 
 /// A task found while closing a project conversation. Its complete text is kept, never shortened.
@@ -147,6 +147,8 @@ fn plan_schema() -> Value {
                 },
                 "additionalProperties": false
             },
+            "size": { "type": "string", "enum": ["small", "in_one_area", "across_areas", "security"],
+                "description": "The work's risk, lowest by default. Never lowered during a job. Restate the contract when a boundary raises it." },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
             "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at." },
             "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
@@ -356,7 +358,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                     member: None,
                 });
             }
-            if steps.is_empty() {
+            if steps.is_empty() && before.is_none_or(|p| p.size == WorkSize::Small) {
                 return Ok(None);
             }
             check_waits(&steps)?;
@@ -378,8 +380,14 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             next.state = StepState::Active;
         }
     }
-    let contract = if input.get("steps").and_then(Value::as_array).is_some() {
+    let size = match input.get("size") {
+        None => WorkSize::Small,
+        Some(value) => serde_json::from_value(value.clone()).map_err(|_| "Send a supported work size.")?,
+    }
+    .max(before.map_or(WorkSize::Small, |p| p.size));
+    let contract = if input.get("contract").is_some() || input.get("steps").and_then(Value::as_array).is_some() {
         input.get("contract").filter(|v| v.is_object()).map(|v| PlanContract {
+            size,
             extends: text_of(&v["extends"], PART_CHARS - 1),
             new_because: text_of(&v["new_because"], PART_CHARS - 1),
             proof: text_of(&v["proof"], PART_CHARS - 1),
@@ -388,7 +396,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
     } else {
         before.and_then(|p| p.contract.clone())
     };
-    Ok(Some(Plan { steps, contract, at, estimate: None }))
+    Ok(Some(Plan { steps, size, contract, at, estimate: None }))
 }
 
 /// The strings of an optional list; anything that is not a string becomes "" (so the checks after refuse it), anything that

@@ -1386,6 +1386,7 @@ mod tests {
                     answer_started: false,
                     settled: false,
                     open_tools: Vec::new(),
+                    contract_calls: Vec::new(),
                     used: 0,
                     cli: Cli { command: "unused".into(), prefix: vec![] },
                     resumed: false,

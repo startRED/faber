@@ -85,3 +85,10 @@ Helper rows with a known AI show its actor mark beside its name and state.
 Review rounds reuse the subagent row: each round shows its score and nests its reviewer helpers. Opening a round shows
 five scores, agreed findings and folded single-reviewer notes; the reply keeps a quiet final score and stop reason. The
 round details exist in the page only while their view is open. No timer or new process is added by the screen.
+
+When a forwarded project call raises the work's size beyond its stated contract, the existing question card shows one
+plain line with the size and boundary reason. State contract is selected by default; it asks the agent to state the
+change and its proof. To let the agent write it, the original call returns unexecuted and a tracked message asks for
+the contract and retry. The retry uses the normal permission flow. The card
+uses the existing wrapping text, keyboard controls, reduced-motion behavior and running-column placement, in all five
+languages. It adds no animation, polling or persistent screen. Stop still cancels the turn.

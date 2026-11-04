@@ -3,6 +3,114 @@
 use serde_json::{Map, Value, json};
 use std::path::{Component, Path, PathBuf};
 
+/// Pure, conservative risk sizing. It grants no authority; canonical path checks and native permissions still apply.
+/// Roots are supplied by the engine so sizing never reads the disk, environment or credential contents.
+pub fn work_boundary(
+    tool: &str,
+    input: &Value,
+    project: &str,
+    data: &[String],
+    credentials: &[String],
+    copy: bool,
+) -> (crate::model::WorkSize, &'static str) {
+    use crate::model::WorkSize::{AcrossAreas, InOneArea, Security, Small};
+    let normalized = |s: &str| s.replace('\\', "/").trim_start_matches("//?/").to_lowercase();
+    let path = |base: &str, s: &str| {
+        let s = normalized(s);
+        if absolute(&s) { resolve("", &s) } else { resolve(base, &s) }
+    };
+    let project = path("", project);
+    let cwd = input["cwd"].as_str().or_else(|| input["workdir"].as_str()).map_or_else(|| project.clone(), |s| path(&project, s));
+    let check = |s: &str| {
+        let p = path(&cwd, s);
+        if secret(Path::new(&p), true) || p.split('/').any(credential_piece) || credentials.iter().any(|root| inside(&p, &path("", root))) {
+            (Security, "credentials")
+        } else if data.iter().any(|root| inside(&p, &path("", root))) && !(copy && inside(&p, &project)) {
+            (Security, "data")
+        } else if s.contains(['~', '$', '%']) || (s.len() >= 2 && s.as_bytes()[1] == b':' && !absolute(&normalized(s))) {
+            (Security, "unknown")
+        } else if !inside(&p, &project) {
+            (AcrossAreas, "outside")
+        } else {
+            (Small, "local")
+        }
+    };
+    let mut boundary = check(&cwd);
+    let mut add = |p: &str| {
+        let next = check(p);
+        if next.0 > boundary.0 {
+            boundary = next;
+        }
+    };
+    match tool {
+        "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" | "Glob" | "Grep" | "LS" => {
+            let Some(p) = input["file_path"]
+                .as_str()
+                .or_else(|| input["notebook_path"].as_str())
+                .or_else(|| input["path"].as_str())
+                .or_else(|| ["Glob", "Grep", "LS"].contains(&tool).then_some("."))
+            else {
+                return (Security, "unknown");
+            };
+            add(p);
+        }
+        "item/fileChange/requestApproval" => {
+            let Some(changes) = input["changes"].as_array().filter(|list| !list.is_empty()) else { return (Security, "unknown") };
+            if input["cwd"].as_str().is_none() {
+                return (Security, "unknown");
+            }
+            for change in changes {
+                let Some(p) = change["path"].as_str() else { return (Security, "unknown") };
+                add(p);
+                for key in ["move_path", "movePath"] {
+                    if let Some(p) = change["kind"][key].as_str() {
+                        add(p);
+                    }
+                }
+            }
+            if changes.iter().any(|change| change["kind"]["type"] == "delete") {
+                if !copy || boundary.0 >= AcrossAreas {
+                    return (Security, "delete");
+                }
+                boundary = (InOneArea, "edit");
+            }
+        }
+        "Bash" | "PowerShell" | "item/commandExecution/requestApproval" | "command" => {
+            // A raw native approval discarded its execution folder; never assume the session folder for it.
+            let Some(args) = input["command"].as_str().and_then(|s| words(s, true)) else {
+                return (Security, "unknown");
+            };
+            let program = args[0].to_ascii_lowercase();
+            let sub = args.get(1).map(String::as_str).unwrap_or_default();
+            if ["git", "npm", "cargo", "gh"].contains(&program.as_str()) && ["push", "publish", "release", "deploy"].contains(&sub) {
+                return (Security, "publish");
+            }
+            let deletes = ["rm", "rmdir", "unlink", "remove-item"].contains(&program.as_str());
+            if !deletes && args.iter().skip(1).any(|arg| arg.starts_with('-')) {
+                return (Security, "unknown");
+            }
+            if !deletes
+                && !["pwd", "cat", "type", "get-content", "ls", "get-childitem", "rg"].contains(&program.as_str())
+                && !(program == "git" && ["status", "diff", "log", "show"].contains(&sub))
+            {
+                return (Security, "unknown");
+            }
+            for arg in args.iter().skip(1).filter(|s| !s.starts_with('-')) {
+                add(arg);
+            }
+            if deletes {
+                if !copy || boundary.0 >= AcrossAreas {
+                    return (Security, "delete");
+                }
+                boundary = (InOneArea, "edit");
+            }
+        }
+        "AskUserQuestion" | "ExitPlanMode" | "TodoWrite" | "WebSearch" | "WebFetch" => {}
+        _ => return (Security, "unknown"),
+    }
+    boundary
+}
+
 /// A fresh name prevents a project's lower-priority settings from adding grants to the host profile.
 pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     let id = format!("faber-{}", uuid::Uuid::new_v4().simple());

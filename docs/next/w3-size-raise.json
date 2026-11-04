@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "When a project call crosses a boundary, it waits for the agent to state what it will change and how it will check it.",
+      "pt-BR": "Quando uma chamada sai dos limites do projeto, ela espera o agente dizer o que vai mudar e como vai conferir.",
+      "es": "Cuando una llamada cruza un límite del proyecto, espera a que el asistente indique qué cambiará y cómo lo comprobará.",
+      "fr": "Quand un appel franchit une limite du projet, il attend que l’assistant précise ce qu’il va changer et comment le vérifier.",
+      "de": "Überschreitet ein Aufruf eine Projektgrenze, wartet er, bis die KI festhält, was sie ändert und wie sie es prüft."
+    }
+  }
+}

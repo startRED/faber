@@ -60,6 +60,11 @@ interface AskedQuestion {
 
 /** The questions the assistant put to the person (the `AskUserQuestion` tool), read defensively: anything malformed is dropped. */
 export function askedQuestions(input: unknown): AskedQuestion[] {
+  const contract = (input && typeof input === 'object' ? (input as { workContract?: { size?: string; reason?: string } }).workContract : undefined);
+  if (contract) return [{
+    question: t('plan.contract.raised', { size: t(`plan.size.${contract.size}` as Key), reason: t(`plan.boundary.${contract.reason}` as Key) }),
+    options: [{ label: t('plan.contract.state'), description: t('plan.contract.wait') }],
+  }];
   const list = (input && typeof input === 'object' ? (input as { questions?: unknown }).questions : undefined) as unknown;
   if (!Array.isArray(list)) return [];
   return list.flatMap((q) => {
@@ -89,7 +94,8 @@ function QuestionCard(props: { conversationId: string; turnId: string; permissio
   // Kept by the question's place in the list, never by its text: the text is the model's, and could be `__proto__`.
   // The card of `offer_bigger` (marked by the engine, never by the model's words) starts on its first tile, the request as asked, so
   // one press of Send does exactly what was asked; every other question starts with nothing picked.
-  const asAsked = (props.permission.input as { bigger?: unknown } | null)?.bigger === true ? questions()[0]?.options[0]?.label : undefined;
+  const firstChoice = props.permission.input as { bigger?: unknown; workContract?: unknown } | null;
+  const asAsked = firstChoice?.bigger === true || firstChoice?.workContract ? questions()[0]?.options[0]?.label : undefined;
   const [picked, setPicked] = createSignal<string[][]>(asAsked ? [[asAsked]] : []);
   const [other, setOther] = createSignal<string[]>([]);
   const [writing, setWriting] = createSignal<boolean[]>([]);

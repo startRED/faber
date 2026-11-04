@@ -3,6 +3,12 @@
 use super::*;
 use crate::progress;
 
+pub(super) struct ContractCall {
+    pub(super) card: String,
+    pub(super) turn: String,
+    pub(super) permission: Permission,
+}
+
 impl Engine {
     /// Accepts a ready task through the ordinary send path, or dismisses its unchanged file.
     pub fn follow_up(&self, id: &str, file: &str, dismiss: bool) -> Result<(), String> {
@@ -11,6 +17,89 @@ impl Engine {
 }
 
 impl Core {
+    pub(super) fn hold_for_contract(&mut self, conv: &str, request: &str, tool: &str, input: &serde_json::Value) -> bool {
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return false };
+        let Some(live) = self.live.get(conv) else { return false };
+        let Some(turn) = live.turn.clone() else { return false };
+        let data = crate::store::Store::data_roots().iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let credentials =
+            crate::permissions::relocated_credentials(&|name| std::env::var(name).ok()).into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        let (size, reason) =
+            crate::permissions::work_boundary(tool, input, &live.cwd.to_string_lossy(), &data, &credentials, c.copy.is_some());
+        if size == crate::model::WorkSize::Small {
+            return false;
+        }
+        let c = self.convs.get_mut(conv).unwrap();
+        let plan = c.plan.get_or_insert_with(|| Plan { steps: vec![], size, contract: None, at: now(), estimate: None });
+        plan.size = plan.size.max(size);
+        if plan.contract.as_ref().is_some_and(|contract| contract.covers(plan.size)) {
+            return false;
+        }
+        let card = new_id();
+        let permission =
+            Permission { request_id: request.into(), tool: tool.into(), input: input.clone(), epoch: self.store.settings().grants_epoch };
+        self.live.get_mut(conv).unwrap().contract_calls.push(ContractCall { card: card.clone(), turn: turn.clone(), permission });
+        if let Some(reply) = self.turn(conv) {
+            reply.permissions.get_or_insert_default().push(Permission {
+                request_id: card.clone(),
+                tool: "AskUserQuestion".into(),
+                epoch: None,
+                input: serde_json::json!({ "workContract": { "size": size, "reason": reason },
+                    "questions": [{ "question": "plan.contract.question", "options": [{ "label": "plan.contract.state" }] }] }),
+            });
+        }
+        self.save(conv);
+        (self.emit)(AppEvent::Plan { conversation_id: conv.into(), plan: self.shown_plan(conv) });
+        self.weigh(conv);
+        self.watch_question(conv, &turn, &card);
+        self.push(conv, Some(&turn), true);
+        true
+    }
+
+    /// The native denial was acknowledged; ask for the contract through the ordinary tracked message queue.
+    pub(super) fn answer_contract(&mut self, conv: &str, turn: &str, request: &str) -> Option<Result<(), String>> {
+        let live = self.live.get(conv).filter(|l| l.turn.as_deref() == Some(turn))?;
+        live.contract_calls.iter().find(|call| call.card == request && call.turn == turn)?;
+        if let Err(error) = self.send_by_itself(conv,
+            "Faber held the boundary call because its contract does not cover the raised work size. Use plan to state extends or new_because and proof, then retry that unexecuted call through its normal permission flow. This was not a refusal by the person.".into(),
+            crate::model::Wake::of("wake.contract")) { return Some(Err(error)); }
+        if let Some(live) = self.live.get_mut(conv) {
+            live.contract_calls.retain(|call| call.card != request);
+        }
+        Some(Ok(()))
+    }
+
+    fn release_contract_calls(&mut self, conv: &str) {
+        if !self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.contract.as_ref().is_some_and(|c| c.covers(p.size))) {
+            return;
+        }
+        let Some(live) = self.live.get_mut(conv) else { return };
+        let (sid, turn) = (live.sid, live.turn.clone());
+        let calls = std::mem::take(&mut live.contract_calls);
+        if let Some(reply) = self.turn(conv)
+            && let Some(cards) = reply.permissions.as_mut()
+        {
+            cards.retain(|p| !calls.iter().any(|c| c.card == p.request_id));
+        }
+        for call in calls.into_iter().filter(|call| Some(&call.turn) == turn.as_ref()) {
+            let p = call.permission;
+            self.handle(conv, sid, EngineEvent::Permission { request_id: p.request_id, tool: p.tool, input: p.input });
+        }
+    }
+
+    pub(super) fn cancel_contract_calls(&mut self, conv: &str) {
+        let Some(live) = self.live.get_mut(conv) else { return };
+        let calls = std::mem::take(&mut live.contract_calls);
+        for call in &calls {
+            drop(live.session.answer(&call.permission.request_id, false));
+        }
+        if let Some(reply) = self.turn(conv)
+            && let Some(cards) = reply.permissions.as_mut()
+        {
+            cards.retain(|p| !calls.iter().any(|c| c.card == p.request_id));
+        }
+    }
+
     fn follow_up_project(&self, id: &str) -> Option<crate::model::Project> {
         let c = self.convs.get(id)?;
         if c.area != Area::Project {
@@ -297,6 +386,9 @@ impl Core {
                 let leads = siblings::offers(c.area) && c.started_by.is_none();
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
                 let mut plan = progress::plan(c.plan.as_ref(), input, now())?;
+                if plan.is_none() && self.live.get(conv).is_some_and(|l| !l.contract_calls.is_empty()) {
+                    return Err("State the contract before clearing a plan with waiting calls.".into());
+                }
                 if let Some(had) = &c.plan {
                     progress::keep_workers(had, &mut plan)?;
                 }
@@ -337,6 +429,7 @@ impl Core {
                 let plan = self.shown_plan(conv);
                 (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 self.refresh_running();
+                self.release_contract_calls(conv);
                 Ok(shown)
             }
             progress::STATUS_TOOL => {

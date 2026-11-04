@@ -323,6 +323,7 @@ struct Live {
     /// The agent's own tool calls of this CLI turn still running, on whichever reply they show (a steer starts a new one):
     /// while any runs, its step has not ended. Helpers in the background are left out.
     open_tools: Vec<String>,
+    contract_calls: Vec<plan::ContractCall>,
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
@@ -2688,6 +2689,7 @@ impl Core {
     /// way, but nobody pressed Stop, so the conversation is not marked stopped, its waiting messages stay, and Keep going sees a
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
+        self.cancel_contract_calls(id);
         let waiting = self.live.get_mut(id).is_some_and(|l| l.overload_wait.take().is_some());
         let retry_line = self.turn(id).is_some_and(|m| m.overload_retry.take().is_some());
         self.cancel_workers(id);
@@ -2703,7 +2705,7 @@ impl Core {
         if by_person && let Some(conv) = self.convs.get_mut(id) {
             conv.stopped = true;
             conv.send_after_stop = None;
-            conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
+            conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| !matches!(w.why.as_str(), "wake.approvedPlan" | "wake.contract")));
         }
         if by_person {
             self.goal_stopped(id);
@@ -3159,6 +3161,7 @@ impl Core {
                 // `bigger` marks the card of `offer_bigger`, which only Faber makes: a CLI's request never carries it.
                 if let Some(fields) = input.as_object_mut() {
                     fields.remove("bigger");
+                    fields.remove("workContract");
                 }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
                 if crate::toolbox::is_self_change(&tool) {
@@ -3212,6 +3215,9 @@ impl Core {
                 // A question the agent asks the person is always a card, in every mode: only the person can answer it.
                 let question = tool == "AskUserQuestion" || plan_card;
                 let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
+                if !question && self.hold_for_contract(conv, &request_id, &tool, &input) {
+                    return;
+                }
                 if let Some(l) = self.live.get(conv)
                     && !question
                     && crate::permissions::touches_credentials(&input, cwd.as_deref().and_then(Path::to_str), &|name| {
@@ -3497,6 +3503,7 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        self.cancel_contract_calls(conv);
         if let Some(sid) = self.live.get(conv).map(|l| l.sid)
             && self.background.end_turn(conv, sid)
         {
@@ -3800,7 +3807,7 @@ impl Core {
             if finished
                 || c.stopped
                 || (coordination_only && next.wake.is_none())
-                || next.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.asked" | "wake.childDone"))
+                || next.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.asked" | "wake.childDone" | "wake.contract"))
                 || research::question(&next.text).is_some()
                 || ![vendor, "auto"].contains(&next.choice.vendor.as_str())
             {
@@ -3875,6 +3882,7 @@ impl Core {
     /// The CLI took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
     /// answer goes on in a new reply under it, because that is what answers it.
     fn taken_in(&mut self, conv: &str, tag: Option<String>) {
+        self.cancel_contract_calls(conv);
         let secs = self.secs();
         let Some(l) = self.live.get_mut(conv) else { return };
         let Some(at) = tag.and_then(|t| l.steering.iter().position(|s| *s == t)).or((!l.steering.is_empty()).then_some(0)) else { return };
@@ -5002,6 +5010,7 @@ impl Core {
                 answer_started: false,
                 settled: false,
                 open_tools: Vec::new(),
+                contract_calls: Vec::new(),
                 used: self.tick,
                 cli,
                 resumed,
@@ -6174,6 +6183,7 @@ mod tool_in_tests {
             answer_started: false,
             settled: false,
             open_tools: Vec::new(),
+            contract_calls: Vec::new(),
             used: 0,
             cli: Cli { command: "unused".into(), prefix: vec![] },
             resumed: false,
@@ -6269,6 +6279,7 @@ mod tool_in_tests {
                         answer_started: false,
                         settled: false,
                         open_tools: Vec::new(),
+                        contract_calls: Vec::new(),
                         used: 0,
                         cli: Cli { command: "unused".into(), prefix: vec![] },
                         resumed: false,

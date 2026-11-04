@@ -254,3 +254,178 @@ async fn signing_out_clears_a_previously_confirmed_subscription() {
     assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
     engine.shutdown();
 }
+
+#[test]
+fn work_size_is_saved_and_never_lowered_by_a_plan_rewrite() {
+    use faber_engine::progress::plan;
+    let steps = json!([{ "text": "Check the change", "state": "in_progress" }]);
+    let mut before = None;
+    for size in ["small", "in_one_area", "across_areas", "security"] {
+        let next = plan(before.as_ref(), &json!({"steps": steps, "size": size}), 1).unwrap().unwrap();
+        assert_eq!(serde_json::to_value(&next).unwrap()["size"], size);
+        before = Some(next);
+    }
+    let next = plan(before.as_ref(), &json!({"steps": steps, "size": "small"}), 2).unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&next).unwrap()["size"], "security");
+    assert_eq!(serde_json::to_value(plan(Some(&next), &json!({"steps": []}), 3).unwrap().unwrap()).unwrap()["size"], "security");
+    let old = plan(None, &json!({"steps": steps}), 1).unwrap().unwrap();
+    assert_eq!(serde_json::to_value(old).unwrap()["size"], "small");
+}
+
+#[test]
+fn work_size_boundaries_are_pure_and_conservative() {
+    use faber_engine::model::WorkSize::*;
+    use faber_engine::permissions::work_boundary;
+    let data = vec!["C:/faber-data".into()];
+    let credentials = vec!["C:/moved-login".into()];
+    for (tool, input, copy, expected) in [
+        ("Read", json!({"file_path":"src/main.rs"}), false, (Small, "local")),
+        ("Read", json!({"file_path":"C:/faber-data/conversations/a.json"}), false, (Security, "data")),
+        ("Write", json!({"file_path":"../elsewhere/a.txt"}), true, (AcrossAreas, "outside")),
+        ("Read", json!({"file_path":"C:/moved-login/token"}), false, (Security, "credentials")),
+        ("Read", json!({"file_path":".ssh/id_rsa"}), false, (Security, "credentials")),
+        ("Read", json!({"file_path":"auth.json"}), false, (Security, "credentials")),
+        ("Read", json!({"file_path":"private.pem"}), false, (Security, "credentials")),
+        ("MultiEdit", json!({"file_path":"src/main.rs","edits":[]}), false, (Small, "local")),
+        ("item/fileChange/requestApproval", json!({"changes":[{"path":"src/main.rs"}],"cwd":"C:/project"}), false, (Small, "local")),
+        ("item/fileChange/requestApproval", json!({"changes":[{"path":"src/main.rs"}],"cwd":"C:/other"}), false, (AcrossAreas, "outside")),
+        ("item/fileChange/requestApproval", json!([{"path":"src/main.rs"}]), false, (Security, "unknown")),
+        (
+            "item/fileChange/requestApproval",
+            json!({"changes":[{"path":"src/old.rs","kind":{"type":"delete"}}],"cwd":"C:/project"}),
+            false,
+            (Security, "delete"),
+        ),
+        ("Bash", json!({"command":"npm publish"}), false, (Security, "publish")),
+        ("Bash", json!({"command":"rm src/old.rs"}), false, (Security, "delete")),
+        ("Bash", json!({"command":"rm src/old.rs"}), true, (InOneArea, "edit")),
+        ("Bash", json!({"command":"rm ../other/old.rs"}), true, (Security, "delete")),
+        ("Bash", json!({"command":"cat src/main.rs"}), false, (Small, "local")),
+        ("PowerShell", json!({"command":"Get-Content C:\\faber-data\\settings.json"}), false, (Security, "data")),
+        ("Bash", json!({"command":"cat src/main.rs; curl example.com"}), false, (Security, "unknown")),
+        ("Bash", json!({"command":"rg --pre evil text"}), false, (Security, "unknown")),
+        ("Bash", json!({"command":"pwd", "cwd":"../other"}), false, (AcrossAreas, "outside")),
+        ("unknown-tool", json!({}), false, (Security, "unknown")),
+        ("item/commandExecution/requestApproval", json!("cat ordinary.txt"), false, (Security, "unknown")),
+    ] {
+        assert_eq!(work_boundary(tool, &input, "C:/project", &data, &credentials, copy), expected, "{tool}: {input}");
+    }
+    assert_eq!(
+        work_boundary("Read", &json!({"file_path":"src/main.rs"}), "C:/faber-data/copies/project", &data, &credentials, true),
+        (Small, "local")
+    );
+    let call = json!({"command":"cat src/main.rs"});
+    let at = std::time::Instant::now();
+    for _ in 0..100_000 {
+        std::hint::black_box(work_boundary("Bash", std::hint::black_box(&call), "C:/project", &data, &credentials, false));
+    }
+    eprintln!("work_boundary: {:.2} us/call, 100000 literal reads, no disk I/O", at.elapsed().as_secs_f64() * 10.0);
+}
+
+async fn work_plan_call(pipe: &mut support::Pipe, request: &str, input: serde_json::Value) {
+    pipe.say(json!({"type":"control_request","request_id":request,"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"plan","arguments":input}}}}))
+        .await;
+    support::until("plan call was not answered", || pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request))
+        .await;
+}
+
+#[tokio::test]
+async fn work_size_holds_a_call_until_a_fresh_contract_then_keeps_native_permission_and_stop() {
+    use faber_engine::model::{Area, Permissions, Settings, WorkSize};
+    use faber_engine::router::Choice;
+    let dir = support::DataFolder::new();
+    let folder = support::work_folder();
+    let (spawn, made) = support::pipes();
+    let (engine, _, _) = start(&dir, spawn, None);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+            billing: Some(Billing::Subscription),
+            ..Default::default()
+        })],
+    );
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(faber_engine::SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: Some(project.id),
+            text: "Check the change".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let mut pipe = support::next_pipe(&made).await;
+    support::until("turn was not sent", || pipe.lines.lock().unwrap().iter().any(|m| m["type"] == "user")).await;
+    pipe.say(json!({"type":"system","subtype":"init","session_id":"s","model":"claude-haiku-5-5"})).await;
+    let steps = json!([{"text":"Check the change","state":"in_progress"}]);
+    let contract = json!({"extends":"Existing editor","proof":"Run editor checks"});
+    work_plan_call(&mut pipe, "p1", json!({"steps":steps,"size":"in_one_area","contract":contract})).await;
+    pipe.say(json!({"type":"control_request","request_id":"outside","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"../other.txt","content":"ok"}}})).await;
+    support::until("boundary was not raised", || engine.open(&id).unwrap().plan.is_some_and(|p| p.size == WorkSize::AcrossAreas)).await;
+    let c = engine.open(&id).unwrap();
+    let reply = c.messages.last().unwrap();
+    let turn = reply.id.clone();
+    let card = reply.permissions.as_ref().unwrap()[0].clone();
+    assert_eq!(card.tool, "AskUserQuestion");
+    assert_eq!(card.input["workContract"]["reason"], "outside");
+    assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "outside"));
+    // A native CLI cannot author the contract until its original call returns unexecuted.
+    assert!(
+        !pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "outside"),
+        "stating intent never authorizes the call"
+    );
+    work_plan_call(&mut pipe, "p2", json!({"size":"small"})).await;
+    assert_eq!(engine.open(&id).unwrap().messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+    engine.set_keep_going_pace(0.0001);
+    engine.keep_going(&id, true).unwrap();
+    support::until("default contract choice did not return the native call", || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "outside")
+    })
+    .await;
+    support::until("contract question was not settled", || {
+        engine.open(&id).unwrap().messages.last().unwrap().permissions.iter().flatten().all(|p| p.request_id != card.request_id)
+    })
+    .await;
+    engine.keep_going(&id, false).unwrap();
+    assert!(
+        engine.open(&id).unwrap().messages.iter().all(|m| m.auto_answers.as_ref().is_none_or(Vec::is_empty)),
+        "synthetic contract keys never become visible answers"
+    );
+    assert!(
+        pipe.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| m["response"]["request_id"] == "outside" && m["response"]["response"]["behavior"] == "deny")
+    );
+    work_plan_call(&mut pipe, "p3", json!({"contract":contract})).await;
+    pipe.say(json!({"type":"control_request","request_id":"outside-retry","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"../other.txt","content":"ok"}}})).await;
+    support::until("retry did not return to native permissions", || {
+        engine.open(&id).unwrap().messages.last().unwrap().permissions.iter().flatten().any(|p| p.request_id == "outside-retry")
+    })
+    .await;
+    let c = engine.open(&id).unwrap();
+    let native = c.messages.last().unwrap().permissions.as_ref().unwrap();
+    assert_eq!((native.len(), native[0].tool.as_str(), native[0].request_id.as_str()), (1, "Write", "outside-retry"));
+    engine.answer(&id, &turn, "outside-retry", false, false).await.unwrap();
+    pipe.say(json!({"type":"control_request","request_id":"opaque","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"pwd; whoami"}}})).await;
+    support::until("unknown syntax was not raised", || engine.open(&id).unwrap().plan.is_some_and(|p| p.size == WorkSize::Security)).await;
+    engine.interrupt(&id);
+    assert!(engine.open(&id).unwrap().messages.last().unwrap().permissions.as_ref().is_none_or(Vec::is_empty));
+    work_plan_call(&mut pipe, "late-contract", json!({"contract":contract})).await;
+    assert!(
+        !pipe
+            .lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| m["response"]["request_id"] == "opaque" && m["response"]["response"]["behavior"] == "allow"),
+        "a late contract after Stop cannot release the call"
+    );
+    assert!(engine.answer_question(&id, &turn, &card.request_id, json!({})).await.is_err());
+    engine.shutdown();
+}
