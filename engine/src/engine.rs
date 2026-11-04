@@ -1535,37 +1535,7 @@ impl Engine {
     }
     /// Points a moved or missing project at its new folder (`Find the folder`), keeping its id and conversations intact.
     pub fn repoint_project(&self, id: &str, path: &str) -> Result<Project, String> {
-        let (copies, run, data) = self.with(|c| {
-            c.repoint_check(id, path)?;
-            let ids: HashSet<_> = c
-                .store
-                .list()
-                .into_iter()
-                .filter(|s| s.project_id.as_deref() == Some(id))
-                .map(|s| s.id)
-                .chain(c.convs.values().filter(|v| v.project_id.as_deref() == Some(id)).map(|v| v.id.clone()))
-                .collect();
-            let copies: Vec<_> = ids
-                .into_iter()
-                .filter_map(|id| {
-                    let copy = match c.convs.get(&id) {
-                        Some(conv) => conv.copy.clone(),
-                        None => c.store.get(&id).and_then(|conv| conv.copy),
-                    };
-                    copy.filter(|copy| !copy.root.is_empty()).map(|copy| (id, copy))
-                })
-                .collect();
-            Ok::<_, String>((copies, c.git.clone(), c.opts.data_dir.clone()))
-        })?;
-        let mut repaired = Vec::new();
-        if !copies.is_empty() {
-            let mut exec = run.and_then(|run| run()).ok_or("error.copy.failed")?;
-            for (conv, before) in copies {
-                let after = crate::project::copy::repair(&mut *exec, Path::new(path), &data, &conv, &before)?;
-                repaired.push((conv, before, after));
-            }
-        }
-        self.with(|c| c.repoint_project(id, path, &repaired))
+        self.with(|c| c.repoint_project(id, path))
     }
     /// Dismisses the one-time calm home note shown after an unclean exit.
     pub fn dismiss_unclean_exit(&self) {
@@ -5737,7 +5707,7 @@ impl Core {
     }
 
     /// Points an existing project at a new folder after its folder moved, keeping its id and conversations intact.
-    fn repoint_check(&self, id: &str, path: &str) -> Result<(Vec<Project>, usize, String), String> {
+    fn repoint_project(&mut self, id: &str, path: &str) -> Result<Project, String> {
         let p = Path::new(path);
         if crate::permissions::forbidden_folder(p) {
             return Err("error.workingFolder".into());
@@ -5750,7 +5720,7 @@ impl Core {
         let Some(resolved) = crate::recents::resolved(path) else {
             return Err("error.workingFolder".into());
         };
-        let projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
+        let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
         let Some(pos) = projects.iter().position(|p| p.id == id) else {
             return Err("error.project.notFound".into());
         };
@@ -5759,38 +5729,6 @@ impl Core {
         }
         if self.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, self.live.get(&conv.id)).is_some()) {
             return Err("error.project.busy".into());
-        }
-        Ok((projects, pos, resolved))
-    }
-
-    fn repoint_project(
-        &mut self,
-        id: &str,
-        path: &str,
-        repaired: &[(String, crate::project::copy::WorkCopy, crate::project::copy::WorkCopy)],
-    ) -> Result<Project, String> {
-        let (mut projects, pos, resolved) = self.repoint_check(id, path)?;
-        for (conv, before, _) in repaired {
-            let current = self
-                .convs
-                .get(conv)
-                .map(|c| (c.project_id.clone(), c.copy.clone()))
-                .or_else(|| self.store.get(conv).map(|c| (c.project_id, c.copy)));
-            if current.is_none_or(|(project, copy)| project.as_deref() != Some(id) || copy.as_ref() != Some(before)) {
-                return Err("error.project.changed".into());
-            }
-        }
-        // Copies commit first: if the project save fails, its missing folder still blocks sends and a retry is safe.
-        for (conv, before, after) in repaired {
-            let loaded = self.convs.contains_key(conv);
-            self.load(conv).ok_or("error.conversationGone")?.copy = Some(after.clone());
-            if let Err(error) = self.try_save(conv) {
-                self.convs.get_mut(conv).unwrap().copy = Some(before.clone());
-                return Err(error);
-            }
-            if !loaded {
-                self.convs.remove(conv);
-            }
         }
         let old_path = projects[pos].path.clone();
         let name = Path::new(&resolved).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| resolved.clone());

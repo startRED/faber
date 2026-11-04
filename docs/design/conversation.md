@@ -136,4 +136,4 @@ notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
 
 Faber's decision and automatic-message rows use the actor's mark beside the existing words.
 
-Recovery keeps queued messages and attachments behind its continuation in every saved snapshot. A failed conclusion keeps its follow-up task; completed task files are removed only after the conclusion saves. Finding a moved project repairs its separate copies and its own linked checkout while retaining edits, and refuses linked or shared recovery metadata before Git writes. Review rows combine votes only for identical evidence; different problems remain separate notes. These corrections add no controls, layout or motion.
+Recovery keeps queued messages and attachments behind its continuation in every saved snapshot. A failed conclusion keeps its follow-up task; completed task files are removed only after the conclusion saves. Review rows combine votes only for identical evidence; different problems remain separate notes. These corrections add no controls, layout or motion.
