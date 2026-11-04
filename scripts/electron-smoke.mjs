@@ -48,13 +48,19 @@ try {
   requireFile('faber.exe');
   const oldExe = readFileSync(path.join(folder, 'faber.exe'));
   mkdirSync(env.FABER_DATA_DIR);
-  writeFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'existing data');
+  const conversation = 'conversations/11111111-1111-4111-8111-111111111111.json';
+  const sample = {
+    [conversation]: JSON.stringify({ id: '11111111-1111-4111-8111-111111111111', title: 'Migration test', area: 'chat', createdAt: 1, updatedAt: 1, messages: [{ id: 'message', role: 'user', text: 'Keep this conversation', at: 1 }] }),
+    'settings.json': JSON.stringify({ language: 'en' }),
+  };
+  mkdirSync(path.join(env.FABER_DATA_DIR, 'conversations'));
+  for (const [name, contents] of Object.entries(sample)) writeFileSync(path.join(env.FABER_DATA_DIR, name), contents);
   run(installer, ['/S', '/UPDATE', `/D=${folder}`]);
   installed = true;
   for (const name of ['faber.exe', 'resources/app.asar', 'resources/faber-sidecar.exe', 'bin/faber.exe']) requireFile(name);
   if (!readFileSync(path.join(folder, 'previous/faber-tauri.exe')).equals(oldExe)) throw new Error('The previous Tauri executable was not preserved');
   for (const name of ['uninstall.exe', 'faber-local.exe']) if (existsSync(path.join(folder, name))) throw new Error(`Leftover ${name}`);
-  if (readFileSync(path.join(env.FABER_DATA_DIR, 'migration-sentinel'), 'utf8') !== 'existing data') throw new Error('Existing data was changed');
+  for (const [name, contents] of Object.entries(sample)) if (readFileSync(path.join(env.FABER_DATA_DIR, name), 'utf8') !== contents) throw new Error(`Existing ${name} was changed by the installer`);
   if (readFileSync(path.join(folder, 'faber.exe')).subarray(0, 2).toString() !== 'MZ') throw new Error('Installed faber.exe is not a Windows executable');
   app = spawn(path.join(folder, 'faber.exe'), [], { env, windowsHide: true, shell: false, stdio: 'ignore' });
   app.on('error', () => {});
@@ -66,6 +72,17 @@ try {
     await delay(1000);
   }
   if (!found) throw new Error('The sidecar did not start as a child');
+  const marker = path.join(env.FABER_DATA_DIR, 'backup-before-electron.done');
+  for (let i = 0; i < 30 && !existsSync(marker) && app.exitCode === null; i++) await delay(1000);
+  if (!existsSync(marker)) throw new Error('The data backup was not completed');
+  const backupName = readFileSync(marker, 'utf8').trim();
+  if (!/^backup-before-electron-[0-9a-f-]+$/i.test(backupName)) throw new Error('Invalid backup folder');
+  for (const [name, contents] of Object.entries(sample)) {
+    if (readFileSync(path.join(env.FABER_DATA_DIR, backupName, name), 'utf8') !== contents) throw new Error(`Backup of ${name} differs`);
+    const current = JSON.parse(readFileSync(path.join(env.FABER_DATA_DIR, name), 'utf8'));
+    const expected = JSON.parse(contents);
+    if (name === conversation ? current.messages?.[0]?.text !== expected.messages[0].text : current.language !== expected.language) throw new Error(`Existing ${name} was not retained after startup`);
+  }
   console.log('Installed files and sidecar child are present.');
 } finally {
   if (app?.pid && app.exitCode === null) spawnSync(path.join(system, 'taskkill.exe'), ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true, shell: false });

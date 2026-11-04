@@ -1,0 +1,26 @@
+name: install-update
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migration:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Download released installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.3.17-preview.84 --pattern Faber_0.3.17-preview.84_x64-setup.exe --dir "$RUNNER_TEMP"
+          gh release download v0.3.18-preview.90 --pattern Faber_0.3.18-preview.90_x64-setup.exe --dir "$RUNNER_TEMP"
+      - name: Check migration and backup
+        shell: bash
+        env:
+          FABER_SMOKE_DISPOSABLE: '1'
+        run: node scripts/electron-smoke.mjs "$RUNNER_TEMP/Faber_0.3.18-preview.90_x64-setup.exe" "$RUNNER_TEMP/Faber_0.3.17-preview.84_x64-setup.exe"
