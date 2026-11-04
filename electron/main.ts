@@ -24,7 +24,7 @@ const FRAME = '#101012';
 /** If the screen never says it painted, the window still shows after this long (as the Tauri shell does). */
 const REVEAL_FAILSAFE_MS = 3000;
 /** How long closing waits for the host to save and stop before it is ended anyway. */
-const HOST_STOP_MS = 5000;
+const HOST_STOP_MS = 60_000;
 
 // Only the instance that owns the data may back it up or count a launch.
 const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
@@ -311,7 +311,7 @@ app.on('second-instance', (_event, argv) => {
 // Faber stays in the tray when its window closes; only Quit, on the tray's menu, ends it.
 app.on('window-all-closed', () => {});
 
-// Quitting waits for the host to save what it holds and stop; one that hangs is ended after a few seconds.
+// Quitting waits for the engine's own shutdown, including slow saves; the minute bound covers a hung host.
 let stopping = false;
 app.on('before-quit', (event) => {
   if (stopping || !host) return;
