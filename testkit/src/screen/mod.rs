@@ -132,6 +132,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    (ux_audit::EXTERNAL_LINKS, "compares the computer's browser processes before and after open-link"),
     (long_session::NAME, "memory"),
     (streaming::NAME, "processor, memory and main-thread long tasks while a reply streams"),
     (app::CREATIVE_WORKLOG[0], "processor, memory"),

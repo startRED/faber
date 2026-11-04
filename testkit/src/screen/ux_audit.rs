@@ -20,7 +20,47 @@ pub fn launch(ctx: &Ctx, codex: bool, no_ai: bool) -> Result<Launch> {
 }
 
 pub fn scenarios() -> Vec<Scenario> {
-    vec![Scenario { name: "ux audit: both fake AIs answer through the walkthrough launch", run: both_ais }]
+    vec![
+        Scenario { name: "ux audit: both fake AIs answer through the walkthrough launch", run: both_ais },
+        Scenario { name: EXTERNAL_LINKS, run: external_links },
+    ]
+}
+
+pub const EXTERNAL_LINKS: &str = "ux audit: open-link records URLs in the hidden sandbox without starting a browser";
+
+fn external_links(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(no_cli())?;
+    let before = crate::proctree::snapshot()?;
+    let urls = ["https://example.com/a?q=%22test%22#part", "http://example.org/"];
+    for url in urls {
+        app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('open_link', {{url:{}}}).then(()=>true)", serde_json::json!(url)))?;
+    }
+    let log = ctx.sb.data.join("blocked-opens.jsonl");
+    let text = std::fs::read_to_string(&log).map_err(|e| format!("{}: {e}", log.display()))?;
+    let recorded: Vec<String> = text.lines().map(serde_json::from_str).collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+    super::same(recorded, urls.map(str::to_string).to_vec(), "recorded external links")?;
+    for url in ["file:///C:/Windows", "javascript:alert(1)"] {
+        let answer = app
+            .page
+            .eval(&format!("window.__TAURI_INTERNALS__.invoke('open_link', {{url:{}}}).then(()=>null,e=>e)", serde_json::json!(url)))?;
+        super::same(answer, serde_json::json!("error.link.web"), "invalid external link")?;
+    }
+    super::same(std::fs::read_to_string(log).map_err(|e| e.to_string())?, text, "invalid links leave no record")?;
+    for _ in 0..10 {
+        let new_browsers: Vec<_> = crate::proctree::snapshot()?
+            .into_iter()
+            .filter(|p| {
+                matches!(
+                    p.name.to_ascii_lowercase().as_str(),
+                    "chrome.exe" | "msedge.exe" | "firefox.exe" | "brave.exe" | "opera.exe" | "vivaldi.exe"
+                ) && !crate::proctree::same_process(p, &before)
+            })
+            .collect();
+        ensure(new_browsers.is_empty(), || format!("open-link started browser processes: {new_browsers:?}"))?;
+        super::pause(0.1);
+    }
+    ctx.close(app.id)
 }
 
 fn both_ais(ctx: &mut Ctx) -> Result {

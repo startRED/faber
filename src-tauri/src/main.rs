@@ -183,6 +183,18 @@ impl Shell for TauriShell {
     }
 
     fn open_link(&self, url: &str) -> Result<(), String> {
+        #[cfg(feature = "test-hooks")]
+        {
+            use std::io::Write;
+            let data = self.handle.state::<Faber>();
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(data.data_dir.join("blocked-opens.jsonl"))
+                .map_err(|_| "error.link.open".to_string())?;
+            writeln!(file, "{}", serde_json::json!(url)).map_err(|_| "error.link.open".into())
+        }
+        #[cfg(not(feature = "test-hooks"))]
         self.handle.opener().open_url(url, None::<&str>).map_err(|_| "error.link.open".into())
     }
 

@@ -4,7 +4,7 @@
 
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, protocol, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
@@ -256,7 +256,8 @@ async function openLink({ url }: Record<string, unknown>): Promise<void> {
   }
   if (link.protocol !== 'https:' && link.protocol !== 'http:') throw new Error('error.link.web');
   try {
-    await shell.openExternal(link.toString());
+    if (testmode.testing) appendFileSync(path.join(dataDir, 'blocked-opens.jsonl'), `${JSON.stringify(link.toString())}\n`);
+    else await shell.openExternal(link.toString());
   } catch {
     throw new Error('error.link.open');
   }
