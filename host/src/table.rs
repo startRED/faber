@@ -43,6 +43,10 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
 const JSON_FILES: Filter = Filter { name: "JSON", extensions: &["json"] };
 const MARKDOWN_FILES: Filter = Filter { name: "Markdown", extensions: &["md"] };
 
+fn save_copy(mut source: impl std::io::Read, target: &Path) -> std::io::Result<()> {
+    look::replace_file(target, |file| std::io::copy(&mut source, file).map(|_| ()))
+}
+
 /// Runs `work` off the async threads. `lost` is the error key if the work panicked.
 async fn off<T: Send + 'static>(lost: &str, work: impl FnOnce() -> T + Send + 'static) -> Res<T> {
     let flag = request_flag();
@@ -704,7 +708,7 @@ table! {
         let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let picked = h.shell.pick_save(None, name).await.map_err(|why| if why == PickError::NoWindow { NO_WINDOW } else { "error.file.save" })?;
         let Some(target) = picked else { return Ok(false) };
-        std::fs::copy(&source, target).map_err(|_| "error.file.save")?;
+        std::fs::File::open(&source).and_then(|source| save_copy(source, &target)).map_err(|_| "error.file.save")?;
         Ok(true)
     }
     Read Ask fn show_file(h, id: String, path: String) -> () {
@@ -1054,6 +1058,30 @@ table! {
 
 #[cfg(test)]
 mod revoke_tests {
+    #[test]
+    fn t515a_failed_workspace_copy_preserves_existing_destination() {
+        use std::io::{self, Read};
+        struct Failing(bool);
+        impl Read for Failing {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    return Err(io::Error::other("copy interrupted"));
+                }
+                self.0 = true;
+                bytes[0] = b'x';
+                Ok(1)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("saved.txt");
+        std::fs::write(&target, b"previous contents").unwrap();
+        assert!(super::save_copy(Failing(false), &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"previous contents");
+        super::save_copy(&b"new contents"[..], &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new contents");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "temporary siblings are cleaned up");
+    }
+
     use super::*;
     #[test]
     fn revoked_blocking_operation_does_not_mutate() {
