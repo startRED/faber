@@ -2521,6 +2521,7 @@ export const de: Messages = {
   'notes.393.better': 'Die KI eines Projekts archiviert jetzt auf Wunsch jede abgeschlossene Unterhaltung des Projekts, nicht nur die selbst gestarteten. Du kannst sie zurückholen.',
   'notes.394.fixed': 'Der Ring neben „Denkt nach“ und alle anderen Arbeitsmarken drehen sich jetzt, damit du siehst, dass die KI noch arbeitet.',
   'notes.395.fixed': 'Wenn die Installation einer KI nicht startet, siehst du das Problem und kannst es erneut versuchen.',
+  'notes.396.fixed': 'Faber öffnet sich nach einem fehlgeschlagenen Update immer wieder: Es legt vorher eine Kopie von sich an und stellt sie wieder her, sodass eine missglückte Installation den Start nicht mehr verhindert.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

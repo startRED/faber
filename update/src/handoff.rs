@@ -40,6 +40,8 @@ const CLOSE_WAIT: Duration = Duration::from_secs(60);
 const INSTALL_WAIT: Duration = Duration::from_secs(300);
 /// Windows: start the process without a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// The names the installed programs are kept under, beside the copy, while the installer runs (`keep`).
+const KEPT: [&str; 2] = ["faber-kept.exe", "faber-sidecar-kept.exe"];
 
 /// Puts a copy of the running program beside `installer` (the verified file `release::download` left in its own temporary
 /// folder), starts the copy, and returns. The caller ends the process right after. `install_dir` is the installer
@@ -108,7 +110,16 @@ pub fn finish(args: &[OsString]) -> i32 {
         crate::log(&data, "install-wait", "Faber was still closing; the installer closes it");
     }
     if !installer.is_empty() {
-        run_installer(installer, signature, version, folder, reopen != "tray", &data);
+        // The programs are kept in this copy's own folder, made new for this install.
+        match std::env::current_exe().ok().and_then(|copy| copy.parent().map(Path::to_path_buf)) {
+            Some(here) => {
+                let sidecar = folder.join(SIDECAR[0]).join(SIDECAR[1]);
+                install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+                    run_installer(installer, signature, version, folder, reopen != "tray", &data)
+                });
+            }
+            None => crate::log(&data, "install-failed", "no folder to keep Faber in"),
+        }
     }
     // Back in every case: the new version, or the same one when the install did not happen.
     let mut again = Command::new(&exe);
@@ -122,7 +133,159 @@ pub fn finish(args: &[OsString]) -> i32 {
     0
 }
 
-fn run_installer(installer: &OsString, signature: &OsString, version: &OsString, folder: &Path, shown: bool, data: &Path) {
+/// How the installer ended. Only `Failed` can have left the installed programs broken; one still running is left alone.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Installed {
+    Done,
+    Failed,
+    /// It did not start (a bad signature, no such file): nothing was touched.
+    NotRun,
+    StillRunning,
+}
+
+/// Runs `install` only once the installed programs are kept in `dir`, and puts them back when it fails and left them
+/// changed: an installer that ends with an error can leave `faber.exe` empty (2026-11-01: exit code 1, a 0-byte
+/// `faber.exe`, and Faber could not open again until it was installed by hand). When they cannot be kept (most likely a
+/// full disk) nothing is installed and the same version opens again.
+fn install_or_put_back(programs: &[&Path], dir: &Path, data: &Path, install: impl FnOnce() -> Installed) -> Installed {
+    let kept = match keep(programs, dir) {
+        Ok(kept) => kept,
+        Err(error) => {
+            crate::log(data, "install-failed", &format!("Faber could not be kept before the install: {error}"));
+            return Installed::NotRun;
+        }
+    };
+    let installed = install();
+    if installed == Installed::Failed {
+        // Each program is tried, so one that cannot go back does not keep the other where it is.
+        for (program, copy) in &kept {
+            // Only a program the installer left unable to start goes back: the rest of the app (its libraries,
+            // `app.asar`) may already be the new version, and an old program beside them would break a Faber that runs.
+            if same(program, copy).unwrap_or(false) || is_program(program) {
+                continue;
+            }
+            match put_back(program, copy) {
+                Ok(()) => crate::log(data, "install-undone", "a program the failed install broke was put back"),
+                Err(error) => crate::log(data, "put-back-failed", &error.to_string()),
+            }
+        }
+    }
+    installed
+}
+
+/// Copies each program into `dir` (as `KEPT`) and checks the copy. Returns the pairs (program, kept copy). Only a program
+/// after the first (the sidecar) may be missing; one that is there but cannot be read stops the install.
+fn keep(programs: &[&Path], dir: &Path) -> std::io::Result<Vec<(PathBuf, PathBuf)>> {
+    let mut kept: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let result = (|| {
+        for (at, (program, name)) in programs.iter().zip(KEPT).enumerate() {
+            match std::fs::symlink_metadata(program) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound && at > 0 => continue,
+                Err(error) => return Err(error),
+                Ok(meta) if !meta.is_file() => return Err(std::io::Error::other("the program is not a plain file")),
+                Ok(_) => {}
+            }
+            let copy = dir.join(name);
+            match copy_new(program, &copy) {
+                // Someone else's file under that name is never written through, nor removed.
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
+                Err(error) => {
+                    let _ = std::fs::remove_file(&copy);
+                    return Err(error);
+                }
+                Ok(()) => kept.push((program.to_path_buf(), copy.clone())),
+            }
+            if !same(program, &copy)? {
+                return Err(std::io::Error::other("the kept copy differs from the program"));
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(kept),
+        Err(error) => {
+            // A copy that could not be finished (a full disk) leaves nothing of this attempt behind.
+            for (_, copy) in kept {
+                let _ = std::fs::remove_file(copy);
+            }
+            Err(error)
+        }
+    }
+}
+
+/// A whole Windows program: "MZ", the "PE" header it points to, and every section it lists inside the file. A program the
+/// installer cut short fails the last check.
+fn is_program(path: &Path) -> bool {
+    whole_program(path).unwrap_or(false)
+}
+
+fn whole_program(path: &Path) -> std::io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let mut dos = [0u8; 64];
+    file.read_exact(&mut dos)?;
+    if &dos[..2] != b"MZ" {
+        return Ok(false);
+    }
+    let pe = u64::from(u32::from_le_bytes([dos[0x3c], dos[0x3d], dos[0x3e], dos[0x3f]]));
+    file.seek(SeekFrom::Start(pe))?;
+    let mut head = [0u8; 24];
+    file.read_exact(&mut head)?;
+    if &head[..4] != b"PE\0\0" {
+        return Ok(false);
+    }
+    let sections = u16::from_le_bytes([head[6], head[7]]);
+    let optional = u64::from(u16::from_le_bytes([head[20], head[21]]));
+    file.seek(SeekFrom::Start(pe + 24 + optional))?;
+    let mut end = 0u64;
+    for _ in 0..sections {
+        let mut section = [0u8; 40];
+        file.read_exact(&mut section)?;
+        let size = u64::from(u32::from_le_bytes([section[16], section[17], section[18], section[19]]));
+        let at = u64::from(u32::from_le_bytes([section[20], section[21], section[22], section[23]]));
+        end = end.max(at + size);
+    }
+    Ok(len >= end)
+}
+
+/// Puts `copy` back at `program` whole or not at all: it is written beside it under another name, checked, and only then
+/// renamed over it, so an error (a full disk) never leaves a half-written program. Its folder is made again if the
+/// installer removed it.
+fn put_back(program: &Path, copy: &Path) -> std::io::Result<()> {
+    let folder = program.parent().ok_or_else(|| std::io::Error::other("no folder for the program"))?;
+    std::fs::create_dir_all(folder)?;
+    let staged = program.with_extension("exe.faber-put-back");
+    let _ = std::fs::remove_file(&staged);
+    let written = copy_new(copy, &staged).and_then(|()| {
+        if same(copy, &staged)? { Ok(()) } else { Err(std::io::Error::other("the program put back differs from the kept one")) }
+    });
+    let renamed = written.and_then(|()| std::fs::rename(&staged, program));
+    if renamed.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    renamed
+}
+
+/// Whether two files hold the same bytes, read in pieces so a big program is never held in memory whole.
+fn same(a: &Path, b: &Path) -> std::io::Result<bool> {
+    let (mut a, mut b) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    if a.metadata()?.len() != b.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut x, mut y) = (vec![0u8; 1 << 16], vec![0u8; 1 << 16]);
+    loop {
+        let n = a.read(&mut x)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        b.read_exact(&mut y[..n])?;
+        if x[..n] != y[..n] {
+            return Ok(false);
+        }
+    }
+}
+
+fn run_installer(installer: &OsString, signature: &OsString, version: &OsString, folder: &Path, shown: bool, data: &Path) -> Installed {
     let checked = || -> Result<std::fs::File, String> {
         // Deny write and delete sharing until the verified executable has started.
         let mut file = std::fs::OpenOptions::new().read(true).share_mode(1).open(installer).map_err(|e| e.to_string())?;
@@ -133,7 +296,7 @@ fn run_installer(installer: &OsString, signature: &OsString, version: &OsString,
         Ok(file) => file,
         Err(error) => {
             crate::log(data, "install-failed", &error);
-            return;
+            return Installed::NotRun;
         }
     };
     let began = Instant::now();
@@ -147,12 +310,24 @@ fn run_installer(installer: &OsString, signature: &OsString, version: &OsString,
                 status.is_some()
             });
             match status {
-                Some(status) if status.success() => crate::log(data, "installed", &format!("in {} ms", began.elapsed().as_millis())),
-                Some(status) => crate::log(data, "install-failed", &format!("installer exit code {}", status.code().unwrap_or(-1))),
-                None => crate::log(data, "install-slow", "the installer still runs; Faber opens anyway"),
+                Some(status) if status.success() => {
+                    crate::log(data, "installed", &format!("in {} ms", began.elapsed().as_millis()));
+                    Installed::Done
+                }
+                Some(status) => {
+                    crate::log(data, "install-failed", &format!("installer exit code {}", status.code().unwrap_or(-1)));
+                    Installed::Failed
+                }
+                None => {
+                    crate::log(data, "install-slow", "the installer still runs; Faber opens anyway");
+                    Installed::StillRunning
+                }
             }
         }
-        Err(error) => crate::log(data, "install-failed", &error.to_string()),
+        Err(error) => {
+            crate::log(data, "install-failed", &error.to_string());
+            Installed::NotRun
+        }
     }
 }
 
@@ -267,8 +442,8 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        COPY, copy_new, finish, hold_folders, install_folder, installer_line, is_free, is_plain, relaunch, start, sweep_in, verify_copy,
-        wait_until,
+        COPY, Installed, KEPT, copy_new, finish, hold_folders, install_folder, install_or_put_back, installer_line, is_free, is_plain,
+        is_program, relaunch, start, sweep_in, verify_copy, wait_until,
     };
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -410,6 +585,142 @@ mod tests {
         assert!(start(&installer, "", "", &OsString::from(r"E:\Apps\Faber"), data.path(), true).is_err(), "not a /D= argument");
         assert!(!temp.path().join(COPY).exists());
         assert!(relaunch(&OsString::from("/D="), data.path(), true).is_err());
+    }
+
+    /// An installed `faber.exe` and sidecar, a data folder, and the copy's own folder where they are kept.
+    fn installed() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let (app, data, here) = (root.path().join("Faber"), root.path().join("data"), root.path().join("faber-update-1"));
+        for dir in [&app.join("resources"), &data, &here] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(app.join("faber.exe"), b"MZ old program").unwrap();
+        std::fs::write(app.join("resources").join("faber-sidecar.exe"), b"MZ old sidecar").unwrap();
+        (root, app.join("faber.exe"), app.join("resources").join("faber-sidecar.exe"), data, here)
+    }
+
+    fn log(data: &Path) -> String {
+        std::fs::read_to_string(data.join("update.log")).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_failed_install_that_emptied_faber_puts_the_old_programs_back() {
+        let (_root, exe, sidecar, data, here) = installed();
+        let installed = install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+            // 2026-11-01: the installer ended with code 1 and left `faber.exe` with no bytes.
+            std::fs::write(&exe, b"").unwrap();
+            std::fs::remove_dir_all(sidecar.parent().unwrap()).unwrap();
+            Installed::Failed
+        });
+        assert_eq!(installed, Installed::Failed);
+        assert_eq!(std::fs::read(&exe).unwrap(), b"MZ old program", "Faber opens again on the same version");
+        assert_eq!(std::fs::read(&sidecar).unwrap(), b"MZ old sidecar", "its removed folder is made again");
+        assert!(log(&data).contains("install-undone"));
+        assert!(!exe.with_extension("exe.faber-put-back").exists(), "nothing is left beside the program");
+    }
+
+    #[test]
+    fn a_failed_install_that_left_a_program_that_starts_keeps_it() {
+        let (_root, exe, sidecar, data, here) = installed();
+        install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+            // The new program is whole; the rest of the app beside it may be new too, so the old one is not put back.
+            std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+            Installed::Failed
+        });
+        assert_eq!(std::fs::read(&exe).unwrap(), std::fs::read(std::env::current_exe().unwrap()).unwrap());
+        assert!(!log(&data).contains("install-undone"));
+    }
+
+    #[test]
+    fn a_failed_install_that_cut_a_program_short_puts_it_back() {
+        let (_root, exe, sidecar, data, here) = installed();
+        install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+            // It starts like a program, but its sections run past the end of the file.
+            let whole = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+            std::fs::write(&exe, &whole[..whole.len() / 2]).unwrap();
+            Installed::Failed
+        });
+        assert_eq!(std::fs::read(&exe).unwrap(), b"MZ old program");
+        assert!(log(&data).contains("install-undone"));
+    }
+
+    #[test]
+    fn a_whole_program_is_told_from_a_cut_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let whole = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        let (good, cut, empty) = (temp.path().join("good.exe"), temp.path().join("cut.exe"), temp.path().join("empty.exe"));
+        std::fs::write(&good, &whole).unwrap();
+        std::fs::write(&cut, &whole[..whole.len() / 2]).unwrap();
+        std::fs::write(&empty, b"").unwrap();
+        assert!(is_program(&good));
+        assert!(!is_program(&cut) && !is_program(&empty) && !is_program(&temp.path().join("missing.exe")));
+    }
+
+    #[test]
+    fn a_kept_copy_that_could_not_be_finished_leaves_nothing_behind() {
+        let (_root, exe, sidecar, data, here) = installed();
+        // The sidecar's name is taken: the copy of `faber.exe` already made is removed, the planted file stays.
+        std::fs::write(here.join(KEPT[1]), b"planted").unwrap();
+        assert_eq!(install_or_put_back(&[&exe, &sidecar], &here, &data, || Installed::Done), Installed::NotRun);
+        assert!(!here.join(KEPT[0]).exists());
+        assert_eq!(std::fs::read(here.join(KEPT[1])).unwrap(), b"planted");
+    }
+
+    #[test]
+    fn the_installer_never_runs_without_the_main_program_kept() {
+        let (_root, exe, sidecar, data, here) = installed();
+        std::fs::remove_file(&exe).unwrap();
+        let mut ran = false;
+        let installed = install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+            ran = true;
+            Installed::Done
+        });
+        assert_eq!(installed, Installed::NotRun);
+        assert!(!ran, "only the sidecar may be missing");
+    }
+
+    #[test]
+    fn a_failed_install_that_touched_nothing_puts_nothing_back() {
+        let (_root, exe, sidecar, data, here) = installed();
+        assert_eq!(install_or_put_back(&[&exe, &sidecar], &here, &data, || Installed::Failed), Installed::Failed);
+        assert_eq!(std::fs::read(&exe).unwrap(), b"MZ old program");
+        assert!(!log(&data).contains("install-undone"));
+    }
+
+    #[test]
+    fn a_finished_or_running_install_is_never_undone() {
+        for outcome in [Installed::Done, Installed::StillRunning] {
+            let (_root, exe, sidecar, data, here) = installed();
+            install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+                std::fs::write(&exe, b"MZ new program").unwrap();
+                outcome
+            });
+            assert_eq!(std::fs::read(&exe).unwrap(), b"MZ new program", "{outcome:?}");
+        }
+    }
+
+    #[test]
+    fn the_installer_never_runs_when_faber_cannot_be_kept_first() {
+        let (_root, exe, sidecar, data, here) = installed();
+        // Something already holds the name the copy is kept under: nothing is written through it.
+        std::fs::write(here.join(KEPT[0]), b"planted").unwrap();
+        let mut ran = false;
+        let installed = install_or_put_back(&[&exe, &sidecar], &here, &data, || {
+            ran = true;
+            Installed::Done
+        });
+        assert_eq!(installed, Installed::NotRun);
+        assert!(!ran, "no installer runs without a way back");
+        assert_eq!(std::fs::read(here.join(KEPT[0])).unwrap(), b"planted");
+        assert!(log(&data).contains("could not be kept"));
+    }
+
+    #[test]
+    fn a_program_that_is_not_installed_is_simply_not_kept() {
+        let (_root, exe, _sidecar, data, here) = installed();
+        let missing = here.join("no-sidecar.exe");
+        assert_eq!(install_or_put_back(&[&exe, &missing], &here, &data, || Installed::Done), Installed::Done);
+        assert!(here.join(KEPT[0]).exists() && !here.join(KEPT[1]).exists());
     }
 
     #[test]

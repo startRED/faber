@@ -2401,6 +2401,7 @@ export const en = {
   'notes.393.better': "A project's agent can now archive any finished conversation of that project when you ask, not only the ones it started. You can bring them back.",
   'notes.394.fixed': 'The ring beside "Thinking" and every other working mark now turns, so you can tell the agent is still at work.',
   'notes.395.fixed': 'If an AI installation cannot start, you can see the problem and try again.',
+  'notes.396.fixed': 'Faber always opens again after an update that fails: it keeps a copy of itself first and puts it back, so a failed install no longer leaves it unable to start.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

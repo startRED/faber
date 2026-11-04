@@ -2521,6 +2521,7 @@ export const es: Messages = {
   'notes.393.better': 'La IA de un proyecto ahora archiva cualquier conversación terminada del proyecto cuando lo pides, no solo las que ella empezó. Puedes recuperarlas.',
   'notes.394.fixed': 'El anillo junto a "Pensando" y las demás marcas de trabajo ahora giran, así ves que la IA sigue trabajando.',
   'notes.395.fixed': 'Si la instalación de una IA no empieza, puedes ver el problema y volver a intentarlo.',
+  'notes.396.fixed': 'Faber siempre vuelve a abrirse después de una actualización que falla: guarda antes una copia de sí mismo y la repone, así que una instalación fallida ya no le impide arrancar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
