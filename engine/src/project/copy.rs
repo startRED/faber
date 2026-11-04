@@ -98,7 +98,63 @@ fn own_branch(branch: &str) -> bool {
 
 fn git(exec: &mut dyn Executor, cwd: &Path, args: &[&str]) -> Option<String> {
     let out = exec.execute(&Invocation::new(cwd, args)).ok()?;
-    out.success.then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string())
+    if !out.success {
+        return None;
+    }
+    Some(String::from_utf8(out.stdout).ok()?.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn repair_file(path: &Path) -> Result<Option<std::fs::File>, &'static str> {
+    real_path(path).map_err(|_| "error.copy.failed")?;
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("error.copy.failed"),
+        Ok(_) => faber_winproc::open_plain_file(
+            path.parent().ok_or("error.copy.failed")?,
+            Path::new(path.file_name().ok_or("error.copy.failed")?),
+        )
+        .map(Some)
+        .map_err(|_| "error.copy.failed"),
+    }
+}
+
+fn repair_metadata(common: &Path, listed: &str, root: &Path, copy: &Path) -> Result<(), &'static str> {
+    // Git repairs every registered worktree, not only its explicit arguments, using truncating writes.
+    let admins = common.join("worktrees");
+    real_path(&admins).map_err(|_| "error.copy.failed")?;
+    for entry in std::fs::read_dir(&admins).map_err(|_| "error.copy.failed")? {
+        let admin = entry.map_err(|_| "error.copy.failed")?.path();
+        real_path(&admin).map_err(|_| "error.copy.failed")?;
+        repair_file(&admin.join("gitdir"))?;
+    }
+    for worktree in listed.split('\0').filter_map(|field| field.strip_prefix("worktree ")).skip(1) {
+        repair_file(&Path::new(worktree).join(".git"))?;
+    }
+    for worktree in [root, copy] {
+        let dotgit = worktree.join(".git");
+        real_path(&dotgit).map_err(|_| "error.copy.failed")?;
+        if worktree == root && dotgit.is_dir() {
+            continue;
+        }
+        if let Some(file) = repair_file(&dotgit)? {
+            use std::io::Read;
+            let mut text = String::new();
+            file.take(4097).read_to_string(&mut text).map_err(|_| "error.copy.failed")?;
+            let target = text.strip_prefix("gitdir: ").filter(|_| text.len() <= 4096 && !text.contains('\0')).ok_or("error.copy.failed")?;
+            // Git's whitespace table intentionally excludes form feed and Unicode spaces.
+            let target = target.trim_end_matches([' ', '\t', '\n', '\r']);
+            let id = target
+                .rsplit_once(|c| c == '/' || (cfg!(windows) && c == '\\'))
+                .map(|(_, id)| id)
+                .filter(|id| !id.is_empty() && !matches!(*id, "." | "..") && !(cfg!(windows) && id.contains(':')))
+                .ok_or("error.copy.failed")?;
+            // Inference must resolve inside this repository, never to a foreign gitdir supplied by a gitfile.
+            if !admins.join(id).is_dir() {
+                return Err("error.copy.failed");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Repairs a linked copy after its repository moved, without checking out or deleting any of its files.
@@ -115,13 +171,28 @@ pub fn repair(exec: &mut dyn Executor, folder: &Path, data: &Path, id: &str, cop
     if root.is_empty() || sub.split('/').any(|part| part == ".." || part == ".git") {
         return Err("error.copy.failed");
     }
+    let dotgit = Path::new(root).join(".git");
+    real_path(&dotgit).map_err(|_| "error.copy.failed")?;
+    // Reclaimed copies keep their record, but a moved main checkout needs no worktree repair of its own.
+    if !path.exists() && dotgit.is_dir() {
+        return Ok(WorkCopy { root: root.into(), sub: sub.into(), ..copy.clone() });
+    }
+    let listed = git(exec, Path::new(root), &["worktree", "list", "--porcelain", "-z"]).ok_or("error.copy.failed")?;
+    if path.is_dir()
+        && !listed.split('\0').filter_map(|field| field.strip_prefix("worktree ")).any(|p| crate::recents::same_place(p, &copy.path))
+    {
+        return Err("error.copy.failed");
+    }
+    let common = git(exec, Path::new(root), &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or("error.copy.failed")?;
+    repair_metadata(Path::new(&common), &listed, Path::new(root), &path)?;
+    // Absolute links also prevent repair from upgrading the repository's relative-worktree config.
+    let mut args = vec!["-c", "worktree.useRelativePaths=false", "worktree", "repair", "--", root];
+    let target = native_path(&path);
     if path.is_dir() {
-        let listed = git(exec, Path::new(root), &["worktree", "list", "--porcelain", "-z"]).ok_or("error.copy.failed")?;
-        if !listed.split('\0').filter_map(|field| field.strip_prefix("worktree ")).any(|p| crate::recents::same_place(p, &copy.path)) {
-            return Err("error.copy.failed");
-        }
-        let common = git(exec, Path::new(root), &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or("error.copy.failed")?;
-        git(exec, Path::new(root), &["worktree", "repair", "--", &native_path(&path)]).ok_or("error.copy.failed")?;
+        args.push(&target);
+    }
+    git(exec, Path::new(root), &args).ok_or("error.copy.failed")?;
+    if path.is_dir() {
         let linked = git(exec, &path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or("error.copy.failed")?;
         if !crate::recents::same_place(&common, &linked) {
             return Err("error.copy.failed");
@@ -525,6 +596,17 @@ pub fn orphan(exec: &mut dyn Executor, data: &Path, id: &str) -> Option<WorkCopy
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t515c_git_paths_must_not_be_lossily_decoded() {
+        struct Raw;
+        impl Executor for Raw {
+            fn execute(&mut self, _: &Invocation) -> Result<super::super::git::Output, super::super::git::GitError> {
+                Ok(super::super::git::Output { success: true, stdout: b"worktree /unvalidated-\xff\0".to_vec() })
+            }
+        }
+        assert!(git(&mut Raw, Path::new("."), &["worktree", "list", "--porcelain", "-z"]).is_none());
+    }
 
     #[test]
     fn a_branch_is_a_few_plain_words_of_the_first_message_and_a_piece_of_the_id() {

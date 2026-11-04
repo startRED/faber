@@ -1,11 +1,11 @@
 {
   "notes": {
     "fixed": {
-      "en": "Waiting messages survive a restart, failed saves keep existing files and tasks, moved projects keep their copies, and reviews keep different problems apart.",
-      "pt-BR": "Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos e tarefas, projetos movidos mantêm suas cópias e revisões separam problemas diferentes.",
-      "es": "Los mensajes pendientes sobreviven al reinicio, los fallos al guardar conservan archivos y tareas, los proyectos trasladados mantienen sus copias y las revisiones distinguen problemas diferentes.",
-      "fr": "Les messages en attente restent après un redémarrage, un enregistrement raté préserve fichiers et tâches, les projets déplacés gardent leurs copies et les revues distinguent les problèmes.",
-      "de": "Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien und Aufgaben, verschobene Projekte behalten ihre Arbeitskopien und Prüfungen halten unterschiedliche Probleme auseinander."
+      "en": "Waiting messages survive a restart, failed saves keep existing files and tasks, moved projects recover safely with their copies, and reviews keep different problems apart.",
+      "pt-BR": "Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos e tarefas, projetos movidos recuperam suas cópias com segurança e revisões separam problemas diferentes.",
+      "es": "Los mensajes pendientes sobreviven al reinicio, los fallos al guardar conservan archivos y tareas, los proyectos trasladados recuperan sus copias con seguridad y las revisiones distinguen problemas diferentes.",
+      "fr": "Les messages en attente restent après un redémarrage, un enregistrement raté préserve fichiers et tâches, les projets déplacés retrouvent leurs copies sans risque et les revues distinguent les problèmes.",
+      "de": "Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien und Aufgaben, verschobene Projekte stellen ihre Arbeitskopien sicher wieder her und Prüfungen halten unterschiedliche Probleme auseinander."
     }
   }
 }
