@@ -1,5 +1,7 @@
 # Queued messages
 
+- Resuming after a close or update starts the interrupted work before waiting messages, while every saved snapshot
+  retains their ids, words and attachments, including the first synchronous save before the AI starts.
 - Messages sent by another conversation's agent, including a finished helper's report, show their existing localized
   origin as one quiet line, without the internal prompt or the person's editing controls. During normal work they
   need no manual send. If work stopped or delivery was refused, the line keeps Remove and Send now so the person can

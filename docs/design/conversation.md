@@ -27,6 +27,8 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   model select under an answer: a retry (and the right-click Redo, which names the model) uses the composer's current
   choice. Edit and Retry keep earlier generated-file cards usable for Save, Show and previews, including when a Chat
   conversation moved into a project; the new conversation keeps its own copy of the earlier default Chat folder.
+  Save copies through an exclusive temporary sibling and replaces the chosen file only after a complete, synced copy;
+  a failed read or write leaves an existing destination intact and uses the same save-error notice.
   Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
   a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
 - That line is a hover bar (R264; the owner, 2026-10-17). It stays in the layout, so nothing moves when it

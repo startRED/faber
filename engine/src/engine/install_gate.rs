@@ -94,18 +94,10 @@ impl Core {
         if v.keep_going.is_some() || v.messages.last().map_or("", |m| m.id.as_str()) != last {
             return;
         }
-        let waiting = std::mem::take(&mut v.queued);
         if self.live.get(id).is_some_and(|l| l.turn.is_some()) {
-            if let Some(v) = self.convs.get_mut(id) {
-                v.queued = waiting;
-            }
             return;
         }
         let _ = self.send_by_itself(id, RESUME.into(), crate::model::Wake::of("wake.updated"));
-        if let Some(v) = self.convs.get_mut(id) {
-            let added = std::mem::replace(&mut v.queued, waiting);
-            v.queued.extend(added);
-        }
         self.save(id);
         self.emit_queue(id);
     }
@@ -121,6 +113,87 @@ and finish what you were doing; do not start over.";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Stop exactly after dispatch_queued's synchronous save, before either resume path can save again.
+    async fn crash_at_resume_save(why: &'static str) {
+        let data = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&data);
+        let snapshot = Arc::new(Mutex::new(None));
+        let captured = snapshot.clone();
+        let path = data.path().to_path_buf();
+        let id = engine.with_saves(false, |core| {
+            core.ledger.claude.billing = Billing::Subscription;
+            core.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "unused".into(), prefix: vec![] });
+            let id = core.blank(Area::Chat, None);
+            let conv = core.convs.get_mut(&id).unwrap();
+            conv.choice = Some(Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None });
+            conv.messages.push(Message::new("request".into(), Role::User, "Work".into(), 1));
+            let mut reply = Message::new("cut".into(), Role::Assistant, "Partial answer".into(), 2);
+            reply.status = Some(Status::Stopped);
+            reply.closed = true;
+            conv.messages.push(reply);
+            conv.ended = Some(Ended { at: now(), kind: EndKind::Interrupted, work_ms: 0, line: None });
+            for n in 0..MAX_QUEUED {
+                conv.queued.push(QueuedTurn {
+                    id: format!("accepted-{n}"),
+                    text: format!("My waiting message {n}"),
+                    images: Some(vec![Image { media_type: "image/png".into(), base64: format!("image-{n}") }]),
+                    attachments: Some(vec![format!("file-{n}.txt")]),
+                    choice: conv.choice.clone().unwrap(),
+                    at: now(),
+                    sending: false,
+                    wake: None,
+                });
+            }
+            core.save(&id);
+            if why == "wake.resumed" {
+                core.convs.remove(&id);
+            }
+            core.emit = Arc::new(move |event| {
+                if let AppEvent::Message { conversation_id, message } = event
+                    && message.wake.as_ref().is_some_and(|w| w.why == why)
+                {
+                    *captured.lock().unwrap() = Store::new(&path).get(&conversation_id);
+                    panic!("simulated crash after the resume save");
+                }
+            });
+            id
+        });
+        if why == "wake.updated" {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    engine.with(|core| core.resume_one(&id, "cut"));
+                }))
+                .is_err()
+            );
+        } else {
+            engine.resume_interrupted();
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(21)).await;
+            tokio::task::yield_now().await;
+        }
+        let saved = snapshot.lock().unwrap().take().expect("the resume reached its durable save before any CLI starts");
+        assert_eq!(saved.messages[saved.messages.len() - 2].wake.as_ref().unwrap().why, why);
+        assert_eq!(saved.queued.len(), MAX_QUEUED, "every accepted message must survive this crash point");
+        for (n, queued) in saved.queued.iter().enumerate() {
+            assert_eq!(queued.id, format!("accepted-{n}"));
+            assert_eq!(queued.text, format!("My waiting message {n}"));
+            assert_eq!(queued.images.as_ref().unwrap(), &[Image { media_type: "image/png".into(), base64: format!("image-{n}") }]);
+            assert_eq!(queued.attachments.as_ref().unwrap(), &[format!("file-{n}.txt")]);
+        }
+        engine.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn update_resume_crash_keeps_the_accepted_queue() {
+        crash_at_resume_save("wake.updated").await;
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn interrupted_resume_crash_keeps_the_accepted_queue() {
+        crash_at_resume_save("wake.resumed").await;
+    }
+
     #[tokio::test]
     async fn install_reserves_chat_admission_and_releases_on_unwind() {
         let data = crate::workspace::TestRoot::new();

@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Queued messages survive interrupted restarts, and saving a file keeps the old copy if writing fails.",
+      "pt-BR": "Mensagens na fila sobrevivem a reinícios interrompidos, e salvar um arquivo mantém a cópia anterior se a gravação falhar.",
+      "es": "Los mensajes en espera sobreviven a reinicios interrumpidos, y al guardar un archivo conservas la copia anterior si falla la escritura.",
+      "fr": "Vos messages en attente restent après un redémarrage interrompu, et enregistrer un fichier préserve l’ancienne copie si l’écriture échoue.",
+      "de": "Nachrichten in der Warteschlange bleiben bei unterbrochenen Neustarts erhalten. Schlägt das Speichern einer Datei fehl, bleibt die bisherige Kopie bestehen."
+    }
+  }
+}

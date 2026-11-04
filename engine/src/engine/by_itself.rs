@@ -24,11 +24,13 @@ impl Core {
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
+        // Pick up interrupted work first without hiding accepted messages from its synchronous save.
+        let resuming = matches!(wake.why.as_str(), "wake.resumed" | "wake.updated");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
         // Compaction owns the session until its continuation can start.
         if busy
             || c.stopped
-            || !c.queued.is_empty()
+            || (!c.queued.is_empty() && !resuming)
             || c.compacting
             || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
         {
@@ -152,7 +154,13 @@ mod tests {
 
     #[tokio::test]
     async fn automatic_messages_hold_after_stop_even_when_the_conversation_is_idle() {
-        for (why, status) in [("wake.asked", Status::Done), ("wake.childDone", Status::Stopped), ("wake.keepGoing", Status::Error)] {
+        for (why, status) in [
+            ("wake.asked", Status::Done),
+            ("wake.childDone", Status::Stopped),
+            ("wake.keepGoing", Status::Error),
+            ("wake.updated", Status::Stopped),
+            ("wake.resumed", Status::Stopped),
+        ] {
             let dir = crate::workspace::TestRoot::new();
             let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
@@ -202,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn refused_questions_and_continuations_do_not_leave_hidden_retries() {
-        for why in ["wake.asked", "wake.keepGoing", "wake.approvedPlan"] {
+        for why in ["wake.asked", "wake.keepGoing", "wake.approvedPlan", "wake.updated", "wake.resumed"] {
             let dir = crate::workspace::TestRoot::new();
             let (engine, _) = super::super::answer::tests::engine(&dir);
             let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);

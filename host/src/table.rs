@@ -40,6 +40,10 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
     ("svg", "image/svg+xml"),
 ];
 
+fn copy_file(mut source: impl std::io::Read, target: &Path) -> std::io::Result<()> {
+    look::replace_file(target, |file| std::io::copy(&mut source, file).map(|_| ()))
+}
+
 const JSON_FILES: Filter = Filter { name: "JSON", extensions: &["json"] };
 const MARKDOWN_FILES: Filter = Filter { name: "Markdown", extensions: &["md"] };
 
@@ -712,7 +716,8 @@ table! {
         let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let picked = h.shell.pick_save(None, name).await.map_err(|why| if why == PickError::NoWindow { NO_WINDOW } else { "error.file.save" })?;
         let Some(target) = picked else { return Ok(false) };
-        std::fs::copy(&source, target).map_err(|_| "error.file.save")?;
+        let source = std::fs::File::open(source).map_err(|_| "error.file.save")?;
+        copy_file(source, &target).map_err(|_| "error.file.save")?;
         Ok(true)
     }
     Read Ask fn show_file(h, id: String, path: String) -> () {
@@ -1057,6 +1062,34 @@ table! {
     #[cfg(all(windows, feature = "test-hooks"))]
     Window Screen fn test_site_refuse_once(h) -> () {
         Err(NO_WINDOW.into())
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+    use std::io::{self, Cursor, Read};
+
+    #[test]
+    fn failed_workspace_copy_keeps_the_existing_destination() {
+        struct FailsAfterBytes(Cursor<&'static [u8]>);
+        impl Read for FailsAfterBytes {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.0.position() == self.0.get_ref().len() as u64 {
+                    return Err(io::Error::other("source read failed midway"));
+                }
+                self.0.read(bytes)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("saved.txt");
+        std::fs::write(&target, b"my original file").unwrap();
+        assert!(copy_file(FailsAfterBytes(Cursor::new(b"partial replacement")), &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"my original file");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "failed copies leave no temporary file");
+        copy_file(Cursor::new(b"complete replacement"), &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"complete replacement");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }
 
