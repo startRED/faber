@@ -53,6 +53,24 @@ use tokio::sync::broadcast;
 
 pub type Res<T> = Result<T, String>;
 
+#[cfg(feature = "test-hooks")]
+static FIRST_USER_BLOCKED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+#[cfg(feature = "test-hooks")]
+pub fn first_user_blocked_action() -> Option<String> {
+    lock(FIRST_USER_BLOCKED.get_or_init(|| Mutex::new(None))).take()
+}
+
+/// Refuses actions outside the isolated first-user walkthrough, before either shell can dispatch them.
+#[cfg(feature = "test-hooks")]
+pub fn first_user_guard(command: &str) -> bool {
+    if !std::env::var_os("FABER_FIRST_USER").is_some_and(|value| value == "1") || !macros::first_user_blocked(command) {
+        return false;
+    }
+    *lock(FIRST_USER_BLOCKED.get_or_init(|| Mutex::new(None))) = Some(command.to_string());
+    true
+}
+
 tokio::task_local! { static REQUEST_REVOKED: Option<Arc<AtomicBool>>; }
 fn request_flag() -> Option<Arc<AtomicBool>> {
     REQUEST_REVOKED.try_with(Clone::clone).ok().flatten()

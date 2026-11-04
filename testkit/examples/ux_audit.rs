@@ -1,14 +1,15 @@
 //! Drives a hidden, sandboxed test build over stdin, one JSON operation per line, and answers one JSON line each.
-//! Operations: eval, click, fill, press, shot, call (any DevTools method), memory, cpu, quit.
+//! Operations: eval, click, fill, press, shot, call (any DevTools method), memory, cpu, review_blocked, quit.
 //!
 //! Options: `--lang <code>` (default pt-BR), `--first-run` (no settings but the language, so the first run shows),
 //! `--codex` (fake Codex with the sandbox's synthetic sign-in), `--no-ai` (no CLI at all; the default is fake Claude),
 //! `--build` (builds the fake CLI
 //! and the test app first, at the build priority). `scripts/first-user.mjs` uses it for the first-user review.
 //! `--project-demo` seeds the existing isolated Demo repository and uses the fake chat replay, without first run.
+//! `--first-user` enables the Tauri-only guard against external actions for the newcomer review.
 
 use faber_testkit::{
-    app::{Ctx, Paths},
+    app::{Ctx, Paths, Shell},
     page::css,
     screen::{projects_ui, start_settings, ux_audit},
     testbuild::build_for_run,
@@ -19,6 +20,9 @@ use std::io::{self, BufRead, Write};
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--first-user") && Shell::chosen() != Shell::Tauri {
+        return Err("the first-user guard requires the Tauri test build".into());
+    }
     if has("--codex") && has("--no-ai") {
         return Err("--codex cannot be combined with --no-ai".into());
     }
@@ -41,6 +45,7 @@ fn main() -> Result<(), String> {
     }
     let project = if has("--project-demo") { Some(projects_ui::fixture(&mut ctx)?) } else { None };
     let mut launch = ux_audit::launch(&ctx, has("--codex"), has("--no-ai"))?;
+    launch.first_user = has("--first-user");
     if let Some(project) = project {
         launch.git_bin = project.git_bin;
     }
@@ -68,6 +73,13 @@ fn main() -> Result<(), String> {
             Some("call") => app.page.cdp.call(s, cmd["params"].clone()),
             Some("memory") => ctx.memory_mb(app.id).map(|m| json!(m)),
             Some("cpu") => ctx.cpu_ms(app.id).map(|m| json!(m)),
+            Some("review_blocked") => app.page.eval("window.__TAURI_INTERNALS__.invoke('first_user_blocked_action')").map(|blocked| {
+                if app.page.cdp.take_file_chooser() {
+                    if blocked.is_null() { json!("file_chooser") } else { json!([blocked, "file_chooser"]) }
+                } else {
+                    blocked
+                }
+            }),
             _ => Err("unknown operation".into()),
         };
         println!(

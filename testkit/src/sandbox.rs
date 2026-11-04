@@ -50,6 +50,8 @@ pub struct Launch {
     pub args: Vec<String>,
     /// Exercises raster costs that a local GPU can hide; used only by the motion benchmark.
     pub software_rendering: bool,
+    /// For the newcomer review, refuse actions that leave the sandbox or change installed tools.
+    pub first_user: bool,
     pub claude: CliSlot,
     pub codex: CliSlot,
     /// `FABER_FAKE_RECORDING`, for the fake CLIs.
@@ -258,6 +260,9 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     }
     set("FABER_DATA_DIR", path(&sb.data));
     set("FABER_FAKE_STATE_DIR", path(&sb.state));
+    if launch.first_user {
+        set("FABER_FIRST_USER", "1".into());
+    }
     set("FABER_SETUP_SOURCE", launch.setup_source.clone().unwrap_or_else(|| DEAD_ORIGIN.into()));
     if let Some(port) = launch.cdp_port {
         set("FABER_CDP_PORT", port.to_string());
@@ -356,6 +361,16 @@ mod tests {
         assert_eq!(child_env(&parent, &sb, &launch, fake).get("FABER_CHECKS_FILTER").map(String::as_str), Some(filter));
         let launch = Launch { checks_filter: None, ..launch };
         assert!(!child_env(&parent, &sb, &launch, fake).contains_key("FABER_CHECKS_FILTER"));
+    }
+
+    #[test]
+    fn first_user_guard_is_opt_in_and_cannot_be_inherited() {
+        let sb = Sandbox::new().unwrap();
+        let parent = pairs(&[("FABER_FIRST_USER", "1")]);
+        let fake = Path::new("fake-cli.exe");
+        assert!(!child_env(&parent, &sb, &Launch::default(), fake).contains_key("FABER_FIRST_USER"));
+        let launch = Launch { first_user: true, ..Launch::default() };
+        assert_eq!(child_env(&[], &sb, &launch, fake).get("FABER_FIRST_USER").map(String::as_str), Some("1"));
     }
 
     #[test]

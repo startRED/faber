@@ -26,6 +26,7 @@ pub struct Cdp {
     frame: Value,
     loaded: Option<String>,
     https_fixture: Option<SocketAddr>,
+    file_chooser: bool,
 }
 
 /// The time left until `deadline`. Zero is an error too, because a socket timeout of zero means "no timeout".
@@ -72,6 +73,10 @@ impl Write for Limited {
 }
 
 impl Cdp {
+    /// Reports and clears an intercepted native file chooser.
+    pub fn take_file_chooser(&mut self) -> bool {
+        std::mem::take(&mut self.file_chooser)
+    }
     /// Process roles from this fixture's own loopback browser, under one discovery/connect/call deadline.
     pub fn process_roles(&self) -> Result<Value, String> {
         let port = self.socket.get_ref().stream.peer_addr().map_err(|e| e.to_string())?.port();
@@ -293,6 +298,7 @@ impl Cdp {
             self.fixture_event(&reply, deadline)?;
             let params = &reply["params"];
             match reply["method"].as_str() {
+                Some("Page.fileChooserOpened") => self.file_chooser = true,
                 Some("Page.frameNavigated") if params["frame"]["parentId"].is_null() && !params["frame"]["id"].is_null() => {
                     self.frame = params["frame"].clone();
                 }
@@ -677,7 +683,7 @@ fn open(url: &str, deadline: Instant) -> Result<Cdp, String> {
     let addr: SocketAddr = host.parse().map_err(|e| format!("the DevTools address {host}: {e}"))?;
     let stream = TcpStream::connect_timeout(&addr, left(deadline, "the DevTools socket")?).map_err(|e| e.to_string())?;
     let (socket, _) = tungstenite::client(url, Limited { stream, deadline }).map_err(|e| format!("DevTools handshake: {e}"))?;
-    Ok(Cdp { socket, next: 0, deadline: None, frame: Value::Null, loaded: None, https_fixture: None })
+    Ok(Cdp { socket, next: 0, deadline: None, frame: Value::Null, loaded: None, https_fixture: None, file_chooser: false })
 }
 
 #[cfg(test)]
@@ -785,6 +791,12 @@ mod tests {
                         // An event before every answer: the client must skip it.
                         socket.send(Message::text(json!({ "method": "Page.frameNavigated", "params": {} }).to_string())).unwrap();
                         let reply = match request["method"].as_str().unwrap() {
+                            "Test.fileChooser" => {
+                                socket
+                                    .send(Message::text(json!({ "method": "Page.fileChooserOpened", "params": {} }).to_string()))
+                                    .unwrap();
+                                json!({})
+                            }
                             "Page.getFrameTree" => {
                                 json!({ "frameTree": { "frame": { "id": "main", "loaderId": "first", "url": "http://tauri.localhost/" } } })
                             }
@@ -911,6 +923,16 @@ mod tests {
         let methods: Vec<String> = seen.lock().unwrap().iter().map(|r| r["method"].as_str().unwrap().to_string()).collect();
         assert_eq!(methods[0], "Emulation.setFocusEmulationEnabled", "an offscreen window must be told it has focus");
         assert!(seen.lock().unwrap()[1]["params"]["awaitPromise"] == json!(true));
+    }
+
+    #[test]
+    fn intercepted_file_chooser_is_retained_until_reported() {
+        let (port, _) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        assert!(!cdp.take_file_chooser());
+        cdp.call("Test.fileChooser", json!({})).unwrap();
+        assert!(cdp.take_file_chooser());
+        assert!(!cdp.take_file_chooser());
     }
 
     #[test]

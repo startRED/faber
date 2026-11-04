@@ -16,6 +16,7 @@ import { crash, progress, report } from './crash.ts';
 import { shellGaps } from './shell-gaps.ts';
 import { ignoreSystemMotion } from './system-motion.ts';
 import './appearance.check.ts';
+import './thread-stall.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
 import './details.check.ts';

@@ -324,6 +324,18 @@ fn visual_policy(faber: State<'_, Faber>) -> bool {
     visual_network::ready() && faber.engine.visual_network()
 }
 
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+fn first_user_guard_status() -> bool {
+    std::env::var_os("FABER_FIRST_USER").is_some_and(|value| value == "1")
+}
+
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+fn first_user_blocked_action() -> Option<String> {
+    faber_host::first_user_blocked_action()
+}
+
 #[tauri::command]
 fn visual_open(pages: State<'_, visual_page::Pages>) -> String {
     pages.open()
@@ -891,6 +903,10 @@ fn main() {
                 visual_close,
                 #[cfg(feature = "test-hooks")]
                 visual_policy,
+                #[cfg(feature = "test-hooks")]
+                first_user_guard_status,
+                #[cfg(feature = "test-hooks")]
+                first_user_blocked_action,
                 screen_ready,
                 #[cfg(feature = "test-hooks")]
                 report_checks,
@@ -905,6 +921,11 @@ fn main() {
             move |invoke: tauri::ipc::Invoke| {
                 if invoke.message.webview().label() != "main" {
                     invoke.resolver.reject("Faber answers only its own screen");
+                    return true;
+                }
+                #[cfg(feature = "test-hooks")]
+                if faber_host::first_user_guard(invoke.message.command()) {
+                    invoke.resolver.reject("error.host.firstUserBlocked");
                     return true;
                 }
                 // A command of the shared table runs there (R459); the rest need the window and are this shell's own, listed above.

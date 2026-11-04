@@ -15,6 +15,24 @@ const controls = [
   { role: 'input', name: 'Escreva aqui', x: 20, y: 20, disabled: true },
 ];
 
+test('the review refuses an unguarded Electron shell before launching', () => {
+  for (const shell of ['electron', 'ELECTRON']) assert.throws(() => firstUser.checkReviewShell(shell), /requires the Tauri test build/);
+  assert.doesNotThrow(() => firstUser.checkReviewShell(undefined));
+});
+
+test('a blocked action is labeled as a test restriction, not a product failure', () => {
+  const text = report({ date: '2026-11-04', agent: 'test', size: { width: 720, height: 480 }, lang: 'en', findings: [], shots: 'shots',
+    results: [{ task: { id: 'projects', goal: 'Find projects' }, outcome: 'blocked', steps: [] }] });
+  assert.match(text, /teste interrompeu uma ação fora do escopo/);
+});
+
+test('a model summary cannot attribute a test-blocked action to the product', () => {
+  const results = [{ task: { id: 'projects' }, outcome: 'blocked', steps: [{ action: { type: 'stuck', where: 'o teste impediu add_project' }, shot: 'shot.png' }] }];
+  const findings = firstUser.reviewFindings(results, [{ task: 'projects', stuck: 'the app blocked the folder' }]);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].stuck, /o teste impediu/);
+});
+
 test('each captured step keeps the actual controls before the reviewer can fail', async () => {
   assert.equal(typeof firstUser.captureObservation, 'function');
   const folder = mkdtempSync(join(tmpdir(), 'faber-first-user-observation-'));
@@ -168,8 +186,8 @@ test('a seeded project conversation is opt-in and never launches without its fak
   assert.equal(tasks.length, 1);
   assert.match(tasks[0].goal, /In one sentence: why is the sky blue\?/);
   assert.equal(firstUser.selectTasks().some((task) => task.id === 'conversa-projeto'), false);
-  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--lang', 'pt-BR']);
-  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--lang', 'en', '--build']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--project-demo', '--first-user', '--lang', 'pt-BR']);
+  assert.deepEqual(firstUser.driverFlags(TASKS, 'en', true), ['--first-run', '--no-ai', '--first-user', '--lang', 'en', '--build']);
   assert.throws(() => firstUser.driverFlags([...TASKS, ...tasks], 'en', false), /one focused task/);
 });
 
@@ -305,8 +323,8 @@ test('without a usable summary the report still lists every confusion and every 
 
 test('focused Chat uses the existing replay instead of disabling AI', () => {
   const tasks = firstUser.selectTasks(['--task', 'conversa']);
-  assert.deepEqual(firstUser.driverFlags(tasks, 'en', true), ['--lang', 'en', '--build']);
-  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--lang', 'pt-BR']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'en', true), ['--first-user', '--lang', 'en', '--build']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--first-user', '--lang', 'pt-BR']);
   const input = JSON.parse(readFileSync(new URL('../tests/fixtures/claude/chat.jsonl', import.meta.url), 'utf8').split('\n')[0]);
   assert.ok(tasks[0].goal.includes(input.msg.message.content));
   assert.match(tasks[0].goal, /Claude Haiku/);
@@ -317,7 +335,7 @@ test('the default no-AI walk explores Chat without requesting an impossible resp
   assert.deepEqual(tasks.map((task) => task.id), ['primeira-abertura', 'catalogo', 'conversa', 'projetos', 'configuracoes']);
   assert.match(tasks.find((task) => task.id === 'conversa').goal, /nenhuma IA conectada/);
   assert.doesNotMatch(tasks.find((task) => task.id === 'conversa').goal, /até aparecer uma resposta/);
-  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--first-run', '--no-ai', '--lang', 'pt-BR']);
+  assert.deepEqual(firstUser.driverFlags(tasks, 'pt-BR', false), ['--first-run', '--no-ai', '--first-user', '--lang', 'pt-BR']);
 });
 
 test('focused Chat report identifies prepared replay rather than claiming first-run evidence', () => {

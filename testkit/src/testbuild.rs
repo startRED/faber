@@ -167,6 +167,11 @@ pub fn without_run_env(mut command: Command) -> Command {
 
 /// Cargo, or the one Cargo that started this runner, at the build priority.
 pub fn cargo_command() -> Command {
+    if std::env::var_os("FABER_CARGO_WRAPPER").is_some() {
+        let mut command = build_priority(without_run_env(Command::new("node")));
+        command.arg("scripts/cargo.mjs");
+        return command;
+    }
     build_priority(without_run_env(Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))))
 }
 
@@ -317,13 +322,28 @@ pub fn build_for_run(paths: &Paths, jobs: usize) -> Result<(), String> {
     build_shell(paths, jobs, &production, &before)
 }
 
+fn wrapper_target(args: &mut Vec<String>) {
+    let i = args.iter().position(|arg| arg == "--target-dir").expect("build arguments include their target");
+    args.drain(i..i + 2);
+}
+
 /// The build of the shell. Tauri's embeds the test screen Vite left in `dist-test`; Electron's is its compiled code and the
 /// Rust host beside it, and serves `dist-test` from the folder (`FABER_TEST_DIST`).
 fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> Result<(), String> {
     match Shell::chosen() {
         Shell::Tauri => {
             let mut tauri = build_priority(without_run_env(Command::new("node")));
-            tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
+            let mut args = tauri_args(&paths.target, jobs);
+            if std::env::var_os("FABER_CARGO_WRAPPER").is_some() {
+                wrapper_target(&mut args);
+                tauri
+                    .current_dir(&paths.root)
+                    .env("CARGO_TARGET_DIR", &paths.target)
+                    .args(["scripts/cargo.mjs", "--tauri"])
+                    .args(&args[1..]);
+            } else {
+                tauri.current_dir(&paths.root).args(args);
+            }
             run("Tauri build", tauri)?;
         }
         Shell::Electron => {
@@ -331,7 +351,12 @@ fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> R
             tsc.current_dir(&paths.root).args(electron_args());
             run("Electron shell build", tsc)?;
             let mut host = cargo_command();
-            host.current_dir(&paths.root).args(sidecar_args(&paths.target, jobs));
+            let mut args = sidecar_args(&paths.target, jobs);
+            if std::env::var_os("FABER_CARGO_WRAPPER").is_some() {
+                wrapper_target(&mut args);
+                host.env("CARGO_TARGET_DIR", &paths.target);
+            }
+            host.current_dir(&paths.root).args(args);
             run("host build", host)?;
         }
     }
@@ -446,6 +471,20 @@ mod tests {
     fn a_build_on_a_persons_pc_starts_at_idle_priority_and_never_with_a_console_window() {
         assert_eq!(build_flags(true), crate::contain::NO_WINDOW);
         assert_eq!(build_flags(false), crate::contain::NO_WINDOW | IDLE_PRIORITY_CLASS);
+    }
+
+    #[test]
+    fn wrapper_moves_the_build_target_to_the_environment_without_losing_other_arguments() {
+        let target = std::path::Path::new("test-target");
+        for mut args in [tauri_args(target, 2), sidecar_args(target, 2)] {
+            let before = args.clone();
+            wrapper_target(&mut args);
+            assert!(!args.iter().any(|arg| arg == "--target-dir" || arg == "test-target"));
+            let mut expected = before;
+            let index = expected.iter().position(|arg| arg == "--target-dir").unwrap();
+            expected.drain(index..index + 2);
+            assert_eq!(args, expected);
+        }
     }
 
     #[test]

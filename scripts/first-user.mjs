@@ -12,9 +12,9 @@
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
 // desktop no monitor shows), with no real CLI connected, so no subscription is spent inside it; the reviewer's own calls are
-// its only cost. Builds run at idle priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
+// its only cost. Builds request low priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const TARGET = process.env.CARGO_TARGET_DIR ? resolve(ROOT, process.env.CARGO_TARGET_DIR) : join(ROOT, 'target');
+
 
 /** Missing artifacts are expected before a build; other read failures must not become missing evidence. */
 export async function artifactIdentity(paths) {
@@ -99,7 +100,11 @@ export function driverFlags(tasks, lang, build) {
   const project = tasks.some((task) => task.id === PROJECT_TASK.id);
   if (project && tasks.length !== 1) throw new Error('the seeded project needs one focused task');
   const chat = tasks.length === 1 && tasks[0].id === CHAT_TASK.id;
-  return [...(project ? ['--project-demo'] : chat ? [] : ['--first-run', '--no-ai']), '--lang', lang, ...(build ? ['--build'] : [])];
+  return [...(project ? ['--project-demo'] : chat ? [] : ['--first-run', '--no-ai']), '--first-user', '--lang', lang, ...(build ? ['--build'] : [])];
+}
+
+export function checkReviewShell(shell) {
+  if ((shell || '').toLowerCase() === 'electron') throw new Error('the first-user guard requires the Tauri test build');
 }
 
 /** Runs in the page: controls a person can see and reach, numbered, with their centre; text comes from the screenshot. */
@@ -297,9 +302,17 @@ export function fallback(results) {
   );
 }
 
+/** A blocked action is a test restriction; a model summary must not attribute it to the product. */
+export function reviewFindings(results, summary) {
+  const blocked = new Set(results.filter((result) => result.outcome === 'blocked').map((result) => result.task.id));
+  if (!Array.isArray(summary)) return fallback(results);
+  return [...summary.filter((finding) => finding && typeof finding === 'object' && !blocked.has(finding.task)),
+    ...fallback(results.filter((result) => blocked.has(result.task.id)))];
+}
+
 /** The report, in plain pt-BR. */
 export function report({ date, agent, size, lang, findings, results, shots }) {
-  const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos' };
+  const outcome = { done: 'conclusão declarada pela IA; precisa conferir as imagens', stuck: 'travou', steps: 'não terminou no limite de passos', blocked: 'teste interrompeu uma ação fora do escopo' };
   const context = results.some((r) => r.task.id === PROJECT_TASK.id)
     ? 'projeto Demo já preparado, com resposta gravada e sem uma IA real dentro do app'
     : results.length === 1 && results[0].task.id === CHAT_TASK.id
@@ -397,7 +410,7 @@ function reviewer(kind, home) {
 
 /** The hidden test build, one JSON operation per line. */
 function driver(exe, flags) {
-  const child = spawn(exe, flags, { cwd: ROOT, windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(exe, flags, { cwd: ROOT, windowsHide: true, env: { ...process.env, CARGO_TARGET_DIR: TARGET, FABER_CARGO_WRAPPER: '1' }, stdio: ['pipe', 'pipe', 'inherit'] });
   const lines = createInterface({ input: child.stdout });
   const waiting = [];
   const queued = [];
@@ -480,6 +493,7 @@ async function act(app, action, seen, size) {
 }
 
 async function main(args) {
+  checkReviewShell(process.env.FABER_TEST_SHELL);
   const tasks = selectTasks(args);
   const agent = option(args, '--agent', 'claude');
   const [width, height] = option(args, '--size', '720x480').split('x').map(Number);
@@ -490,68 +504,87 @@ async function main(args) {
   const { shots, out } = runPaths(ROOT, TARGET, date, option(args, '--out'));
 
   const home = mkdtempSync(join(tmpdir(), 'faber-first-user-'));
-  if (insideRepo(home)) throw new Error(`the reviewer's folder ${home} is inside the repository`);
-  const ask = reviewer(agent, home);
-
-  // The build of the driver inherits this priority; the test app's own build in `ux_audit --build` sets idle itself.
   try {
-    setPriority(constants.priority.PRIORITY_LOW);
-  } catch {
-    // Not allowed here: build at the normal priority.
-  }
-  const artifacts = {
-    driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
-    app: join(TARGET, `faber-test/debug/faber${EXE}`),
-    fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
-  };
-  const identities = [];
-  const recordIdentity = async (stage) => {
-    identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
-    writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
-  };
-  await recordIdentity('before-driver-build');
-  // --no-build reuses the app; the driver is still built from this worktree before it starts.
-  const built = spawnSync('cargo', ['build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
-  await recordIdentity('after-driver-build');
-  if (built.status !== 0) throw new Error('the build of testkit/examples/ux_audit.rs failed');
-  const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
-  await recordIdentity('before-driver-start');
-  const app = driver(artifacts.driver, flags);
-  const results = [];
-  await withApp(app, async () => {
-    await recordIdentity('app-ready');
-    await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
-    await pause(1500);
-    const actualLang = await app.op('eval', 'document.documentElement.lang');
-    if (actualLang !== lang) {
-      await app.op('shot', join(shots, 'language-mismatch.png'));
-      throw new Error(`the app language is ${actualLang}, expected ${lang}; refusing a mislabeled review`);
+    if (insideRepo(home)) throw new Error(`the reviewer's folder ${home} is inside the repository`);
+    const ask = reviewer(agent, home);
+
+    // Child runtimes can choose a higher priority on Windows, so this alone does not guarantee idle.
+    try {
+      setPriority(constants.priority.PRIORITY_LOW);
+    } catch {
+      // Not allowed here: build at the normal priority.
     }
-    for (const task of tasks) {
-      const steps = [];
-      let outcome = 'steps';
-      for (let n = 1; n <= maxSteps; n++) {
-        const shot = join(shots, `${task.id}-${n}.png`);
-        const seen = await captureObservation(app, shot);
-        const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
-        if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
-        steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
-        console.log(`${task.id} ${n}: ${describe(step.action)}`);
-        if (step.action.type === 'done' || step.action.type === 'stuck') {
-          outcome = step.action.type;
-          break;
-        }
-        await act(app, step.action, seen, size);
+    const artifacts = {
+      driver: join(TARGET, `debug/examples/ux_audit${EXE}`),
+      app: join(TARGET, `faber-test/debug/faber${EXE}`),
+      fakeCli: join(TARGET, `debug/fake-cli${EXE}`),
+    };
+    const identities = [];
+    const recordIdentity = async (stage) => {
+      identities.push({ stage, at: new Date().toISOString(), files: await artifactIdentity(artifacts) });
+      writeFileSync(join(shots, 'execution-identities.json'), JSON.stringify(identities, null, 2));
+    };
+    await recordIdentity('before-driver-build');
+    // --no-build reuses the app; the driver is still built from this worktree before it starts.
+    await new Promise((done, fail) => {
+      const child = spawn(process.execPath, [join(ROOT, 'scripts/cargo.mjs'), 'build', '--quiet', '-p', 'faber-testkit', '--example', 'ux_audit'], {
+        cwd: ROOT, env: { ...process.env, CARGO_TARGET_DIR: TARGET }, stdio: 'inherit', windowsHide: true,
+      });
+      child.once('error', fail);
+      child.once('close', (code) => code === 0 ? done() : fail(new Error(`the build of testkit/examples/ux_audit.rs failed (${code})`)));
+    });
+    await recordIdentity('after-driver-build');
+    const flags = driverFlags(tasks, lang, !args.includes('--no-build'));
+    await recordIdentity('before-driver-start');
+    const app = driver(artifacts.driver, flags);
+    const results = [];
+    await withApp(app, async () => {
+      await recordIdentity('app-ready');
+      const protectedRun = await app.op('eval', "window.__TAURI_INTERNALS__.invoke('first_user_guard_status')");
+      if (protectedRun !== true) throw new Error('the hidden app did not enable the first-user guard');
+      await app.op('call', 'Page.enable');
+      await app.op('call', 'Page.setInterceptFileChooserDialog', { params: { enabled: true } });
+      await app.op('call', 'Emulation.setDeviceMetricsOverride', { params: { width, height, deviceScaleFactor: 1, mobile: false } });
+      await pause(1500);
+      const actualLang = await app.op('eval', 'document.documentElement.lang');
+      if (actualLang !== lang) {
+        await app.op('shot', join(shots, 'language-mismatch.png'));
+        throw new Error(`the app language is ${actualLang}, expected ${lang}; refusing a mislabeled review`);
       }
-      results.push({ task, steps, outcome });
-    }
-  }, () => recordIdentity('after-driver-exit'));
-  const summary = firstJson(await ask(summaryPrompt(results)))?.findings;
-  const findings = Array.isArray(summary) ? summary : fallback(results);
-  const name = agent === 'claude' ? 'Claude Haiku, sem nenhuma ferramenta' : 'Codex gpt-6-luna, sem terminal nem apps';
-  writeFileSync(out, report({ date, agent: name, size, lang, findings, results, shots: relative(ROOT, shots).replaceAll('\\', '/') }));
-  rmSync(home, { recursive: true, force: true });
-  console.log(`findings: ${relative(ROOT, out)}`);
+      for (const task of tasks) {
+        const steps = [];
+        let outcome = 'steps';
+        for (let n = 1; n <= maxSteps; n++) {
+          const shot = join(shots, `${task.id}-${n}.png`);
+          const seen = await captureObservation(app, shot);
+          const step = parseStep(await ask(stepPrompt(task, steps, seen, size, lang), shot), seen.controls);
+          if (step.action.type === 'click') step.action.name = seen.controls[step.action.n - 1].name;
+          steps.push({ ...step, shot: relative(ROOT, shot).replaceAll('\\', '/') });
+          console.log(`${task.id} ${n}: ${describe(step.action)}`);
+          if (step.action.type === 'done' || step.action.type === 'stuck') {
+            outcome = step.action.type;
+            break;
+          }
+          await act(app, step.action, seen, size);
+          const blocked = await app.op('review_blocked');
+          if (blocked) {
+            writeFileSync(join(shots, `${task.id}-${n}.blocked.json`), JSON.stringify({ task: task.id, step, command: blocked }, null, 2), { flag: 'wx' });
+            steps[steps.length - 1].action = { type: 'stuck', where: `o teste impediu a ação ${blocked}; não é um defeito confirmado` };
+            outcome = 'blocked';
+            break;
+          }
+        }
+        results.push({ task, steps, outcome });
+      }
+    }, () => recordIdentity('after-driver-exit'));
+    const summary = firstJson(await ask(summaryPrompt(results)))?.findings;
+    const findings = reviewFindings(results, summary);
+    const name = agent === 'claude' ? 'Claude Haiku, sem nenhuma ferramenta' : 'Codex gpt-6-luna, sem terminal nem apps';
+    writeFileSync(out, report({ date, agent: name, size, lang, findings, results, shots: relative(ROOT, shots).replaceAll('\\', '/') }));
+    console.log(`findings: ${relative(ROOT, out)}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

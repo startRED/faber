@@ -1,5 +1,70 @@
 //! The macro that builds the command table.
 
+#[cfg(feature = "test-hooks")]
+pub(super) fn first_user_blocked(command: &str) -> bool {
+    matches!(
+        command,
+        "open_link"
+            | "open_terminal"
+            | "show_file"
+            | "show_damaged_conversation"
+            | "show_project"
+            | "add_project"
+            | "open_folders"
+            | "open_theme"
+            | "save_theme"
+            | "export_conversation"
+            | "save_file"
+            | "setup_install"
+            | "setup_sign_in"
+            | "tools_install"
+            | "tools_replace"
+            | "tools_remove"
+            | "tools_set_enabled"
+            | "tools_restore"
+            | "site_open"
+            | "site_go"
+            | "site_step"
+            | "site_tab"
+    )
+}
+
+#[cfg(all(test, feature = "test-hooks"))]
+mod first_user_tests {
+    #[test]
+    fn only_explicit_external_or_tool_changes_are_blocked() {
+        for command in [
+            "open_link",
+            "open_terminal",
+            "show_file",
+            "show_damaged_conversation",
+            "show_project",
+            "add_project",
+            "open_folders",
+            "open_theme",
+            "save_theme",
+            "export_conversation",
+            "save_file",
+            "setup_install",
+            "setup_sign_in",
+            "tools_install",
+            "tools_replace",
+            "tools_remove",
+            "tools_set_enabled",
+            "tools_restore",
+            "site_open",
+            "site_go",
+            "site_step",
+            "site_tab",
+        ] {
+            assert!(super::first_user_blocked(command), "{command}");
+        }
+        for command in ["state", "setup_check", "tools_list", "tools_clear_removed", "save_settings"] {
+            assert!(!super::first_user_blocked(command), "{command}");
+        }
+    }
+}
+
 /// A command's failure type: an error key unless the entry names another (`Failure`, for the appearance commands).
 macro_rules! fail {
     () => {
@@ -40,6 +105,8 @@ macro_rules! table {
             /// Runs one command. Arguments are an object of named values, as the screen sends them; anything else, or
             /// arguments that do not fit, is `error.host.badArgs`, and a name not in the table `error.host.unknownCommand`.
             pub async fn dispatch(&self, command: &str, args: Value) -> Result<Value, Failure> {
+                #[cfg(feature = "test-hooks")]
+                if crate::first_user_guard(command) { return Err(Failure::key("error.host.firstUserBlocked")); }
                 let args = match args {
                     Value::Null => Value::Object(Default::default()),
                     Value::Object(_) => args,
