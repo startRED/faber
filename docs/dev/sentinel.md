@@ -43,6 +43,10 @@ Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `n
 copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
 `scripts/shots.test.mjs` keeps the choice of screens. A fresh session scores the `before` and `after` folders out of 40
 with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touched screen reaches 32.
+`node scripts/council.mjs <label>` is that scorer: judges of several vendors score the same photos at once, a line is
+their median, a judge far from the middle one is a jester whose numbers leave the score, and only rows two judges agree
+on are work. `--refs` adds photos of other apps as the bar, and `--against <label>` says whether a climb keeps a round,
+reverts it or stops at its target (36 of 40). `scripts/council.test.mjs` keeps the scoring; the skill says how to climb.
 
 ## First-user review
 

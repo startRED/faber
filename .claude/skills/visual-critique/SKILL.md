@@ -44,13 +44,47 @@ Score each screen, before and after, 0 to 5 on each line:
 The score of a screen is the sum, out of 40. For each point lost, one row: the photo, what is there, what it should be,
 the line or card it breaks. A score with no rows is not a score.
 
+### The council (the default scorer)
+
+One judge sees through one model's eyes, and some judges invent defects. `node scripts/council.mjs <label>` sends the
+photos of a label to several judges of different vendors at once (`--judges codex,agy,claude`, the default; two at
+least), each in an empty temp folder with only the photos, no code and no tools:
+
+- A line's score is the judges' median; with two judges, the harsher one.
+- From three judges on, one whose total for a photo is more than 6 points from the middle judge is that photo's
+  **jester**: its numbers leave the score and its rows go to "Unconfirmed". A jester is expected; it is why there is a
+  council.
+- Only rows two judges agree on (the same line of the same photo) are work. The rest is listed, never fixed by itself.
+- `--refs <folder>` (or `FABER_COUNCIL_REFS`) adds photos of the apps Faber is measured against (section 4). The
+  judges score them on the same lines; the report gives each screen's gap to the best reference and what they do better.
+  Those photos stay on the PC, never in the repository.
+
+It writes `council.md` and `council.json` in the label's folder. A judge that is signed out or gives no fair answer is
+named and left out. The council replaces the single fresh session for the score; the rule below does not change.
+
+## 3b. The climb (hill climbing to a target)
+
+Asking once for a perfect screen does not work; a score and a loop do. For a screen below its target, or when the owner
+asks for polish:
+
+1. `node scripts/shots.mjs r0` and `node scripts/council.mjs r0`: the starting point, and the first best round.
+2. Fix only the council's "Work" rows (and the references' "better" lines that fit the cards), as one commit.
+3. `node scripts/shots.mjs r1`, then `node scripts/council.mjs r1 --against <best> --target 36`. The climb line says:
+   - **keep**: no screen dropped, one rose past the noise; this round is the new best.
+   - **revert**: a screen dropped, or nothing rose; `git revert` the round's commit and try a different fix.
+   - **stop**: every screen reached the target.
+4. Stop too after five rounds or two reverts in a row, and say where it ended. Never edit the rubric, the photos or the
+   judges to climb; a climb that games its score is a revert.
+
+The target of a climb is 36 of 40; the rule's floor stays 32.
+
 ## 3. The rule
 
 - The score of a screen never drops. A drop blocks the merge, like a failing check.
 - A new screen, or a screen the change touches, reaches 32 of 40 (the owner, 2026-10-16). One already below 32 may rise in
   steps, as long as it does not drop.
 - The pull request says `Visual critique: before X/40, after Y/40, by <session>` (the lowest screen of each), and links
-  the rows.
+  the rows; by the council it says `by council <judges>` and names any jester.
 - A point lost that a check could catch (art under text, a repeated name, uneven columns) is the sentinel's job: if it
   passed green, say so, so the check gets better.
 
