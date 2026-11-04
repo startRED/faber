@@ -8,6 +8,7 @@
 //!     cargo run -p faber-engine --example bench -- [--dry-run] [--plain claude|codex] [--vendors claude[,codex]]
 //!         [--only id,id] [--run-id id] [--dir folder] [--cap-usd 8] [--cap-tokens 3000000] [--per-run-usd 1.5]
 //!         [--plain-model m] [--plain-effort e] [--judge-model m] [--judge-effort e]
+//!     --tool-definitions exports both toolbox wire formats as JSON without starting a CLI or spending quota.
 //!
 //! The pure parts (request files, the A/B deal, the verdict, what a CLI reported, the cap, the tables) are
 //! `bench/pure.rs`, tested by `engine/tests/all.rs`.
@@ -835,6 +836,11 @@ fn write_checkpoint(run_dir: &Path, options: &Options, rows: &[Row], row: &Row, 
 
 #[tokio::main]
 async fn main() -> Result<(), Failure> {
+    // Export the actual wire definitions for paired CLI token measurements, without spending quota.
+    if std::env::args().any(|arg| arg == "--tool-definitions") {
+        println!("{}", json!({ "mcp": faber_engine::toolbox::mcp_tools(), "dynamic": faber_engine::toolbox::codex_tools() }));
+        return Ok(());
+    }
     let mut options = Options::read()?;
     let root = std::path::absolute(options.dir.join(&options.run_id))?;
     let inputs = if options.dry_run {
