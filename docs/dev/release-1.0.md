@@ -19,6 +19,7 @@ English and French. Green when no finding is blocker or high:
 
 - [ ] First run with no AI, with Claude, with Codex; account cards; the health check names a fix for each failure.
 - [ ] Chat: send, stream, stop, retry, edit, go back, question card, permission card, attachment.
+      Evidence (2026-11-04): 60 clean hidden runs (Tauri and Electron, pt-BR/en/fr, 720x480 and 1280x800; first run no AI/Claude/Codex, prepared `ux_audit --codex` walk, What's new) and the Electron UI suite 812/812; exact coverage per run class in reports/reforma/helpers/g390j.result.md. Findings: high, Electron loses the unsent draft after a forced close; medium, Electron hard-kill recovery lands on home; medium, Catalog heading hidden at compact size (task 455). Not covered: stop/retry/edit/go back, question and permission cards, project tools and subagents, real sign-in.
 - [ ] Projects: new conversation, tools, a subagent step, a helper, the changes pane, resume a past conversation.
 - [ ] Endings: concluded shows the AI's summary; ended without a conclusion, interrupted (after a forced close) and
       stuck each show their true state and the way on.
@@ -45,9 +46,11 @@ English and French. Green when no finding is blocker or high:
 ## Install and update
 
 - [ ] A clean Windows user installs from the release page, signs in through each CLI's own flow and sends a message.
+      Evidence (2026-11-04): run 41800600209: the installed .90 reaches the first-run subscription connection screen (hidden, repeated passes). Real sign-in and a sent message are not covered.
 - [ ] The current Tauri install updates itself to the Electron build without losing a conversation or a setting.
-      Evidence (2026-11-04): partial: CI run 41765623671 (windows-latest) installed preview.84 (Tauri), ran the preview.90 (Electron) installer, started it hidden and found the sample conversation, the setting and the backup on disk. It did not show the app reading them or the self-update itself.
+      Evidence (2026-11-04): run 41800600209 (windows-latest, `install-update-self.yml`): the real preview.84 app downloaded, signature-checked and ran the preview.90 installer itself; the new app read the sample conversation and setting through its API and the backup holds both files. Not proved: the automatic relaunch of the new app from .84 (the harness starts it). Harness details: a local HTTPS fixture serves the original signed .90.
 - [ ] 1.0 updates itself to a 1.0.1 built for the test, while a conversation is open, and the conversation goes on.
+      Evidence (2026-11-04): FAILED in run 41800600209 with preview.89 to .90: after the real restart button the old Electron processes stay alive, the installed package stays .89 (a shutdown race in `update/src/updater.rs` and `sidecar/src/main.rs`, same code on base). Task 460 fixes it.
 - [ ] macOS and Linux builds pass CI and ship marked as preview.
       Evidence (2026-11-04): release v0.3.18-preview.90 (Pre-release) ships mac dmg/zip, Linux .deb and AppImage, Windows setup; CI run 41760708119 passed `check (macos-latest, ...)`. Linux: the "Linux engine and runner compile guard" step of the docs job in the same run passed (a compile check, not a full app build); the packages come from the release build.
 
