@@ -89,6 +89,7 @@ async fn replay(
                     spawn: fake.spawn.clone(),
                     sandbox: None,
                     launch: ClaudeLaunch {
+                        temporary: false,
                         area,
                         permissions,
                         model: None,
@@ -126,6 +127,7 @@ async fn replay(
             });
             let session = app.open_with_tools(
                 CodexThread {
+                    temporary: false,
                     title: None,
                     cwd: cwd.into(),
                     permissions,

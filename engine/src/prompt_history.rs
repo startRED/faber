@@ -94,6 +94,8 @@ fn matches_scope(input: impl Read, id: &str, area: Area, project_id: Option<&str
 #[serde(rename_all = "camelCase")]
 struct Saved {
     id: String,
+    #[serde(default)]
+    temporary: bool,
     area: Area,
     project_id: Option<String>,
     #[serde(deserialize_with = "prompts")]
@@ -229,7 +231,7 @@ pub(crate) fn read(
         let input = Cancellable { input: file.take(FILE_LIMIT), cancelled, remaining: &mut remaining };
         // Damaged or concurrently removed files do not hide the others; no partial file escapes.
         let Ok(saved) = serde_json::from_reader::<_, Saved>(BufReader::new(input)) else { continue };
-        if saved.id != id || saved.area != area || (area == Area::Project && saved.project_id.as_deref() != project_id) {
+        if saved.temporary || saved.id != id || saved.area != area || (area == Area::Project && saved.project_id.as_deref() != project_id) {
             continue;
         }
         for prompt in saved.messages {

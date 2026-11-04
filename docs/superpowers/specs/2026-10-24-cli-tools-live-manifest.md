@@ -1,6 +1,6 @@
 # Command-line tools and the live manifest
 
-Status: in progress locally; task 998 remains open. Offline signature verification has six passing checks and two independent security reviews. No remote manifest, compatibility gate or command-line catalog item is built.
+Status: in progress; offline signature and payload validation are implemented. Cache and accepted revision state remain open. No remote manifest, compatibility gate or command-line catalog item is built.
 
 ## Existing contract
 
@@ -34,8 +34,16 @@ It uses Node's [built-in signature verifier](https://nodejs.org/api/crypto.html#
 with no new dependency, filesystem, network or app integration. It accepts a UTF-8 envelope of at most 1 MiB with
 exactly `key_id`, `payload` and `signature`; the latter two are canonical padded base64. The key id is a lowercase
 ASCII identifier of at most 64 characters. Only a caller-supplied pinned public Ed25519 key can authenticate it.
-The result is authenticated UTF-8 bytes, not parsed JSON or authorization. Schema, cache and freshness checks below
-remain unimplemented. Production signing material is never needed for its ephemeral in-memory test fixtures.
+The result is authenticated UTF-8 bytes, not authorization. `parsePayload` separately validates the bounded schema,
+freshness and minimum app version offline. Revision persistence and cache checks remain unimplemented. Production
+signing material is never needed for its ephemeral in-memory test fixtures.
+
+Schema 1 uses separate `catalog`, `compatibility`, `policies` and `drivers` arrays. Catalog pins carry an id,
+commit and digest; compatibility records identify provider, exact version, platform, driver, artifact digest, outcome,
+reason and four evidence digests. Driver variants are restricted to the compiled provider protocols. Policies contain
+only `suspend` or `unchanged` for installation and launch, at least one suspension, a reason and an evidence digest.
+Digests are lowercase SHA-256 identities. The offline parser validates pin shape, not membership in the compiled
+catalog; that comparison and revision monotonicity require trusted local state before integration.
 
 - One schema version, monotonically increasing revision, issued/expiry times and an explicit minimum supported app
   version. Reject unsupported versions, duplicate identities, unknown fields, oversized documents and invalid values.

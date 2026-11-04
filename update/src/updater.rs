@@ -24,7 +24,7 @@ const START_DOWNLOAD: Duration = Duration::from_secs(150);
 /// A download in the background has no one waiting, but a stalled one must not hold the six-hour loop forever.
 const LATER_DOWNLOAD: Duration = Duration::from_secs(600);
 /// The order to end the app is a line on its way to the shell; the process ends only after this, so the line is out.
-const QUIT_GRACE: Duration = Duration::from_millis(300);
+const QUIT_GRACE: Duration = Duration::from_secs(2);
 
 /// What only the app knows, and what only it can do. The updater decides; the app answers and carries out.
 pub trait App: Send + Sync + 'static {
@@ -40,7 +40,7 @@ pub trait App: Send + Sync + 'static {
     /// on after the restart (the person own restart).
     fn shut_down(&self, resume: bool);
     /// Ends the app at once, without waiting for the updater: the installer is about to replace it.
-    fn quit(&self);
+    fn quit(&self) -> std::sync::mpsc::Receiver<()>;
     /// Tells the screen where the update is.
     fn emit(&self, status: Status);
 }
@@ -237,7 +237,8 @@ impl Release for Live {
             let (inner, tray) = (&self.inner, self.reopen == Reopen::Tray);
             crate::handoff::start(&ready.installer, &ready.signature, &ready.version, &inner.install_dir, &inner.data_dir, tray)
                 .map_err(|e| self.failed("install-failed", e))?;
-            self.end()
+            self.end();
+            Ok(())
         }
         #[cfg(not(windows))]
         {
@@ -255,17 +256,36 @@ impl Release for Live {
                 self.inner.note("relaunch-failed", &error);
             }
         }
-        self.end()
+        self.end();
     }
 }
 
 impl Live {
     /// The app ends at once, then this process: the copy of the program that runs the installer waits for both.
-    fn end(&self) -> ! {
-        self.inner.app.quit();
-        std::thread::sleep(QUIT_GRACE);
-        std::process::exit(0)
+    fn end(&self) {
+        self.end_with(|| std::process::exit(0));
     }
+
+    fn end_with(&self, finish: impl FnOnce() + Send + 'static) {
+        let closed = lock(&self.closed).take();
+        let inner = self.inner.clone();
+        finish_after_flush(self.inner.app.quit(), move |result| {
+            let _closed = closed;
+            if let Err(error) = result {
+                inner.note("quit-not-flushed", &error.to_string());
+            }
+            finish();
+        });
+    }
+}
+
+fn finish_after_flush(
+    flushed: std::sync::mpsc::Receiver<()>,
+    finish: impl FnOnce(Result<(), std::sync::mpsc::RecvTimeoutError>) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        finish(flushed.recv_timeout(QUIT_GRACE));
+    });
 }
 
 /// Windows only: elsewhere the installer does not restart the app.
@@ -408,7 +428,9 @@ mod tests {
             None
         }
         fn shut_down(&self, _: bool) {}
-        fn quit(&self) {}
+        fn quit(&self) -> std::sync::mpsc::Receiver<()> {
+            std::sync::mpsc::channel().1
+        }
         fn emit(&self, status: Status) {
             lock(&self.told).push(status);
         }
@@ -419,6 +441,85 @@ mod tests {
         let (data, program) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let updater = Updater::new(app.clone(), "0.4.0", data.path().to_path_buf(), program.path()).unwrap();
         (updater, data, program)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn quit_waits_for_the_writer_without_blocking_its_runtime() {
+        let (sent, flushed) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let wrote = Arc::new(AtomicBool::new(false));
+        let writer = wrote.clone();
+        tokio::spawn(async move {
+            writer.store(true, Ordering::SeqCst);
+            let _ = sent.send(());
+        });
+        finish_after_flush(flushed, move |_| {
+            finished.send(wrote.load(Ordering::SeqCst)).unwrap();
+        });
+        tokio::task::yield_now().await;
+        for _ in 0..20 {
+            if let Ok(wrote) = done.try_recv() {
+                assert!(wrote, "the process ended before the writer flushed");
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the writer must flush before the process ends");
+    }
+
+    #[test]
+    fn live_end_waits_for_quit_acknowledgement() {
+        struct PendingQuit(Mutex<Option<std::sync::mpsc::Receiver<()>>>);
+        impl App for PendingQuit {
+            fn previews(&self) -> bool {
+                false
+            }
+            fn window_visible(&self) -> bool {
+                false
+            }
+            fn close_engine(&self, _: Who) -> Option<Box<dyn Any + Send>> {
+                None
+            }
+            fn shut_down(&self, _: bool) {}
+            fn quit(&self) -> std::sync::mpsc::Receiver<()> {
+                lock(&self.0).take().unwrap()
+            }
+            fn emit(&self, _: Status) {}
+        }
+        let (ack, flushed) = std::sync::mpsc::channel();
+        let data = tempfile::tempdir().unwrap();
+        let app = Arc::new(PendingQuit(Mutex::new(Some(flushed))));
+        let inner = Arc::new(Inner {
+            app: app.clone(),
+            current: semver::Version::new(1, 0, 0),
+            data_dir: data.path().to_path_buf(),
+            install_dir: OsString::new(),
+            stage: Mutex::default(),
+            ready: Mutex::default(),
+            touched: AtomicBool::new(false),
+            draft_dirty: AtomicBool::new(false),
+        });
+        let (finished, done) = std::sync::mpsc::channel();
+        Live::new(&inner, Reopen::Window).end_with(move || finished.send(()).unwrap());
+        assert!(matches!(done.recv_timeout(Duration::from_millis(100)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+        ack.send(()).unwrap();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        for disconnected in [true, false] {
+            let (ack, flushed) = std::sync::mpsc::channel();
+            *lock(&app.0) = Some(flushed);
+            let (finished, done) = std::sync::mpsc::channel();
+            Live::new(&inner, Reopen::Window).end_with(move || finished.send(()).unwrap());
+            if disconnected {
+                drop(ack);
+            } else {
+                assert!(matches!(done.recv_timeout(Duration::from_millis(100)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+            }
+            done.recv_timeout(QUIT_GRACE + Duration::from_secs(2)).unwrap();
+            let log = std::fs::read_to_string(data.path().join("update.log")).unwrap();
+            assert!(log.contains("quit-not-flushed"));
+            std::fs::remove_file(data.path().join("update.log")).unwrap();
+        }
     }
 
     #[test]

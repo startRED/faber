@@ -747,6 +747,7 @@ mod tests {
             let delivery = crate::tools::Delivery { start_card: Some(CARD.into()), ..Default::default() };
             let instructions = aside.then(|| "Internal question only".to_string());
             let launch = ClaudeLaunch {
+                temporary: false,
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
@@ -773,6 +774,7 @@ mod tests {
                 let cli = core.opts.clis[&Vendor::Codex].clone();
                 core.codex_server(Area::Project, false, Permissions::Isolated, &cli).open_with_tools(
                     CodexThread {
+                        temporary: false,
                         title: None,
                         helper: Default::default(),
                         browse: false,

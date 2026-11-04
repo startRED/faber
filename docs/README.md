@@ -18,7 +18,8 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [decisions.md](decisions.md) | To check a change against the decisions in force (R-numbers). Search it for the words of your change; never read it whole |
 | [product/README.md](product/README.md) | Before changing scope: what Faber is, principles, goals, phases and non-goals |
 | [product/models.md](product/models.md) | Auto, model choice, or how the CLIs are driven |
-| [product/areas.md](product/areas.md) | Chat and Projects, the lead agent, normal and autonomous modes, the toolbox, guardrails |
+| [product/areas.md](product/areas.md) | Chat and Projects, the toolbox, guardrails |
+| [product/lead-agent.md](product/lead-agent.md) | The lead agent, universal by design: aiming higher, normal and autonomous modes |
 | [product/building.md](product/building.md) | How Projects builds software: team, workers, self-development, coherence |
 | [product/frontend.md](product/frontend.md) | Original frontend design/proof skills, how both AIs receive them, what delivery checks do and do not prove |
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |

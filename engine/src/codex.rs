@@ -777,6 +777,8 @@ fn apply_tuning(params: &mut Map<String, Value>, tuning: &Tuning) {
 /// One conversation inside the shared process.
 #[derive(Debug, Clone)]
 pub struct CodexThread {
+    /// User-requested temporary Chat: the CLI must not persist its thread.
+    pub temporary: bool,
     pub cwd: PathBuf,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -1134,6 +1136,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     // account's list; this is the last resort for a caller that chose none and knows no account.
     let model = t.model.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| crate::router::default_model(Vendor::Codex, None, &[]));
     let mut params = codex_thread(area, Some(&model), t.permissions);
+    if t.temporary {
+        params.insert("ephemeral".into(), true.into());
+    }
     if let Some(instructions) = &t.instructions {
         params.insert("baseInstructions".into(), instructions.clone().into());
         // Legacy read-only still permits disk-wide reads. Internal questions keep the same credential/network
@@ -3091,6 +3096,7 @@ mod rewind_tests {
             identity: None,
             unsubscribed: false,
             params: CodexThread {
+                temporary: false,
                 title: None,
                 cwd: PathBuf::new(),
                 model: None,
