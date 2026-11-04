@@ -327,9 +327,9 @@ table! {
         let engine = h.engine.clone();
         off("error.copy.failed", move || engine.remove_with(&id, discard.unwrap_or(false))).await?
     }
-    /// Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation it
-    /// started that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused.
-    Write Own("/id") fn archive(h, id: String, on: bool, by: Option<String>) -> () [Failure] {
+    /// Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation of its
+    /// own project that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused.
+    Write Free fn archive(h, id: String, on: bool, by: Option<String>) -> () [Failure] {
         if let Some(by) = by {
             if !on {
                 return Err(refused("only the person can bring an archived conversation back".into()));

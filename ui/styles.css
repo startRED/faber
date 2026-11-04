@@ -13,7 +13,7 @@
   --dur-exit: 80ms; --ease-in: cubic-bezier(.4, 0, 1, 1); --ease-spring: cubic-bezier(.2, .9, .25, 1.02);
   --dur-feedback-max: 150ms; --dur-entry-max: 240ms; --dur-stagger-max: 60ms;
   /* Scenes that loop or play once (the home's effects, the blinking caret, Curioso waking): not interface timing. */
-  --dur-wake: 1100ms; --dur-blink: 1s; --dur-pulse: 3.2s; --dur-weave: 9s; --dur-weave-slow: 12s; --dur-drift: 32s;
+  --dur-wake: 1100ms; --dur-blink: 1s; --dur-pulse: 3.2s; --dur-spin: 900ms; --dur-weave: 9s; --dur-weave-slow: 12s; --dur-drift: 32s;
   --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
   --motion-blur: 2px; --motion-backdrop: 8px; --motion-stagger: 18ms;
 }
@@ -185,6 +185,7 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .usage .vendor.more:hover, .usage .vendor.more:focus-visible { color: var(--ink); }
 .who { flex: 1; min-width: 0; padding: 0 10px; color: var(--ink); font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .upd { padding: 2px 10px; font-size: var(--fs-xs); color: var(--ink-3); }
+.upd.busy, .setup-step-text { display: flex; align-items: center; gap: 6px; }
 .upd.act { display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 10px; border-radius: var(--r-xs); color: var(--ink-2); text-align: left; }
 .upd.act::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .upd.act:hover:not(:disabled) { background: var(--s2); color: var(--ink); }
@@ -317,6 +318,7 @@ svg.i.sm { width: 14px; height: 14px; }
 .live::after { content: ''; position: absolute; inset: -4px; border: 1.5px solid var(--accent); border-radius: 2px; opacity: 0; animation: var(--live-anim); }
 @keyframes ping { 0% { transform: scale(0.4); opacity: 0.8; } 100% { transform: scale(1.5); opacity: 0; } }
 @keyframes pulse { 50% { opacity: 0.35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 [data-base='oficina'] .live, [data-base='bancada'] .live { animation: var(--live-anim); }
 [data-base='oficina'] .live::after, [data-base='bancada'] .live::after { display: none; }
 .run-btn.need { box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
@@ -767,8 +769,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .site-mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; border-radius: var(--r-xs); background: var(--s2); color: var(--ink-2); font: 600 var(--fs-xs)/1 var(--font-data); }
 .site-tab.front .site-mark { background: var(--s2); color: var(--ink); }
 .site-mark svg.i { width: 14px; height: 14px; }
-/* The agent is working in this tab: a still dot, its words in the label. */
-.site-busy { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* The agent is working in this tab: the turning ring, its words in the label. */
+.site-busy { flex: none; display: inline-flex; }
 /* Close shows on the tab in front and on the one under the pointer or the focus. */
 .site-tab-close { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: var(--r-xs); color: var(--ink-3); opacity: 0; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
 .site-tab.front .site-tab-close, .site-tab:hover .site-tab-close, .site-tab:focus-within .site-tab-close { opacity: 1; }
@@ -1486,6 +1488,10 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .cm-item { display: block; width: 100%; min-width: 0; padding: 8px 12px; border-radius: var(--r-xs); color: var(--ink-2); font-size: var(--fs-sm); text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .cm-item:is(:hover, :focus-visible):not(:disabled) { background: var(--s3); color: var(--ink); outline: none; }
 .cm-item:disabled { color: var(--ink-3); opacity: 0.55; }
+/* The letter that chooses an item, drawn at its end; the button's text stays the label alone. */
+.cm-item[data-key] { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; }
+.cm-item[data-key]::after { content: attr(data-key); flex: none; color: var(--ink-3); font-size: var(--fs-xs); }
+.cm-item.danger[data-key]::after { color: inherit; opacity: 0.7; }
 .cm-item.danger { color: var(--danger); }
 .cm-item.danger.armed { background: var(--danger); color: var(--bg); font-weight: 580; }
 /* Recent folders and saved environments on the open-a-project screen and in the Chat folder setting. */
@@ -1656,7 +1662,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .stepper svg { animation: fade-in var(--dur-ui) var(--ease) both; }
 :is(.setup-badge, .acct-pill) { transition: color var(--dur-ui) var(--ease), background-color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease); }
 /* The update screen's words are a block, so an arriving phase can rise; the ghost of the old phase fades under it. */
-.ustage-text > span { display: block; }
+.ustage-text > span { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .tour-dim { transition: background-color var(--dur-ui) var(--ease); }
 .tour-ring { animation: fade-in var(--dur-ui) var(--ease) both; }
 .tour-ring.leaving { animation: fade-out var(--dur-exit) var(--ease-in) both; }
@@ -1943,7 +1949,7 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   .meter { border: 1px solid CanvasText; }
   .meter i { border: 2px solid Highlight; box-sizing: border-box; }
   .urow .expected { border-left: 2px solid CanvasText; z-index: 1; }
-  .run-dot, .item .unseen, .site-busy, .mk, .catalog-state::before { border: 1px solid CanvasText; box-sizing: border-box; }
+  .run-dot, .item .unseen, .mk, .catalog-state::before { border: 1px solid CanvasText; box-sizing: border-box; }
   .dot { border: 1px solid ButtonText; }
   .ask .btn, .ask .q-opt, .q-mark { border: 1px solid ButtonText; }
   .ask .btn.primary, .ask .q-opt.on { border: 2px solid Highlight; }

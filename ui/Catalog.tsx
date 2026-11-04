@@ -3,6 +3,7 @@ import { createStore, reconcile } from 'solid-js/store';
 import { api, type Project, type ToolRow, type Vendor } from './api.ts';
 import { Toggle } from './controls.tsx';
 import { Icon, type GlyphName } from './Glyphs.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
 import { catalogName, failureText, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { CatalogInventory } from './CatalogInventory.tsx';
@@ -372,7 +373,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             <Show when={needsNode(row())}><p>{t(plugin(row()) ? 'catalog.pluginNodeHelp' : 'catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
             <div class="catalog-actions">
               <Show when={!removedCopy(row())}>
-                <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
+                <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}><Show when={busy()}><StateGlyph state="working" small /></Show>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
                   {(prepared) => <div class="catalog-notice" data-catalog-replacement>
                     <div><p>{t('catalog.confirmReplace')}</p><dl><dt>{t('catalog.replaceFrom')}</dt><dd class="catalog-version">{prepared().from}</dd><dt>{t('catalog.replaceTo')}</dt><dd class="catalog-version">{prepared().to}</dd></dl><p>{t('catalog.replaceKeeps')}</p></div>
                     <button class="btn" ref={(el) => (cancelReplacement = el)} disabled={busy()} onClick={() => { ++preparation; setReplacement(undefined); queueMicrotask(() => detail?.focus()); }}>{t('catalog.cancel')}</button>

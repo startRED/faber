@@ -355,7 +355,13 @@ async fn session_control_accepts_a_codex_parent_and_checks_its_children() {
     for (command, args, expected_key, expected_detail) in [
         ("interrupt", json!({"id": "other"}), "error.reach.ask", None),
         ("resume_conversation", json!({"id": "other"}), "error.session.refused", Some("that conversation was not started by you")),
-        ("archive", json!({"id": "other", "on": true}), "error.reach.ask", None),
+        ("archive", json!({"id": "foreign", "on": true}), "error.session.refused", Some("no conversation with that id is in this project")),
+        (
+            "archive",
+            json!({"id": "other", "on": false}),
+            "error.session.refused",
+            Some("only the person can bring an archived conversation back"),
+        ),
         ("mark_waiting", json!({"on": ["other"]}), "error.session.refused", Some("that conversation was not started by you")),
         (
             "message_conversation",
@@ -387,6 +393,9 @@ async fn session_control_accepts_a_codex_parent_and_checks_its_children() {
     let resume = host.dispatch_session(&agent, "resume_conversation", json!({"id": "child"}), None).await.unwrap_err();
     assert_eq!(resume.key, "error.session.refused");
     assert_eq!(resume.detail.as_deref(), Some("the conversation is archived"));
+    // Archiving is organizing: any finished conversation of the project goes, not only the ones this AI started.
+    host.dispatch_session(&agent, "archive", json!({"id": "other", "on": true}), None).await.unwrap();
+    assert!(host.engine.open("other").unwrap().archived_at.is_some());
 }
 
 #[tokio::test]
@@ -452,8 +461,8 @@ async fn the_four_session_commands_need_an_agent_conversation() {
 }
 
 #[tokio::test]
-async fn archive_and_interrupt_belong_to_an_agents_own_family_and_leave_the_person_and_screen_unchanged() {
-    assert_eq!(Host::reach("archive"), Some(Reach::Own("/id")));
+async fn interrupt_belongs_to_an_agents_own_family_and_archive_is_free_within_its_project() {
+    assert_eq!(Host::reach("archive"), Some(Reach::Free));
     assert_eq!(Host::reach("interrupt"), Some(Reach::Own("/id")));
     let (host, _dir) = host().await;
     seed_conversation(&host, "c1", None, None);
@@ -461,10 +470,12 @@ async fn archive_and_interrupt_belong_to_an_agents_own_family_and_leave_the_pers
     seed_conversation(&host, "c9", None, None);
 
     let agent = Caller::Agent { conversation: Some("c1".into()) };
-    assert_eq!(key(host.dispatch_as(&agent, "archive", json!({ "id": "c9", "on": true })).await), "error.reach.ask");
     assert_eq!(key(host.dispatch_as(&agent, "interrupt", json!({ "id": "c9" })).await), "error.reach.ask");
     // Within its own family, reach allows the call and the engine's session verb runs.
     assert_ne!(key(host.dispatch_as(&agent, "archive", json!({ "id": "c2", "on": true })).await), "error.reach.ask");
+    // Archiving is organizing: reach lets it through to another conversation of the project too.
+    assert_ne!(key(host.dispatch_as(&agent, "archive", json!({ "id": "c9", "on": true })).await), "error.reach.ask");
+    host.dispatch_as(&Caller::Person, "archive", json!({ "id": "c9", "on": false })).await.unwrap();
 
     // Person and screen archive and unarchive any conversation as before, even if `by` was sent.
     host.dispatch_as(&Caller::Person, "archive", json!({ "id": "c9", "on": true, "by": "c1" })).await.unwrap();

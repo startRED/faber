@@ -40,6 +40,8 @@ in. When a file you work on changed and neither you nor your helpers changed it,
 - `ask` with `id` and `message`: sends your question to another conversation's agent; it answers in its own reply, which \
 you read later with `read`. Say who you are and what you need in one or two sentences; one cut off when Faber closed \
 goes on when asked \"Continue where you stopped. Check the project's state first.\"\n\
+- `archive` with `id`: archives another conversation of this project that is finished (not working, waiting, queued or \
+pinned), whoever started it; the person can bring it back. `list` first, and archive only what the person asked for.\n\
 - `archive`: archives this conversation. It leaves the sidebar and the person can bring it back. Do it as your very last \
 step once everything the person asked here is done and verified and nothing waits on them; never while work is left.\n\
 - `context`: how many tokens your own context holds, of how many it can, and the share.\n\

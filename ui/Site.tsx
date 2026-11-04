@@ -4,6 +4,7 @@ import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
 import { type MenuItem, openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { type SiteKey, siteKeyOf } from './keys.ts';
 
@@ -861,7 +862,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
                       </span>
                       <span class="site-tab-name">{tabName(tab)}</span>
                       <Show when={busy().has(tab.id)}>
-                        <span class="site-busy" role="img" aria-label={t('site.agentTab')} title={t('site.agentTab')} />
+                        <span class="site-busy" role="img" aria-label={t('site.agentTab')} title={t('site.agentTab')}><StateGlyph state="working" small /></span>
                       </Show>
                     </button>
                     <button class="site-tab-close" aria-label={t('site.closeTab')} title={t('site.closeTab')} onClick={() => void step('close', tab.id)}>

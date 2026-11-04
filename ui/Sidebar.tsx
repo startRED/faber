@@ -338,19 +338,19 @@ export function Sidebar(props: Props) {
       data-conversation-id={row.c.id}
       onContextMenu={(e) =>
         openMenu(e, [
-          { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
+          { id: 'rename', key: 'r', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
           ...(!row.c.archived ? [{
-            id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
+            key: 'p', id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
             label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
             run: () => void api.pin(row.c.id, row.c.pinnedAt === undefined).catch((err) => props.onError?.(err)),
           }] : []),
-          { id: 'export', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
+          { id: 'export', key: 'e', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
           ...(row.c.area === 'chat' ? [
-            { id: 'move-group', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
-            ...(membership(row.c.id) ? [{ id: 'ungroup', label: t('menu.removeFromGroup'), run: () => changeGroup(api.moveChatToGroup(row.c.id)) }] : []),
+            { id: 'move-group', key: 'g', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
+            ...(membership(row.c.id) ? [{ id: 'ungroup', key: 'u', label: t('menu.removeFromGroup'), run: () => changeGroup(api.moveChatToGroup(row.c.id)) }] : []),
           ] : []),
           ...(row.c.area === 'chat' && !row.c.archived && props.projects.length ? [{
-            id: 'move', label: t('menu.moveToProject'),
+            id: 'move', key: 'm', label: t('menu.moveToProject'),
             run: () => openMenu(e, props.projects.map((p) => ({
               id: p.id, label: p.name,
               run: () => void api.moveToProject(row.c.id, p.id).then((c) => {
@@ -361,9 +361,9 @@ export function Sidebar(props: Props) {
             })), rowEl?.querySelector('.item') ?? null),
           }] : []),
           row.c.archived
-            ? { id: 'unarchive', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
-            : { id: 'archive', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
-          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
+            ? { id: 'unarchive', key: 'a', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
+            : { id: 'archive', key: 'a', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
+          { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
         ])
       }
     >
@@ -584,8 +584,8 @@ export function Sidebar(props: Props) {
               const sections = createMemo(() => groupChats(rows(), props.now, !searching()));
               return <div class="proj" data-chat-group-id={g.id}>
                 <div class="prow" onContextMenu={(e) => openMenu(e, [
-                  { id: 'rename', label: t('menu.rename'), run: () => setRenaming(g.id) },
-                  { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(api.removeChatGroup(g.id)) },
+                  { id: 'rename', key: 'r', label: t('menu.rename'), run: () => setRenaming(g.id) },
+                  { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(api.removeChatGroup(g.id)) },
                 ])}>
                   <Show when={renaming() !== g.id} fallback={<RenameBox title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(api.saveChatGroup(g.id, name)); }} />}>
                     <button class="item" aria-current={here() ? 'location' : undefined} aria-expanded={expanded()} onClick={() => { toggle(g.id, !(props.place.groupId === g.id && expanded())); props.onGroup?.(g.id); }}><Icon name="folder" small /><span class="t">{g.name}</span></button>

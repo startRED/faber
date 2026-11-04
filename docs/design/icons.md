@@ -34,7 +34,7 @@ drawing means what). Decided 2026-10-31 in the rework, by the owner.
 
 | State | Drawing | Ink | Moves |
 | :--- | :--- | :--- | :--- |
-| Working | an open ring | accent | breathes (`pulse`, `--dur-pulse`); the open ring is the cue without motion |
+| Working | an open ring | accent | turns (`spin`, `--dur-spin`), twice as slowly in reduced motion; the open ring is the cue without motion |
 | Waiting for you | the speech bubble with "?" | amber (locked: needs you) | no |
 | Stuck (works and gets nowhere) | an hourglass | amber | no |
 | Concluded (the AI gave its conclusion) | a ring with a check | full ink | no |
@@ -45,8 +45,8 @@ drawing means what). Decided 2026-10-31 in the rework, by the owner.
 
 `stateKind(word)` turns the engine's words (`running`, `done`, `passed`, `unreported`, `closed`...) into one of these; a word
 nobody mapped is "ended without a conclusion", which never claims anything good. A drawing with no state words beside it
-takes a `label`, and then it is an image with that name; beside the words it is hidden from readers. Reduced and no motion
-stop the breathing (`.st-working` has its own rule in `ui/icons/icons.css`, which holds the state colours too).
+takes a `label`, and then it is an image with that name; beside the words it is hidden from readers. No motion stops the turning, and reduced motion only slows it:
+a loading mark is the one motion that says work goes on (`.st-working` has its own rule in `ui/icons/icons.css`, which holds the state colours too).
 
 ## Who is speaking
 

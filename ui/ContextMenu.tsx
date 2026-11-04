@@ -67,7 +67,12 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
         else if (e.key === 'Home') move(() => 0);
         else if (e.key === 'End') move((all) => all.length - 1);
         else if (e.key === 'Tab') closeMenu(true);
-        else return;
+        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          // A letter chooses the item that shows it; a held key is not a new press.
+          const item = props.m.items.find((i) => i.key?.toLowerCase() === e.key.toLowerCase());
+          if (!item) return;
+          if (!e.repeat) choose(item);
+        } else return;
         e.preventDefault();
       }}
     >
@@ -80,6 +85,8 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
             classList={{ danger: item.danger, armed: armed() === item.id }}
             tabindex="-1"
             disabled={unavailable(item)}
+            data-key={armed() === item.id ? undefined : item.key?.toUpperCase()}
+            aria-keyshortcuts={item.key?.toUpperCase()}
             onFocusOut={() => armed() === item.id && setArmed(undefined)}
             onClick={() => choose(item)}
           >

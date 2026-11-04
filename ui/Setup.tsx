@@ -2,6 +2,7 @@ import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorText, type Vendor } from './api.ts';
 import { Stage, Title } from './FirstRun.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { Scene } from './illustrations/index.tsx';
 import { Peek } from './Mark.tsx';
@@ -189,6 +190,7 @@ export function Setup(props: SetupProps) {
                     {(step) => (
                       <div class="setup-step">
                         <span class="setup-step-text">
+                          <StateGlyph state="working" small />
                           {fromEngine(`setup.step.${step()}`)}
                         </span>
                       </div>

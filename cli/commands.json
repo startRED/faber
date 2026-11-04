@@ -1213,9 +1213,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "own",
-    "conversation": "/id",
-    "about": "Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation it started that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused."
+    "reach": "free",
+    "about": "Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation of its own project that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused."
   },
   {
     "name": "start_conversation",

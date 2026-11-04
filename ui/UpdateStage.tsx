@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onMount, Show } from 'solid-js';
 import type { UpdateStatus } from './api.ts';
 import { Collapse } from './controls.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
 import { t } from './i18n.ts';
 import { Mark } from './Mark.tsx';
 import { animateList } from './motion.ts';
@@ -31,7 +32,8 @@ export function UpdateLine(props: { status: UpdateStatus }) {
   });
   return (
     <Collapse open={visible()}>
-      <div class="upd" role="status">
+      <div class="upd busy" role="status">
+        <StateGlyph state="working" small />
         {held()}
       </div>
     </Collapse>
@@ -56,7 +58,7 @@ export function UpdateStage(props: { status: UpdateStatus }) {
         {/* Each phase fades in over the one before it; the percent inside a phase just counts. */}
         <p class="ustage-text num" role="status" ref={animateList}>
           <Show when={props.status.phase} keyed>
-            {(_phase) => <span>{updateText(props.status)}</span>}
+            {(_phase) => <span><StateGlyph state="working" small />{updateText(props.status)}</span>}
           </Show>
         </p>
         <Show when={percent() !== undefined}>

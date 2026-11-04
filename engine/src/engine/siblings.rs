@@ -735,8 +735,10 @@ impl Core {
         }
         self.set_archived(conv, true)
     }
+    /// Any finished conversation of the same project, not only the ones this one started: archiving is organizing, and the
+    /// person brings it back from the sidebar (R499).
     pub(super) fn session_archive(&mut self, by: &str, id: &str) -> Result<String, String> {
-        self.own(by, id)?;
+        self.same_project(by, id).map_err(str::to_string)?;
         let c = &self.convs[id];
         if c.archived_at.is_some() {
             return Err("the conversation is already archived".into());

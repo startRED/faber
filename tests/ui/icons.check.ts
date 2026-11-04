@@ -52,14 +52,16 @@ check('icons: a state drawing is decoration beside its words, and a named image 
   done();
 });
 
-check('icons: the working ring breathes only while motion is on, and keeps its open ring when it does not', () => {
+check('icons: the working ring turns while motion is on (slower when reduced) and keeps its open ring when it is off', () => {
   const { host, done } = draw(() => StateGlyph({ state: 'working' }));
-  const ring = host.querySelector<HTMLElement>('.st-working')!;
-  ok(getComputedStyle(ring).animationName.includes('pulse'), 'the working ring does not breathe');
+  const ring = host.querySelector<SVGElement>('.st-working svg')!;
+  ok(getComputedStyle(ring).animationName.includes('spin'), 'the working ring does not turn');
   const before = document.documentElement.dataset.motion;
-  document.documentElement.dataset.motion = 'none';
   try {
-    equal(getComputedStyle(ring).animationName, 'none', 'the working ring breathes with motion off');
+    document.documentElement.dataset.motion = 'reduced';
+    ok(getComputedStyle(ring).animationName.includes('spin'), 'the working ring stands still with reduced motion');
+    document.documentElement.dataset.motion = 'none';
+    equal(getComputedStyle(ring).animationName, 'none', 'the working ring turns with motion off');
   } finally {
     if (before === undefined) delete document.documentElement.dataset.motion;
     else document.documentElement.dataset.motion = before;

@@ -156,6 +156,46 @@ check('right-click: a chat offers Rename, Export, Archive and Delete, Delete ask
   }
 });
 
+check('right-click: a letter chooses an item of a chat menu (A archives, D asks twice before deleting) and is shown at its end', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  const archived: Array<[string, boolean]> = [];
+  const original = api.archive;
+  api.archive = async (id, on) => void archived.push([id, on]);
+  const dispose = sidebar(root, calls);
+  try {
+    const row = [...root.querySelectorAll('.crow')].find((r) => r.textContent?.includes('Plan the trip'))!;
+    rightClick(row);
+    await settle();
+    equal(entry(t('menu.archive')).dataset.key, 'A');
+    equal(entry(t('menu.delete')).dataset.key, 'D');
+    equal(entry(t('menu.archive')).textContent, t('menu.archive'), 'the label stays the button text');
+    key(menus()[0]!, { key: 'x' });
+    equal(menus().length, 1, 'a letter nothing shows does nothing');
+    key(menus()[0]!, { key: 'a' });
+    await settle();
+    deepEqual(archived, [['c1', true]]);
+    equal(menus().length, 0);
+
+    rightClick(row);
+    await settle();
+    key(menus()[0]!, { key: 'D' });
+    await settle();
+    equal(menus().length, 1, 'the first D only asks');
+    deepEqual(calls, []);
+    key(menus()[0]!, { key: 'd', repeat: true });
+    await deliberate();
+    deepEqual(calls, [], 'a held key never confirms');
+    key(menus()[0]!, { key: 'd' });
+    await settle();
+    deepEqual(calls, ['remove c1']);
+  } finally {
+    api.archive = original;
+    dispose();
+    root.remove();
+  }
+});
+
 check('conversation export: both areas save their own row, cancel silently and show a refused save', async () => {
   const calls: Array<[string, unknown]> = [];
   const errors: unknown[] = [];

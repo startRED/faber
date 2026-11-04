@@ -15,6 +15,8 @@ export interface MenuItem {
   danger?: boolean;
   /** The first activation only arms the item and shows this text instead; the second one runs it. */
   confirm?: string;
+  /** One letter that chooses the item while the menu is open, shown at the item's end (a destructive item still needs its second press). */
+  key?: string;
 }
 
 export interface OpenMenu {
