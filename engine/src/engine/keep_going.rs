@@ -674,6 +674,22 @@ impl Core {
         if !self.convs.contains_key(conv) {
             return Ok(());
         }
+        let c = &self.convs[conv];
+        let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
+        let selected = if choice.vendor == "auto" {
+            match self.next_route(conv) {
+                Some(Some(before)) => Some(before),
+                Some(None) => None,
+                None => same_as_before(c, self.live.get(conv)),
+            }
+        } else {
+            pick_model(&choice, &self.vendors(), self.codex_recommended.as_deref())
+        };
+        // An unresolved Auto route may still choose any account.
+        let candidates = selected.map_or_else(|| self.vendors(), |pick| vec![pick.vendor]);
+        if candidates.into_iter().any(|vendor| self.room(vendor, None) == Err("reason.keepGoing.account")) {
+            return Err("reason.keepGoing.account");
+        }
         let mut why = None;
         for vendor in self.vendors() {
             match self.room(vendor, None) {
@@ -695,6 +711,7 @@ impl Core {
         match self.room_next(conv) {
             Ok(()) => None,
             Err("reason.keepGoing.quota") if on => None,
+            Err("reason.keepGoing.account") => None,
             Err(UNKNOWN) => Some("reason.keepGoing.billed"),
             Err(why) => Some(why),
         }
@@ -709,7 +726,16 @@ impl Core {
             Err(Why::Billing) if self.ledger.of(vendor).billing == Billing::Unknown => Err(UNKNOWN),
             Err(Why::Billing) => Err("reason.keepGoing.billed"),
             Err(_) => Err("reason.keepGoing.quota"),
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                let now = self.secs();
+                crate::budget::background_gate(
+                    &self.snap(vendor, now),
+                    model.and_then(family_of),
+                    Purpose::UserTurn { by_hand: false },
+                    now,
+                )
+                .map_err(|_| "reason.keepGoing.account")
+            }
         }
     }
 
@@ -755,6 +781,7 @@ impl Core {
     pub(super) fn wait_for_room(&mut self, conv: &str, reply_id: &str, why: &'static str) {
         match why {
             UNKNOWN => return self.fail_wait(conv, reply_id, "error.billingUnknown"),
+            "reason.keepGoing.account" => return self.arm(conv, reply_id, RETRY_SECS * self.keep_pace, "account"),
             "reason.keepGoing.quota" => {}
             _ => return self.halt(conv, reply_id, why),
         }
@@ -927,6 +954,7 @@ fn static_why(why: &str) -> &'static str {
         "rest" => "rest",
         "busy" => "busy",
         "question" => "question",
+        "account" => "account",
         _ => "start",
     }
 }
@@ -954,6 +982,31 @@ fn drop_own_turns(c: &mut Conversation) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn selected_account_waits_only_for_its_own_outside_use() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with_saves(false, |core| {
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                core.opts.clis.insert(vendor, Cli { command: "unused".into(), prefix: vec![] });
+                core.ledger.of_mut(vendor).billing = Billing::Subscription;
+            }
+            let now = core.secs();
+            let ledger = core.ledger.of_mut(Vendor::Claude);
+            ledger.record("five_hour", 0.1, now + 10000.0, now - 120.0, 0);
+            ledger.record("five_hour", 0.2, now + 10000.0, now - 60.0, 0);
+            assert!(ledger.snap(now).jumped);
+            let id = core.blank(Area::Chat, None);
+            let choice = |vendor: Vendor| Some(Choice { vendor: vendor.name().into(), model: None, effort: None });
+            core.convs.get_mut(&id).unwrap().choice = choice(Vendor::Codex);
+            assert_eq!(core.room_next(&id), Ok(()));
+            core.convs.get_mut(&id).unwrap().choice = choice(Vendor::Claude);
+            assert_eq!(core.room_next(&id), Err("reason.keepGoing.account"));
+            core.ledger.of_mut(Vendor::Claude).history.clear();
+            assert_eq!(core.room_next(&id), Ok(()));
+        });
+    }
 
     const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false };
 

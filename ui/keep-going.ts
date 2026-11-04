@@ -31,6 +31,7 @@ export function keepGoingOutlook(usage: readonly VendorUsage[]): Outlook | undef
 
 /** The words for an outlook, or for keep going that already waits (the running row's `waitUntil`), which comes first. */
 export function keepGoingWarning(usage: readonly VendorUsage[], row?: RunningItem): string | undefined {
+  if (row?.keepGoing && row.keepWait?.why === 'account') return t('keepGoing.warn.account');
   if (row?.keepGoing && row.waitUntil) return t('keepGoing.warn.waiting', { when: untilReset(row.waitUntil) });
   const o = keepGoingOutlook(usage);
   if (!o) return undefined;
