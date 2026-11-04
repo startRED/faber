@@ -1,6 +1,7 @@
 //! One verified catalog snapshot; each session selects its own bounded kit in memory.
 
 mod matching;
+pub(crate) use matching::known_stack;
 use matching::{item_capability, labels, matches_task, stack_labels};
 
 use super::{Delivery, Item, Launch, Store, digest, lock, manifest_bytes, retry_busy, small_file};
@@ -663,9 +664,24 @@ impl Store {
         permissions: Permissions,
         disabled: &[String],
     ) -> (Delivery, Report) {
+        let facts = (area == Area::Project).then(|| cwd.and_then(|cwd| crate::project::rules::kit_facts(cwd).ok())).flatten();
+        self.ready_kit_from_facts(vendor, request, cwd, area, permissions, disabled, facts.as_ref())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ready_kit_from_facts(
+        &self,
+        vendor: Vendor,
+        request: &str,
+        cwd: Option<&Path>,
+        area: Area,
+        permissions: Permissions,
+        disabled: &[String],
+        facts: Option<&crate::project::rules::Facts>,
+    ) -> (Delivery, Report) {
         let empty = || Delivery { catalog_root: Some(self.root.clone()), ..Default::default() };
         let (jobs, explicit) = labels(request, cwd);
-        let stacks = if area == Area::Project { stack_labels(request, cwd) } else { matching::request_stack_labels(request, cwd) };
+        let stacks = matching::stack_labels_from_facts(request, cwd, facts);
         let mut report = Report { jobs: jobs.into_iter().collect(), method: "code".into(), ..Default::default() };
         let Ok(data) = self.ready.data.try_lock() else { return (empty(), report) };
         if permissions == Permissions::Isolated {
@@ -1236,6 +1252,20 @@ impl Store {
         self.prepare_kit_for(vendor, request, cwd, area, permissions, disabled);
         self.wait_prepared();
         self.ready_kit_for(vendor, request, cwd, area, permissions, disabled)
+    }
+
+    pub(crate) fn kit_from_facts(
+        &self,
+        vendor: Vendor,
+        request: &str,
+        cwd: &Path,
+        permissions: Permissions,
+        disabled: &[String],
+        facts: &crate::project::rules::Facts,
+    ) -> (Delivery, Report) {
+        self.prepare_kit_for(vendor, request, Some(cwd), Area::Project, permissions, disabled);
+        self.wait_prepared();
+        self.ready_kit_from_facts(vendor, request, Some(cwd), Area::Project, permissions, disabled, Some(facts))
     }
 
     /// An OS lock distinguishes abandoned copies from live sessions, including other Engine instances.

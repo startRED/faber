@@ -992,14 +992,14 @@ impl Store {
     }
 
     /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
-    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<(), &'static str> {
+    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<crate::project::rules::Facts, &'static str> {
         let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
-        let record = crate::project::rules::refresh_cached(folder, all.get(project))?;
+        let (record, facts) = crate::project::rules::refresh_cached(folder, all.get(project))?;
         if all.get(project) != Some(&record) {
             all.insert(project.into(), record);
             self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
         }
-        Ok(())
+        Ok(facts)
     }
 
     fn adoptions_checked(&self) -> Result<Adoptions, Fault> {

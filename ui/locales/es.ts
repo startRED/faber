@@ -2576,6 +2576,7 @@ export const es: Messages = {
   'notes.405.fixed': 'Faber se reinicia durante una conversación en marcha, que continúa después. Las versiones antiguas pueden necesitar otro reinicio o instalación manual.',
   'notes.406.fixed': 'Al editar o borrar preferencias o lecciones, retiras tu aprobación; recuperar el texto anterior requiere que vuelvas a aprobarlo.',
   'notes.407.fixed': 'Escribir a un ayudante justo después de que aparece ya no dice que terminó: tus palabras esperan y le llegan en cuanto empieza.',
+  'notes.408.better': 'Recibes herramientas acordes con las bibliotecas Python de tu proyecto aunque no las nombres en tu pedido.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

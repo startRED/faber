@@ -245,13 +245,47 @@ fn request_text(request: &str) -> String {
         .replace('ß', "ss")
 }
 
+const STACKS: &[(&str, &str)] = &[
+    ("swift", "swift swiftui"),
+    ("flutter", "flutter dart"),
+    ("expo", "expo"),
+    ("react-native", "react-native"),
+    ("compose", "compose jetpack"),
+    ("prisma", "prisma"),
+    ("firestore", "firestore firebase"),
+    ("postgres", "postgres postgresql supabase sql"),
+    ("stripe", "stripe"),
+    ("cloudflare", "cloudflare wrangler"),
+    ("auth0", "auth0"),
+    ("android", "android jetpack"),
+    ("godot", "godot gdscript"),
+    ("unity", "unity"),
+    ("roblox", "roblox luau"),
+    ("minecraft", "minecraft neoforge fabric"),
+    ("unreal", "unreal ue5"),
+    ("bevy", "bevy"),
+    ("love2d", "love2d love2d-core"),
+    ("phaser", "phaser"),
+    ("pixijs", "pixijs"),
+    ("threejs", "threejs three.js"),
+];
+
+pub(crate) fn known_stack(name: &str) -> Option<&'static str> {
+    STACKS.iter().find_map(|(stack, _)| (*stack == name).then_some(*stack))
+}
+
 pub(super) fn stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSet<&'static str> {
+    let facts = cwd.and_then(|cwd| crate::project::rules::kit_facts(cwd).ok());
+    stack_labels_from_facts(request, cwd, facts.as_ref())
+}
+
+pub(super) fn stack_labels_from_facts(
+    request: &str,
+    cwd: Option<&Path>,
+    facts: Option<&crate::project::rules::Facts>,
+) -> BTreeSet<&'static str> {
     let mut stacks = request_stack_labels(request, cwd);
-    if let Some(cwd) = cwd
-        && let Ok(facts) = crate::project::rules::kit_facts(cwd)
-    {
-        stacks.extend(facts.stacks);
-    }
+    stacks.extend(facts.into_iter().flat_map(|facts| facts.stacks.iter().copied()));
     stacks
 }
 
@@ -259,30 +293,7 @@ pub(super) fn request_stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSe
     let text = request_text(request);
     let tokens: BTreeSet<_> = text.split(|c: char| !c.is_alphanumeric()).collect();
     let mut stacks = BTreeSet::new();
-    for (stack, words) in [
-        ("swift", "swift swiftui"),
-        ("flutter", "flutter dart"),
-        ("expo", "expo"),
-        ("react-native", "react-native"),
-        ("compose", "compose jetpack"),
-        ("prisma", "prisma"),
-        ("firestore", "firestore firebase"),
-        ("postgres", "postgres postgresql supabase sql"),
-        ("stripe", "stripe"),
-        ("cloudflare", "cloudflare wrangler"),
-        ("auth0", "auth0"),
-        ("android", "android jetpack"),
-        ("godot", "godot gdscript"),
-        ("unity", "unity"),
-        ("roblox", "roblox luau"),
-        ("minecraft", "minecraft neoforge fabric"),
-        ("unreal", "unreal ue5"),
-        ("bevy", "bevy"),
-        ("love2d", "love2d love2d-core"),
-        ("phaser", "phaser"),
-        ("pixijs", "pixijs"),
-        ("threejs", "threejs three.js"),
-    ] {
+    for &(stack, words) in STACKS {
         if words.split_whitespace().any(|word| tokens.contains(word)) {
             stacks.insert(stack);
         }

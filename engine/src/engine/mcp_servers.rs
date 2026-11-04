@@ -25,6 +25,7 @@ struct CheckKey {
 pub(super) struct LaunchCheck {
     key: CheckKey,
     pub(super) token: u64,
+    pub(super) rules_refreshed: bool,
     ready: Option<CheckedKit>,
     after: Option<AfterCheck>,
     pub(super) owner: String,
@@ -181,6 +182,7 @@ impl Core {
         vendor: Vendor,
         permissions: Permissions,
         cwd: &Path,
+        facts: Option<(PathBuf, crate::project::rules::Facts)>,
     ) -> Result<CheckedKit, String> {
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let area = c.area;
@@ -205,7 +207,7 @@ impl Core {
         let mut raw = self.session_tools(vendor, area, permissions, project.as_deref(), &request, cwd);
         raw.0.guide = self.guide_for(vendor, area, permissions);
         let disabled = self.project_disabled_servers(project.as_deref());
-        self.check_kit(conv, conv, vendor, area, permissions, cwd, request, native, previous, disabled, raw)
+        self.check_kit(conv, conv, vendor, area, permissions, cwd, request, native, previous, disabled, raw, facts)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -222,6 +224,7 @@ impl Core {
         previous: Vec<String>,
         disabled: Vec<String>,
         mut raw: CheckedKit,
+        facts: Option<(PathBuf, crate::project::rules::Facts)>,
     ) -> Result<CheckedKit, String> {
         let store = self.catalog_store();
         let key = CheckKey {
@@ -258,7 +261,7 @@ impl Core {
         if self.synchronous_kit_checks {
             return Ok(verify_kit(store, key, raw));
         }
-        if let Some(check) = self.kit_checks.get_mut(name).filter(|check| check.key == key) {
+        if let Some(check) = self.kit_checks.get_mut(name).filter(|check| check.key == key && (facts.is_none() || check.rules_refreshed)) {
             if let Some(ready) = check.ready.take() {
                 self.kit_checks.remove(name);
                 return Ok(ready);
@@ -272,6 +275,7 @@ impl Core {
             LaunchCheck {
                 key: key.clone(),
                 token,
+                rules_refreshed: facts.is_some(),
                 ready: None,
                 after: None,
                 owner: owner.into(),
@@ -303,9 +307,15 @@ impl Core {
                 }
                 #[cfg(test)]
                 let started_at = std::time::Instant::now();
-                // Project selection reads bounded manifest facts only here, never under Core's lock.
-                let mut raw = if key.area == Area::Project {
-                    let mut selected = store.kit_for(key.vendor, &key.request, Some(&key.cwd), key.area, key.permissions, &key.disabled);
+                // Reuse the rules snapshot; a separate working copy gets one bounded read on this worker.
+                let facts = (key.area == Area::Project).then(|| {
+                    facts.filter(|(folder, _)| *folder == key.cwd).map(|(_, facts)| facts).unwrap_or_else(|| {
+                        if kept.is_some() { crate::project::rules::facts(&key.cwd) } else { crate::project::rules::kit_facts(&key.cwd) }
+                            .unwrap_or_default()
+                    })
+                });
+                let mut raw = if let Some(facts) = &facts {
+                    let mut selected = store.kit_from_facts(key.vendor, &key.request, &key.cwd, key.permissions, &key.disabled, facts);
                     selected.0.guide = raw.0.guide;
                     selected
                 } else {
@@ -313,11 +323,10 @@ impl Core {
                 };
                 if let Some((read_kept, read_learning)) = kept {
                     use crate::project::{memory, rules};
-                    let facts = rules::facts(&key.cwd).unwrap_or_default();
                     let decisions = memory::kept_for_card(&key.cwd, &read_kept()).unwrap_or_default();
                     let taste = memory::taste_for_card(&key.cwd, &read_learning()).unwrap_or_default();
                     raw.0.start_card = Some(rules::card(
-                        &facts,
+                        facts.as_ref().unwrap_or(&rules::Facts::default()),
                         &decisions.iter().map(String::as_str).collect::<Vec<_>>(),
                         &taste.iter().map(String::as_str).collect::<Vec<_>>(),
                     ));

@@ -168,7 +168,7 @@ impl Core {
             return Err(super::worker_memory::PENDING);
         }
         let (mut tools, _) = self
-            .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, prompt.clone(), None, vec![], disabled, raw)
+            .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, prompt.clone(), None, vec![], disabled, raw, None)
             .map_err(|_| super::mcp_servers::CHECK_PENDING)?;
         self.finish_worker_admission(&check_name);
         let flags = if vendor == Vendor::Claude { self.claude_flags_for(&cli) } else { Default::default() };

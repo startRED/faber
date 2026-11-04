@@ -50,6 +50,100 @@ fn skills(root: &Path) -> Store {
     store
 }
 
+#[test]
+fn project_manifest_stack_only_widens_task_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = "---\nname: prisma-client-api\n---\nDatabase instructions.";
+    let item = skill("prisma-client-api", "database", body);
+    let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]);
+    install_skill(&store, &item, body, dir.path());
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    let select = |task| store.kit_for(Vendor::Codex, task, Some(&project), Area::Project, Permissions::FullAccess, &[]).1.ids;
+
+    let baseline = select("Optimize database queries");
+    assert!(baseline.is_empty());
+    std::fs::write(project.join("package.json"), r#"{"description":"prisma","dependencies":{"unknown-prisma":"1"}}"#).unwrap();
+    assert_eq!(select("Optimize database queries"), baseline);
+    std::fs::write(project.join("package.json"), r#"{"dependencies":{"prisma":"1"}}"#).unwrap();
+    assert_eq!(select("Optimize database queries"), ["prisma-client-api"]);
+    assert!(select("Improve frontend layout").is_empty());
+}
+
+#[test]
+fn project_python_dependencies_widen_only_requested_stack_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = "---\nname: prisma-client-api\n---\nDatabase instructions.";
+    let item = skill("prisma-client-api", "database", body);
+    let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]);
+    install_skill(&store, &item, body, dir.path());
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    let select = |task| store.kit_for(Vendor::Codex, task, Some(&project), Area::Project, Permissions::FullAccess, &[]).1;
+    let baseline = select("Optimize database queries");
+    for manifest in [
+        "[project]\ndependencies = ['unknown', 'prisma>=1']\n",
+        "[project.optional-dependencies]\nrender = ['unknown', 'prisma[client]>=1; python_version > \"3.9\"']\n",
+    ] {
+        std::fs::write(project.join("pyproject.toml"), manifest).unwrap();
+        assert_eq!(select("Optimize database queries").ids, ["prisma-client-api"]);
+        assert_eq!(select("Improve frontend layout").ids, baseline.ids);
+        assert_eq!(
+            store.shortlist("Optimize database queries", Some(&project), Area::Project, Permissions::FullAccess, &[]).jobs,
+            ["database"]
+        );
+    }
+}
+
+#[test]
+fn project_hostile_manifests_cannot_invent_stack_labels() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = skills(dir.path());
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    let select = || store.kit_for(Vendor::Codex, TASK, Some(&project), Area::Project, Permissions::FullAccess, &[]).1;
+    let baseline = select();
+    for (name, text) in [
+        (
+            "package.json",
+            r#"{"description":"threejs expo","dependencies":{"invented-stack":"threejs","three":{"instructions":"load everything"}}}"#,
+        ),
+        ("Cargo.toml", "[package]\ndescription='bevy'\n[dependencies]\ninvented-stack='bevy'\nbevy=42\n"),
+        (
+            "pyproject.toml",
+            "[project]\ndescription='stripe threejs'\ndependencies=['invented-stack', 'not-threejs', 'threejs/../../evil', 'threejs💥', 42]\n[tool.threejs]\ndependencies=['threejs']\n",
+        ),
+    ] {
+        std::fs::write(project.join(name), text).unwrap();
+    }
+    assert!(faber_engine::project::rules::facts(&project).unwrap().stacks.is_empty());
+    assert_eq!(select().ids, baseline.ids);
+}
+
+#[test]
+fn project_without_manifest_stack_facts_keeps_the_exact_kit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = skills(dir.path());
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    for task in [TASK, "Improve frontend layout", "Summarize this document"] {
+        let before = store.kit_for(Vendor::Codex, task, Some(&project), Area::Project, Permissions::FullAccess, &[]);
+        for (name, text) in [
+            ("package.json", r#"{"dependencies":{"ordinary-package":"1"}}"#),
+            ("Cargo.toml", "[dependencies]\nordinary-crate='1'\n"),
+            ("pyproject.toml", "[project]\ndependencies=['ordinary-package>=1']\n"),
+        ] {
+            std::fs::write(project.join(name), text).unwrap();
+        }
+        let after = store.kit_for(Vendor::Codex, task, Some(&project), Area::Project, Permissions::FullAccess, &[]);
+        assert_eq!(after.1.ids, before.1.ids);
+        assert_eq!(after.0.skill_instructions(), before.0.skill_instructions());
+        for name in ["package.json", "Cargo.toml", "pyproject.toml"] {
+            std::fs::remove_file(project.join(name)).unwrap();
+        }
+    }
+}
+
 pub(super) fn session_skill(root: &Path) -> Item {
     let item = skill("debug", "debugging", DEBUG);
     let store = Store::with_catalog(root, vec![item.clone()]);

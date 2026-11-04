@@ -618,15 +618,17 @@ CLI subagents inherit their session's capabilities. The kit a conversation has n
 the Context meter's panel (above) in both areas; the reply keeps its quiet kit fold only where a session changed kit.
 
 Project session boundaries collect stack evidence from the actual working folder's bounded, held-handle
-`package.json` and `Cargo.toml` reads. Only known names in structured dependency maps add stack tags;
+`package.json`, `Cargo.toml` and `pyproject.toml` reads. Only known names in structured dependency maps or Python project dependency lists add stack tags;
 descriptions, instruction prose and workflow bodies never do. The existing launch-check worker prepares,
 selects and verifies the kit outside the conversation lock, including an empty selection and project helpers.
 Chat keeps its ready-only path. Ready picks and shortlists share the same stack evidence; an edit is read again
-at the next session boundary. The `project_facts_` regressions cover dependency evidence and prose refusal,
+at the next session boundary. Selection and the start card reuse the rules rebuild's facts when the project and working folder coincide; a separate working copy is read once for its own facts. Launch retries reuse the original snapshot.
+The `project_facts_snapshot_shared_with_rules_and_start_card` check changes a manifest between the rebuild and selection to prove sharing.
+The `project_python_dependencies_widen_only_requested_stack_tools`, `project_hostile_manifests_cannot_invent_stack_labels` and `project_without_manifest_stack_facts_keeps_the_exact_kit` integration checks prove Python matching, the allowlist and unchanged selection without evidence. The `project_facts_` regressions cover dependency evidence and prose refusal,
 working-copy first launch, empty catalogs and Chat prepared-session reuse.
 Package JSON validates every value while retaining only the useful fields, without a tree of unused lists.
-TOML facts compact flat arrays of decimal integers, plain finite decimal floats, booleans and strings to one validated element before the official parse, since facts
-never use array elements. Escaped basic strings use the official scalar decoder with a discard sink;
+Cargo TOML facts compact flat arrays of decimal integers, plain finite decimal floats, booleans and strings to one validated element before the official parse, since facts
+never use Cargo array elements. Python project facts retain dependency arrays, including optional groups; only exact known labels before requirement specifiers count. Escaped basic strings use the official scalar decoder with a discard sink;
 invalid escapes and Unicode still reject the original document. Multiline strings use the official lexer and decoder,
 including line continuation and quote boundaries. One level of scalar child arrays can also be reduced when the
 first retained element is a child array, preserving the original container depth; deeper arrays and inline tables retain full parsing.

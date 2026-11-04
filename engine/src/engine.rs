@@ -2234,11 +2234,14 @@ impl Core {
     /// A project's `.faber/rules.md` follows its sources: rebuilt in the project folder (where Memory reads) at each turn start
     /// of one of its conversations, and written only when it differs. A project that refuses it (a link, a read-only file)
     /// keeps its turn: the rules are an addition, never a condition.
-    fn refresh_rules(&self, id: &str) {
-        let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
-        if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
-            let _ = self.store.refresh_rules(&project.id, Path::new(&project.path));
-        }
+    fn refresh_rules(&self, id: &str) -> Option<(PathBuf, crate::project::rules::Facts)> {
+        let c = self.convs.get(id).filter(|c| c.area == Area::Project)?;
+        let project = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())?;
+        let folder = PathBuf::from(project.path);
+        self.store
+            .refresh_rules(&project.id, &folder)
+            .ok()
+            .and_then(|facts| crate::permissions::checked_folder(&folder).map(|folder| (folder, facts)))
     }
 
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
@@ -4531,7 +4534,6 @@ impl Core {
         {
             live.session.close();
         }
-        self.refresh_rules(id);
         let kit_reset = match self.launch(id, pick) {
             Err(error) if error == mcp_servers::CHECK_PENDING => {
                 let (id, reply, pick) = (id.to_string(), reply_id.to_string(), pick.clone());
@@ -4687,6 +4689,12 @@ impl Core {
                 return Err(error);
             }
         };
+        // The asynchronous check retries launch; keep its original snapshot instead of reading again.
+        let facts = if mode == kits::SessionStart::Turn && !self.kit_checks.get(conv).is_some_and(|check| check.rules_refreshed) {
+            self.refresh_rules(conv)
+        } else {
+            None
+        };
         let group = if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) { self.group_for(conv)? } else { None };
         let group_context = group.as_ref().map(|g| (g.instructions.clone(), g.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>()));
         let prepared_key = self.convs.get(conv).map(|c| (c.area, settings.user_hooks() && permissions.guarded(), permissions));
@@ -4762,7 +4770,7 @@ impl Core {
                 self.retire_codex_server((area, user_hooks, permissions));
             }
         }
-        let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd)?;
+        let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd, facts)?;
         if pick.vendor == Vendor::Claude && !flags.plugin_dir {
             project_tools.without_plugin();
         }
