@@ -107,8 +107,16 @@ impl Replay {
             Some(entry) if entry.input => key(&entry.msg),
             _ => "(no input expected)".to_string(),
         };
-        if sent == expected {
+        let report_matches = self.entries.get(self.at).and_then(|entry| entry.msg["_faberReportContains"].as_str()).is_none_or(|text| {
+            msg["result"]["contentItems"][0]["text"]
+                .as_str()
+                .or_else(|| msg["response"]["response"]["mcp_response"]["result"]["content"][0]["text"].as_str())
+                .is_some_and(|report| report.contains(text))
+        });
+        if sent == expected && report_matches {
             self.at += 1;
+        } else if !report_matches {
+            self.mismatches.push("helper report did not contain the recorded text".into());
         } else {
             self.mismatches.push(format!("sent {sent}, recorded {expected}"));
         }
@@ -128,6 +136,26 @@ mod tests {
 
     fn entry(input: bool, msg: Value) -> Entry {
         Entry { input, msg }
+    }
+
+    #[test]
+    fn a_recorded_helper_report_must_reach_the_agent_before_its_answer() {
+        for (expected, wrong, right) in [
+            (
+                json!({"id":0,"result":{},"_faberReportContains":"found 3"}),
+                json!({"id":0,"result":{"contentItems":[{"text":"wrong"}]}}),
+                json!({"id":0,"result":{"contentItems":[{"text":"found 3"}]}}),
+            ),
+            (
+                json!({"type":"control_response","response":{"request_id":"r"},"_faberReportContains":"found 3"}),
+                json!({"type":"control_response","response":{"request_id":"r","response":{"mcp_response":{"result":{"content":[{"text":"wrong"}]}}}}}),
+                json!({"type":"control_response","response":{"request_id":"r","response":{"mcp_response":{"result":{"content":[{"text":"found 3"}]}}}}}),
+            ),
+        ] {
+            let mut replay = Replay::new(vec![entry(true, expected), entry(false, json!({"answer":true}))]);
+            assert!(replay.feed(&wrong.to_string()).unwrap().is_empty());
+            assert_eq!(replay.feed(&right.to_string()).unwrap().len(), 1);
+        }
     }
 
     #[test]

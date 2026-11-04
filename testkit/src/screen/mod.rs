@@ -13,6 +13,7 @@ pub mod containment;
 pub mod control_walk;
 pub mod draft_attachments;
 pub mod first_run;
+pub mod helper_both;
 pub mod homes;
 pub mod killed;
 pub mod long_session;
@@ -57,6 +58,7 @@ pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
         .chain(agent_history::scenarios())
+        .chain(helper_both::scenarios())
         .chain(permissions::scenarios())
         .chain(performance::scenarios())
         .chain(approve_plan::scenarios())
@@ -137,6 +139,8 @@ pub const SOLO: &[(&str, &str)] = &[
     (app::CREATIVE_WORKLOG[2], "processor, memory"),
     (performance::NAME, "processor, memory, scheduling and layout timing"),
     (agent_history::NAME, "subagent-history screen scenario samples process-tree memory and CPU"),
+    (helper_both::CLAUDE, "helper round samples process-tree memory"),
+    (helper_both::CODEX, "helper round samples process-tree memory"),
     #[cfg(windows)]
     (browser_pane::NAME, "native browser placement, physical window size, process-tree memory and CPU"),
     #[cfg(windows)]
