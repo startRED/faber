@@ -26,8 +26,7 @@ test('rollback restores transcripts, project attachments and private Chat work',
     await startWayback(dir);
     const backup = path.join(dir, readFileSync(path.join(dir, 'backup-before-electron.done'), 'utf8').trim());
     // Simulate deletion, then the documented restore into the two original roots.
-    rmSync(path.join(dir, 'child-transcripts'), { recursive: true });
-    rmSync(path.join(dir, 'attachments'), { recursive: true });
+    for (const root of new Set(Object.keys(contents).map((name) => name.split('/')[0]))) rmSync(path.join(dir, root), { recursive: true });
     rmSync(`${dir}-chat-work/one`, { recursive: true });
     cpSync(backup, dir, { recursive: true });
     cpSync(path.join(backup, 'chat-work'), `${dir}-chat-work`, { recursive: true });

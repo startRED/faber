@@ -7,7 +7,7 @@ import { api } from '../ui/api.ts';
 import { dirtyCount, kept } from '../ui/unsent.ts';
 import { store } from '../ui/running.ts';
 
-export { dirtyCount, kept };
+export { dirtyCount, kept, keep } from '../ui/unsent.ts';
 
 export function mountComposer(key) {
   api.draftDirty = async () => {};

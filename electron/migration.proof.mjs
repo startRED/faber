@@ -6,6 +6,7 @@ import path from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
 
 const [mode, dir] = process.argv.slice(2);
+let interrupted = false;
 app.setPath('userData', path.join(dir, 'webview'));
 app.disableHardwareAcceleration();
 app.enableSandbox();
@@ -48,6 +49,26 @@ void app.whenReady().then(async () => { try {
     console.log('seeded legacy profile', ses.storagePath);
   } else {
     protocol.handle('faber', blank);
+    if (mode === 'crash-publication') app.on('web-contents-created', (_event, contents) => {
+      const execute = contents.executeJavaScript.bind(contents);
+      contents.executeJavaScript = (script, ...args) => execute(script.replace("localStorage.setItem(markerKey, '1');", "await new Promise(() => console.log('CRASH_BEFORE_ATTACHMENT_MARKER'));"), ...args);
+      contents.on('console-message', (event) => {
+        if (event.message !== 'CRASH_BEFORE_ATTACHMENT_MARKER') return;
+        // Stop after the real IDB transaction and text write, without running the importer's rollback.
+        session.defaultSession.flushStorageData();
+        console.log('PASS: interrupted import before attachment marker publication');
+        interrupted = true; clearTimeout(watchdog); app.exit(0);
+      });
+    });
+    if (mode === 'failed-read-idle') app.on('web-contents-created', (_event, contents) => contents.on('did-finish-load', () => {
+      if (contents.getURL() === 'http://tauri.localhost/') void contents.executeJavaScript(`(() => {
+        const original = Storage.prototype.getItem;
+        Storage.prototype.getItem = function(key) {
+          if (key === 'faber.unsent.new-chat-') throw new Error('injected legacy read failure');
+          return original.call(this, key);
+        };
+      })()`);
+    }));
     if (mode === 'quota' || mode === 'partial' || mode === 'failed-use' || mode === 'failed-idle') {
       const failingKey = mode === 'partial' ? 'faber.tauri-drafts-imported' : 'faber.unsent-attachments.new-chat-';
       app.on('web-contents-created', (_event, contents) => contents.on('did-finish-load', () => {
@@ -67,7 +88,7 @@ void app.whenReady().then(async () => { try {
     }
     const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } });
     await window.loadURL('faber://app/');
-    if (mode === 'restart-dirty' || mode === 'failed-idle') await window.webContents.executeJavaScript(`globalThis.faberShell = {
+    if (['restart-dirty', 'failed-idle', 'failed-read-idle', 'hydrate-pending'].includes(mode)) await window.webContents.executeJavaScript(`globalThis.faberShell = {
       invoke: async () => undefined, listen: () => () => {}, window: { isMaximized: async () => false, onResized: () => () => {} },
     }; void 0;`);
     if (mode === 'restart-dirty') {
@@ -80,6 +101,22 @@ void app.whenReady().then(async () => { try {
     const { migrateDrafts = async () => {} } = await import('../out/electron/migrate.js').catch((error) => {
       if (error.code === 'ERR_MODULE_NOT_FOUND') return {}; throw error;
     });
+    if (mode === 'hydrate-pending' || mode === 'failed-read-idle') {
+      assert.deepEqual(await window.webContents.executeJavaScript(`[
+        localStorage.getItem('faber.tauri-drafts-imported.new-chat-'),
+        localStorage.getItem('faber.unsent.new-chat-'), localStorage.getItem('faber.unsent-attachments.new-chat-')
+      ]`), ['pending', 'my unsent draft', null], 'interruption must leave committed text without an attachment marker');
+      if (mode === 'failed-read-idle') await assert.rejects(migrateDrafts(dir), /injected legacy read failure/);
+      await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
+      await window.webContents.executeJavaScript("void draftScreen.mountComposer('new-chat-')");
+      assert.equal(await window.webContents.executeJavaScript("document.querySelector('textarea').value"), '', 'the composer must never expose half-published import text');
+      if (mode === 'hydrate-pending') assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.tauri-drafts-imported.new-chat-')"), 'pending', 'hydration must not finalize a pending import');
+      if (mode === 'hydrate-pending') assert.equal(await window.webContents.executeJavaScript("draftScreen.keep('new-chat-', 'my unsent draft')"), false, 'pending publication must refuse screen persistence too');
+      else assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.tauri-drafts-imported.new-chat-')"), null, 'startup must roll back pending publication before the failed legacy read');
+      session.defaultSession.flushStorageData(); window.destroy();
+      console.log('PASS: ' + mode + ' with untouched real composer');
+      clearTimeout(watchdog); app.quit(); return;
+    }
     if (mode === 'failed-idle') {
       await assert.rejects(migrateDrafts(dir), /injected quota failure/);
       assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.unsent.new-chat-')"), null, 'failed publication rolls back text');
@@ -174,4 +211,4 @@ void app.whenReady().then(async () => { try {
     console.log('PASS: legacy text, binary attachments, conflict and deletion preservation, idempotence');
   }
   clearTimeout(watchdog); app.quit();
-} catch (error) { console.error(error); clearTimeout(watchdog); app.exit(1); } });
+} catch (error) { if (!interrupted) { console.error(error); clearTimeout(watchdog); app.exit(1); } } });

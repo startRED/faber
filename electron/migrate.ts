@@ -17,11 +17,22 @@ type Draft = { text: string | null; attachments?: {
 } };
 
 /** Runs in a sandboxed blank page, without a preload, IPC, Node or network access. */
-async function storage(mode: 'keys' | 'read' | 'write' | 'has' | 'done' | 'finished', key = '', value?: Draft): Promise<unknown> {
+async function storage(mode: 'keys' | 'read' | 'write' | 'has' | 'done' | 'finished' | 'reconcile', key = '', value?: Draft): Promise<unknown> {
   const textKey = `faber.unsent.${key}`;
   const markerKey = `faber.unsent-attachments.${key}`;
   const done = 'faber.tauri-drafts-imported';
   const progress = `${done}.${key}`;
+  if (mode === 'reconcile') {
+    for (const name of Object.keys(localStorage)) {
+      if (!name.startsWith(`${done}.`) || localStorage.getItem(name) !== 'pending') continue;
+      const field = name.slice(done.length + 1);
+      // Roll back before any legacy read can fail and let the screen hydrate a half-published field.
+      localStorage.removeItem(`faber.unsent.${field}`);
+      localStorage.removeItem(`faber.unsent-attachments.${field}`);
+      localStorage.removeItem(name);
+    }
+    return;
+  }
   if (mode === 'finished') return localStorage.getItem(done) === '1';
   if (mode === 'done') { localStorage.setItem(done, '1'); return; }
   if (mode === 'has') {
@@ -130,6 +141,7 @@ export async function migrateDrafts(dir: string): Promise<void> {
     if (snapshotInfo && (!snapshotInfo.isDirectory() || snapshotInfo.isSymbolicLink())) throw new Error('Linked draft snapshot');
     ownsSnapshot = true;
     await writer.webContents.loadURL('faber://app/__draft_import__');
+    await writer.webContents.executeJavaScript(script('reconcile'));
     if (await writer.webContents.executeJavaScript(script('finished'))) return;
     const webview = path.join(dir, 'webview');
     const roots = [path.join(webview, 'EBWebView', 'Default'), path.join(webview, 'Default'), webview];

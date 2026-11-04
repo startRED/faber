@@ -18,7 +18,7 @@ async function prove(modes) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'faber-profile-515b-'));
   const electron = createRequire(import.meta.url)('electron');
   try {
-    if (modes.includes('failed-idle') || modes.includes('restart-dirty')) {
+    if (modes.some((mode) => ['failed-idle', 'failed-read-idle', 'hydrate-pending', 'restart-dirty'].includes(mode))) {
       const { build } = await import('vite');
       const { default: solid } = await import('vite-plugin-solid');
       const result = await build({ configFile: false, plugins: [solid()], logLevel: 'error', build: {
@@ -45,5 +45,9 @@ test('retry after a partially completed migration never resurrects a consumed dr
 test('failed import never restores a field used and consumed by the screen, including unreached fields', { skip: process.platform !== 'win32' }, () => prove(['seed', 'failed-use', 'retry-used']));
 
 test('failed import followed by an untouched empty composer recovers the legacy draft after restart', { skip: process.platform !== 'win32' }, () => prove(['seed', 'failed-idle', 'import']));
+
+test('crash before attachment publication followed by a read failure and untouched composer recovers attachments on restart', { skip: process.platform !== 'win32' }, () => prove(['seed', 'crash-publication', 'failed-read-idle', 'import']));
+
+test('hydrating pending import text never completes its attachment publication', { skip: process.platform !== 'win32' }, () => prove(['seed', 'crash-publication', 'hydrate-pending']));
 
 test('engine recovery refreshes state while preserving a live composer whose draft write failed', () => prove(['restart-dirty']));

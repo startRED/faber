@@ -32,6 +32,7 @@ const KEPT = 'faber.unsent.';
 function resolveImport(key: string): void {
   const imported = 'faber.tauri-drafts-imported';
   const field = `${imported}.${key}`;
+  if (localStorage.getItem(field) === 'pending') throw new Error('Draft import pending');
   if (localStorage.getItem(imported) !== '1' && localStorage.getItem(field) !== '1') localStorage.setItem(field, '1');
 }
 
@@ -45,6 +46,7 @@ export function kept(key: string): string {
   const newer = memory.get(key);
   if (newer !== undefined) return newer;
   try {
+    if (localStorage.getItem(`faber.tauri-drafts-imported.${key}`) === 'pending') return '';
     return localStorage.getItem(KEPT + key) ?? '';
   } catch {
     return '';
