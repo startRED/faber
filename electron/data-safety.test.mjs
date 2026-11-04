@@ -48,4 +48,3 @@ test('rollback refuses a linked private Chat root without following or marking i
     assert.equal(readFileSync(path.join(parent, 'outside', 'private.txt'), 'utf8'), 'keep');
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
-
