@@ -31,6 +31,24 @@ const KEPT = 'faber.unsent.';
 // The text a failed write could not save, by the same keys: a box that is built again (scrolling that loads earlier messages)
 // reads this before the storage, so stale text never comes back over newer text. Gone on the next successful write.
 const memory = new Map<string, string>();
+const privateConversations = new Set<string>();
+function draftConversation(key: string): string | undefined {
+  if (key.startsWith('piece-edit.')) {
+    try {
+      const identity: unknown = JSON.parse(key.slice('piece-edit.'.length));
+      return Array.isArray(identity) && typeof identity[0] === 'string' ? identity[0] : undefined;
+    } catch { return undefined; }
+  }
+  const parts = key.split('.');
+  return parts.length === 1 ? parts[0] : parts[1];
+}
+
+/** Side questions and message editors share the temporary conversation's memory-only lifetime. */
+export function keepPrivateDrafts(id: string): void { privateConversations.add(id); }
+export function forgetPrivateDrafts(id: string): void {
+  for (const key of memory.keys()) if (draftConversation(key) === id) memory.delete(key);
+  // Keep the id private so a late editor callback can never write it to disk.
+}
 // Conversation ids are never reused. Old callbacks cannot recreate a draft after its explicit deletion in this process.
 const forgotten = new Set<string>();
 
@@ -83,6 +101,10 @@ function written(key: string, ok: boolean): void {
  * of text keeps the box reported as dirty until a write succeeds or the box is emptied. */
 export function keep(key: string, text: string): boolean {
   if (forgotten.has(key) && text.trim()) return false;
+  if (privateConversations.has(draftConversation(key) ?? '')) {
+    if (text.trim()) memory.set(key, text); else memory.delete(key);
+    return true;
+  }
   try {
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
