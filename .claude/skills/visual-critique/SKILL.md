@@ -59,7 +59,8 @@ least), each in an empty temp folder with only the photos, no code and no tools:
   judges score them on the same lines; the report gives each screen's gap to the best reference and what they do better.
   Those photos stay on the PC, never in the repository.
 
-It writes `council.md` and `council.json` in the label's folder. A judge that is signed out or gives no fair answer is
+It writes `council.md` and `council.json` in the label's folder. A point a judge took with no row counts as 5 and is
+named in the report; the rest of its answer still counts. A judge that is signed out or gives no fair answer is
 named and left out. The council replaces the single fresh session for the score; the rule below does not change.
 
 ## 3b. The climb (hill climbing to a target)
