@@ -33,3 +33,5 @@ async function prove(modes) {
 test('Tauri localStorage and IndexedDB drafts survive the Electron origin change', { skip: process.platform !== 'win32' }, () => prove(['seed', 'import']));
 test('attachment marker failure rolls back a partial field and retry restores its bytes', { skip: process.platform !== 'win32' }, () => prove(['seed', 'quota', 'import']));
 test('retry after a partially completed migration never resurrects a consumed draft', { skip: process.platform !== 'win32' }, () => prove(['seed', 'partial', 'retry']));
+
+test('failed import never restores a field used and consumed by the screen, including unreached fields', { skip: process.platform !== 'win32' }, () => prove(['seed', 'failed-use', 'retry-used']));

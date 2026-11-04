@@ -72,6 +72,7 @@ export class Sidecar {
     // A hidden run never has a pane, whatever the environment it was started in says.
     if (process.env.FABER_HIDDEN === '1') delete env.FABER_PANE;
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
+    const started = Date.now();
     let ended: () => void = () => {};
     this.child = child;
     this.alive = true;
@@ -86,6 +87,7 @@ export class Sidecar {
       this.pending.clear();
       ended();
       if (!this.stopping) {
+        if (Date.now() - started >= 30_000) this.retryMs = 1000;
         this.restart = setTimeout(() => {
           this.restart = undefined;
           this.launch();
@@ -93,7 +95,6 @@ export class Sidecar {
           // Never replay a send: read the saved state and use the screen's existing lost-events recovery.
           void this.call('state', {}).then(() => {
             if (!this.stopping && this.child === replacement && this.alive) {
-              this.retryMs = 1000;
               this.listen.event({ type: 'lagged' });
             }
           }).catch(() => {});

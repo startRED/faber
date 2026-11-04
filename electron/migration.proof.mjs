@@ -1,8 +1,9 @@
 // Runs only as an Electron main entry; every window stays hidden and all data is synthetic.
 import { app, BrowserWindow, protocol, session } from 'electron';
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { stripTypeScriptTypes } from 'node:module';
 
 const [mode, dir] = process.argv.slice(2);
 app.setPath('userData', path.join(dir, 'webview'));
@@ -28,6 +29,8 @@ void app.whenReady().then(async () => { try {
       localStorage.setItem('faber.unsent.deleted', 'must stay gone');
       localStorage.setItem('faber.unsent-attachments.deleted', 'forget');
       localStorage.setItem('faber.unsent.text-only', 'only text');
+      localStorage.setItem('faber.unsent.attachment-only', 'old attachment field');
+      localStorage.setItem('faber.unsent.untouched', 'still import this field');
       localStorage.setItem('unrelated', 'never import');
       const db = await new Promise((resolve, reject) => {
         const request = indexedDB.open('faber.unsent', 1);
@@ -45,9 +48,14 @@ void app.whenReady().then(async () => { try {
     console.log('seeded legacy profile', ses.storagePath);
   } else {
     protocol.handle('faber', blank);
-    if (mode === 'quota' || mode === 'partial') {
-      const failingKey = mode === 'quota' ? 'faber.unsent-attachments.new-chat-' : 'faber.tauri-drafts-imported';
+    if (mode === 'quota' || mode === 'partial' || mode === 'failed-use') {
+      const failingKey = mode === 'partial' ? 'faber.tauri-drafts-imported' : 'faber.unsent-attachments.new-chat-';
       app.on('web-contents-created', (_event, contents) => contents.on('did-finish-load', () => {
+        // Force the failed field first, so this launch also leaves a known field unvisited.
+        if (mode === 'failed-use' && contents.getURL() === 'http://tauri.localhost/') void contents.executeJavaScript(`(() => {
+          const original = Object.keys;
+          Object.keys = (value) => original(value).sort((a, b) => Number(b.endsWith('.new-chat-')) - Number(a.endsWith('.new-chat-')));
+        })()`);
         if (contents.getURL() === 'faber://app/__draft_import__') void contents.executeJavaScript(`(() => {
           const original = Storage.prototype.setItem;
           Storage.prototype.setItem = function(key, value) {
@@ -63,6 +71,48 @@ void app.whenReady().then(async () => { try {
     const { migrateDrafts = async () => {} } = await import('../out/electron/migrate.js').catch((error) => {
       if (error.code === 'ERR_MODULE_NOT_FOUND') return {}; throw error;
     });
+    if (mode === 'failed-use') {
+      await assert.rejects(migrateDrafts(dir), /injected quota failure/);
+      assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.tauri-drafts-imported.text-only')"), null, 'the loop has not reached this field');
+      // Run the real screen persistence code with only reactivity and the shell notification stubbed.
+      const source = stripTypeScriptTypes(readFileSync(new URL('../ui/unsent.ts', import.meta.url), 'utf8')).replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
+      await window.webContents.executeJavaScript(`(async () => {
+        const createSignal = (initial) => { let value = initial; return [() => value, (next) => { value = typeof next === 'function' ? next(value) : next; }]; };
+        const api = { draftDirty: async () => {} };
+        ${source}
+        for (const key of ['new-chat-', 'text-only']) {
+          if (!keep(key, 'new message sent in Electron') || !keep(key, '')) throw new Error('screen draft write failed');
+          if (localStorage.getItem('faber.unsent.' + key) !== null || localStorage.getItem('faber.unsent-attachments.' + key) !== null) throw new Error('consumed field must have no draft keys');
+        }
+        if (!await keepAttachments('attachment-only', { images: [], files: [{ name: 'new.txt', base64: 'bmV3' }], inlined: [] })) throw new Error('screen attachment write failed');
+        if (!await keepAttachments('attachment-only', { images: [], files: [], inlined: [] })) throw new Error('screen attachment consumption failed');
+        if (localStorage.getItem('faber.unsent-attachments.attachment-only') !== null) throw new Error('consumed attachment marker must be gone');
+        localStorage.setItem('faber.unsent.blocked-text', 'retain this draft');
+        const original = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'faber.tauri-drafts-imported.blocked-text' || key === 'faber.tauri-drafts-imported.blocked-attachment') throw new Error('injected progress failure');
+          return original.call(this, key, value);
+        };
+        try {
+          if (keep('blocked-text', '') || kept('blocked-text') !== '' || dirtyCount() !== 1) throw new Error('failed progress must retain deletion intent and block unattended update');
+          if (localStorage.getItem('faber.unsent.blocked-text') !== 'retain this draft') throw new Error('failed progress must not consume durable text');
+          if (await keepAttachments('blocked-attachment', { images: [], files: [{ name: 'new.txt', base64: 'bmV3' }], inlined: [] })) throw new Error('failed progress must report attachment failure');
+          if (await keepAttachments('blocked-attachment', { images: [], files: [], inlined: [] })) throw new Error('failed progress must protect attachment consumption too');
+        } finally { Storage.prototype.setItem = original; }
+        if (!keep('blocked-text', '') || !await keepAttachments('blocked-attachment', { images: [], files: [], inlined: [] }) || dirtyCount() !== 0) throw new Error('retry must release failed-write protection');
+      })()`);
+      session.defaultSession.flushStorageData(); window.destroy();
+      console.log('PASS: failed import followed by screen writes and consumption, including an unreached field');
+      clearTimeout(watchdog); app.quit(); return;
+    }
+    if (mode === 'retry-used') {
+      await migrateDrafts(dir);
+      const consumed = await window.webContents.executeJavaScript(`['new-chat-', 'text-only', 'attachment-only'].map((key) => [key, localStorage.getItem('faber.unsent.' + key), localStorage.getItem('faber.unsent-attachments.' + key)])`);
+      assert.deepEqual(consumed, [['new-chat-', null, null], ['text-only', null, null], ['attachment-only', null, null]], 'retry must not resurrect failed or unreached fields consumed by the screen');
+      assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.unsent.untouched')"), 'still import this field', 'unused legacy fields must still import');
+      window.destroy(); console.log('PASS: retry preserves consumed failed and unreached fields');
+      clearTimeout(watchdog); app.quit(); return;
+    }
     if (mode === 'quota' || mode === 'partial') {
       await assert.rejects(migrateDrafts(dir), /injected quota failure/);
       if (mode === 'quota') {

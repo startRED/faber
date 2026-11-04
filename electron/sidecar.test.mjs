@@ -104,3 +104,26 @@ test('a crashed engine restarts, refreshes the screen and never replays requests
   t.mock.timers.tick(60_000); await flush();
   assert.equal(children.at(-1), replacement, 'Quit never starts another host');
 });
+
+test('answering state before crashing does not reset backoff; stable uptime does', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const host = Sidecar.start(listeners());
+  let child = children.at(-1);
+  for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+    child.emit('exit', 1);
+    t.mock.timers.tick(delay - 1); await flush();
+    assert.equal(children.at(-1), child, 'a brief state reply must not reset crash backoff: ' + delay);
+    t.mock.timers.tick(1); await flush();
+    child = children.at(-1);
+    child.stdout.write(JSON.stringify({ id: child.requests[0].id, ok: {} }) + '\n');
+    await flush();
+  }
+  t.mock.timers.tick(30_000); await flush();
+  child.emit('exit', 1);
+  t.mock.timers.tick(999); await flush();
+  assert.equal(children.at(-1), child);
+  t.mock.timers.tick(1); await flush();
+  const stableReplacement = children.at(-1);
+  assert.notEqual(stableReplacement, child, 'thirty seconds of uptime resets backoff to one second');
+  const stopping = host.stop(budget); stableReplacement.emit('exit', 0); await stopping;
+});

@@ -48,7 +48,7 @@ as well as removing only the chosen file.
 
 ## Unsent attachments
 
-When moving from the Windows Tauri app to Electron, unsent text and attachment bytes are imported before the screen starts. Existing Electron drafts and confirmed deletions win; this adds no control, layout or motion. The original browser profile is kept intact (`electron/migration.test.mjs`).
+When moving from the Windows Tauri app to Electron, unsent text and attachment bytes are imported before the screen starts. Existing Electron drafts and confirmed deletions win. If import fails, later text or attachment use remains recorded after sending or clearing, including fields import never reached; this adds no control, layout or motion. The original browser profile is kept intact (`electron/migration.test.mjs`).
 
 The same draft key keeps text and attachments. Text retains its synchronous small browser-storage write; image and
 file bytes use IndexedDB Blobs, with names and inline-text removal metadata. Typing does not rewrite attachment bytes.

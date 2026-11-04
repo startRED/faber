@@ -12,7 +12,7 @@ Quota handoff reasons name the exhausted AI and its saved model, then the AI tak
 
 ## Answers
 
-If Electron's engine process exits unexpectedly, it restarts and the screen reloads from saved state after the replacement answers. No message is resent automatically; interrupted replies keep their existing recovery actions. Normal Quit waits for saving to end, up to 60 seconds (`electron/sidecar.test.mjs`).
+If Electron's engine process exits unexpectedly, it restarts and the screen reloads from saved state after the replacement answers. Restart delays grow from 1 to 30 seconds until the host stays up for 30 seconds, even when each short-lived replacement answers state. No message is resent automatically; interrupted replies keep their existing recovery actions. Normal Quit waits for saving to end, up to 60 seconds (`electron/sidecar.test.mjs`).
 
 The newest reply has a quiet, wrapping line of what the conversation delivered and its work time and API-price cost; a second, quieter line names a run of at least three turns with nothing delivered. The project home lists the same facts by conversation, most spent first, with the total above them. Neither needs motion or a card.
 
