@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { covered, isWords, lintsFor, statusText, toCheck } from './ci-scope.mjs';
-import { areas, BATCH, conflicts, dropped, eligibleStack, half, parseThen, pickRiders, remainingRiders, thenMessage, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
+import { riderFate, areas, BATCH, conflicts, dropped, eligibleStack, half, parseThen, pickRiders, remainingRiders, thenMessage, redAt, riders, running, TRAIN, landCancelled, insertions, landsAsChecked, message, noCheck, refusal, settle, stacked, stackOn, WORDS, wordsOnly, workflow } from './land.mjs';
 
 test('the commit is the title with its number, then the body without the template comments', () => {
   const body = '## What changed\n\n<!-- One or two sentences. -->\nFragments.   \n\n\n\n## Cost\n\n<!-- Memory.\n     More. -->\nNone.\n';
@@ -332,4 +332,39 @@ test('a workflow change of its own lands as checked on a moved base only from a 
   assert.equal(landsAsChecked(['docs/tasks/a.md'], [flow], ['docs/tasks/a.md'], isWords, { ownWorkflow: true }), 'words');
   assert.equal(landsAsChecked(['engine/src/a.rs'], [flow], ['engine/src/a.rs'], isWords, { ownWorkflow: true }), 'disjoint');
   assert.equal(landsAsChecked([flow], ['ui/App.tsx'], [flow], isWords, { ownWorkflow: true }), null, 'a base that changed a workflow changed what checked it');
+});
+
+test('a rider that squashes on the base but not after an earlier rider waits; one that conflicts with the base is blamed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'faber-fate-'));
+  const g = (...args) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+  const commit = (file, text, msg) => {
+    spawnSync('node', ['-e', `require('fs').writeFileSync(${JSON.stringify(join(dir, file))}, ${JSON.stringify(text)})`]);
+    g('add', '-A');
+    g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', msg);
+    return g('rev-parse', 'HEAD').stdout.trim();
+  };
+  try {
+    g('init', '-q', '-b', 'main');
+    const base = commit('map.md', 'a\nb\nc\n', 'base');
+    g('checkout', '-q', '-b', 'early');
+    const early = commit('map.md', 'a\nB1\nc\n', 'early');
+    g('checkout', '-q', '-b', 'late', base);
+    const late = commit('map.md', 'a\nB2\nc\n', 'late');
+    g('checkout', '-q', '-b', 'bad', base);
+    const bad = commit('map.md', 'a\nB3\nc\n', 'bad');
+    g('checkout', '-q', 'main');
+    const clean = (onto, head) => g('merge-tree', '--write-tree', onto, head).status === 0;
+    // The late rider squashes on the base alone but not on the early one: it waits.
+    assert.equal(clean(base, late), true);
+    assert.equal(clean(early, late), false);
+    assert.equal(riderFate(false, true), 'wait');
+    // A rider that fails on the base for another reason (a refused push) waits too.
+    assert.equal(riderFate(true, undefined), 'wait');
+    // One that does not squash on the base itself is blamed, as before.
+    g('checkout', '-q', '-B', 'main', early);
+    assert.equal(clean(early, bad), false);
+    assert.equal(riderFate(true, true), 'blame');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
