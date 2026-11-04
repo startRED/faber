@@ -258,9 +258,7 @@ impl Core {
 
     /// Every gate that keeps a check from starting, cheapest first. None of them reads a file.
     fn goal_gates_open(&self, project: &str, now: f64) -> bool {
-        self.git.is_some()
-            && self.project_quiet(project, now)
-            && self.vendors().into_iter().any(|v| self.allows(v, None, Purpose::UserTurn { by_hand: false }, false).is_ok())
+        self.git.is_some() && self.project_quiet(project, now) && self.vendors().into_iter().any(|v| self.room(v, None).is_ok())
     }
 
     /// The tick: runs the check of the goal that is due, if every gate is open.
@@ -497,6 +495,9 @@ impl Core {
         goals.room(self.goal_day(), self.goals.unpaid.get(project_id).copied().unwrap_or(0.0)).map_err(Refused::Needs)?;
         if goals.items.iter().any(|g| g.id != goal.id && g.conversation.as_deref().is_some_and(|c| self.goal_conv_working(c))) {
             return Err(Refused::Needs("reason.goal.busy"));
+        }
+        if self.vendors().into_iter().any(|v| self.room(v, None) == Err("reason.keepGoing.account")) {
+            return Err(Refused::Wait);
         }
         let asked: Vec<_> = self.vendors().into_iter().map(|v| self.allows(v, None, Purpose::UserTurn { by_hand: false }, false)).collect();
         if !asked.iter().any(Result::is_ok) {

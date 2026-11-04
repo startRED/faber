@@ -619,7 +619,7 @@ export interface RunningItem {
   /** "Keep going" is on: it runs on its own. */
   keepGoing?: boolean;
   /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
-  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start' | 'question'; until: number };
+  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start' | 'question' | 'account'; until: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
   /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
