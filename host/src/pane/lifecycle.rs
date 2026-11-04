@@ -23,6 +23,7 @@ impl Pane {
     /// sign-ins never reach the next one's, R308), and takes the sign-ins `conversation` holds before its first page.
     pub(super) async fn load(self: &Arc<Self>, url: &str, conversation: &str, tab: Option<&str>) -> Result<u64, String> {
         let parsed = checked(url)?;
+        self.home.check_navigation(parsed.to_string()).await?;
         let before = self.loads.borrow().0;
         // A page Faber loads is the agent's or a card's, never one the person went to.
         crate::lock(&self.state).skip_finish += 1;

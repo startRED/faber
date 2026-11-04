@@ -101,7 +101,7 @@ Size: S small, M medium, L large. Wave: 1 next, 2 after, 3 later or with its pha
 | K2 | Search in Settings | Codex app | Five short sections | Only if Settings grows | S | 3 |
 | K3 | A health check that finds and fixes setup problems (`/doctor`) | both CLIs | The account cards check | Extends the account cards | S | 3 |
 | K4 | What's new in the CLI itself (`/release-notes`) | Claude Code | Faber's own notes | Owner's call | S | 3 |
-| K5 | Sites Faber's browser may or may never open | Claude app | Any http or https page | A Settings list | S | 3 |
+| K5 | Sites Faber's browser may or may never open | Claude app | Blocked sites and subdomains in Settings > Privacy; Electron direct opens only; no allow-only list | A Settings list | S | 3 |
 
 ## Not to be closed
 

@@ -15,7 +15,7 @@ Faber runs the person's own Claude Code and Codex subscriptions. The sidebar has
 
 ## Projects
 - "Keep going" (a chip in a project conversation): Faber sends the next turn by itself until the work is done and checked, while the person is away. Running out of quota does not stop it: it moves to the other AI or waits for the reset. It stops when the work is done and checked, after repeated failures, after a very long run, or when no AI it may use is on a subscription. If the agent asks something and nobody answers for ten minutes, Faber picks the first choice and says so on the reply. "Stop" ends it.
-- "A separate copy for each conversation" (on by default): each conversation works in a copy of the project of its own, so two conversations never change each other's files; the person decides what goes back into the original folder.
+- "A separate copy for each conversation" (on by default): each conversation works in a copy of the project of its own, so two conversations never change each other's files.
 - "Checks": the commands Faber runs on the agent's work; confirm them once in "Settings", "Projects". "Helpers": a second AI the agent starts for one part; the person can write to one.
 - "Changes" (Ctrl+Shift+D) lists the files changed. "Faber's browser" (Ctrl+Shift+B) shows pages the agent opens (Windows).
 
@@ -26,9 +26,9 @@ The run button in the top bar (Ctrl+.) opens "Running now": every working conver
 Open with Ctrl+, or "Settings" at the bottom of the sidebar; Esc goes back. Five sections; the version closes the list:
 - "General". "You": "Language" (the system's, English, Portuguese, Spanish, French or German), "Your name", "Do you already use AI?" (picks which tutorial plays), "Tutorial" with "Watch again", "Keyboard shortcuts". "How the AI works": "Permissions for Chat and Projects" (the same choice as "Permission mode", both areas), "Web search", "Reply style", "Projects run my automatic actions", "Full trust for Faber’s own setup" (off: asks on a card before installing a catalog tool; on: installs without asking, never sends, publishes, pays or deletes), "Chat working folder" (only when Settings was opened from Chat), "Reasoning summary" (Codex only). "Notifications and system": "Notify me", "Play a sound", "Resume interrupted work when Faber opens", and on Windows only "Keep the computer awake while Faber works" and "Start Faber when I sign in". "Updates": "Receive previews".
 - "Projects": each project's "Checks" and "A separate copy for each conversation".
-- "Appearance": "Look" has six looks (default "Dark Room"; "Morning" is the light one), plus "Accent color", "Text size", "Motion", background, spacing, corners and fonts. Nothing applies until "Use this look"; "Back to default" restores the default; "Look file" saves or opens a theme file. To change the theme: Settings, Appearance, pick a look, "Use this look".
+- "Appearance": "Look" has six looks (default "Dark Room"; "Morning" is the light one), plus "Accent color", "Text size", "Motion", background, spacing, corners and fonts. Nothing applies until "Use this look"; "Back to default" restores the default; "Look file" saves or opens a theme file.
 - "Accounts and limits": a card per AI with its plan and quota bars (5-hour and 7-day, with the reset time). "Manage accounts" connects or installs an AI. Faber never sees the login: the AI's own sign-in does it.
-- "Privacy": three statements, no controls: no telemetry, history stays on this PC, logins are never read.
+- "Privacy": "Blocked sites" (sites Faber’s browser never opens), and three statements: no telemetry, history stays on this PC, logins never read.
 
 Permission modes: "Ask" (every change waits for OK), "Accept edits" (edits run, commands may ask), "Plan" (plans, changes wait), "Auto" (the AI's own reviewer approves safe actions), "Full access" (the default: no cards, the whole computer). A change applies from the next message. "Reply style": "AI's own way", "Short", "Explained" or "My own words". "Web search" is "Off" or "Live" (Codex also has a cached copy).
 
@@ -121,6 +121,7 @@ Look file | Arquivo do visual | Archivo del aspecto | Fichier du style | Datei z
 Accounts and limits | Contas e limites | Cuentas y límites | Comptes et limites | Konten und Limits
 Manage accounts | Gerenciar contas | Gestionar cuentas | Gérer les comptes | Konten verwalten
 Privacy | Privacidade | Privacidad | Confidentialité | Datenschutz
+Blocked sites | Sites bloqueados | Sitios bloqueados | Sites bloqués | Gesperrte Websites
 Ask | Perguntar | Preguntar | Demander | Nachfragen
 Accept edits | Aceitar edições | Aceptar ediciones | Accepter les modifications | Änderungen annehmen
 Plan | Planejar | Planificar | Planifier | Planen

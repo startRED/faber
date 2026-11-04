@@ -18,6 +18,7 @@ fn read(path: &str) -> String {
 /// until it is listed here, and then the map has to name it.
 fn settings_keys() -> Vec<String> {
     let every = Settings {
+        blocked_hosts: Some(Vec::new()),
         appearance: Some(Default::default()),
         user_hooks: Some(true),
         permissions: Some(Permissions::Ask),

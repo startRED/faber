@@ -427,13 +427,14 @@ async fn site_park(app: AppHandle, load: u32, box_id: u64) {
 
 /// The person opens a page from a reply's card in the browser pane; it is that conversation's page from then on.
 #[tauri::command]
-async fn site_open(app: AppHandle, id: String, url: String) -> bool {
+async fn site_open(app: AppHandle, id: String, url: String) -> Result<bool, String> {
     #[cfg(windows)]
     if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
-        return pane.show_page(&id, &url).await;
+        pane.check_navigation(&url)?;
+        return Ok(pane.show_page(&id, &url).await);
     }
     let _ = (app, id, url);
-    false
+    Ok(false)
 }
 
 /// The person goes back, forward or reloads in the browser pane, on that conversation's page only.
@@ -459,17 +460,18 @@ fn test_site_refuse_once() {
 
 /// The person loads an address they typed in the tab in front of the browser pane.
 #[tauri::command]
-async fn site_go(app: AppHandle, id: String, url: String) -> bool {
+async fn site_go(app: AppHandle, id: String, url: String) -> Result<bool, String> {
     #[cfg(all(windows, feature = "test-hooks"))]
     if TEST_REFUSE_SITE_OPEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
-        return false;
+        return Ok(false);
     }
     #[cfg(windows)]
     if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
-        return pane.go(&id, &url).await;
+        pane.check_navigation(&url)?;
+        return Ok(pane.go(&id, &url).await);
     }
     let _ = (app, id, url);
-    false
+    Ok(false)
 }
 
 /// What the person did to the browser pane's tabs, answered with the tabs and the tab it concerns; the tab in front shows.

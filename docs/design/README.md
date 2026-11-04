@@ -53,6 +53,7 @@ Native pieces and generated pages have their own [visual-answer rules](visual-an
   `ui/Site.tsx`, which watches the screen once a frame at most and counts a painted layer by its bounds unless it lies under the box, so a new layer needs a role
   of dialog, menu, listbox or tooltip, or `<dialog>` or a popover): never draw over the pane and hope.
 - Forgetting imported sign-ins closes both browser views and reopens the visible page on a clean profile.
+- Settings > Privacy has the browser's Blocked sites list ([settings.md](settings.md)). Refused typed addresses and page/app cards show the localized reason without opening the pane. Known incoherence: the Electron pane checks only direct opens through the Rust host; page links, history and redirects still need the Electron move's per-hop hook. Tauri checks each navigation callback the platform reports.
 - Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
   reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Export, Move to group, Remove from group when assigned and Move to project (project-name picker) in Chat, Archive or Unarchive, Delete), a Chat group (Rename, Delete), a project (New
   conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit and Go back before this message on yours;

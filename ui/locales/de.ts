@@ -1,6 +1,15 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  'set.blockedHosts': 'Gesperrte Websites',
+  'set.blockedHostsHint': 'Diese Websites bleiben in Fabers Browser gesperrt.',
+  'set.blockedHostsMore': 'Trage bis zu 50 Website-Namen wie bank.example ein, ohne https://, Port oder Pfad. Unterdomains werden ebenfalls gesperrt. Das gilt für Fabers Browser, nicht für andere Apps oder die Webwerkzeuge der KI.',
+  'set.blockedHostsAdd': 'Hinzufügen',
+  'set.blockedHostsRemove': '{host} entfernen',
+  'set.blockedHostsRemoveButton': 'Entfernen',
+  "error.browser.invalidHost": "Gib nur den Namen der Website ein, ohne https:// oder Pfad.",
+  "error.browser.tooManyHosts": "Du kannst bis zu 50 Websites sperren.",
+  "error.browser.blockedHost": "Diese Website ist in den Einstellungen gesperrt.",
   "reason.conversation_damaged": "Diese Unterhaltung konnte nicht gelesen werden.",
   "damaged.showFile": "Datei anzeigen",
   "damaged.remove": "Entfernen",
@@ -2579,6 +2588,7 @@ export const de: Messages = {
   'notes.408.better': 'Du bekommst passende Werkzeuge für die Python-Bibliotheken deines Projekts, auch wenn du sie in deiner Anfrage nicht nennst.',
   'notes.409.better': 'Auch im kleinen Fenster kannst du den vollständigen Titel der Katalogdetails lesen und Zurück weiterhin erreichen.',
   'notes.410.fixed': 'Nach einem erzwungenen Schließen findest du beim Öffnen von Faber deinen ungesendeten Text, die Anhänge und das vorige Gespräch wieder.',
+  'notes.411.new': 'Du kannst Websites und ihre Unterdomains unter Einstellungen, Datenschutz sperren, damit sie in Fabers Browser nicht geöffnet werden.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

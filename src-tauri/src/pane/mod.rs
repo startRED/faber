@@ -393,6 +393,7 @@ impl Pane {
     /// says it is gone, and takes the sign-ins `conversation` holds.
     async fn load(self: &Arc<Self>, url: &str, conversation: &str, tab: Option<&str>) -> Result<u64, String> {
         let parsed = checked(url)?;
+        self.check_navigation(parsed.as_str())?;
         let before = self.loads.borrow().0;
         // A page Faber loads is the agent's or a card's, never one the person went to.
         crate::lock(&self.state).skip_finish += 1;
@@ -421,9 +422,16 @@ impl Pane {
         let blank = Url::parse("about:blank").map_err(|e| e.to_string())?;
         // Only the pane the person sees tells the screen where its page is; the agent's pane behind is never on it.
         let front = self.behind.is_some();
+        let navigation_app = self.app.clone();
         let builder = WebviewBuilder::new(self.label, WebviewUrl::External(blank))
             .incognito(true)
-            .on_navigation(allowed)
+            .on_navigation(move |url| {
+                allowed(url)
+                    && navigation_app.try_state::<crate::Faber>().is_some_and(|faber| {
+                        let blocked = faber.engine.settings().blocked_hosts.unwrap_or_default();
+                        faber_engine::browser::check_blocked_url(url.as_str(), &blocked).is_ok()
+                    })
+            })
             .on_new_window(|_, _| NewWindowResponse::Deny)
             .on_download(|_, _| false)
             .on_document_title_changed(move |_, _| {
@@ -841,10 +849,16 @@ impl Pane {
         self.touch();
     }
 
+    /// Refuses a destination using the latest saved list, before a tab or view changes.
+    pub fn check_navigation(&self, url: &str) -> Result<(), String> {
+        let blocked = self.app.state::<crate::Faber>().engine.settings().blocked_hosts.unwrap_or_default();
+        faber_engine::browser::check_blocked_url(url, &blocked).map_err(str::to_string)
+    }
+
     /// Loads a page the person asked for from a conversation's reply. The page is that conversation's from then on.
     pub async fn show_page(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
         // An address the pane never loads leaves another conversation's page and tabs as they were.
-        if checked(url).is_err() {
+        if checked(url).is_err() || self.check_navigation(url).is_err() {
             return false;
         }
         let tab = self.tab_step(conversation, TabStep::Show(url.to_string())).await.and_then(|(_, tab)| tab);
@@ -854,7 +868,7 @@ impl Pane {
     /// The person loads `url` in the tab in front (an address they typed): the tab keeps it.
     pub async fn go(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
         // An address too long for its tab to keep would load and then reopen on the page before.
-        if checked(url).is_err() || url.chars().count() > faber_engine::browser::MAX_URL {
+        if checked(url).is_err() || url.chars().count() > faber_engine::browser::MAX_URL || self.check_navigation(url).is_err() {
             return false;
         }
         let front = self.tabs_of(conversation).await.and_then(|tabs| tabs.front);

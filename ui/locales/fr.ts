@@ -1,6 +1,15 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  'set.blockedHosts': 'Sites bloqués',
+  'set.blockedHostsHint': 'Empêchez ces sites de s’ouvrir dans le navigateur de Faber.',
+  'set.blockedHostsMore': 'Ajoutez jusqu’à 50 noms de sites, comme banque.example, sans https://, port ni chemin. Leurs sous-domaines sont aussi bloqués. Ce réglage concerne le navigateur de Faber, pas les autres applications ni les outils web de l’IA.',
+  'set.blockedHostsAdd': 'Ajouter',
+  'set.blockedHostsRemove': 'Retirer {host}',
+  'set.blockedHostsRemoveButton': 'Retirer',
+  "error.browser.invalidHost": "Saisissez seulement le nom du site, sans https:// ni chemin.",
+  "error.browser.tooManyHosts": "Vous pouvez bloquer jusqu’à 50 sites.",
+  "error.browser.blockedHost": "Ce site est bloqué dans les paramètres.",
   "reason.conversation_damaged": "Cette conversation n’a pas pu être lue.",
   "damaged.showFile": "Afficher le fichier",
   "damaged.remove": "Supprimer",
@@ -2579,6 +2588,7 @@ export const fr: Messages = {
   'notes.408.better': 'Vous disposez des outils adaptés aux bibliothèques Python de votre projet sans avoir à les nommer dans votre demande.',
   'notes.409.better': 'Dans une petite fenêtre, vous pouvez lire le titre complet des détails du Catalogue et garder Retour à portée de main.',
   'notes.410.fixed': 'Votre texte non envoyé, vos pièces jointes et la conversation précédente reviennent quand vous rouvrez Faber après une fermeture forcée.',
+  'notes.411.new': 'Vous pouvez bloquer des sites et leurs sous-domaines dans Paramètres, sous Confidentialité, pour les empêcher de s’ouvrir dans le navigateur de Faber.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

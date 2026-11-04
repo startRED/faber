@@ -1520,6 +1520,9 @@ pub struct PaceNote {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    /// Sites the browser must not open, in canonical host form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_hosts: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appearance: Option<serde_json::Map<String, Value>>,
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).

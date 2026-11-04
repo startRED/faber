@@ -2544,6 +2544,13 @@ impl Core {
         let before = self.store.settings();
         let before_tuning = before.tuning();
         let mut settings = Settings {
+            blocked_hosts: patch
+                .blocked_hosts
+                .as_ref()
+                .map(|hosts| crate::browser::blocked_hosts(hosts))
+                .transpose()
+                .map_err(str::to_string)?
+                .or(before.blocked_hosts),
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),

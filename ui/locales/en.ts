@@ -1,6 +1,15 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  'set.blockedHosts': 'Blocked sites',
+  'set.blockedHostsHint': 'Keep these sites out of Faber’s browser.',
+  'set.blockedHostsMore': 'Add up to 50 site names, such as bank.example, without https://, a port or a path. Subdomains are blocked too. This applies to Faber’s browser, not to other apps or the AI’s own web tools.',
+  'set.blockedHostsAdd': 'Add',
+  'set.blockedHostsRemove': 'Remove {host}',
+  'set.blockedHostsRemoveButton': 'Remove',
+  "error.browser.invalidHost": "Enter a site name without a scheme or path.",
+  "error.browser.tooManyHosts": "You can block up to 50 sites.",
+  "error.browser.blockedHost": "This site is blocked in Settings.",
   "reason.conversation_damaged": "This conversation could not be read.",
   "damaged.showFile": "Show the file",
   "damaged.remove": "Remove",
@@ -2459,6 +2468,7 @@ export const en = {
   'notes.408.better': "You get tools suited to your project's Python libraries without naming those libraries in your request.",
   'notes.409.better': 'You can read the full Catalog detail title in a small window, with Back still within reach.',
   'notes.410.fixed': 'Your unsent text, attachments and previous conversation return when you reopen Faber after a forced close.',
+  'notes.411.new': 'You can block sites and their subdomains in Settings, under Privacy, to keep them out of Faber’s browser.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

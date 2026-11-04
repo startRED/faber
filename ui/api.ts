@@ -564,6 +564,7 @@ export type WebSearch = 'off' | 'cached' | 'live';
 export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
 export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
 export interface Settings {
+  blockedHosts?: string[];
   appearance?: Appearance;
   userHooks?: boolean;
   permissions?: PermissionMode;

@@ -325,6 +325,9 @@ export function Settings(props: Props) {
             </div>
           </Match>
           <Match when={section() === 'privacy'}>
+            <Group>
+              <BlockedSites saved={props.saved} onSave={save} onError={props.onError} />
+            </Group>
             <div class="st-card">
               <ul class="facts">
                 <For each={['telemetry', 'history', 'logins'] as const}>
@@ -342,6 +345,42 @@ export function Settings(props: Props) {
       </div>
     </div>
   );
+}
+
+function BlockedSites(props: Pick<Props, 'saved' | 'onSave' | 'onError'>) {
+  const [host, setHost] = createSignal('');
+  const [saving, setSaving] = createSignal(false);
+  let field: HTMLInputElement | undefined;
+  const hosts = () => props.saved.blockedHosts ?? [];
+  const save = async (next: string[], added = false) => {
+    if (saving()) return;
+    const focused = document.activeElement;
+    setSaving(true);
+    let saved = false;
+    try {
+      saved = await props.onSave({ blockedHosts: next });
+      if (saved && added) setHost('');
+    } catch (error) { props.onError?.(error); }
+    finally { setSaving(false); }
+    if (saved) field?.focus();
+    else if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+  };
+  return <>
+    <Opt id="set-blocked-hosts" label={t('set.blockedHosts')} hint={t('set.blockedHostsHint')} more={t('set.blockedHostsMore')} htmlFor="blocked-host">
+      <form class="blocked-host-add" onSubmit={(event) => { event.preventDefault(); if (host().trim() && hosts().length < 50) void save([...hosts(), host().trim()], true); }}>
+        <input ref={(el) => { field = el; }} id="blocked-host" class="field" value={host()} maxLength={253} disabled={saving() || hosts().length >= 50} autoCapitalize="none" spellcheck={false} onInput={(event) => setHost(event.currentTarget.value)} />
+        <button type="submit" class="btn" disabled={saving() || !host().trim() || hosts().length >= 50}>{t('set.blockedHostsAdd')}</button>
+      </form>
+    </Opt>
+    <Show when={hosts().length}>
+      <ul class="st-extra blocked-hosts" aria-labelledby="set-blocked-hosts-name">
+        <For each={hosts()}>{(entry) => <li>
+          <span>{entry}</span>
+          <button class="btn" disabled={saving()} aria-label={t('set.blockedHostsRemove', { host: entry })} onClick={() => void save(hosts().filter((host) => host !== entry))}>{t('set.blockedHostsRemoveButton')}</button>
+        </li>}</For>
+      </ul>
+    </Show>
+  </>;
 }
 
 /** The folder a Chat works in. It is a row only where its control exists: Settings opened from Chat, as the choice acts on the

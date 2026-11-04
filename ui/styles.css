@@ -1043,6 +1043,12 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .st-pad { padding: 14px 16px; }
 .st-extra { display: grid; gap: 8px; padding: 10px 16px 14px; }
 .st-extra:has(> .recents:empty) { display: none; }
+.blocked-host-add, .blocked-hosts li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.blocked-host-add .field { min-width: 0; flex: 1; }
+.blocked-hosts { margin: 0; padding: 12px 16px; }
+.blocked-hosts li { justify-content: space-between; }
+.blocked-hosts li span { min-width: 0; overflow-wrap: anywhere; }
+.blocked-hosts .btn { flex: none; }
 .st-note { padding: 12px 16px 0; }
 .st-val { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-2); }
 .st-fold-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 12px 16px; text-align: left; }

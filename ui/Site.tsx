@@ -259,14 +259,18 @@ export const hostOf = (url: string) => {
 /** A page the agent opened, in its reply: the picture it took, the title and the site, and a button to look at it. */
 export function SiteCard(props: { conversationId: string; tool: ToolUse; site: { url: string; title: string; turn?: SiteTurn }; steps?: Accessor<SiteStep[]> }) {
   const [picture] = createResource(() => props.tool.id, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+  const [refused, setRefused] = createSignal<string>();
   const open = async () => {
+    setRefused(undefined);
     const { url, title } = props.site;
-    if (await api.siteOpen(props.conversationId, url).catch(() => false)) showSite({ conversationId: props.conversationId, url, title, steps: props.steps });
+    const opened = await api.siteOpen(props.conversationId, url).catch((error) => { setRefused(errorText(error)); return false; });
+    if (opened) showSite({ conversationId: props.conversationId, url, title, steps: props.steps });
   };
   return (
     <div class="file site" data-turn={props.site.turn ? 'person' : undefined}>
       <Show when={picture()}>{(src) => <img src={src()} alt="" />}</Show>
       <Show when={props.site.turn}>{(turn) => <p class="site-turn">{t(turn())}</p>}</Show>
+      <Show when={refused()}>{(error) => <p class="note err" role="alert">{fromEngine(error())}</p>}</Show>
       <div>
         <span title={props.site.url}>
           <b>{props.site.title || hostOf(props.site.url)}</b>
@@ -599,7 +603,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     if (focused()) refocus = owner();
     sweep();
   });
-  const [refused, setRefused] = createSignal<'site.refused' | 'site.openFailed'>();
+  const [refused, setRefused] = createSignal<string>();
   let navigation = 0;
   onCleanup(() => navigation++);
   const close = () => { navigation++; props.onClose(); };
@@ -609,9 +613,10 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     const owner = props.site.conversationId;
     setRefused(undefined);
     if (!to) return setRefused('site.refused');
-    const opened = await api.siteGo(owner, to).catch(() => false);
+    let failure: string | undefined;
+    const opened = await api.siteGo(owner, to).catch((error) => { failure = errorText(error); return false; });
     if (request !== navigation || owner !== props.site.conversationId || box?.closest<HTMLElement>('.runcol')?.dataset.exiting === 'true') return;
-    if (!opened) return setRefused('site.openFailed');
+    if (!opened) return setRefused(failure ?? 'site.openFailed');
     setTyped(undefined);
     address?.blur();
     // The new page is the live one, even on the same site: a step's picture that stood in for the page goes.
@@ -952,7 +957,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
         {(error) => <p class="side-meta bad" role="alert">{fromEngine(error())}</p>}
       </Show>
       <Show when={refused()}>
-        {(error) => <p class="side-meta bad" id="site-address-error" role="alert">{t(error())}</p>}
+        {(error) => <p class="side-meta bad" id="site-address-error" role="alert">{fromEngine(error())}</p>}
       </Show>
       <div class="rc-body side-body site-body">
         {/* The sizes of a check are a list a screen reader walks, never one image. */}

@@ -1,6 +1,15 @@
 import type { Messages } from './en.ts';
 
 export const ptBR: Messages = {
+  'set.blockedHosts': 'Sites bloqueados',
+  'set.blockedHostsHint': 'Impeça esses sites de abrir no navegador do Faber.',
+  'set.blockedHostsMore': 'Adicione até 50 nomes de sites, como banco.example, sem https://, porta ou caminho. Os subdomínios também ficam bloqueados. Isso vale pro navegador do Faber, não pra outros aplicativos nem pras ferramentas de busca da IA.',
+  'set.blockedHostsAdd': 'Adicionar',
+  'set.blockedHostsRemove': 'Remover {host}',
+  'set.blockedHostsRemoveButton': 'Remover',
+  "error.browser.invalidHost": "Digite só o nome do site, sem https:// ou caminho.",
+  "error.browser.tooManyHosts": "Você pode bloquear até 50 sites.",
+  "error.browser.blockedHost": "Este site está bloqueado nas configurações.",
   "reason.conversation_damaged": "Não foi possível ler esta conversa.",
   "damaged.showFile": "Mostrar o arquivo",
   "damaged.remove": "Remover",
@@ -2566,6 +2575,7 @@ export const ptBR: Messages = {
   'notes.408.better': 'Você recebe ferramentas adequadas às bibliotecas Python do projeto, mesmo sem citar essas bibliotecas no pedido.',
   'notes.409.better': 'Você consegue ler o título inteiro dos detalhes no Catálogo numa janela pequena, com Voltar sempre ao alcance.',
   'notes.410.fixed': 'Seu texto ainda não enviado, os anexos e a conversa anterior voltam quando você reabre o Faber depois de um fechamento forçado.',
+  'notes.411.new': 'Você pode bloquear sites e seus subdomínios em Configurações, na seção Privacidade, pra impedir que abram no navegador do Faber.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
