@@ -6013,6 +6013,16 @@ async fn r160_claude_plan_approval_is_never_auto_answered_by_full_access_or_a_re
 async fn r160_claude_keep_planning_declines_plan_exit_without_changing_permissions() {
     let dir = support::DataFolder::new();
     let mut entries = fixture("claude", "approve-plan");
+    let plan = "1. Inspect the parser.\n2. Add the check.";
+    let exit = entries.iter().position(|e| e.msg["type"] == "control_request").unwrap();
+    entries.insert(
+        exit,
+        Entry {
+            input: false,
+            msg: json!({ "type": "stream_event", "event": { "type": "content_block_delta", "index": 0,
+            "delta": { "type": "text_delta", "text": plan } } }),
+        },
+    );
     entries.retain(|e| !(e.input && e.msg["type"] == "control_request"));
     let result = entries.iter_mut().find(|e| e.msg["type"] == "result").unwrap();
     result.msg["subtype"] = "success".into();
@@ -6025,6 +6035,9 @@ async fn r160_claude_keep_planning_declines_plan_exit_without_changing_permissio
     engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
     let id = engine.send(ask(Area::Chat, "Plan this change.", choice("claude", Some("haiku")))).unwrap();
     let card = until(&engine, &id, |c| c.messages.iter().any(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))).await;
+    let permission = &card.messages.last().unwrap().permissions.as_ref().unwrap()[0];
+    assert_eq!(permission.input["plan"], plan, "the approval keeps its canonical plan even when the reply already shows it");
+    assert_eq!(permission.input["planInReply"], true);
     let turn_id = card.messages.last().unwrap().id.clone();
     engine.approve_plan(&id, &turn_id, &card.messages.last().unwrap().permissions.as_ref().unwrap()[0].request_id, None).await.unwrap();
     until(&engine, &id, |c| c.messages.len() == 2 && c.messages.iter().all(|m| m.status != Some(Status::Streaming))).await;
@@ -6060,7 +6073,8 @@ async fn r160_codex_plan_approval_resumes_under_the_selected_mode_and_starts_def
     let reply = card.messages.last().unwrap();
     let permission = reply.permissions.as_ref().unwrap().first().unwrap();
     assert_eq!(permission.request_id, "plan:plan-item");
-    assert!(permission.input.get("plan").is_none(), "the plan is already in the reply text");
+    assert_eq!(permission.input["plan"], "1. Inspect the parser.\n2. Add the check.");
+    assert_eq!(permission.input["planInReply"], true, "the card can fold a plan already shown in the reply");
     assert!(reply.text.contains("1. Inspect the parser.\n2. Add the check."));
     assert_eq!(permission.input["mode"], "dontAsk", "the shared mode before Plan was Full access");
     let initial_turn = first.wire.messages().into_iter().find(|m| m["method"] == "turn/start").unwrap();

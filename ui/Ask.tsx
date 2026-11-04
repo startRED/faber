@@ -8,18 +8,7 @@ import { catalogName, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { millis } from './motion.ts';
 import { answerOutcome } from './running.ts';
-
-// What a permission request means, in plain words.
-function describe(tool: string, input: unknown): { title: string; note?: string; body: string } {
-  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const raw = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
-  if (tool === 'Bash' || tool === 'command') {
-    return { title: t('ask.command'), note: typeof i.description === 'string' ? i.description : undefined, body: typeof input === 'string' ? input : String(i.command ?? raw) };
-  }
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool)) return { title: t('ask.file'), body: String(i.file_path ?? i.path ?? raw) };
-  if (tool === 'WebFetch') return { title: t('ask.page'), body: String(i.url ?? raw) };
-  return { title: t('ask.other', { tool }), body: raw };
-}
+import { PermissionDetails, planText } from './PermissionDetails.tsx';
 
 /** Faber's own self-change card (the agent installing from the catalog): the engine sends ids and facts, and every word here is the
  * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
@@ -372,8 +361,7 @@ function QuestionCard(props: { conversationId: string; turnId: string; permissio
 
 /** The same plan decision in the thread and running column; the engine owns both the mode and the run. */
 export function PlanCard(props: { conversationId: string; turnId: string; permission: Permission; surface?: string }) {
-  const input = () => props.permission.input as { mode?: PermissionMode; plan?: unknown };
-  const plan = () => typeof input()?.plan === 'string' ? input().plan as string : '';
+  const input = () => props.permission.input as { mode?: PermissionMode; plan?: unknown; planInReply?: boolean };
   const modes = PERMISSION_MODES.filter((m) => m !== 'plan');
   const [mode, setMode] = createSignal<PermissionMode>(modes.find((m) => m === input()?.mode) ?? 'ask');
   const [sending, setSending] = createSignal(false);
@@ -381,6 +369,7 @@ export function PlanCard(props: { conversationId: string; turnId: string; permis
   const [dropped, setDropped] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
   const answer = async (approve: boolean) => {
+    if (sending()) return;
     setSending(true);
     setProblem(undefined);
     try {
@@ -400,11 +389,16 @@ export function PlanCard(props: { conversationId: string; turnId: string; permis
     <Show when={!dropped()}>
       <div class="ask plan-approval" data-surface={props.surface} data-testid="plan-approval" role="group" aria-label={t('ask.plan.title')} aria-busy={sending()}>
         <b role={props.surface === 'ask' ? 'status' : undefined} aria-live={props.surface === 'ask' ? 'polite' : undefined}>{t('ask.plan.title')}</b>
-        <Show when={plan()}>{(text) => <div class="md" onClick={openLinks}><Markdown text={text()} /></div>}</Show>
+        <Show when={planText(props.permission.input)} fallback={<p class="note">{t('ask.plan.missing')}</p>}>
+          {(text) => <Show when={input()?.planInReply} fallback={<div class="md permission-plan" tabindex="0" aria-label={t('ask.plan.title')} onClick={openLinks}><Markdown text={text()} /></div>}>
+            <details><summary>{t('ask.plan')}</summary><div class="md permission-plan" tabindex="0" aria-label={t('ask.plan.title')} onClick={openLinks}><Markdown text={text()} /></div></details>
+          </Show>}
+        </Show>
         <div>
           <PermissionChip mode={mode()} onMode={setMode} modes={modes} caption={t('ask.plan.mode')} disabled={sending() || changed()} />
           <p class="note">{t('ask.plan.shared')}</p>
         </div>
+        <p class="note">{t('ask.plan.keepHint')}</p>
         <div>
           <button class="btn primary" ref={(el) => {
             // The running column can show the same card; only its thread copy receives focus.
@@ -413,7 +407,7 @@ export function PlanCard(props: { conversationId: string; turnId: string; permis
               if (active instanceof HTMLElement && (active.matches('input, textarea') || active.isContentEditable)) return;
               if (el.isConnected) el.focus({ preventScroll: true });
             });
-          }} disabled={sending() || changed()} onClick={() => void answer(true)}>{t('ask.plan.approve')}</button>
+          }} disabled={sending() || changed() || !planText(props.permission.input)} onClick={() => void answer(true)}>{t('ask.plan.approve')}</button>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>{t('ask.plan.keep')}</button>
         </div>
         <Show when={problem()}><div class="note err" role="alert">{problem()}</div></Show>
@@ -429,8 +423,8 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   const [sending, setSending] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
   const own = () => selfInstall(props.permission.tool, props.permission.input);
-  const d = () => describe(props.permission.tool, props.permission.input);
   const answer = async (allow: boolean, always = false) => {
+    if (sending()) return;
     setProblem(undefined);
     setSending(true);
     try {
@@ -447,16 +441,12 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   };
   return (
     <Show when={!dropped()}>
-      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')}>
+      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')} aria-busy={sending()}>
         <Show
           when={own()}
           fallback={
             <>
-              <b>{d().title}</b>
-              <Show when={d().note}>
-                <span class="note">{d().note}</span>
-              </Show>
-              <pre>{d().body}</pre>
+              <PermissionDetails permission={props.permission} />
             </>
           }
         >
@@ -487,6 +477,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
             {t('ask.deny')}
           </button>
         </div>
+        <Show when={sending()}><span class="note" role="status">{t('ask.sending')}</span></Show>
         <Show when={problem()}>
           <div class="note err" role="alert">
             {problem()}

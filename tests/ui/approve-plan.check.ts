@@ -14,7 +14,7 @@ check('approve-plan: a closing box keeps its recap without a second approval act
   const dispose = render(() => createComponent(Thread, {
     conversationId: 'conversation', options: [], from: 0, onBranch: () => {}, onReply: () => {},
     messages: [{ id: 'turn', role: 'assistant', text: 'The proposed plan.', at: 1, vendor: 'codex', status: 'done',
-      permissions: [{ requestId: 'plan:item', tool: 'ExitPlanMode', input: {} }],
+      permissions: [{ requestId: 'plan:item', tool: 'ExitPlanMode', input: { plan: '# Proposed plan' } }],
       wrapUp: { recap: 'The plan is ready.', ask: 'Start?', actions: ['Start', 'Later'] } }],
   }), root);
   try {
@@ -31,7 +31,7 @@ check('approve-plan: the card chooses a run mode, excludes Plan, and keeps plann
   const root = document.createElement('div');
   document.body.append(root);
   const dispose = render(() => createComponent(PlanCard, {
-    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'ask' } },
+    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'ask', plan: '# Proposed plan' } },
   }), root);
   try {
     const select = root.querySelector<HTMLButtonElement>('[role=combobox]')!;
@@ -62,7 +62,7 @@ check('approve-plan: unknown plan history starts with Ask and an error keeps tha
   const root = document.createElement('div');
   document.body.append(root);
   const dispose = render(() => createComponent(PlanCard, {
-    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: {} },
+    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { plan: '# Proposed plan' } },
   }), root);
   try {
     const select = root.querySelector<HTMLButtonElement>('[role=combobox]')!;
@@ -96,7 +96,7 @@ check('approve-plan: a tool-only plan is safe Markdown in the card and detail in
 check('approve-plan: mode choices share the composer chip words and one-line meanings', () => {
   const root = document.createElement('div');
   document.body.append(root);
-  const dispose = render(() => [createComponent(PermissionChip, { mode: 'ask', onMode: () => {} }), createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'ask' } } })], root);
+  const dispose = render(() => [createComponent(PermissionChip, { mode: 'ask', onMode: () => {} }), createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'ask', plan: '# Proposed plan' } } })], root);
   try {
     const pickers = [...root.querySelectorAll<HTMLButtonElement>('[role=combobox]')];
     const options = (picker: HTMLButtonElement) => {
@@ -116,7 +116,7 @@ check('approve-plan: with no editable focus the thread focuses approval and anno
   document.body.append(root);
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   equal(document.activeElement, document.body, 'no field is being edited');
-  const permission = { requestId: 'request', tool: 'ExitPlanMode', input: {} };
+  const permission = { requestId: 'request', tool: 'ExitPlanMode', input: { plan: '# Proposed plan' } };
   const dispose = render(() => [createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission, surface: 'ask' }), createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission })], root);
   try {
     await Promise.resolve();
@@ -133,7 +133,7 @@ check('approve-plan: a plan card leaves focus on the person typing in any editab
     document.body.append(field, root);
     field.focus();
     const dispose = render(() => createComponent(PlanCard, {
-      conversationId: 'conversation', turnId: 'turn', surface: 'ask', permission: { requestId: 'request', tool: 'ExitPlanMode', input: {} },
+      conversationId: 'conversation', turnId: 'turn', surface: 'ask', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { plan: '# Proposed plan' } },
     }), root);
     try {
       await Promise.resolve();
@@ -154,7 +154,7 @@ check('approve-plan: every language explains the shared mode and quietly names F
   const root = document.createElement('div');
   document.body.append(root);
   const dispose = render(() => [
-    createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: {} } }),
+    createComponent(PlanCard, { conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { plan: '# Proposed plan' } } }),
     createComponent(Thread, { conversationId: 'conversation', options: [], from: 0, onBranch: () => {}, messages: [
       { id: 'prompt', role: 'user', text: 'Go ahead with the plan.', at: 0, wake: { why: 'wake.approvedPlan' } },
       { id: 'reply', role: 'assistant', text: 'Started the approved work.', at: 1, status: 'done' },
@@ -182,7 +182,7 @@ check('approve-plan: a later permission choice refuses approval on the card and 
   const root = document.createElement('div');
   document.body.append(root);
   const dispose = render(() => createComponent(PlanCard, {
-    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'dontAsk' } },
+    conversationId: 'conversation', turnId: 'turn', permission: { requestId: 'request', tool: 'ExitPlanMode', input: { mode: 'dontAsk', plan: '# Proposed plan' } },
   }), root);
   try {
     const approve = root.querySelector<HTMLButtonElement>('.primary')!;

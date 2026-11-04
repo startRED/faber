@@ -1956,3 +1956,17 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   .q-opt.on .q-mark { border-color: Highlight; color: Highlight; }
   .ask .btn:disabled { border-color: GrayText; }
 }
+
+/* Permission review keeps the existing amber surface; content and controls remain still while being read. */
+.ask > .permission-plan, .ask .permission-plan div { display: block; }
+.ask .permission-plan { max-height: min(55vh, 640px); overflow: auto; min-width: 0; overflow-wrap: anywhere; }
+.ask .permission-plan pre { white-space: pre; overflow: auto; }
+.ask .permission-path, .ask .permission-reason { margin: 0; overflow-wrap: anywhere; }
+.ask .permission-tool { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-sm); }
+.ask .permission-tool dt { color: var(--ink-3); }
+.ask .permission-tool dd { margin: 0; overflow-wrap: anywhere; }
+.ask details { min-width: 0; }
+.ask summary { cursor: default; color: var(--ink-2); font-size: var(--fs-sm); padding: 4px 0; }
+.ask .permission-diff { max-height: min(40vh, 400px); padding: 8px; background: var(--s1); border-radius: var(--r-sm); }
+.ask .permission-diff .add { color: var(--accent-text); }
+.ask .permission-diff .del { color: var(--danger); }

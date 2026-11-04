@@ -389,6 +389,19 @@ pub(super) mod tests {
     use serde_json::json;
     use std::collections::VecDeque;
 
+    #[tokio::test]
+    async fn permission_plan_ignores_a_legacy_remembered_exit_grant() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = engine(&dir);
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["ExitPlanMode".into()]));
+        assert!(!engine.with(|c| c.grant_stands(&id, "ExitPlanMode")), "a legacy plan grant never authorizes a different plan");
+        ask(&engine, &id, "plan", "ExitPlanMode");
+        assert_eq!(waiting(&engine, &id, "t1"), ["plan"]);
+        assert!(s.asked.lock().unwrap().is_empty(), "only the person can approve this plan");
+    }
+
     /// What a stand-in session does with the next answer it is given.
     enum Reply {
         Say(Delivery),

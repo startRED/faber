@@ -224,6 +224,8 @@ closed). Opening Settings focuses Back; native Tab order reaches the five sectio
 Choices that live elsewhere on purpose: model and effort (the composer, per conversation); paying with credits, moving to
 the other subscription or waiting (the quota card, just in time, per message); permission answers (the cards).
 
+Readable permission cards (`ui/PermissionDetails.tsx`) show Bash/PowerShell commands, proposed changed lines, connected-tool arguments and Codex reasons/folders, with the original request behind a disclosure. Plans retain their canonical text for the existing approval card; missing text disables approval and explains how to request it. Keep planning declines first; requested changes go in the conversation. A legacy remembered ExitPlanMode grant never approves a new plan. Proofs: `tests/ui/permissions.check.ts`, `engine/src/codex.rs` (`permission_details_keep_the_reason_and_working_folder`), `engine/src/engine/answer.rs` (`permission_plan_ignores_a_legacy_remembered_exit_grant`). Settings mode details distinguish requested policies from machine isolation, which remains unverified.
+
 ## Every setting
 
 `settings.json` in the data folder holds the struct `Settings` of `engine/src/model.rs`; `ui/api.ts` mirrors it by hand.

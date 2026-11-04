@@ -2495,6 +2495,9 @@ impl Core {
     /// Whether the person's "Always allow" for this tool in this conversation still counts: it must have been made under the
     /// settings' current grants epoch (no epoch on either side matches: an install that never revoked anything).
     fn grant_stands(&self, conv: &str, tool: &str) -> bool {
+        if tool == "ExitPlanMode" {
+            return false;
+        }
         let Some(c) = self.convs.get(conv) else { return false };
         if !c.allow_always.as_ref().is_some_and(|a| a.iter().any(|t| t == tool)) {
             return false;
@@ -3197,9 +3200,8 @@ impl Core {
                     input["modeRevision"] = serde_json::to_value(&settings.permissions_revision).unwrap_or_default();
                     if input["plan"].as_str().is_some_and(|plan| {
                         !plan.is_empty() && self.convs.get(conv).and_then(|c| c.messages.last()).is_some_and(|m| m.text.contains(plan))
-                    }) && let Some(fields) = input.as_object_mut()
-                    {
-                        fields.remove("plan");
+                    }) {
+                        input["planInReply"] = serde_json::Value::Bool(true);
                     }
                     if vendor == Vendor::Codex {
                         if !self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan) {
