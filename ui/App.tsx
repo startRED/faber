@@ -669,7 +669,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         options={options()}
         choice={picked()}
         onChoice={pickChoice}
-        mode={state().settings.permissions ?? 'dontAsk'}
+        mode={state().settings.permissions ?? 'fullAccess'}
         onMode={(permissions) => void saveSettings({ permissions })}
         busy={busy() && !loading()}
         locked={loading()}

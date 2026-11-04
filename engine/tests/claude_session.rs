@@ -415,7 +415,7 @@ fn r121_the_person_choosing_do_not_ask_never_reaches_the_isolated_arguments() {
         assert!(isolated.contains(&"--safe-mode".into()) && isolated.contains(&"--strict-mcp-config".into()));
     }
     // The stored settings name only the two choices on screen; the isolated mode cannot be written or read back.
-    assert_eq!(serde_json::to_string(&Permissions::FullAccess).unwrap(), "\"dontAsk\"");
+    assert_eq!(serde_json::to_string(&Permissions::FullAccess).unwrap(), "\"fullAccess\"");
     assert_eq!(serde_json::to_string(&Permissions::Ask).unwrap(), "\"ask\"");
     assert_eq!(serde_json::from_str::<Permissions>("\"dontAsk\"").unwrap(), Permissions::FullAccess);
     assert!(serde_json::from_str::<Permissions>("\"isolated\"").is_err());

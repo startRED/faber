@@ -30,6 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 mod answer;
+pub use answer::RememberedRules;
 mod auto;
 mod browse;
 pub mod facts;
@@ -1149,13 +1150,16 @@ impl Core {
     }
 
     fn save(&self, id: &str) {
+        let _ = self.save_checked(id);
+    }
+
+    fn save_checked(&self, id: &str) -> Result<(), crate::store::Fault> {
         if let Some(c) = self.convs.get(id) {
             if c.messages
                 .last()
                 .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
             {
-                self.store.save(c);
-                return;
+                return self.store.save_checked(c);
             }
             let mut saved = c.clone();
             if let Some(m) = saved.messages.last_mut() {
@@ -1175,8 +1179,9 @@ impl Core {
                         check: t.check.into(),
                     });
             }
-            self.store.save(&saved);
+            return self.store.save_checked(&saved);
         }
+        Ok(())
     }
 
     fn state(&self) -> AppState {
@@ -1196,6 +1201,9 @@ impl Core {
     /// Whether the person's "Always allow" for this tool in this conversation still counts: it must have been made under the
     /// settings' current grants epoch (no epoch on either side matches: an install that never revoked anything).
     fn grant_stands(&self, conv: &str, tool: &str) -> bool {
+        if tool == "ExitPlanMode" {
+            return false;
+        }
         let Some(c) = self.convs.get(conv) else { return false };
         if !c.allow_always.as_ref().is_some_and(|a| a.iter().any(|t| t == tool)) {
             return false;

@@ -193,8 +193,26 @@ async fn interrupt(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn answer(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> Res<()> {
-    faber.engine.answer(&id, &turn_id, &request_id, allow, always).await
+async fn answer(
+    faber: State<'_, Faber>,
+    id: String,
+    turn_id: String,
+    request_id: String,
+    allow: bool,
+    always: bool,
+    reason: Option<String>,
+) -> Res<()> {
+    faber.engine.answer_reason(&id, &turn_id, &request_id, allow, always, reason).await
+}
+
+#[tauri::command]
+async fn permission_rules(faber: State<'_, Faber>) -> Res<Vec<faber_engine::engine::RememberedRules>> {
+    Ok(faber.engine.permission_rules())
+}
+
+#[tauri::command]
+async fn revoke_permission_rule(faber: State<'_, Faber>, id: String, tool: String) -> Res<()> {
+    faber.engine.revoke_permission_rule(&id, &tool)
 }
 
 /// The person's choices for a question the agent asked: each question's text to the label picked.
@@ -1412,6 +1430,8 @@ fn main() {
                 route_draft,
                 interrupt,
                 answer,
+                permission_rules,
+                revoke_permission_rule,
                 answer_question,
                 rename,
                 remove,

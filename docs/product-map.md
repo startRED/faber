@@ -24,8 +24,8 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Step up | "Try again one step up": the same question as a branch one effort up on the same model, or on the next stronger model of the same vendor when that rung is not available, offered when a check failed or code changed unchecked. | `engine/src/nudge.rs` |
 | Branch | Editing a past message starts a new conversation from that point. | `ui/Thread.tsx` |
 | Queue, steer | A message sent while an answer runs waits in a queue; Codex can take it into the running turn. | `engine/src/engine.rs` |
-| Permissions | Five modes for Chat: "Ask", "Accept edits", "Plan", "Auto", "Full access" (`dontAsk`, the default). Auto runs as "Accept edits" when the CLI has no auto mode, and the screen says so. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
-| Permission card, held-back request | A question the CLI asks in Ask mode; a request it denied because nobody could answer, shown and never allowed by itself. | `ui/Ask.tsx`, `engine/src/engine/parked.rs` |
+| Permissions | Five modes for Chat: "Ask", "Accept edits", "Plan", "Auto", "Full access" (`fullAccess`, the default; legacy `dontAsk` still reads as Full access). Auto runs as "Accept edits" when the CLI has no auto mode, and the screen says so. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
+| Permission card, held-back request | A CLI question with a readable command (Bash or PowerShell), proposed changed lines, connected tool or rendered plan. Codex's reason and working folder stay visible. Plans approve once or return feedback to keep planning; no plan text disables approval. Claude refusals accept feedback; native Codex approvals cannot carry it, which the card says. Original details remain inspectable. Held-back requests were denied, shown and never allowed by themselves. | `ui/Ask.tsx`, `ui/PermissionDetails.tsx`, `engine/src/engine/parked.rs`, `engine/src/engine/answer.rs` |
 | Needs you | Amber, always with words: something waits for the person. | run button, running column, sidebar, tray |
 | Running column | The list on the right of everything running, grouped by project. | `ui/Running.tsx`, `ui/running.ts` |
 | Quota window, pace, plan | A subscription's usage limit over a time window; how fast it is being spent against the time left; the plan's name (asked when the CLI cannot tell). "Still counting" marks use the vendor has not counted yet. | `engine/src/ledger.rs`, `engine/src/engine/usage_view.rs` |
@@ -120,10 +120,10 @@ text unfolds under the row from a small "?" beside the name (keyboard reachable,
 closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
 
 - **General**, in groups. *You*: Language (follow the system, or one of five), Your name. *How the AI works*: Permissions
-  for Chat and Projects (a menu of five modes, each with its one line; "Full access" by default), Web search, Your CLI
+  for Chat and Projects (a menu of five modes; "Full access" by default; its details distinguish requested policy from unverified machine isolation), Web search, Your CLI
   hooks (only acts in the guarded modes, not "Full access"), Chat working folder (with Recents; acts on the open chat
   while it has no message; the row exists only when Settings was opened from Chat, where its control does), and a folded
-  "Codex" group (reasoning summary, answer length; Codex only, closed by default). *Notifications and system*: Notify me,
+  "Codex" group (reasoning summary, answer length; Codex only, closed by default). A closed Remembered permissions fold lists valid tool grants per conversation, each with Withdraw (`ui/PermissionRules.tsx`). *Notifications and system*: Notify me,
   Play a sound, and on Windows keep the computer awake while Faber works and start with Windows. *Updates*: Receive
   previews (off by default, R156).
 - **Projects**: per project, closed until opened, in the same cards and rows: checks (confirm, edit, view), "If a tool is
@@ -162,11 +162,11 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `appearance` | A look: `base`, `accent`, `ground`, `textFont`, `headingFont`, `textSize`, `density`, `corners`, `motion`, `effects`, `colors` (Dark Room) | Settings > Appearance; the first run (`base`, `textSize`, `density`, `motion`); `colors` only arrives in a theme file opened there | `src-tauri/src/look.rs`, then the screen |
 | `language` | `""` follows the system, `en`, `pt-BR`, `es`, `fr`, `de` (none: the system) | Settings > General (You) | `ui/i18n.ts`; the tray through `set_shell_texts` |
 | `userName` | Up to 40 characters (none) | Settings > General (You); the first run | Greeting, sidebar footer, and both CLIs (copied into each new conversation) |
-| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General (How the AI works); the composer chip in Chat | The engine at every turn; the status line in a conversation |
+| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `fullAccess` (`fullAccess`); reads legacy `dontAsk`, writes `fullAccess` on the next save | Settings > General (How the AI works); the composer chip in Chat | The engine at every turn; the status line in a conversation |
 | `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General (How the AI works) | The engine at every turn, for Chat and the person's own project sessions |
 | `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
 | `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
-| `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; only the engine writes it, when a stricter mode replaces the old one | The engine, to drop an "Always allow" made under a looser mode |
+| `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; the engine writes it for stricter modes or withdrawal of a remembered rule | The engine drops obsolete "Always allow" rules and responses; withdrawal preserves other valid rules under the new epoch |
 | `userHooks` | true, false (false) | Settings > General (How the AI works) | The engine; acts only in the guarded modes (not "Full access") |
 | `notifications` | true, false (true) | Settings > General (Notifications and system) | The tray |
 | `notificationSound` | true, false (true) | Settings > General (Notifications and system) | The tray |
@@ -219,7 +219,7 @@ sentences. Test builds add `report_checks` and two mission probes.
 | Quota | `set_clock`, `quota_attention`, `answer_plan`, `approve_credits`, `move_turn`, `wait_turn` |
 | Files and links | `save_file`, `show_file`, `read_image`, `open_link` |
 | Faber's browser | `site_place` (the page over a box of the screen), `site_park` (out of sight; box 0 says a screen just loaded and the shell forgets every box); both carry the random id of the screen's load, and the shell ignores any other load's calls, `site_open` (a page the person opens from a reply), `site_picture` (a call's picture as a data URL). Only the screen's own webview may call any command |
-| Settings and looks | `save_settings`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
+| Settings and looks | `save_settings`, `permission_rules`, `revoke_permission_rule`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
 | Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` (no caller on screen: the mission screens are gone) |
 | Updates | `update_status` (phase and progress), `screen_ready` (the first frame is painted: the window, built hidden, shows; a failsafe shows it after 3 s; the page paints its own mark on the theme colour before any script, so neither shows a blank window), `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
@@ -243,7 +243,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Auto and step up | Done; the draft is routed at every pause (the roadmap wants at most twice) | `engine/tests/auto.rs`, `route.rs`, `simulation.rs`; `tests/ui/nudge.check.ts` |
 | Quota reading, pacing, recovery, plan question | Done | `engine/tests/pacing.rs`, `quota.rs`, `quota_live.rs`, `budget.rs`, `ledger.rs`, `learn.rs`, `paid_guard.rs`; `tests/ui/pace.check.ts`, `quota.check.ts` |
 | Queue, steer, branch | Done | `engine/tests/engine.rs`; `tests/ui/steer.check.ts` |
-| Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
+| Permissions, cards, held-back requests | Five modes (R140), readable plan/tool cards, refusal feedback where the CLI supports it, visible and revocable remembered grants; machine sandbox enforcement is disclosed as unverified, not certified | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `engine/src/engine/answer.rs` (`permission_` tests); `engine/src/model.rs` (`full_access_permission_reads_legacy_and_canonical_values`); `tests/ui/permissions.check.ts`, `tests/ui/thread.check.ts` |
 | Faber's browser (R161 step 7) | Pages the agent reads and acts on, on Windows; the person's turn for logins, captchas and payments; the recorded log and the app pane are planned | `engine/src/browser.rs` (unit tests), `engine/tests/claude_session.rs`, `codex_session.rs`; `tests/ui/site.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Quiet during games: no motion, no timed repaint, events held as one while a game is in front | Done on Windows (R191) | `tests/ui/quiet.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |

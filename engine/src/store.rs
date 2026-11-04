@@ -187,6 +187,11 @@ impl Store {
         let _ = self.write(&self.file(&conversation.id), conversation);
     }
 
+    /// A permission revocation must report a failed durable write instead of claiming it was saved.
+    pub fn save_checked(&self, conversation: &Conversation) -> Result<(), Fault> {
+        self.write(&self.file(&conversation.id), conversation)
+    }
+
     pub fn remove(&self, id: &str) {
         if self.get(id).is_some() {
             let _ = fs::remove_file(self.file(id));

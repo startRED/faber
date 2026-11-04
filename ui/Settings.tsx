@@ -9,6 +9,7 @@ import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
+import { PermissionRules } from './PermissionRules.tsx';
 import type { Quotas } from './sidebar.ts';
 
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
@@ -35,7 +36,7 @@ const MORE = {
   acceptEdits: 'set.permissions.acceptEdits.more',
   plan: 'set.permissions.plan.more',
   auto: 'set.permissions.auto.more',
-  dontAsk: 'set.permissionsDontAskBody',
+  fullAccess: 'set.permissionsDontAskBody',
 } as const;
 const WEB = [['off', 'set.webSearch.off'], ['cached', 'set.webSearch.cached'], ['live', 'set.webSearch.live']] as const;
 const SUMMARY = [['default', 'set.default'], ['auto', 'set.summary.auto'], ['concise', 'set.summary.concise'], ['detailed', 'set.summary.detailed'], ['none', 'set.summary.none']] as const;
@@ -92,7 +93,7 @@ export function Settings(props: Props) {
   const [section, setSection] = createSignal<Section>(props.start ?? 'general');
   // The look being worked on in Appearance. It is not on the page until "Use this look" has saved it.
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
-  const mode = () => props.saved.permissions ?? 'dontAsk';
+  const mode = () => props.saved.permissions ?? 'fullAccess';
   const title = () => t(SECTIONS.find(([id]) => id === section())![1]);
   let main: HTMLDivElement | undefined;
   // A section opens at its top, whatever the one before was scrolled to.
@@ -161,7 +162,7 @@ export function Settings(props: Props) {
               </Opt>
             </Group>
             <Group title={t('set.group.ai')}>
-              <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={t(MORE[mode()])}>
+              <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={[t(MORE[mode()]), t('set.enforcement.note'), ...(mode() === 'fullAccess' ? [t('set.enforcement.full')] : [t('set.enforcement.claude'), t('set.enforcement.codex')]), ...(mode() === 'auto' ? [t('set.enforcement.fallback')] : [])]}>
                 <PickMenu
                   id="set-permissions-pick"
                   label={t('set.permissions')}
@@ -205,6 +206,9 @@ export function Settings(props: Props) {
                   </Opt>
                 </Fold>
               </Show>
+            </Group>
+            <Group>
+              <Fold id="set-permission-rules" title={t('set.rules')} hint={t('set.rules.more')}><PermissionRules /></Fold>
             </Group>
             <Group title={t('set.group.system')}>
               <Toggle id="set-notify" label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications === true} onChange={(on) => save({ notifications: on })} />

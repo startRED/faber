@@ -1,19 +1,8 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, createUniqueId, For, Show } from 'solid-js';
 import { api, type Parked, type Permission } from './api.ts';
 import { fromEngine, t } from './i18n.ts';
 import { answerOutcome } from './running.ts';
-
-// What a permission request means, in plain words.
-function describe(tool: string, input: unknown): { title: string; note?: string; body: string } {
-  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const raw = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
-  if (tool === 'Bash' || tool === 'command') {
-    return { title: t('ask.command'), note: typeof i.description === 'string' ? i.description : undefined, body: typeof input === 'string' ? input : String(i.command ?? raw) };
-  }
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool)) return { title: t('ask.file'), body: String(i.file_path ?? i.path ?? raw) };
-  if (tool === 'WebFetch') return { title: t('ask.page'), body: String(i.url ?? raw) };
-  return { title: t('ask.other', { tool }), body: raw };
-}
+import { isPlan, nativeApproval, PermissionDetails, planText } from './PermissionDetails.tsx';
 
 interface AskedQuestion {
   question: string;
@@ -150,12 +139,16 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   const [dropped, setDropped] = createSignal(false);
   const [sending, setSending] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
-  const d = () => describe(props.permission.tool, props.permission.input);
+  const [feedback, setFeedback] = createSignal('');
+  const feedbackId = createUniqueId();
+  const plan = () => isPlan(props.permission.tool);
+  const canExplain = () => !nativeApproval(props.permission.tool);
   const answer = async (allow: boolean, always = false) => {
+    if (sending()) return;
     setProblem(undefined);
     setSending(true);
     try {
-      await api.answer(props.conversationId, props.turnId, props.permission.requestId, allow, always);
+      await api.answer(props.conversationId, props.turnId, props.permission.requestId, allow, always, !allow && canExplain() ? feedback().trim() || undefined : undefined);
     } catch (err) {
       // A question already answered (here, in the other copy, or elsewhere) is dropped without an alarm; an answer the
       // CLI did not get keeps the card, with the reason, so the user can try again.
@@ -168,23 +161,25 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   };
   return (
     <Show when={!dropped()}>
-      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')}>
-        <b>{d().title}</b>
-        <Show when={d().note}>
-          <span class="note">{d().note}</span>
+      <div class="ask" data-surface={props.surface} role="group" aria-label={t(plan() ? 'ask.plan' : 'ask.label')} aria-busy={sending()}>
+        <PermissionDetails permission={props.permission} />
+        <Show when={canExplain()} fallback={<span class="note">{t('ask.feedbackHint')}</span>}>
+          <label for={feedbackId}>{t(plan() ? 'ask.plan.feedback' : 'ask.feedback')}</label>
+          <textarea id={feedbackId} class="field permission-feedback" value={feedback()} rows={2} maxLength={4000}
+            disabled={sending()} onInput={e => setFeedback(e.currentTarget.value)} />
         </Show>
-        <pre>{d().body}</pre>
-        <div>
-          <button class="btn primary" disabled={sending()} onClick={() => void answer(true)}>
-            {t('ask.allow')}
+        <div class="permission-actions">
+          <button class="btn primary" disabled={sending() || (plan() && !planText(props.permission.input))} onClick={() => void answer(true)}>
+            {t(plan() ? 'ask.plan.approve' : 'ask.allow')}
           </button>
-          <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
-            {t('ask.always')}
-          </button>
+          <Show when={!plan()}>
+            <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>{t('ask.always')}</button>
+          </Show>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
-            {t('ask.deny')}
+            {t(plan() ? 'ask.plan.keep' : 'ask.deny')}
           </button>
         </div>
+        <Show when={sending()}><span class="note" role="status">{t('ask.sending')}</span></Show>
         <Show when={problem()}>
           <div class="note err" role="alert">
             {problem()}

@@ -661,9 +661,9 @@ pub enum Permissions {
     #[serde(rename = "auto")]
     Auto,
     /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
-    /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
+    /// credential folders stay blocked, where the CLI can enforce it. Stored as `fullAccess`.
     #[default]
-    #[serde(rename = "dontAsk")]
+    #[serde(rename = "fullAccess", alias = "dontAsk")]
     FullAccess,
     /// Faber's own isolated mode (R97, R107, R109): commands run in a native sandbox with no network, only the working
     /// folder writable, integrations off and sensitive folders refused. For the model list, the router, internal checks and
@@ -800,10 +800,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn full_access_permission_reads_legacy_and_canonical_values() {
+        for value in ["fullAccess", "dontAsk"] {
+            assert_eq!(serde_json::from_str::<Permissions>(&format!("\"{value}\"")).unwrap(), Permissions::FullAccess);
+        }
+        assert_eq!(serde_json::to_string(&Permissions::FullAccess).unwrap(), "\"fullAccess\"");
+        assert!(serde_json::from_str::<Permissions>("\"unknown\"").is_err());
+    }
+
+    #[test]
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
         assert_eq!(
             serde_json::to_value(Settings::default().shown()).unwrap(),
-            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "autostart": false })
+            serde_json::json!({ "userHooks": false, "permissions": "fullAccess", "notifications": true, "notificationSound": true, "keepAwake": true, "autostart": false })
         );
         let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
         assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));

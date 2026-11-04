@@ -404,6 +404,12 @@ fn block_text(content: &Value) -> String {
 /// How a refused approval comes back as the tool's error: the text Faber answers with, and the older wording of the recordings.
 const DECLINED: [&str; 2] = ["The user declined.", "The user denied"];
 
+fn deny_response(reply: Option<&Value>) -> Value {
+    let reason = reply.and_then(Value::as_str).filter(|text| !text.is_empty());
+    let message = reason.map_or_else(|| DECLINED[0].to_string(), |reason| format!("{} {reason}", DECLINED[0]));
+    json!({ "behavior": "deny", "message": message })
+}
+
 fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
@@ -778,7 +784,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
+                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { deny_response(reply.as_ref()) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
@@ -852,6 +858,15 @@ fn user_message(turn: &UserTurn) -> Value {
 #[cfg(test)]
 mod allow_tests {
     use super::*;
+
+    #[test]
+    fn permission_denial_carries_feedback_without_losing_its_declined_marker() {
+        assert_eq!(
+            deny_response(Some(&json!("Keep the database unchanged."))),
+            json!({ "behavior": "deny", "message": "The user declined. Keep the database unchanged." })
+        );
+        assert_eq!(deny_response(None), json!({ "behavior": "deny", "message": DECLINED[0] }));
+    }
 
     #[test]
     fn a_subagents_tool_calls_name_the_agent_call_and_its_words_never_join_the_answer() {

@@ -178,7 +178,7 @@ pub enum SessionCommand {
     Answer {
         request_id: String,
         allow: bool,
-        /// What the user chose for a question the agent asked (`AskUserQuestion`): question text to the labels picked.
+        /// Question text to the labels picked (`AskUserQuestion`), or a string with feedback on a declined approval.
         reply: Option<serde_json::Value>,
         ack: tokio::sync::oneshot::Sender<Delivery>,
     },

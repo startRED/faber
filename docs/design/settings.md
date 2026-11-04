@@ -37,7 +37,17 @@ How the Settings screen, the first-run steps and the tutorial look and behave.
   | Accept edits | `acceptEdits` | `on-request` / `workspace-write` / `user` |
   | Plan | `plan` | `on-request` / `read-only` / `user` |
   | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
-  | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
+  | Full access (default, stored `fullAccess`; reads old `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
+
+  The same five modes keep their meaning and default. Full access reads the legacy stored value `dontAsk` and writes
+  `fullAccess` on the next save, avoiding confusion with Claude Code's different native `dontAsk` policy. Unknown values
+  still fail settings decoding, which falls back to Ask. The permission row's existing details say what is requested
+  from each CLI: Claude's rules are not OS isolation, Codex requests a native workspace sandbox, and isolation on this
+  machine has not been verified by Faber. Full access explicitly has no command sandbox; no machine certification is inferred.
+  A closed Remembered permissions fold in General reads active tool grants grouped by conversation only while open.
+  Each tool has Withdraw, disabled during a save. Empty, loading and error states are explicit. Withdrawal renews the
+  durable epoch before rewriting the remaining valid grants, so a stale Always answer or a failed write cannot restore
+  the withdrawn rule after restart. No additional permanent process or timer is kept.
 
   Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode
   stops a running turn and revokes every remembered grant. The revocation is a new random token, `grantsEpoch`, written in the

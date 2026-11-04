@@ -243,7 +243,7 @@ const section = (props: AppearanceProps) => mount(() => createComponent(Appearan
 const useButton = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('.ap-bar .btn.primary')!;
 const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLButtonElement>(`[aria-labelledby="look-${id}-name"]`)!;
 // What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
-const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, autostart: false };
+const SHOWN: Saved = { userHooks: false, permissions: 'fullAccess', notifications: true, notificationSound: true, keepAwake: true, autostart: false };
 
 check('settings: notification switches show what the engine sends, save separately and restore a refused change without playing anything', async () => {
   const [saved, setSaved] = createSignal<Saved>(SHOWN);
@@ -462,13 +462,13 @@ check('R140: the permission menu lists five modes with one plain line each, and 
   try {
     const pick = () => view.host.querySelector<HTMLButtonElement>('#set-permissions-pick')!;
     const options = () => [...view.host.querySelectorAll<HTMLElement>('#set-permissions-pick-list [role="option"]')];
-    equal(pick().textContent, en['set.permissions.dontAsk'], 'full access is on when nothing is saved');
+    equal(pick().textContent, en['set.permissions.fullAccess'], 'full access is on when nothing is saved');
     equal(view.host.querySelector('[role="listbox"]'), null, 'the menu is closed until it is asked for');
-    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.dontAsk.line'], 'the row says the line of the mode that is on');
+    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.fullAccess.line'], 'the row says the line of the mode that is on');
     pick().click();
     await tick();
-    deepEqual(options().map((o) => o.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.dontAsk']]);
-    deepEqual(options().map((o) => o.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
+    deepEqual(options().map((o) => o.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.fullAccess']]);
+    deepEqual(options().map((o) => o.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.fullAccess.line']]);
     for (const row of options()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
     deepEqual(options().map((o) => o.getAttribute('aria-selected')), ['false', 'false', 'false', 'false', 'true']);
     const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => view.host.textContent!.includes(en[key]);
@@ -545,12 +545,12 @@ check('R140: the permission menu lists five modes with one plain line each, and 
 
 check('R140: every mode has a name, a line and, for the three new ones, details, in every language', () => {
   for (const [code, messages] of Object.entries({ en, 'pt-BR': ptBR, es, fr, de })) {
-    for (const mode of ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'] as const) {
+    for (const mode of ['ask', 'acceptEdits', 'plan', 'auto', 'fullAccess'] as const) {
       ok(messages[`set.permissions.${mode}`].trim() && messages[`set.permissions.${mode}.line`].trim(), `${code} ${mode}`);
     }
     ok(messages['mode.fallback.auto'].trim() && messages['set.learnMore'].trim() && messages['composer.mode'].trim(), code);
   }
-  equal(en['set.permissions.dontAsk'], 'Full access');
+  equal(en['set.permissions.fullAccess'], 'Full access');
 });
 
 // ---- the calm grammar (calm screens, delivery 2) ----

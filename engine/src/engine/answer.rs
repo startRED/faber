@@ -13,6 +13,14 @@ const ACK_WAIT: Duration = Duration::from_secs(5);
 const STALE: &str = "error.permission.stale";
 const UNDELIVERED: &str = "error.permission.undelivered";
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RememberedRules {
+    pub conversation_id: String,
+    pub title: String,
+    pub tools: Vec<String>,
+}
+
 /// An answer given to the sessions and not yet settled.
 pub(super) struct Handed {
     /// Each request answered with the receiver of its acknowledgement. The request the user clicked comes first.
@@ -34,6 +42,30 @@ impl Engine {
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
         self.answer_with(conv, turn_id, request_id, allow, always, None).await
+    }
+
+    /// A refusal can carry the person's feedback where the CLI's native approval response supports it.
+    pub async fn answer_reason(
+        &self,
+        conv: &str,
+        turn_id: &str,
+        request_id: &str,
+        allow: bool,
+        always: bool,
+        reason: Option<String>,
+    ) -> Result<(), String> {
+        let reply = reason.filter(|text| !allow && !text.trim().is_empty()).map(serde_json::Value::String);
+        self.answer_with(conv, turn_id, request_id, allow, always, reply).await
+    }
+
+    /// Active remembered tool rules only, without retaining unopened conversation histories.
+    pub fn permission_rules(&self) -> Vec<RememberedRules> {
+        self.with(|c| c.permission_rules())
+    }
+
+    /// Revokes one tool rule. Rotating the epoch also invalidates an older card's "Always" still in flight.
+    pub fn revoke_permission_rule(&self, conv: &str, tool: &str) -> Result<(), String> {
+        self.with(|c| c.revoke_permission_rule(conv, tool))
     }
 
     /// Answers a question the agent asked the user (`AskUserQuestion`) with what the user chose: each question's text to the
@@ -64,6 +96,66 @@ impl Engine {
 }
 
 impl Core {
+    fn permission_rules(&self) -> Vec<RememberedRules> {
+        let epoch = self.store.settings().grants_epoch;
+        let mut ids: BTreeMap<String, ()> = self.store.list().into_iter().map(|c| (c.id, ())).collect();
+        ids.extend(self.convs.keys().map(|id| (id.clone(), ())));
+        ids.into_keys()
+            .filter_map(|id| {
+                let saved;
+                let conv = match self.convs.get(&id) {
+                    Some(conv) => conv,
+                    None => {
+                        saved = self.store.get(&id)?;
+                        &saved
+                    }
+                };
+                let tools: Vec<String> = conv
+                    .allow_always
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|tool| tool.as_str() != "ExitPlanMode" && conv.allow_always_epochs.get(*tool) == epoch.as_ref())
+                    .cloned()
+                    .collect();
+                (!tools.is_empty()).then(|| RememberedRules { conversation_id: id, title: conv.title.clone(), tools })
+            })
+            .collect()
+    }
+
+    fn revoke_permission_rule(&mut self, conv: &str, tool: &str) -> Result<(), String> {
+        let rules = self.permission_rules();
+        if !rules.iter().any(|rule| rule.conversation_id == conv && rule.tools.iter().any(|entry| entry == tool)) {
+            return Ok(());
+        }
+        let mut settings = self.store.settings();
+        let epoch = crate::model::new_epoch();
+        settings.grants_epoch = Some(epoch.clone());
+        // Persist the revocation first: even a failed conversation write must never revive the removed rule on restart.
+        self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        let mut failed = false;
+        for rule in rules {
+            let mut saved = match self.convs.get(&rule.conversation_id).cloned().or_else(|| self.store.get(&rule.conversation_id)) {
+                Some(saved) => saved,
+                None => {
+                    failed = true;
+                    continue;
+                }
+            };
+            let tools: Vec<String> = rule.tools.into_iter().filter(|entry| rule.conversation_id != conv || entry != tool).collect();
+            saved.allow_always = (!tools.is_empty()).then(|| tools.clone());
+            saved.allow_always_epochs = tools.into_iter().map(|tool| (tool, epoch.clone())).collect();
+            if let Some(loaded) = self.convs.get_mut(&rule.conversation_id) {
+                loaded.allow_always = saved.allow_always;
+                loaded.allow_always_epochs = saved.allow_always_epochs;
+                failed |= self.save_checked(&rule.conversation_id).is_err();
+            } else {
+                failed |= self.store.save_checked(&saved).is_err();
+            }
+        }
+        if failed { Err("error.store.write".into()) } else { Ok(()) }
+    }
+
     /// Checks that the conversation is live, that `turn_id` is its current turn and that the request waits in it, then
     /// hands the answer to the session. It changes no permission. "Always" also answers the other waiting requests for
     /// the same tool.
@@ -80,11 +172,17 @@ impl Core {
         let reply = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == turn_id)).ok_or(STALE)?;
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
+        // Codex's approval response has a decision only. Do not claim feedback was delivered by dropping it on the wire.
+        if !allow && live.vendor == Vendor::Codex && choices.as_ref().is_some_and(serde_json::Value::is_string) {
+            return Err("error.permission.reasonUnsupported".into());
+        }
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
         // Not in Plan, and not for a card made under an epoch that is gone: that answer lets only its own request through.
         // A question the agent asks is never remembered: each one is the person's to answer.
-        let always =
-            always && tool != "AskUserQuestion" && live.permissions != Permissions::Plan && epoch == self.store.settings().grants_epoch;
+        let always = always
+            && !matches!(tool.as_str(), "AskUserQuestion" | "ExitPlanMode")
+            && live.permissions != Permissions::Plan
+            && epoch == self.store.settings().grants_epoch;
         let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
         let requests = ids
@@ -197,6 +295,140 @@ mod tests {
     use crate::events::SessionCommand;
     use serde_json::json;
     use std::collections::VecDeque;
+
+    #[tokio::test]
+    async fn permission_denial_feedback_is_delivered_only_to_its_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let log = received.clone();
+        let session = Session::from_fn(move |cmd| {
+            if let SessionCommand::Answer { request_id, allow, reply, ack } = cmd {
+                log.lock().unwrap().push((request_id, allow, reply));
+                let _ = ack.send(Delivery::Delivered);
+            }
+        });
+        let id = seed(&engine, session, &[("t1", &[("1", "ExitPlanMode"), ("2", "Bash")])]);
+        engine.answer_reason(&id, "t1", "1", false, false, Some("Keep planning.".into())).await.unwrap();
+        assert_eq!(*received.lock().unwrap(), [("1".into(), false, Some(json!("Keep planning.")))]);
+        assert_eq!(waiting(&engine, &id, "t1"), ["2"]);
+    }
+
+    #[tokio::test]
+    async fn permission_denial_feedback_is_not_silently_dropped_for_codex() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[("1", "command")])]);
+        engine.with(|c| c.live.get_mut(&id).unwrap().vendor = Vendor::Codex);
+        assert_eq!(
+            engine.answer_reason(&id, "t1", "1", false, false, Some("Do not run it.".into())).await,
+            Err("error.permission.reasonUnsupported".into())
+        );
+        assert!(s.asked.lock().unwrap().is_empty());
+        assert_eq!(waiting(&engine, &id, "t1"), ["1"]);
+        engine.answer_reason(&id, "t1", "1", false, false, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn permission_rules_include_unloaded_grants_and_revocation_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = engine(dir.path());
+        first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let id = first.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            let epoch = c.store.settings().grants_epoch;
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.title = "Permission example".into();
+            conv.allow_always = Some(vec!["Bash".into(), "Write".into(), "Edit".into()]);
+            if let Some(epoch) = epoch {
+                conv.allow_always_epochs.insert("Bash".into(), epoch.clone());
+                conv.allow_always_epochs.insert("Write".into(), epoch);
+            }
+            conv.allow_always_epochs.insert("Edit".into(), "old".into());
+            c.save(&id);
+            c.convs.remove(&id);
+            id
+        });
+        let rules = first.permission_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].conversation_id, id);
+        assert_eq!(rules[0].tools, ["Bash", "Write"]);
+        assert!(first.with(|c| c.convs.is_empty()), "listing does not retain histories");
+        first.revoke_permission_rule(&id, "Bash").unwrap();
+        assert!(!stands(&first, &id, "Bash"));
+        assert!(stands(&first, &id, "Write"));
+        drop(first);
+        let (second, _) = engine(dir.path());
+        assert!(!stands(&second, &id, "Bash"));
+        assert!(stands(&second, &id, "Write"));
+        assert_eq!(second.permission_rules()[0].tools, ["Write"]);
+    }
+
+    #[tokio::test]
+    async fn permission_rule_revocation_invalidates_an_always_answer_already_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[("1", "Bash")])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Bash".into()]);
+            c.save(&id);
+        });
+        let handed = engine.with(|c| c.prepare_answer(&id, "t1", "1", true, true, None)).unwrap();
+        engine.revoke_permission_rule(&id, "Bash").unwrap();
+        engine
+            .with(|c| c.settle_answer(&id, "t1", handed.sid, "Bash", Some(handed.epoch), &[("1".into(), Some(Delivery::Delivered))]))
+            .unwrap();
+        assert!(!stands(&engine, &id, "Bash"));
+    }
+
+    #[tokio::test]
+    async fn permission_plan_ignores_a_legacy_remembered_exit_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["ExitPlanMode".into()]);
+            c.save(&id);
+        });
+        ask(&engine, &id, "plan", "ExitPlanMode");
+        assert_eq!(waiting(&engine, &id, "t1"), ["plan"]);
+        assert!(s.asked.lock().unwrap().is_empty(), "a saved grant must not approve a different plan");
+        assert!(engine.permission_rules().is_empty(), "an obsolete plan grant is not an active permission");
+    }
+
+    #[tokio::test]
+    async fn permission_rule_revocation_fails_closed_when_the_conversation_cannot_be_saved() {
+        struct NoConversationWrites;
+        impl crate::store::Disk for NoConversationWrites {
+            fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+                if path.parent().is_some_and(|p| p.ends_with("conversations")) {
+                    Err(std::io::Error::other("disk full"))
+                } else {
+                    crate::store::Disk::write(&crate::store::RealDisk, path, bytes)
+                }
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                crate::store::Disk::rename(&crate::store::RealDisk, from, to)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = engine(dir.path());
+        let id = first.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Bash".into()]);
+            c.save(&id);
+            c.store = Store::with_disk(dir.path(), Arc::new(NoConversationWrites));
+            id
+        });
+        assert_eq!(first.revoke_permission_rule(&id, "Bash"), Err("error.store.write".into()));
+        assert!(!stands(&first, &id, "Bash"));
+        drop(first);
+        let (second, _) = engine(dir.path());
+        assert!(!stands(&second, &id, "Bash"));
+    }
 
     /// What a stand-in session does with the next answer it is given.
     enum Reply {

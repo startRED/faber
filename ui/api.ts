@@ -230,10 +230,10 @@ export type ThemeFile = Appearance & { name: string };
 
 /** The answer to "Do you already use AI?". No answer counts as a beginner. */
 export type Experience = 'beginner' | 'experienced';
-/** How a CLI may act in Chat (R140). `dontAsk` is Full access and the default when nothing is saved. */
-export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk';
+/** How a CLI may act in Chat (R140). `fullAccess` is the default when nothing is saved. */
+export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'fullAccess';
 /** The modes in the order they are listed, strictest first; full access is the default. */
-export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'];
+export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'fullAccess'];
 export type WebSearch = 'off' | 'cached' | 'live';
 export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
 export type Verbosity = 'default' | 'low' | 'medium' | 'high';
@@ -413,8 +413,10 @@ export const api = {
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
-  answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
-    invoke<void>('answer', { id, turnId, requestId, allow, always }),
+  answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false, reason?: string) =>
+    invoke<void>('answer', { id, turnId, requestId, allow, always, reason }),
+  permissionRules: () => invoke<{ conversationId: string; title: string; tools: string[] }[]>('permission_rules'),
+  revokePermissionRule: (id: string, tool: string) => invoke<void>('revoke_permission_rule', { id, tool }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),

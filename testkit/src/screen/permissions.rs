@@ -46,7 +46,7 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the long risk text is on the page while closed".into())?;
     page.click(&css("#set-permissions-q"))?;
     page.wait_visible(&css(".hint").has_text(&dont_ask_body))?;
-    let full_access = page.text_of("set.permissions.dontAsk")?;
+    let full_access = page.text_of("set.permissions.fullAccess")?;
     same(page.eval(PICKED)?.as_str(), Some(full_access.as_str()), "Do not ask is the default")?;
     // Choosing the other mode swaps the details; choosing this one again brings them back.
     pick_mode(page, 1)?;
@@ -112,7 +112,7 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     page.click(&settings)?;
     let pick = css("#set-permissions-pick");
     page.wait_visible(&pick)?;
-    let (full_access, ask_mode) = (page.text_of("set.permissions.dontAsk")?, page.text_of("set.permissions.ask")?);
+    let (full_access, ask_mode) = (page.text_of("set.permissions.fullAccess")?, page.text_of("set.permissions.ask")?);
     same(page.eval(PICKED)?.as_str(), Some(full_access.as_str()), "older settings default to Don't ask")?;
     pick_mode(page, 1)?;
     page.wait_for("the permissions choice to be saved", &format!("({PICKED}) === {}", serde_json::json!(ask_mode)))?;

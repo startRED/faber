@@ -195,7 +195,12 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
-- An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
+- Permission cards match the thread: Bash and PowerShell commands, reason and folder; all proposed changed lines in a
+  keyboard-scrollable, accessible disclosure; connected tool names and folded arguments. Original details stay inspectable.
+  Plans use sanitized Markdown with Approve and run or Keep planning and feedback, never Always allow. Missing plan text
+  disables approval; no narrative or private CLI file is used instead. Claude refusals carry feedback; native Codex
+  approvals cannot, as the card says. Sending disables repeated answers; failure keeps the card and text for retry,
+  and stale questions disappear quietly. Native controls keep keyboard order; readable content never moves.
   A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike:
   each question in bold with its short header chip, its options as full-width rows to tap (amber ring when chosen,
   checkboxes when several are allowed), one line to write another answer, then Send answers (enabled once every
