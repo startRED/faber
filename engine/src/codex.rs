@@ -1209,7 +1209,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
                 tools.push(crate::review::codex_tool());
-                tools.extend(crate::progress::codex_tools());
+                let mut progress = crate::progress::codex_tools();
+                progress[2]["description"] = crate::progress::wrap_up_description(&t.cwd).into();
+                tools.extend(progress);
                 tools.extend(crate::toolbox::codex_tools());
             }
         }
@@ -3087,6 +3089,25 @@ mod rewind_tests {
         for name in ["FABER_AGENT_TOKEN", "FABER_AGENT_AUTH", "FABER_CONVERSATION"] {
             assert!(!env.contains_key(std::ffi::OsStr::new(name)));
         }
+    }
+
+    #[test]
+    fn fold_at_close_never_changes_ordinary_warm_or_resumed_input() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let mut settings = thread(Arc::new(|_| {})).params;
+        settings.cwd = project.path().into();
+        settings.progress = true;
+        let turn = UserTurn::text("Finish the export");
+        let ordinary = start_params("native", &mut settings, "model", &turn);
+        for resumed in [false, true] {
+            settings.resume = resumed.then(|| "native".into());
+            std::fs::write(project.path().join(".faber/lessons.md"), "x".repeat(2049)).unwrap();
+            assert_eq!(start_params("native", &mut settings, "model", &turn), ordinary);
+            std::fs::write(project.path().join(".faber/lessons.md"), "x".repeat(2048)).unwrap();
+            assert_eq!(start_params("native", &mut settings, "model", &turn), ordinary);
+        }
+        assert_eq!(turn.text, "Finish the export");
     }
 
     fn thread(sink: EventSink) -> Thread {

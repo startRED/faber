@@ -110,7 +110,7 @@ fn source(path: &str) -> Option<&'static str> {
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
         let kind = parts.get(i + 1)?;
         return (name.ends_with(".md")
-            && ["decisions", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
+            && ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
                 .contains(&kind.trim_end_matches(".md")))
         .then_some("faber");
     }
@@ -124,10 +124,14 @@ fn source(path: &str) -> Option<&'static str> {
     }
 }
 
-/// `.faber/decisions.md` (or a file under `.faber/decisions/`): the one list whose entries carry an author.
+/// Live and old decisions carry author marks; only live decisions enter the start card.
 fn decisions(path: &str) -> bool {
     let parts: Vec<_> = path.split('/').collect();
-    parts.iter().position(|p| *p == ".faber").and_then(|i| parts.get(i + 1)).is_some_and(|kind| kind.trim_end_matches(".md") == "decisions")
+    parts
+        .iter()
+        .position(|p| *p == ".faber")
+        .and_then(|i| parts.get(i + 1))
+        .is_some_and(|kind| matches!(kind.trim_end_matches(".md"), "decisions" | "decisions-old"))
 }
 
 struct Mark {
@@ -960,6 +964,29 @@ pub fn list_faber(project: &Path) -> Result<MemoryList, &'static str> {
     scan(project, &private_roots(), true)
 }
 
+/// Check stored consent against both live and archived words; never revoke a record on an agent's behalf.
+pub(crate) fn fold_notice(project: &Path, kept: &[KeptDecision]) -> &'static str {
+    if kept.is_empty() {
+        return "";
+    }
+    let Ok(list) = list_faber(project) else { return "Project notes could not be checked for decisions you kept." };
+    if list.incomplete || list.files.iter().any(|f| f.too_large) {
+        return "Project notes could not be fully checked for decisions you kept.";
+    }
+    let items: Vec<_> = list
+        .files
+        .iter()
+        .filter(|f| decisions(&f.path))
+        .flat_map(|f| &f.entries)
+        .map(|e| KeptDecision::of(e.body.as_deref().unwrap_or(&e.text)))
+        .collect();
+    if kept.iter().any(|record| !items.iter().any(|item| record.matches(item))) {
+        "Some decisions you kept are missing from the project notes. Tell the person; the work can still conclude."
+    } else {
+        ""
+    }
+}
+
 fn reference_exists(directory: &Directory, root: &Path, name: &str, protected: &[String]) -> bool {
     let Ok(path) = adopted_relative(name) else { return false };
     if private(&root.join(path), protected) {
@@ -1249,6 +1276,33 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fold_at_close_archived_kept_decisions_never_enter_the_card() {
+        use super::*;
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        std::fs::write(project.path().join(".faber/decisions.md"), "- Current choice [by AI]\n").unwrap();
+        std::fs::write(project.path().join(".faber/decisions-old.md"), "- Old choice [by AI]\n").unwrap();
+        let kept = [KeptDecision::of("- Current choice"), KeptDecision::of("- Old choice")];
+        assert_eq!(kept_for_card(project.path(), &kept).unwrap(), ["- Current choice"]);
+        assert_eq!(fold_notice(project.path(), &kept), "");
+    }
+
+    #[test]
+    fn fold_at_close_checks_words_without_requiring_an_author_mark_and_reports_unreadable_notes() {
+        use super::*;
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let file = project.path().join(".faber/decisions-old.md");
+        let kept = KeptDecision::of("- Kept choice");
+        std::fs::write(&file, "- Kept choice\n").unwrap();
+        assert_eq!(fold_notice(project.path(), std::slice::from_ref(&kept)), "");
+        std::fs::write(&file, "- Kept choice with different words [by person]\n").unwrap();
+        assert!(fold_notice(project.path(), std::slice::from_ref(&kept)).contains("missing"));
+        std::fs::write(&file, vec![b'x'; MAX_BYTES + 1]).unwrap();
+        assert!(fold_notice(project.path(), &[kept]).contains("could not be fully checked"));
+    }
+
     use super::*;
 
     #[test]

@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "At close, the agent tidies oversized project notes while keeping live decisions; older decisions remain searchable.",
+      "pt-BR": "Ao concluir, o agente organiza as anotações grandes do projeto sem perder decisões atuais; as antigas continuam na busca.",
+      "es": "Al terminar, el agente ordena las notas grandes del proyecto sin perder decisiones vigentes; las antiguas siguen disponibles en la búsqueda.",
+      "fr": "En terminant, l’agent range les longues notes du projet sans perdre les décisions actuelles ; les anciennes restent accessibles par la recherche.",
+      "de": "Zum Abschluss ordnet der Agent umfangreiche Projektnotizen und bewahrt aktuelle Entscheidungen; ältere Entscheidungen bleiben über die Suche auffindbar."
+    }
+  }
+}

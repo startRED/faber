@@ -246,12 +246,34 @@ impl Core {
 
     pub(super) fn progress_call(&mut self, conv: &str, call: String, tool: &'static str, input: serde_json::Value) {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
-        let (ok, text) = match self.write_progress(conv, tool, &input) {
-            Ok(text) => (true, text),
+        if tool == progress::WRAP_UP_TOOL
+            && let Some(project) = self.follow_up_project(conv)
+        {
+            let turn = self.live[conv].turn.clone();
+            let folder = self.live[conv].cwd.clone();
+            let kept = self.store.kept_decisions_reader(&project.id);
+            let (me, conv) = (self.me.clone(), conv.to_string());
+            let read = self.opts.runtime.spawn_blocking(move || crate::project::memory::fold_notice(&folder, &kept()));
+            self.opts.runtime.spawn(async move {
+                let notice = read.await.unwrap_or("Project notes could not be checked for decisions you kept.");
+                let Some(core) = me.upgrade() else { return };
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.turn == turn) {
+                    core.finish_progress_call(&conv, sid, &call, tool, &input, notice);
+                }
+            });
+            return;
+        }
+        self.finish_progress_call(conv, sid, &call, tool, &input, "");
+    }
+
+    fn finish_progress_call(&mut self, conv: &str, sid: u64, call: &str, tool: &'static str, input: &serde_json::Value, notice: &str) {
+        let (ok, text) = match self.write_progress(conv, tool, input) {
+            Ok(text) => (true, if notice.is_empty() { text } else { format!("{text}\n{notice}") }),
             Err(why) => (false, why),
         };
         if let Some(l) = self.live.get(conv).filter(|l| l.sid == sid) {
-            l.session.helper_reply(&call, ok, text);
+            l.session.helper_reply(call, ok, text);
         }
     }
 
@@ -403,6 +425,57 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn fold_at_close_reports_a_lost_kept_decision_without_refusing_the_close() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = crate::events::Session::from_fn(move |cmd| {
+            if let crate::events::SessionCommand::HelperReply { ok, text, .. } = cmd {
+                tx.send((ok, text)).unwrap();
+            }
+        });
+        let id = crate::engine::answer::tests::seed(&app, session, &[("closing", &[])]);
+        let registered = tempfile::tempdir().unwrap();
+        let project = app.add_project(&registered.path().to_string_lossy()).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        std::fs::write(folder.path().join(".faber/decisions.md"), "- Current choice [by AI]\n").unwrap();
+        std::fs::write(folder.path().join(".faber/decisions-old.md"), "- Kept choice [by AI]\n").unwrap();
+        let kept = KeptDecision::of("- Kept choice");
+        app.with(|c| {
+            c.live.get_mut(&id).unwrap().cwd = folder.path().into();
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id.clone());
+            c.store.keep_decision(&project.id, kept.clone(), std::slice::from_ref(&project.id)).unwrap();
+        });
+        assert!(memory::kept_for_card(folder.path(), std::slice::from_ref(&kept)).unwrap().is_empty());
+        let close = || {
+            app.with(|c| {
+                c.progress_call(
+                    &id,
+                    "close".into(),
+                    progress::WRAP_UP_TOOL,
+                    serde_json::json!({
+                        "outcome":"done", "did":"Finished", "result":"Checked", "verified":"Tests passed"
+                    }),
+                )
+            })
+        };
+        close();
+        let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(ok && !text.contains("missing"), "{text}");
+        std::fs::write(folder.path().join(".faber/decisions-old.md"), "- Changed choice [by person]\n").unwrap();
+        close();
+        let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(ok && text.contains("decisions you kept are missing"), "{text}");
+        assert!(app.open(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        app.with(|c| assert_eq!(c.store.kept_decisions(&project.id), [kept]));
+        app.shutdown();
+    }
 
     #[tokio::test]
     async fn follow_up_refuses_compaction_and_streaming_admission_without_queueing_duplicates() {

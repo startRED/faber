@@ -74,6 +74,73 @@ fn start(dir: &crate::support::DataFolder, spawn: Spawner, ask: Option<Ask>) -> 
 
 const FIVE: Duration = Duration::from_millis(500);
 
+#[test]
+fn fold_at_close_names_only_files_over_their_target() {
+    use faber_engine::{
+        codex::{CodexThread, thread_params},
+        model::{Area, Permissions},
+    };
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join(".faber")).unwrap();
+    let thread = CodexThread {
+        temporary: false,
+        cwd: project.path().into(),
+        model: None,
+        effort: None,
+        resume: None,
+        title: None,
+        instructions: None,
+        user_name: None,
+        research: None,
+        group_instructions: None,
+        permissions: Permissions::FullAccess,
+        leave_plan: false,
+        tuning: Default::default(),
+        helper: Default::default(),
+        browse: false,
+        conversations: false,
+        leads: false,
+        verify: false,
+        progress: true,
+    };
+    let description = || {
+        thread_params(Area::Project, &thread).1["dynamicTools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == "wrap_up").unwrap()["description"].as_str().unwrap().to_string()
+    };
+    let ordinary = description();
+    let path = project.path().join(".faber/decisions.md");
+    std::fs::write(&path, "x".repeat(8 * 1024 + 1)).unwrap();
+    let folding = description();
+    assert!(folding.contains(".faber/decisions.md") && folding.contains(".faber/decisions-old.md"), "{folding}");
+    assert!(folding.contains("live item"));
+    std::fs::write(&path, "x".repeat(8 * 1024)).unwrap();
+    assert_eq!(description(), ordinary);
+}
+
+#[test]
+fn fold_at_close_old_decisions_and_legacy_notes_are_searchable_without_rewriting() {
+    use faber_engine::{memory_search, project::memory, search::Results};
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join(".faber")).unwrap();
+    let names = ["decisions-old", "plans", "recipes", "learning", "memory"];
+    for name in names {
+        std::fs::write(project.path().join(format!(".faber/{name}.md")), "- Historical database choice [by AI]\n").unwrap();
+    }
+    let list = memory::list_faber(project.path()).unwrap();
+    for name in names {
+        assert!(list.files.iter().any(|file| file.path == format!(".faber/{name}.md")), "{name}");
+    }
+    let found = memory_search::answer("database", &Ok(Results { ready: true, hits: vec![] }), &Ok(list), 0);
+    assert!(found.contains(".faber/decisions-old.md:1 · old"), "{found}");
+    for name in names {
+        assert!(found.contains(&format!(".faber/{name}.md")));
+        assert_eq!(
+            std::fs::read_to_string(project.path().join(format!(".faber/{name}.md"))).unwrap(),
+            "- Historical database choice [by AI]\n"
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept() {
     let dir = support::DataFolder::new();

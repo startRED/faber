@@ -986,7 +986,12 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     crate::helper::Mcp::Answer(json!({"jsonrpc":"2.0","id":msg["request"]["message"]["id"],"error":{"code":-32601,"message":"No such server"}}))
                                 };
                                 match step {
-                                    crate::helper::Mcp::Answer(answer) => {
+                                    crate::helper::Mcp::Answer(mut answer) => {
+                                        if tools.progress && let Some(list) = answer["result"]["tools"].as_array_mut() {
+                                            for tool in list.iter_mut().filter(|t| t["name"] == crate::progress::WRAP_UP) {
+                                                tool["description"] = crate::progress::wrap_up_description(&opts.cwd).into();
+                                            }
+                                        }
                                         let reply = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": msg["request_id"],
                                             "response": { "mcp_response": answer } } });
                                         let _ = proc::write_line(&mut *stdin, &reply).await;

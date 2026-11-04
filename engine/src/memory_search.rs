@@ -75,7 +75,9 @@ fn notes(list: &MemoryList, query: &str) -> Vec<String> {
             let text = e.body.as_deref().unwrap_or(&e.text).trim_start();
             // The list marker is Markdown, not what was written.
             let text = ["- ", "* ", "+ "].iter().find_map(|m| text.strip_prefix(m)).unwrap_or(text);
-            crate::search::matches(text, query).then(|| format!("{}:{} · {} · {}", flat(&f.path), e.line, author(e), cut(text, NOTE_CHARS)))
+            let old = if f.path.ends_with("/.faber/decisions-old.md") || f.path == ".faber/decisions-old.md" { "old · " } else { "" };
+            crate::search::matches(text, query)
+                .then(|| format!("{}:{} · {old}{} · {}", flat(&f.path), e.line, author(e), cut(text, NOTE_CHARS)))
         })
         .collect()
 }
