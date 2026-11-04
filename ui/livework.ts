@@ -48,7 +48,7 @@ export function liveWork(input: LiveInput): LiveWork | undefined {
   const streaming = m.status === 'streaming';
   const ended = m.status === 'stopped' || m.status === 'error';
   // A stop or an error ends its helpers too, even one that ran in the background (as `helpersAtWork` counts them).
-  const helpers = agentSteps(tools)
+  const helpers = agentSteps(tools, '', undefined, m.review?.rounds)
     .map((step) => ({ id: step.call.id, title: step.title, state: ended && step.call.ok === undefined ? 'stopped' as const : agentState(step, streaming), since: step.call.started }))
     .sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity));
   const base = { answer: m.id, since: m.at, helpers };

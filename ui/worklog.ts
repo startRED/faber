@@ -1,4 +1,4 @@
-import type { Change, ChangedLine, Message, ToolUse } from './api.ts';
+import type { Change, ChangedLine, Message, ReviewRound, ToolUse } from './api.ts';
 import { lang, t } from './i18n.ts';
 import { readsIn } from './language.ts';
 import type { Key } from './locales/en.ts';
@@ -57,6 +57,7 @@ const KINDS: Record<string, Key> = {
   Conversation: 'tool.conversation',
   Agent: 'tool.agent',
   Helper: 'tool.agent',
+  Review: 'review.kind',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
   AskUserQuestion: 'tool.ask',
@@ -255,10 +256,14 @@ export function stepLine(groups: StepGroup[], tool: ToolUse, folder?: string): s
 /** A call of the plan, the now line or the closing box (task 017): drawn as themselves, never as a step. */
 export const isProgressCall = (tool: ToolUse): boolean => tool.name === 'Plan' || tool.name === 'Status' || tool.name === 'WrapUp';
 
-export const isAgentCall = (tool: ToolUse): boolean => SUBAGENT.has(tool.name) || tool.name === 'Helper';
+export const isAgentCall = (tool: ToolUse): boolean => SUBAGENT.has(tool.name) || tool.name === 'Helper' || tool.name === 'Review';
+
+/** Why the rounds stopped, as the engine keeps it (a locale key), or nothing while they go on. */
+export const reviewStop = (review: NonNullable<Message['review']>): string => review.stop ?? '';
 
 export interface AgentStep {
   call: ToolUse;
+  review?: ReviewRound;
   /** The task that handed it work, when that task is in this reply. */
   parent?: { id: string; title: string };
   /** Its name on screen: the few words it was given when they read in the person's language, else "Helper 1", "Helper 2"…
@@ -360,12 +365,13 @@ export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
 /** Each helper's place among the agent calls of one reply, from 1: what "Helper 1" counts. A view that reads the steps of
  * several replies passes the numbers of the reply the helper belongs to, so it has the same name everywhere. */
 export function helperNumbers(tools: ToolUse[] = []): Map<string, number> {
-  return new Map(tools.filter(isAgentCall).map((call, i) => [call.id, i + 1]));
+  return new Map(tools.filter((call) => isAgentCall(call) && call.name !== 'Review').map((call, i) => [call.id, i + 1]));
 }
 
 /** Each subagent, including nested ones, with its own tools. The parent keeps the handoff, the child keeps its work. */
-export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = helperNumbers(tools)): AgentStep[] {
+export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = helperNumbers(tools), rounds: ReviewRound[] = []): AgentStep[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const reviews = tools.filter((tool) => tool.name === 'Review');
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
   const parentOf = (tool: ToolUse) => {
     let at = tool.parent ? byId.get(tool.parent) : undefined;
@@ -381,6 +387,11 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     return text(call.name === 'Helper' ? input.title : input.description).trim();
   };
   const titleOf = (call: ToolUse) => {
+    if (call.name === 'Review') {
+      const n = reviews.indexOf(call) + 1;
+      const round = rounds.find((r) => r.call === call.id);
+      return round ? t('review.round', { n, total: round.total }) : t('review.running', { n });
+    }
     const named = namedOf(call);
     return named && readsIn(named, lang()) ? named : t('agent.numbered', { n: numbers.get(call.id) ?? 1 });
   };
@@ -398,10 +409,11 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     const parent = parentOf(call);
     return {
       call,
+      review: call.name === 'Review' ? rounds.find((r) => r.call === call.id) : undefined,
       parent: parent ? { id: parent.id, title: titleOf(parent) } : undefined,
       title: titleOf(call),
       named: namedOf(call),
-      kind: helper ? helperKind : text(input.subagent_type),
+      kind: call.name === 'Review' ? t('review.kind') : helper ? helperKind : text(input.subagent_type),
       helper,
       brief: text(helper ? input.brief : input.prompt).trim(),
       tools: own.get(call.id) ?? [],

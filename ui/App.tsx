@@ -705,7 +705,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const helperKind = m?.vendor ? vendorName(m.vendor === 'claude' ? 'codex' : 'claude') : '';
     // Its steps, and a parent's, may sit in other replies; each name counts the helpers of its own reply, as the rows do.
     const numbers = new Map(conversation.messages.flatMap((message) => [...helperNumbers(message.tools)]));
-    const step = agentSteps(conversation.messages.flatMap((message) => message.tools ?? []), helperKind, numbers).find((s) => s.call.id === open.callId);
+    // Rounds name their own Review call, so every reply's rounds can be read together.
+    const rounds = conversation.messages.flatMap((message) => message.review?.rounds ?? []);
+    const step = agentSteps(conversation.messages.flatMap((message) => message.tools ?? []), helperKind, numbers, rounds).find((s) => s.call.id === open.callId);
     // A helper works only in a project whose agent can reach the other AI (both connected), as the engine offers it.
     const helpable = conversation.area === 'project' && state().vendors.length > 1;
     return step && { step, streaming: m?.status === 'streaming', helpable };

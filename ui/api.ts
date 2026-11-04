@@ -141,7 +141,10 @@ export interface FaberAct {
   change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
   sent?: string;
 }
+export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; reviewers: string[] }
+export interface ReviewRound { call?: string; lines: [number, number, number, number, number]; total: number; reviewers: string[]; scores?: [string, [number, number, number, number, number]][]; omitted?: string[]; jesters: string[]; agreed: ReviewFinding[]; notes: ReviewFinding[] }
 export interface Message {
+  review?: { rounds: ReviewRound[]; stop?: string };
   acts?: FaberAct[];
   visualFileCount?: number;
   id: string;

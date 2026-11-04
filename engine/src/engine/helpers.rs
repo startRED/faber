@@ -56,7 +56,7 @@ impl Core {
 
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.
     pub(super) fn start_helper(&mut self, conv: &str, call: String, input: serde_json::Value) {
-        if let Err(why) = self.launch_helper(conv, &call, &input) {
+        if let Err(why) = self.launch_helper(conv, &call, &input, None) {
             if why == super::worker_memory::PENDING {
                 let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
                 let owner = conv.to_string();
@@ -98,7 +98,13 @@ impl Core {
         }
     }
 
-    fn launch_helper(&mut self, conv: &str, call: &str, input: &serde_json::Value) -> Result<(), &'static str> {
+    pub(super) fn launch_helper(
+        &mut self,
+        conv: &str,
+        call: &str,
+        input: &serde_json::Value,
+        review: Option<Vendor>,
+    ) -> Result<(), &'static str> {
         if self.goal_out_of_money(conv) {
             return Err(super::siblings::GOAL_CAP);
         }
@@ -108,8 +114,8 @@ impl Core {
         let l = self.live.get(conv).ok_or("the conversation is gone")?;
         let (sid, vendor, permissions, tuning, cwd) = (
             l.sid,
-            helper::other(l.vendor),
-            l.permissions,
+            review.unwrap_or_else(|| helper::other(l.vendor)),
+            if review.is_some() { Permissions::Plan } else { l.permissions },
             Tuning { web: l.tuning.web, summary: l.tuning.summary, language: l.tuning.language.clone(), ..Default::default() },
             l.cwd.clone(),
         );
@@ -475,8 +481,14 @@ impl Core {
             text.push_str(&helper::told_note(&h.told));
         }
         self.never_read(&h.conv, call, &h.waiting);
-        let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid) else { return };
-        l.session.helper_reply(call, ok, text);
+        if self.review_ended(&h.conv, call, ok, &h.report, false) {
+            if !ok {
+                text = "error.review.failed".into();
+            }
+            self.handle(&h.conv, h.sid, EngineEvent::ToolResult { id: call.to_string(), ok, declined: false, text });
+        } else if let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid) {
+            l.session.helper_reply(call, ok, text);
+        }
         if let Some(m) = self.turn(&h.conv) {
             if incomplete {
                 m.incomplete = Some(true);
@@ -535,6 +547,7 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
+        self.reviews.retain(|_, run| run.conv != conv);
         self.cancel_helper_workers(conv);
         self.kit_checks.retain(|name, check| !name.starts_with("helper:") || check.owner != conv);
         // The checks it was waiting for stop too (`verifying.rs`).

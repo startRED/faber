@@ -366,6 +366,8 @@ pub struct Message {
     pub thinking: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolUse>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<crate::review::History>,
     /// Catalog items chosen when this reply's CLI session started; unchanged while that session runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_kit: Option<crate::tools::kits::Report>,
@@ -971,6 +973,7 @@ impl Message {
             overload_retry: None,
             thinking: None,
             tools: None,
+            review: None,
             commits: vec![],
             needs_you: false,
             permissions: None,

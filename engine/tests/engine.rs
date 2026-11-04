@@ -7148,6 +7148,99 @@ async fn large_tool_input_survives_branch_and_deletion() {
     engine.shutdown();
 }
 
+async fn review_call(pipe: &mut support::Pipe, id: &str) {
+    let input = json!({"request":"Change the files", "files":["a.rs", "b.rs"]});
+    pipe.say(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":id,"name":"mcp__faber__review","input":input}]},"parent_tool_use_id":null})).await;
+    pipe.say(json!({"type":"control_request","request_id":id,"request":{"subtype":"mcp_message","server_name":"faber","message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"review","arguments":input,"_meta":{"claudecode/toolUseId":id}}}}})).await;
+}
+
+async fn review_finish(pipe: &mut support::Pipe, text: &str) {
+    pipe.say(json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":text}}})).await;
+    pipe.say(json!({"type":"result","subtype":"success","is_error":false,"result":text,"total_cost_usd":0.001,"usage":{"input_tokens":10,"output_tokens":10}})).await;
+}
+
+#[tokio::test]
+async fn review_rounds_use_fresh_read_only_reviewers_and_stop() {
+    let dir = support::DataFolder::new();
+    let (spawn, made) = pipes();
+    let (engine, _) = engine(&dir, Vendor::Claude, spawn);
+    let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "Change the files", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut main = next_pipe(&made).await;
+    main.say(json!({"type":"system","subtype":"init","session_id":"main","model":"claude-haiku-5-5"})).await;
+    review_call(&mut main, "review1").await;
+    let mut first = next_pipe(&made).await;
+    let mut second = next_pipe(&made).await;
+    assert!(first.args.windows(2).any(|a| a == ["--permission-mode", "plan"]), "{:?}", first.args);
+    assert!(second.args.windows(2).any(|a| a == ["--permission-mode", "plan"]), "{:?}", second.args);
+    let answer = r#"{"lines":[4,4,4,4,4],"rows":[{"line":1,"file":"a.rs","at":1,"what":"broken","should":"fix"},{"line":2,"file":"b.rs","what":"wrong","should":"fix"},{"line":3,"file":"c.rs","what":"unsafe","should":"fix"},{"line":4,"file":"d.rs","what":"complex","should":"fix"},{"line":5,"file":"e.rs","what":"untested","should":"test"}]}"#;
+    let mut second_answer: serde_json::Value = serde_json::from_str(answer).unwrap();
+    second_answer["rows"].as_array_mut().unwrap().push(json!({"line":1,"file":"only.rs","what":"private note","should":"fix"}));
+    review_finish(&mut first, answer).await;
+    review_finish(&mut second, &second_answer.to_string()).await;
+    let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.review.as_ref().is_some_and(|r| !r.rounds.is_empty()))).await;
+    let round = &c.messages.iter().find_map(|m| m.review.as_ref()).unwrap().rounds[0];
+    assert_eq!(round.total, 20);
+    assert_eq!(round.agreed.len(), 5);
+    assert_eq!(round.notes.len(), 1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let output = main.lines.lock().unwrap().iter().find(|v| v["response"]["request_id"] == "review1").cloned();
+            if let Some(output) = output {
+                let text = output["response"]["response"]["mcp_response"]["result"]["content"][0]["text"].as_str().unwrap();
+                assert!(text.contains("Score: 20 out of 25") && text.contains("Agreed:") && !text.contains("private note"), "{text}");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    review_call(&mut main, "review2").await;
+    let mut third = next_pipe(&made).await;
+    let mut fourth = next_pipe(&made).await;
+    review_finish(&mut third, r#"{"lines":[5,5,5,5,5],"rows":[]}"#).await;
+    review_finish(&mut fourth, "invalid").await;
+    let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.review.as_ref().is_some_and(|r| r.rounds.len() == 2))).await;
+    let history = c.messages.iter().find_map(|m| m.review.as_ref()).unwrap();
+    assert_eq!(history.rounds[1].total, 25);
+    assert_eq!(history.rounds[1].omitted.len(), 1);
+    review_call(&mut main, "review3").await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if main.lines.lock().unwrap().iter().any(|v| v["response"]["request_id"] == "review3") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(made.lock().unwrap().is_empty());
+    engine.shutdown();
+}
+
+#[test]
+fn review_rounds_agree_only_on_shared_rows_and_tool_is_project_only() {
+    use faber_engine::{helper, review};
+    let a = review::parse(r#"{"lines":[4,4,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","should":"fix"},{"line":2,"file":"only.rs","what":"note","should":"fix"}]}"#).unwrap();
+    let b = review::parse(r#"{"lines":[4,5,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","should":"fix"}]}"#).unwrap();
+    let round = review::score(&[("one".into(), a), ("two".into(), b)]);
+    assert_eq!(round.total, 23);
+    assert_eq!(round.agreed.len(), 1);
+    assert_eq!(round.notes.len(), 1);
+    let call = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"review","arguments":{"request":"x","files":[]}}});
+    assert!(matches!(
+        helper::mcp(&call, helper::Tools { progress: true, ..Default::default() }),
+        helper::Mcp::Call { tool: review::NAME, .. }
+    ));
+    assert!(matches!(helper::mcp(&call, helper::Tools::default()), helper::Mcp::Answer(_)), "chat and helpers have no project tools");
+}
+
 #[test]
 fn hook_list_limits_output_and_names_unreadable_files() {
     let dir = tempfile::tempdir().unwrap();

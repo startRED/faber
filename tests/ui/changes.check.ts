@@ -61,8 +61,10 @@ check('review change: both requests use the conversation send path while idle or
           ok(sent, 'a review calls the same api.send as the composer');
           equal(sent.conversationId, c.id); equal(sent.area, 'project'); equal(sent.projectId, 'p1');
           equal(sent.text, t(security ? 'changes.reviewSecurityRequest' : 'changes.reviewRequest'));
-          ok(sent.text.includes(security ? 'for bugs and security issues.' : 'for bugs.'));
-          for (const words of ['copy base', 'helper tool', 'other AI when it is connected', 'fresh read-only subagent', 'short list, worst first', 'Do not change files', 'no findings']) ok(sent.text.includes(words), words);
+          const words = security
+            ? ['for bugs and security issues.', 'copy base', 'helper tool', 'other AI when it is connected', 'fresh read-only subagent', 'short list, worst first', 'Do not change files', 'no findings']
+            : ['review tool', 'agreed problems', 'call it again', 'final score'];
+          for (const word of words) ok(sent.text.includes(word), word);
           deepEqual(sent.images, []); deepEqual(sent.files, []);
           equal(host.querySelector('.changes-view'), null, 'sending closes the changes');
           equal(host.querySelector('.pane-changes')!.getAttribute('aria-pressed'), 'false', 'and the column, so the findings stream in the conversation');

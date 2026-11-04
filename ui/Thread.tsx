@@ -44,7 +44,7 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
@@ -461,7 +461,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const thinking = createMemo(() => thinkingParts(thinkingText()));
   // A helper always comes from the AI that is not running the reply.
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
-  const agents = createMemo(() => agentSteps(tools(), helperKind()));
+  const agents = createMemo(() => agentSteps(tools(), helperKind(), undefined, m().review?.rounds));
   // The agent's own tools, without its subagents' (each subagent's sit in its own row).
   const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
   // The reply as it happened: words, thinking and steps in their order (W1). Each part that did not change keeps its object, so
@@ -672,6 +672,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           );
         }}
       </Index>
+      <Show when={m().review?.rounds.at(-1)}>{(round) => <p class="side-meta">{t('review.summary', { total: round().total })}<Show when={reviewStop(m().review!)}>{(stop) => <> · {fromEngine(stop())}</>}</Show></p>}</Show>
       <Show when={props.visuals?.some((a) => a.versions.some((v) => v.file && v.messageId === m().id))}>
         <div class="md">
           <VisualFiles answers={props.visuals ?? []} messageId={m().id} conversationId={props.conversationId} />

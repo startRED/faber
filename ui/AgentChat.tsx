@@ -479,6 +479,13 @@ export function AgentChat(props: {
       <div class="rc-body side-body" data-state={state()} ref={animateList}>
         <Show when={props.step.parent}>{(parent) => <p class="side-meta agent-parent">{parent().title || t('agent.untitled')} › {title()}</p>}</Show>
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
+        <Show when={props.step.review}>{(round) => <section class="review-round">
+          <For each={(['asked', 'correct', 'safe', 'simple', 'checked'] as const)}>{(line, i) => <p>{t(`review.line.${line}`)}: {round().lines[i()]} / 5</p>}</For>
+          <For each={round().agreed}>{(finding) => <p><b><Breakable text={`${finding.file}${finding.at == null ? '' : `:${finding.at}`}`} /></b><br />{finding.what}<br />{finding.should}</p>}</For>
+          <Show when={round().notes.length}><details class="disclosure"><summary>{t('review.notes', { n: round().notes.length })}</summary><For each={round().notes}>{(finding) => <p><b><Breakable text={`${finding.file}${finding.at == null ? '' : `:${finding.at}`}`} /></b><br />{finding.what}<br />{finding.should}</p>}</For></details></Show>
+          <Show when={round().omitted?.length}><p class="side-meta">{t('review.omitted')}</p></Show>
+          <Show when={round().jesters.length}><p class="side-meta">{t('review.jester')}</p></Show>
+        </section>}</Show>
         <Show when={props.step.named && props.step.named !== props.step.title}>
           <p class="side-meta">{t('agent.named', { title: props.step.named })}</p>
         </Show>
@@ -521,7 +528,7 @@ export function AgentChat(props: {
           <Told told={props.step.call.told!} />
         </Show>
         <Show when={props.step.call.facts}>{(facts) => <Facts facts={facts()} />}</Show>
-        <Show when={!props.step.call.transcript?.pages && props.step.report}>
+        <Show when={props.step.call.name !== 'Review' && !props.step.call.transcript?.pages && props.step.report}>
           <div class="md agent-report" onClick={openLinks}>
             <Markdown text={props.step.report} />
           </div>
@@ -529,7 +536,7 @@ export function AgentChat(props: {
         <Show when={working() && props.step.helper && props.step.call.id} keyed>
           {(callId) => <HelperBox callId={callId} />}
         </Show>
-        <Show when={working() && !props.step.helper}>
+        <Show when={working() && !props.step.helper && props.step.call.name !== 'Review'}>
           <div class="side-tell">
             <p>{t('agent.side.note')}</p>
             <button type="button" class="btn" onClick={() => {
@@ -541,7 +548,7 @@ export function AgentChat(props: {
             </button>
           </div>
         </Show>
-        <Show when={!working() && state() !== 'background' && props.helpable}>
+        <Show when={props.step.call.name !== 'Review' && !working() && state() !== 'background' && props.helpable}>
           <div class="side-tell">
             <p>{t('agent.continue.note')}</p>
             <button type="button" class="btn" onClick={() => start(t('agent.continueAbout', { title: title() }))}>

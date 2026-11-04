@@ -637,6 +637,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 .chain(items(&msg["message"]["content"]).filter(|c| c["type"] == "tool_use").map(|c| {
                     let name = match c["name"].as_str() {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
+                        Some(crate::review::CLAUDE_NAME) => crate::review::TOOL.to_string(),
                         Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
                         Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
                         Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
@@ -989,6 +990,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
                                         on_event(match tool {
+                                            crate::review::NAME => EngineEvent::ReviewCall { id, input },
                                             crate::browser::NAME => EngineEvent::BrowseCall { id, input },
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
                                             crate::verify::NAME => EngineEvent::VerifyCall { id, input },
@@ -1034,6 +1036,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     // Calling the helper changes nothing by itself: what the helper does is held to the same mode. The
                                     // browser is offered only in full access, which asks nothing, and the engine checks every address.
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)
+                                        || (tool == crate::review::CLAUDE_NAME && opts.launch.progress)
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)

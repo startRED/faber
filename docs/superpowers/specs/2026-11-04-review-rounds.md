@@ -1,6 +1,6 @@
 # Review rounds: a council scores the work and the agent climbs to a target
 
-Status: proposed, waiting for the owner's choice. Nothing is built.
+Status: chosen by the owner on 2026-11-04 (score and fix, up to 21 of 25 or 3 rounds; the person and the agent may both start it). Being built, step 1 first.
 
 Asked by the owner on 2026-11-04 (direction: bring the council of judges and the hill-climb of Theo's T3 Code video to
 Faber's users); the details are the AI's. The developer version, which scores Faber's own screens, is
@@ -25,8 +25,8 @@ person must write. Review rounds turn that one button into a short loop:
    points from the middle one is left out of the round and the screen says so in one line ("One reviewer was far from
    the others and was left out").
 5. The agent fixes only the agreed problems, runs the project's checks, and the reviewers score again. Faber keeps a
-   round that rose (no line dropped, the total rose at least 1), puts the files back with Rewind when the total
-   dropped, and stops when the target is reached, when no agreed problem is left, when two rounds in a row did not
+   round that rose (no line dropped, the total rose at least 1), tells the agent to put back its own edits of the
+   round when the total or a line dropped, and stops when the target is reached, when no agreed problem is left, when two rounds in a row did not
    rise, or at the round limit.
 
 ## Who the reviewers are
@@ -45,7 +45,7 @@ person must write. Review rounds turn that one button into a short loop:
 - After a finished project task that changed files, the answer's actions row may offer "Review" where a step up or
   "Look around" would sit, never two of them (the R369 rule). It only starts the rounds, like "Look around" starts the
   box.
-- The agent may start it itself (the owner chooses, below) at the close of a task that changed many files, through the
+- The agent may start it itself (the owner's choice) at the close of a task that changed many files, through the
   same rounds, never on a small task.
 - No setting on a work screen (C011). The target and the round limit are good defaults with no setting; if one is ever
   needed it is one row in Settings > Projects.
@@ -82,14 +82,22 @@ person must write. Review rounds turn that one button into a short loop:
 - Expected cost: 0 MB while no round runs; while one runs, the two CLI processes a helper already costs, and under
   1 MB in Faber itself. The commit that builds it names the CI run that measured it.
 
+## How it runs
+
+One Faber tool of the project's agent, `review` (beside `helper`), is one round. Review sends a fixed request asking
+the agent to call it, the way Review does today (R280); the agent calls it by itself only at the close of a task that
+changed five files or more. The tool starts both reviewers read-only (plan mode, whatever the conversation's mode),
+scores them, keeps the round on the reply and answers with the score, the agreed problems and what to do next: fix and
+call again, put back the round's edits and stop, or stop. A call after a stop starts nothing.
+
 ## Build steps (after the owner's yes)
 
 1. Engine: the scoring functions (`engine/src/review.rs`): parse a reviewer's answer, median, agreed rows, jester with
    three, keep/revert/stop, with unit tests ported in idea (not code) from `council.mjs`.
 2. Engine: the rounds (`engine/src/engine/review.rs`) on top of the helper runner: two reviewers, the fix turn with only
-   the agreed problems, Rewind on a drop, the quota guard, Stop.
+   the agreed problems, putting back a round that dropped, the quota guard, Stop.
 3. Screen: the Review button sends rounds; the round row, its details and the line under the answer; locales in every
    language; the product map, design page and what's-new entry.
-4. Optional, if the owner says so: the agent may start rounds itself at the close of a big task.
+4. The agent may start rounds itself at the close of a big task (the owner said yes).
 
 Each step lands as its own pull request through `land.mjs`; steps 1 and 2 get a fresh review by the other vendor.

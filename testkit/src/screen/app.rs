@@ -1884,7 +1884,7 @@ fn reviews_change(ctx: &mut Ctx) -> Result {
     page.click(&css(".proj-chats .item").has_text("Update the greeting"))?;
     super::select_model(page, "Claude Haiku")?;
     for (key, finding, scope) in [
-        ("changes.review", "The changed greeting has no fallback.", "for bugs."),
+        ("changes.review", "The changed greeting has no fallback.", "review tool"),
         ("changes.reviewSecurity", "The changed path accepts untrusted input.", "for bugs and security issues."),
     ] {
         page.click(&css(".topbar .pane-changes"))?;

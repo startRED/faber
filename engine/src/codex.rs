@@ -565,6 +565,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             let name = match (kind, item["tool"].as_str()) {
                 ("dynamicToolCall", Some("run_command")) => "Bash",
                 ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
+                ("dynamicToolCall", Some(crate::review::NAME)) => crate::review::TOOL,
                 ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
                 ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
@@ -1193,6 +1194,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         if t.progress {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
+                tools.push(crate::review::codex_tool());
                 tools.extend(crate::progress::codex_tools());
                 tools.extend(crate::toolbox::codex_tools());
             }
@@ -1322,6 +1324,7 @@ pub(crate) fn redact_sink(sink: EventSink, token: String) -> EventSink {
             | EngineEvent::ToolboxCall { input, .. }
             | EngineEvent::ProgressCall { input, .. }
             | EngineEvent::HelperCall { input, .. }
+            | EngineEvent::ReviewCall { input, .. }
             | EngineEvent::Permission { input, .. }
             | EngineEvent::Parked { input, .. } => redact_value(input, &token),
             EngineEvent::Background(crate::background::Update::Start { command, .. }) => *command = command.replace(&token, "[redacted]"),
@@ -1897,6 +1900,17 @@ async fn serve(
                     (Some(method), Some(id)) => {
                         let top = params["threadId"].as_str().and_then(|t| by_id.get(t)).copied();
                         let thread = top.and_then(|k| threads.get_mut(&k));
+                        if method == "item/tool/call" && params["tool"] == crate::review::NAME {
+                            match thread.filter(|t| t.params.progress && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::ReviewCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => { let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":crate::helper::dynamic_result(false, "Review is not available here.", &[])})).await; }
+                            }
+                            continue;
+                        }
                         if method == "item/tool/call" && params["tool"] == crate::helper::NAME {
                             // R161: the agent asked for a helper; the engine answers once the helper is done.
                             match thread.filter(|t| t.params.helper == crate::helper::Helper::Offers && !t.blocked && !t.closing) {

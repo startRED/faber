@@ -840,3 +840,32 @@ check('restarted agents: a persisted interruption stops background and nested wo
   const live = calls.map(({ ...call }) => ({ ...call, interrupted: false }));
   equal(helpersAtWork([{ id: 'live', role: 'assistant', at: 1, text: '', status: 'done', tools: live }]), 2, 'a live session still owns background work');
 });
+
+check('review rounds: two scored rows, nested reviewers and the final line', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const finding = { line: 1, file: 'src/a.ts', at: 8, what: 'Missing check', should: 'Add a check', reviewers: ['a', 'b'] };
+  const round = { lines: [3, 4, 4, 3, 3] as [number, number, number, number, number], total: 17, reviewers: ['a', 'b'], jesters: [], agreed: [finding], notes: [finding] };
+  const message: Message = { id: 'review', role: 'assistant', at: 0, status: 'done', text: 'Done.', tools: [
+    { id: 'r1', name: 'Review', input: {}, ok: true },
+    { id: 'h1', name: 'Helper', input: { title: 'Check changes' }, parent: 'r1', ok: true },
+    { id: 'r2', name: 'Review', input: {}, ok: true },
+  ], review: { rounds: [{ ...round, call: 'r1' }, { ...round, call: 'r2', lines: [5, 4, 5, 4, 4], total: 22 }], stop: 'review.stop.target' } };
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'review', options: [], onBranch: () => {} }), root);
+  try {
+    const rows = [...root.querySelectorAll('.agents .agent b')].map((el) => el.textContent);
+    deepEqual(rows, ['Round 1: 17 of 25', 'Check changes', 'Round 2: 22 of 25']);
+    ok(root.textContent!.includes('Review: 22 of 25 · good enough'));
+    equal(root.querySelector('[data-parent="r1"]')?.getAttribute('data-parent'), 'r1');
+  } finally { dispose(); root.remove(); }
+  const detail = document.createElement('div'); document.body.append(detail);
+  const steps = agentSteps(message.tools, '', undefined, message.review!.rounds);
+  const close = render(() => createComponent(AgentChat, { step: steps[0]!, streaming: false, onBack: () => {}, onClose: () => {} }), detail);
+  try {
+    ok(detail.textContent!.includes('Does what was asked: 3 / 5'));
+    ok(detail.textContent!.includes('src/a.ts:8'));
+    equal(detail.querySelector('details summary')?.textContent, '1 seen by one reviewer');
+    equal(detail.querySelector('details')?.open, false);
+  } finally { close(); detail.remove(); }
+});

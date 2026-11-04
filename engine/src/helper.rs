@@ -99,6 +99,9 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
             if tools.helper {
                 list.push(json!({ "name": NAME, "description": DESCRIPTION, "inputSchema": schema() }));
             }
+            if tools.progress {
+                list.push(crate::review::mcp_tool());
+            }
             if tools.browse {
                 list.push(crate::browser::mcp_tool());
             }
@@ -134,6 +137,7 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
 fn called(name: &Value, tools: Tools) -> Option<&'static str> {
     match name.as_str()? {
         NAME if tools.helper => Some(NAME),
+        crate::review::NAME if tools.progress => Some(crate::review::NAME),
         crate::browser::NAME if tools.browse => Some(crate::browser::NAME),
         crate::sibling::NAME if tools.conversation => Some(crate::sibling::NAME),
         crate::verify::NAME if tools.verify => Some(crate::verify::NAME),
@@ -345,7 +349,10 @@ mod tests {
         }
         let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), offered) else { panic!() };
         let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["plan", "status", "wrap_up", "judge_creative", "settings", "quota", "catalog", "memory_search", "offer_bigger"]);
+        assert_eq!(
+            names,
+            ["review", "plan", "status", "wrap_up", "judge_creative", "settings", "quota", "catalog", "memory_search", "offer_bigger"]
+        );
     }
 
     #[test]

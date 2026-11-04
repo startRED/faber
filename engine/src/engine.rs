@@ -60,6 +60,7 @@ mod goals;
 #[path = "groups.rs"]
 mod groups;
 mod helpers;
+mod review;
 pub use groups::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
@@ -454,7 +455,7 @@ fn new_id() -> String {
 /// A message no running CLI owns: streaming and unfinished agents stop, and native requests go. A completed Codex plan remains a decision.
 fn settle(m: &mut Message) {
     for tool in m.tools.iter_mut().flatten() {
-        if tool.ok.is_none() && matches!(tool.name.as_str(), "Agent" | "Task" | "Helper") {
+        if tool.ok.is_none() && matches!(tool.name.as_str(), "Agent" | "Task" | "Helper" | "Review") {
             tool.interrupted = true;
             tool.sign = None;
         }
@@ -623,6 +624,7 @@ struct Core {
     copying: HashMap<String, copies::Held>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    reviews: HashMap<String, review::Run>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
     asking: HashMap<String, aside::Asking>,
@@ -797,6 +799,7 @@ impl Engine {
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
                 helpers: HashMap::new(),
+                reviews: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
                 titles: HashMap::new(),
@@ -2851,6 +2854,7 @@ impl Core {
                     return;
                 }
                 EngineEvent::HelperCall { id, .. }
+                | EngineEvent::ReviewCall { id, .. }
                 | EngineEvent::BrowseCall { id, .. }
                 | EngineEvent::ConversationCall { id, .. }
                 | EngineEvent::VerifyCall { id, .. }
@@ -3148,6 +3152,7 @@ impl Core {
                 self.watch_ended(conv, &id);
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
+            EngineEvent::ReviewCall { id, input } => return self.start_review(conv, id, input),
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
