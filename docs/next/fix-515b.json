@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Your drafts and attachments carry over to the new Windows app; it also waits for saves and recovers after interruptions.",
+      "pt-BR": "Seus rascunhos e anexos continuam no novo app do Windows; o Faber também espera o salvamento ao fechar e se recupera de interrupções.",
+      "es": "Tus borradores y archivos adjuntos siguen en la nueva aplicación de Windows; Faber espera al guardado al cerrar y se recupera de interrupciones.",
+      "fr": "Vos brouillons et pièces jointes suivent dans la nouvelle application Windows ; Faber attend l’enregistrement à la fermeture et reprend après une interruption.",
+      "de": "Deine Entwürfe und Anhänge bleiben in der neuen Windows-App erhalten; Faber wartet beim Beenden auf das Speichern und erholt sich nach Unterbrechungen."
+    }
+  }
+}

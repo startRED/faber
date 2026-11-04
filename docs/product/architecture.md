@@ -106,9 +106,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Going back to the Tauri build
 
-On Windows, the Electron installer saves the old executable as `previous/faber-tauri.exe` in the installation folder. Close Faber and disconnect the internet before running it, or reinstall a known Tauri installer while offline. Reconnecting may update Faber to Electron again. The executable alone may need files from that installer; recovery has not been proven on a real installation. Do not uninstall Electron before saving this copy elsewhere.
-
-After it starts, Electron saves conversations and top-level JSON files in `backup-before-electron-<timestamp>` under the data folder (normally `%APPDATA%/Faber`, or `FABER_DATA_DIR`). It leaves the webview profile, caches and logs out. The backup runs asynchronously and is limited to 10,000 files and 2 GiB. If it exceeds a limit, there is less than twice the needed space, or copying fails, startup continues and `update.log` records it; the next start retries, so a delayed backup may contain data already changed by Electron. To restore, close Faber and copy the saved files back into the data folder. Changes made after the backup will be replaced, so save the current data separately first. Compatibility with newer data is not guaranteed. Two starts that never reached Electron's ready event are recorded in `update.log`; this does not automatically roll back.
+[Recovery across desktop shells](recovery.md) describes the migration backup, draft import, manual restore and engine restart limits.
 
 ## What makes it better
 

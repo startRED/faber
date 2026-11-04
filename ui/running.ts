@@ -24,7 +24,7 @@ export function newest(held: RunningList, offered: RunningList): RunningList {
  * they arrive; an old list never replaces a newer one. */
 export function createRunningStore() {
   const [list, setList] = createSignal<RunningList>({ revision: -1, items: [] });
-  return { list, offer: (next: RunningList) => setList((held) => newest(held, next)) };
+  return { list, offer: (next: RunningList) => setList((held) => newest(held, next)), reset: () => setList({ revision: -1, items: [] }) };
 }
 
 export const store = createRunningStore();

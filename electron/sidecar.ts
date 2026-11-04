@@ -38,17 +38,24 @@ function startsWithSystem(): boolean {
 
 export class Sidecar {
   private next = 1;
-  private alive = true;
+  private alive = false;
+  private stopping = false;
+  private restart: NodeJS.Timeout | undefined;
+  private retryMs = 1000;
   private readonly pending = new Map<number, Pending>();
-  private readonly child: ChildProcessByStdio<Writable, Readable, null>;
-  private readonly exited: Promise<void>;
+  private child!: ChildProcessByStdio<Writable, Readable, null>;
+  private exited: Promise<void> = Promise.resolve();
+  private readonly listen: Listeners;
 
-  private constructor(child: ChildProcessByStdio<Writable, Readable, null>, exited: Promise<void>) {
-    this.child = child;
-    this.exited = exited;
-  }
+  private constructor(listen: Listeners) { this.listen = listen; }
 
   static start(listen: Listeners): Sidecar {
+    const sidecar = new Sidecar(listen);
+    sidecar.launch();
+    return sidecar;
+  }
+
+  private launch(): void {
     // What only the app knows (`faber-sidecar`'s own doc): its version, its process (whose windows are Faber's) and
     // whether it starts with the system.
     const env = {
@@ -65,18 +72,35 @@ export class Sidecar {
     // A hidden run never has a pane, whatever the environment it was started in says.
     if (process.env.FABER_HIDDEN === '1') delete env.FABER_PANE;
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
+    const started = Date.now();
     let ended: () => void = () => {};
-    const sidecar = new Sidecar(
-      child,
-      new Promise((resolve) => {
-        ended = resolve;
-      }),
-    );
+    this.child = child;
+    this.alive = true;
+    this.exited = new Promise((resolve) => { ended = resolve; });
+    let goneAlready = false;
     const gone = () => {
-      sidecar.alive = false;
-      for (const { reject } of sidecar.pending.values()) reject(new Error('error.host.gone'));
-      sidecar.pending.clear();
+      if (goneAlready) return;
+      goneAlready = true;
+      this.alive = false;
+      lines.close();
+      for (const { reject } of this.pending.values()) reject(new Error('error.host.gone'));
+      this.pending.clear();
       ended();
+      if (!this.stopping) {
+        if (Date.now() - started >= 30_000) this.retryMs = 1000;
+        this.restart = setTimeout(() => {
+          this.restart = undefined;
+          this.launch();
+          const replacement = this.child;
+          // Never replay a send: read the saved state and use the screen's existing lost-events recovery.
+          void this.call('state', {}).then(() => {
+            if (!this.stopping && this.child === replacement && this.alive) {
+              this.listen.event({ type: 'lagged' });
+            }
+          }).catch(() => {});
+        }, this.retryMs);
+        this.retryMs = Math.min(this.retryMs * 2, 30_000);
+      }
     };
     child.on('exit', gone);
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
@@ -87,12 +111,11 @@ export class Sidecar {
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on('line', (line) => sidecar.heard(line, listen));
-    return sidecar;
+    lines.on('line', (line) => { if (!goneAlready) this.heard(line, this.listen); });
   }
 
   call(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-    if (!this.alive) return Promise.reject(new Error('error.host.gone'));
+    if (!this.alive || this.stopping) return Promise.reject(new Error('error.host.gone'));
     if (this.pending.size >= MAX_PENDING) return Promise.reject(new Error('error.host.busy'));
     const id = this.next++;
     let line: string;
@@ -123,13 +146,18 @@ export class Sidecar {
 
   /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
   async stop(patience: number): Promise<void> {
+    this.stopping = true;
+    clearTimeout(this.restart);
     if (!this.alive) return;
     this.child.stdin.end();
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<'late'>((resolve) => {
       timer = setTimeout(() => resolve('late'), patience);
     });
-    if ((await Promise.race([this.exited, late])) === 'late') this.child.kill();
+    if ((await Promise.race([this.exited, late])) === 'late') {
+      this.child.kill();
+      await this.exited;
+    }
     clearTimeout(timer);
   }
 

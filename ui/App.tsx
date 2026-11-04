@@ -29,7 +29,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { forgetDraft, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
+import { dirtyCount, forgetDraft, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
@@ -419,8 +419,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const area = () => place().area;
   const projectId = () => place().projectId;
-  const refresh = () =>
-    api.state().then((s) => {
+  const refresh = (recover = false) => {
+    const before = quotas();
+    return api.state().then((s) => {
+      // Quota events received while reading state are newer than its snapshot.
+      if (recover) setQuotas((current) => ({
+        ...seedQuotas(s.quotas),
+        ...Object.fromEntries(Object.entries(current).filter(([key, reading]) => reading !== before[key])),
+      }));
       const selected = place();
       if (selected.groupId && !s.groups?.some((g) => g.id === selected.groupId)) {
         const next = { ...selected, groupId: undefined };
@@ -440,6 +446,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         };
       });
     });
+  };
   const groupPage = () => area() === 'chat' && !place().id ? state().groups?.find((g) => g.id === place().groupId) : undefined;
   const groupForChat = () => state().groups?.find((g) => g.conversationIds.includes(place().id ?? ''));
   let groupReady: { id: string; wait: () => Promise<boolean> } | undefined;
@@ -1057,6 +1064,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
+      if (e.type === 'lagged') {
+        // A replacement engine starts its revisions over; keep the renderer and its unsaved drafts alive.
+        store.reset();
+        setChildUpdates({});
+        setState((s) => ({ ...s, background: undefined }));
+        void api.draftDirty(dirtyCount() > 0).catch(() => {});
+        void refresh(true).catch(fail);
+        const revision = ++asksRevision;
+        void api.asks().then((list) => { if (revision === asksRevision) receiveAsks(list); }).catch(() => {});
+        void go(place());
+      }
       if (e.type === 'asks') { asksRevision++; receiveAsks(e.asks); }
       if (e.type === 'background') setState((s) => !s.background || e.revision > s.background.revision ? { ...s, background: { revision: e.revision, items: e.items } } : s);
       if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
@@ -1530,13 +1548,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const setKeepGoing = (value: boolean) => {
     setAskKeepGoing(false);
     const id = current()?.id;
-    if (id) void api.keepGoing(id, value).then(refresh, (err) => setSaveError(failureText(err)));
+    if (id) void api.keepGoing(id, value).then(() => refresh(), (err) => setSaveError(failureText(err)));
   };
   // An archived conversation, by the person or its own agent: once its reply ends, one line in place of the composer brings it back.
   const archived = () => !!place().id && state().conversations.some((s) => s.id === place().id && s.archived);
   const unarchive = () => {
     const id = place().id;
-    if (id) void api.archive(id, false).then(refresh, (err) => setSaveError(failureText(err)));
+    if (id) void api.archive(id, false).then(() => refresh(), (err) => setSaveError(failureText(err)));
   };
   // With no AI, Projects says what Chat says ("No AI connected") instead of offering a folder nothing could work in.
   const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;

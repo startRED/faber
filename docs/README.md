@@ -25,6 +25,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |
 | [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
+| [product/recovery.md](product/recovery.md) | Desktop-shell migration, draft import, rollback files and engine restart limits |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |
 | [product/parity.md](product/parity.md) | What Claude Code, Codex, claude.ai and ChatGPT have that Faber still lacks, how each gap closes, and what is never closed |
