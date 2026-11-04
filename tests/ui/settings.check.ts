@@ -1441,3 +1441,26 @@ check('settings: opening again lands on the section that was open', () => {
     again.stop();
   }
 });
+
+check('settings: the hooks fold reads and shows previews only while open', async () => {
+  const previous = api.hookList;
+  let reads = 0;
+  api.hookList = async () => { reads++; return [{ file: 'project/.claude/settings.json', event: 'PreToolUse', command: 'check', length: 17, unreadable: false }, { file: 'broken.json', event: '', command: '', length: 0, unreadable: true }]; };
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    equal(reads, 0);
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    await tick();
+    equal(reads, 1);
+    const text = view.host.querySelector('#set-hooks-more')!.textContent!;
+    ok(text.includes('PreToolUse') && text.includes('check') && text.includes('project/.claude/settings.json'));
+    ok(text.includes('broken.json'));
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    await tick();
+    equal(reads, 2);
+  } finally { api.hookList = previous; view.stop(); }
+});

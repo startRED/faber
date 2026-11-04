@@ -1,6 +1,8 @@
 import { invoke, listen } from './shell.ts';
 
 // The shapes the engine sends (engine/src/model.rs).
+export interface HookPreview { file: string; event: string; command: string; length: number; unreadable: boolean }
+
 export type Vendor = 'claude' | 'codex' | 'gemini';
 
 /**
@@ -1090,6 +1092,7 @@ export const api = {
   forgetEnvironment: (id: string) => invoke<void>('forget_environment', { id }),
   startEnvironment: (id: string) => invoke<Project[]>('start_environment', { id }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
+  hookList: () => invoke<HookPreview[]>('hook_list'),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),

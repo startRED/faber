@@ -1411,3 +1411,84 @@ mod allow_tests {
         }
     }
 }
+
+/// One hook's safe preview, or the name of a settings file that could not be read.
+#[derive(Debug, serde::Serialize)]
+pub struct HookPreview {
+    pub file: String,
+    pub event: String,
+    pub command: String,
+    pub length: usize,
+    pub unreadable: bool,
+}
+
+/// Reads only the hooks field, without retaining a command or any other settings.
+pub fn list_hooks(files: &[PathBuf]) -> Vec<HookPreview> {
+    #[derive(serde::Deserialize)]
+    struct HookSettings {
+        #[serde(default)]
+        hooks: std::collections::BTreeMap<String, Vec<HookGroup>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct HookGroup {
+        #[serde(default)]
+        hooks: Vec<HookCommand>,
+    }
+    #[derive(serde::Deserialize)]
+    struct HookCommand {
+        #[serde(rename = "type")]
+        kind: String,
+        command: Option<String>,
+    }
+    let mut result = Vec::new();
+    let mut count = 0;
+    for path in files {
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                result.push(HookPreview {
+                    file: path.to_string_lossy().into_owned(),
+                    event: String::new(),
+                    command: String::new(),
+                    length: 0,
+                    unreadable: true,
+                });
+                continue;
+            }
+        };
+        match serde_json::from_reader::<_, HookSettings>(std::io::BufReader::new(file)) {
+            Ok(settings) => {
+                for (event, groups) in settings.hooks {
+                    for hook in groups.into_iter().flat_map(|group| group.hooks) {
+                        if count == 30 {
+                            break;
+                        }
+                        if hook.kind != "command" {
+                            continue;
+                        }
+                        if let Some(command) = hook.command {
+                            let first = command.split_whitespace().next().unwrap_or("");
+                            result.push(HookPreview {
+                                file: path.to_string_lossy().into_owned(),
+                                event: event.clone(),
+                                command: first.to_owned(),
+                                length: command.chars().count(),
+                                unreadable: false,
+                            });
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            Err(_) => result.push(HookPreview {
+                file: path.to_string_lossy().into_owned(),
+                event: String::new(),
+                command: String::new(),
+                length: 0,
+                unreadable: true,
+            }),
+        }
+    }
+    result
+}

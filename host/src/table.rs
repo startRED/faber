@@ -145,6 +145,17 @@ table! {
     Read Free fn settings(h) -> Settings {
         Ok(h.shell.shown_settings(h.engine.settings()))
     }
+    /// Hook previews are requested by the screen and never saved.
+    Read Screen fn hook_list(h) -> Vec<faber_engine::claude::HookPreview> {
+        let mut files = Vec::new();
+        if let Some(dir) = faber_engine::claude_sessions::config_dir(&|key| std::env::var(key).ok()) {
+            files.push(dir.join("settings.json"));
+        }
+        for project in h.engine.state().projects {
+            files.push(PathBuf::from(project.path).join(".claude").join("settings.json"));
+        }
+        off("error.settings.loadFailed", move || faber_engine::claude::list_hooks(&files)).await
+    }
     /// Everything the screen draws its first frame from; the command line reads `conversations`, `projects` and `quota`.
     Read Screen fn state(h) -> FullState {
         lock(&h.feed).forget();
