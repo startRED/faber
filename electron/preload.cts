@@ -17,6 +17,7 @@ const EVENTS = new Set([
 ]);
 
 contextBridge.exposeInMainWorld('faberShell', {
+  flushStorage: () => ipcRenderer.send('faber:flush-storage'),
   invoke: async (command: string, args?: Record<string, unknown>) => {
     // A failure is thrown as the host gave it (a key, or `{key, detail}`), as Tauri's `invoke` does.
     const answer = (await ipcRenderer.invoke('faber:invoke', command, args ?? {})) as { ok?: unknown; err?: unknown };

@@ -2564,6 +2564,8 @@ export const ptBR: Messages = {
   'notes.406.fixed': 'Editar ou apagar uma preferência ou lição retira sua aprovação; recuperar o texto antigo precisa de uma nova aprovação sua.',
   'notes.407.fixed': 'Escrever para um ajudante logo depois que ele aparece não diz mais que ele terminou: suas palavras esperam e chegam a ele assim que começa.',
   'notes.408.better': 'Você recebe ferramentas adequadas às bibliotecas Python do projeto, mesmo sem citar essas bibliotecas no pedido.',
+  'notes.409.better': 'Você consegue ler o título inteiro dos detalhes no Catálogo numa janela pequena, com Voltar sempre ao alcance.',
+  'notes.410.fixed': 'Seu texto ainda não enviado, os anexos e a conversa anterior voltam quando você reabre o Faber depois de um fechamento forçado.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

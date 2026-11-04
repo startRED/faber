@@ -2577,6 +2577,8 @@ export const fr: Messages = {
   'notes.406.fixed': 'Modifier ou supprimer une préférence ou une leçon retire votre validation ; rétablir l’ancien texte exige votre accord à nouveau.',
   'notes.407.fixed': "Écrire à un assistant juste après son apparition n'affirme plus qu'il a fini : vos mots attendent et lui parviennent dès qu'il démarre.",
   'notes.408.better': 'Vous disposez des outils adaptés aux bibliothèques Python de votre projet sans avoir à les nommer dans votre demande.',
+  'notes.409.better': 'Dans une petite fenêtre, vous pouvez lire le titre complet des détails du Catalogue et garder Retour à portée de main.',
+  'notes.410.fixed': 'Votre texte non envoyé, vos pièces jointes et la conversation précédente reviennent quand vous rouvrez Faber après une fermeture forcée.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

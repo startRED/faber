@@ -276,6 +276,9 @@ const windowCommands = new Map<string, (args: Record<string, unknown>) => unknow
 ]);
 
 function relay(): void {
+  ipcMain.on('faber:flush-storage', (event) => {
+    if (fromScreen(event)) event.sender.session.flushStorageData();
+  });
   ipcMain.handle('faber:invoke', async (event, command: unknown, args: unknown) => {
     // Any other page (a future browser pane, a frame) is refused before a command runs.
     if (!fromScreen(event)) return { err: 'error.host.notScreen' };

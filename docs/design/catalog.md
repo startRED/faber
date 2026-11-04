@@ -39,7 +39,9 @@ quick-action centre using the two height tokens, rather than a fixed offset that
 Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
 properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
 filters wrap, and long names, pins and paths wrap. The ordinary narrow sidebar remains a modal dialog with its existing
-focus trap and Escape close. Heading focus enters the same-tab detail; Back and Escape return focus to the card.
+focus trap and Escape close. Heading focus enters the same-tab detail without the browser scrolling it behind Back;
+opening or returning focus to a detail resets its reading surface to the top. The focused title remains below Back at
+720×480, including enlarged text and every language. Back and Escape return focus to the original card.
 The same Back button stays visible near the top while the detail scrolls, in an opaque bar across the reading column
 so no fragments of the scrolling text show beside it. It adds no motion or second navigation control.
 

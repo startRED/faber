@@ -143,7 +143,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       setSelected(undefined);
       queueMicrotask(() => search?.focus());
     }
-    if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (replacement()) { setReplacement(undefined); ++preparation; queueMicrotask(() => detail?.focus()); } else if (confirming()) setConfirming(false); else back(); }
+    if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (replacement()) { setReplacement(undefined); ++preparation; queueMicrotask(focusDetail); } else if (confirming()) setConfirming(false); else back(); }
     // The search field keeps its own Escape, which clears what was typed.
     else if (!event.defaultPrevented && event.key === 'Escape' && event.target !== search && chosen().length && !busy()) { event.preventDefault(); if (confirmingBatch()) setConfirmingBatch(false); else setPicked([]); }
   };
@@ -235,13 +235,17 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     setBusy(false);
     if (refreshAfterAction) { refreshAfterAction = false; void refresh(); }
   };
+  const focusDetail = () => {
+    detail?.focus({ preventScroll: true });
+    detail?.closest('[data-catalog]')?.scrollTo(0, 0);
+  };
   const open = (row: ToolRow, button: HTMLElement) => {
     ++preparation; setReplacement(undefined); setRetry(undefined);
     returnCard = button;
     setSelected(row.id);
     setConfirming(false);
     setError(undefined);
-    queueMicrotask(() => detail?.focus());
+    queueMicrotask(focusDetail);
   };
   const back = () => {
     const id = selected();
@@ -267,7 +271,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       if (action === 'remove') { setRemoved({ id, enabled: wasEnabled }); setConfirming(false); queueMicrotask(() => undo?.focus()); }
       else if (removed()?.id === id) setRemoved(undefined);
       if (action === 'restore') rememberRemoved(rows);
-      if (action === 'install' || action === 'restore') queueMicrotask(() => detail?.focus());
+      if (action === 'install' || action === 'restore') queueMicrotask(focusDetail);
       setRevision((v) => v + 1);
       return true;
     } catch (err) {
@@ -300,7 +304,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       const index = rows.findIndex((row) => row.id === id);
       if (index >= 0) setRows(index, { installed: true, hasCopy: true, enabled: prepared.enabled, status: undefined, version: prepared.to });
       setRevision((v) => v + 1);
-      queueMicrotask(() => detail?.focus());
+      queueMicrotask(focusDetail);
     } catch (err) {
       // A failed or stale plan is never submitted again: Retry prepares a new question.
       if (!gone && selected() === id) { setError(failureText(err)); setRetry(() => () => void prepareReplacement(id)); }
@@ -376,7 +380,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
                 <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}><Show when={busy()}><StateGlyph state="working" small /></Show>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
                   {(prepared) => <div class="catalog-notice" data-catalog-replacement>
                     <div><p>{t('catalog.confirmReplace')}</p><dl><dt>{t('catalog.replaceFrom')}</dt><dd class="catalog-version">{prepared().from}</dd><dt>{t('catalog.replaceTo')}</dt><dd class="catalog-version">{prepared().to}</dd></dl><p>{t('catalog.replaceKeeps')}</p></div>
-                    <button class="btn" ref={(el) => (cancelReplacement = el)} disabled={busy()} onClick={() => { ++preparation; setReplacement(undefined); queueMicrotask(() => detail?.focus()); }}>{t('catalog.cancel')}</button>
+                    <button class="btn" ref={(el) => (cancelReplacement = el)} disabled={busy()} onClick={() => { ++preparation; setReplacement(undefined); queueMicrotask(focusDetail); }}>{t('catalog.cancel')}</button>
                     <button class="btn primary" disabled={busy()} onClick={() => void replace(row().id)}>{t('catalog.confirmReplaceAction')}</button>
                   </div>}
                 </Show>

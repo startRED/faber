@@ -52,6 +52,11 @@ The same draft key keeps text and attachments. Text retains its synchronous smal
 file bytes use IndexedDB Blobs, with names and inline-text removal metadata. Typing does not rewrite attachment bytes.
 Only a draft with a saved marker or a pending write opens that store. No resident service or polling is added.
 
+Electron requests a DOMStorage flush after each text write or deletion and each attachment-marker change, instead of
+waiting for Chromium's delayed commit. Attachment bytes keep their existing IndexedDB transaction. The hidden native
+restart check verifies the text, marker and exact PNG/PDF bytes after forced process closure, then removal and send-once.
+This requests an immediate write; it is not a synchronous disk acknowledgement or a power-loss guarantee.
+
 Restoring bytes can be slower than restoring text. The person may type while they load; sending waits until the saved
 attachments are known, and hydration preserves the newer words. A load failure leaves the record intact and offers
 the existing Remove attachments action for explicit discard. A save failure retains the in-memory draft, keeps the

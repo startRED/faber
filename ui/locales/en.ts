@@ -2457,6 +2457,8 @@ export const en = {
   'notes.406.fixed': 'Preferences and lessons you edit or delete lose approval; restoring their old words needs your approval again.',
   'notes.407.fixed': 'Writing to a helper just after it appears no longer says it has finished: your words wait and reach it as soon as it starts.',
   'notes.408.better': "You get tools suited to your project's Python libraries without naming those libraries in your request.",
+  'notes.409.better': 'You can read the full Catalog detail title in a small window, with Back still within reach.',
+  'notes.410.fixed': 'Your unsent text, attachments and previous conversation return when you reopen Faber after a forced close.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

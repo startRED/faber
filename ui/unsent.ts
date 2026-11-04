@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup } from 'solid-js';
 import { api } from './api.ts';
+import { flushStorage } from './shell.ts';
 
 /** The fields that hold something the person has typed or attached and not sent yet. */
 const dirty = new Set<object>();
@@ -86,6 +87,7 @@ export function keep(key: string, text: string): boolean {
   try {
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
+    flushStorage();
     memory.delete(key);
     written(key, true);
     return true;
@@ -235,7 +237,7 @@ export function keepAttachments(key: string, value: DraftAttachments, change: At
   let markerError = false;
   if (needed) {
     attachmentProtection(key, true);
-    try { localStorage.setItem(ATTACHED + key, change.forget ? 'forget' : removing ? 'remove' : '1'); }
+    try { localStorage.setItem(ATTACHED + key, change.forget ? 'forget' : removing ? 'remove' : '1'); flushStorage(); }
     catch { markerError = true; }
   }
   const textRemoved = change.forget ? keep(key, '') : true;
@@ -254,7 +256,7 @@ export function keepAttachments(key: string, value: DraftAttachments, change: At
       } else {
         if (hadAttachments) await attachmentTransaction((store) => store.delete(key), 'readwrite');
         if (!textRemoved) throw new Error('draft text could not be removed');
-        if (attachmentVersions.get(key) === version) localStorage.removeItem(ATTACHED + key);
+        if (attachmentVersions.get(key) === version) { localStorage.removeItem(ATTACHED + key); flushStorage(); }
       }
       if (attachmentVersions.get(key) === version) {
         attachmentProtection(key, false);

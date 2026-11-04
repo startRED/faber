@@ -360,6 +360,11 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         // WebKit reveals the newly focused heading in a later rendering step; reading starts once it has (on macOS
         // CI the reveal undid the scroll below on 2026-10-28, failing queues that never touched the catalog).
         await frames();
+        const heading = view.root.querySelector<HTMLElement>('.catalog-detail h1')!;
+        const headingBounds = heading.getBoundingClientRect();
+        const returnBounds = view.root.querySelector('.catalog-return')!.getBoundingClientRect();
+        equal(document.activeElement, heading);
+        ok(headingBounds.top >= returnBounds.bottom && headingBounds.bottom <= 480, 'the focused heading is visible below the sticky return control');
         const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
         surface.scrollTop = surface.scrollHeight;
         const afterSet = { at: performance.now() - passStarted, scrollTop: surface.scrollTop, active: describe(document.activeElement), connected: surface.isConnected };

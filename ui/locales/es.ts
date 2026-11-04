@@ -2577,6 +2577,8 @@ export const es: Messages = {
   'notes.406.fixed': 'Al editar o borrar preferencias o lecciones, retiras tu aprobación; recuperar el texto anterior requiere que vuelvas a aprobarlo.',
   'notes.407.fixed': 'Escribir a un ayudante justo después de que aparece ya no dice que terminó: tus palabras esperan y le llegan en cuanto empieza.',
   'notes.408.better': 'Recibes herramientas acordes con las bibliotecas Python de tu proyecto aunque no las nombres en tu pedido.',
+  'notes.409.better': 'Puedes leer el título completo de los detalles del Catálogo en una ventana pequeña y seguir teniendo Volver a mano.',
+  'notes.410.fixed': 'El texto sin enviar, los archivos adjuntos y la conversación anterior vuelven al abrir Faber después de un cierre forzado.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

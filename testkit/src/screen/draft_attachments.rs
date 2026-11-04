@@ -73,6 +73,11 @@ fn restored(page: &mut Page, pdf: bool) -> Result {
         "the draft text after the app restarted",
         &format!("document.querySelector('.composer textarea')?.value === {}", json!(WORDS)),
     )?;
+    same(
+        page.eval(&format!("localStorage.getItem({})", json!(format!("faber.unsent-attachments.{KEY}"))))?,
+        json!("1"),
+        "the restored marker discovers the committed attachment bytes",
+    )?;
     page.wait_count(&css(".composer .attach-row .thumb"), if pdf { 2 } else { 1 })?;
     same(page.eval("document.querySelector('.composer .attach-row img')?.alt")?, json!(IMAGE), "the recovered image's name")?;
     same(

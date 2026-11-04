@@ -2577,6 +2577,8 @@ export const de: Messages = {
   'notes.406.fixed': 'Bearbeitete oder gelöschte Vorlieben und Erkenntnisse verlieren deine Freigabe; auch ihr früherer Wortlaut braucht danach wieder deine Zustimmung.',
   'notes.407.fixed': 'Wer einem Helfer gleich nach seinem Erscheinen schreibt, bekommt nicht mehr gesagt, er sei fertig: Deine Worte warten und erreichen ihn, sobald er startet.',
   'notes.408.better': 'Du bekommst passende Werkzeuge für die Python-Bibliotheken deines Projekts, auch wenn du sie in deiner Anfrage nicht nennst.',
+  'notes.409.better': 'Auch im kleinen Fenster kannst du den vollständigen Titel der Katalogdetails lesen und Zurück weiterhin erreichen.',
+  'notes.410.fixed': 'Nach einem erzwungenen Schließen findest du beim Öffnen von Faber deinen ungesendeten Text, die Anhänge und das vorige Gespräch wieder.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

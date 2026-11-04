@@ -1,4 +1,5 @@
 import { AgentAskCard } from './Ask.tsx';
+import { flushStorage } from './shell.ts';
 import { ChatGroup } from './ChatGroup.tsx';
 import { batch, createComputed, createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
@@ -93,6 +94,7 @@ function recall<T>(key: string, fallback: T): T {
 function remember(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    if (key === 'faber.place') flushStorage();
   } catch {
     // per-viewer convenience only
   }
