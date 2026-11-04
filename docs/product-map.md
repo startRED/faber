@@ -267,6 +267,8 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 
 ## Other stored state
 
+Recovery after interruption or an update starts its continuation ahead of waiting messages without taking them out of the conversation: every admission snapshot keeps their ids, order and attachment references (`engine::install_gate::tests::t515a_update_admission_snapshots_keep_accepted_queue_and_attachments`, `t515a_interrupted_admission_snapshots_keep_accepted_queue_and_attachments`). Stop and busy admission still hold.
+
 Review rounds live on `Message.review`: scores, reviewers, findings and an optional stop reason, saved with the reply.
 
 Conversation saves from engine calls and the helper-activity timer collect small requests, serialize each requested conversation once at entry exit under the core lock, and publish after unlocking (R538).

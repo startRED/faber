@@ -68,12 +68,7 @@ impl Engine {
                     if times.len() >= closed::CONTINUES {
                         continue;
                     }
-                    let waiting = std::mem::take(&mut c.convs.get_mut(&id).unwrap().queued);
                     let sent = c.send_by_itself(&id, closed::CONTINUE.into(), Wake::of("wake.resumed")).is_ok();
-                    if let Some(conv) = c.convs.get_mut(&id) {
-                        let added = std::mem::replace(&mut conv.queued, waiting);
-                        conv.queued.extend(added);
-                    }
                     if sent {
                         c.closed_continues.entry(id.clone()).or_default().push(at);
                     }
