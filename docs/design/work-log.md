@@ -8,6 +8,8 @@ the plain thread line from the latest reply’s engine state; a personal Stop is
 everyday words without dropping a problem; technical words are allowed when asked for or used first by the person,
 and a useful file location is allowed when the person needs to find or open an artifact.
 
+- Technical details has one quiet disclosure, "What the agent was told about this project", only when a current native session received a start card. Opening the view requests the exact saved texts; the fold creates read-only, selectable `command-output` blocks only while open, separated from the metadata by spacing and the mono face, with UTF-8 bytes and the counts of rule lines, decisions and taste lines left out. Closing the view releases the response. Chat and conversations without a card have no row. Project files are never reread to reconstruct it; session changes cannot borrow an earlier session’s card. No process, timer, setting or new motion. The existing fold and local code scrolling work at 720 px and in every language (`tests/ui/start-card-details.check.ts`).
+
 - The steps' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
   whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
 

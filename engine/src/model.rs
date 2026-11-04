@@ -1812,8 +1812,38 @@ fn is_zero_usd(n: &f64) -> bool {
     *n == 0.0
 }
 
+/// The exact native-session input, read only when Technical details opens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartCard {
+    pub vendor: Vendor,
+    pub text: String,
+    pub bytes: usize,
+    pub omitted_rules: usize,
+    pub omitted_decisions: usize,
+    pub omitted_taste: usize,
+}
+
+impl StartCard {
+    pub fn sent(vendor: Vendor, text: &str) -> Self {
+        // Read only the formatter's complete counter lines, never approved prose or today's project files.
+        let count = |suffix: &str| {
+            text.lines().find_map(|line| line.strip_prefix("And ")?.strip_suffix(suffix)?.parse::<usize>().ok()).unwrap_or(0)
+        };
+        Self {
+            vendor,
+            text: text.to_owned(),
+            bytes: text.len(),
+            omitted_rules: count(" more rule lines; search them with memory_search."),
+            omitted_decisions: count(" older decisions; search them with memory_search."),
+            omitted_taste: count(" more taste lines; search them with memory_search."),
+        }
+    }
+}
+
 impl Conversation {
     pub fn for_screen(mut self) -> Self {
+        self.session_start_cards.clear();
         self.messages = self.messages.into_iter().map(Message::for_screen).collect();
         self.plan = self.shown_plan();
         self

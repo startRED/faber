@@ -1190,6 +1190,7 @@ export const api = {
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
     invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
+  startCards: (id: string) => invoke<StartCard[]>('start_cards', { id }),
 };
 
 /** The engine reports user-facing errors as translation keys; Tauri wraps them as plain strings. The look engine
@@ -1199,3 +1200,13 @@ export const failureOf = (err: unknown): Failure => {
   return { key: typeof err === 'string' ? err : err instanceof Error ? err.message : String(err) };
 };
 export const errorText = (err: unknown) => failureOf(err).key;
+
+/** Exact project input retained by the native session, fetched only by Technical details. */
+export interface StartCard {
+  vendor: Vendor;
+  text: string;
+  bytes: number;
+  omittedRules: number;
+  omittedDecisions: number;
+  omittedTaste: number;
+}

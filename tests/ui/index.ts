@@ -154,3 +154,4 @@ export async function runChecksOnBoot(): Promise<void> {
 }
 
 import './agent-ask.check.ts';
+import './start-card-details.check.ts';

@@ -2490,6 +2490,10 @@ export const en = {
   'error.session.agentOnly': "This command is only for an AI inside a Faber conversation. Use send instead.",
   'error.session.useSession': "An AI starts a conversation with start_conversation and writes to one with message_conversation, never with send.",
 
+  "details.startCard": "What the agent was told about this project",
+  "details.startCardSize": "{n} bytes",
+  "details.startCardOmitted": "Left out: rule lines ({rules}), decisions ({decisions}), taste lines ({taste}).",
+  "details.startCardError": "Could not read the project context. Close Technical details and open it again to retry.",
 } as const;
 
 export type Key = keyof typeof en;

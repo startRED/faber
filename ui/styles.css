@@ -1956,3 +1956,7 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   .q-opt.on .q-mark { border-color: Highlight; color: Highlight; }
   .ask .btn:disabled { border-color: GrayText; }
 }
+
+.start-card > summary { padding-inline: 0; outline-offset: -2px; }
+.start-card-body { display: grid; gap: 8px; padding: 8px 0; }
+.start-card-body pre { font-family: var(--font-mono); }

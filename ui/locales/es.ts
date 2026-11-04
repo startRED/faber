@@ -2610,4 +2610,8 @@ export const es: Messages = {
   'error.session.agentOnly': "Este comando es solo para una IA dentro de una conversación de Faber. Para escribir, usa send.",
   'error.session.useSession': "Una IA empieza una conversación con start_conversation y escribe en otra con message_conversation, nunca con send.",
 
+  "details.startCard": "Lo que recibió el agente sobre este proyecto",
+  "details.startCardSize": "{n} bytes",
+  "details.startCardOmitted": "Sin incluir: líneas de reglas ({rules}), decisiones ({decisions}) y preferencias ({taste}).",
+  "details.startCardError": "No se pudo leer el contexto del proyecto. Cierra los detalles técnicos y vuelve a abrirlos para reintentar.",
 };

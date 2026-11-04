@@ -1072,6 +1072,17 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|core| core.opened(id))
     }
+    /// Exact saved input only; native ids keep a replacement session from inheriting another card.
+    pub fn start_cards(&self, id: &str) -> Vec<crate::model::StartCard> {
+        self.with(|core| {
+            let Some(c) = core.load(id).filter(|c| c.area == Area::Project) else { return Vec::new() };
+            c.session_start_cards
+                .iter()
+                .filter(|(vendor, (native, _))| c.sessions.get(*vendor) == Some(native) || c.tentative.get(*vendor) == Some(native))
+                .map(|(vendor, (_, text))| crate::model::StartCard::sent(*vendor, text))
+                .collect()
+        })
+    }
     /// The catalog tools the conversation's agent has now, each with its job group (why it was picked): the kit saved for the
     /// session of the AI at work, else of the newest reply's AI. Read on request from what is in memory; nothing is prepared.
     pub fn tools_in_use(&self, id: &str) -> Vec<(String, String)> {

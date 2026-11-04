@@ -2610,4 +2610,8 @@ export const de: Messages = {
   'error.session.agentOnly': "Dieser Befehl ist nur für eine KI in einem Faber-Gespräch. Nutze stattdessen send.",
   'error.session.useSession': "Eine KI startet ein Gespräch mit start_conversation und schreibt an eines mit message_conversation, nie mit send.",
 
+  "details.startCard": "Was der Agent über dieses Projekt erfahren hat",
+  "details.startCardSize": "{n} Bytes",
+  "details.startCardOmitted": "Nicht enthalten: Regelzeilen ({rules}), Entscheidungen ({decisions}), Vorlieben ({taste}).",
+  "details.startCardError": "Der Projektkontext konnte nicht gelesen werden. Schließen Sie die technischen Details und öffnen Sie sie erneut.",
 };

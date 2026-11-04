@@ -1058,6 +1058,10 @@ table! {
     Window Screen fn test_site_refuse_once(h) -> () {
         Err(NO_WINDOW.into())
     }
+    /// Exact start cards for this project's current native sessions; never rebuilt from files.
+    Read Screen fn start_cards(h, id: String) -> Vec<faber_engine::model::StartCard> {
+        Ok(h.engine.start_cards(&id))
+    }
 }
 
 #[cfg(test)]

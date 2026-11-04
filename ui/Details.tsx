@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show, type ComponentProps } from 'solid-js';
+import { createMemo, createResource, createSignal, For, Show, type ComponentProps } from 'solid-js';
 import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
 import { StateGlyph, stateKind } from './icons/kinds.tsx';
@@ -10,6 +10,7 @@ import { agentState, type AgentState } from './worklog.ts';
 import { showAgent } from './AgentChat.tsx';
 import { backgroundCalls, backgroundOf, createBackgroundCache, followedIn, indexed, referenceLines, prune, workStatus, type BackgroundWork, type ToolIndex } from './background.ts';
 import { LiveText } from './Background.tsx';
+import { vendorName } from './models.ts';
 
 // Faber's own checks of a reply that changed files (R146): one quiet line while they run and once they ended, the failed
 // checks' first failures behind a disclosure. Checks that still fail after Faber's fixes wait for the person, in amber.
@@ -155,6 +156,28 @@ function BackgroundList(props: { rows: BackgroundWork[]; conversationId: string;
   }}</For></ul>;
 }
 
+function StartCards(props: { id: string }) {
+  const [open, setOpen] = createSignal(false);
+  const [failed, setFailed] = createSignal(false);
+  const [cards] = createResource(async () => {
+    try { return await api.startCards(props.id); }
+    catch { setFailed(true); return []; }
+  });
+  return <Show when={cards()?.length || failed()}><section class="det-g">
+    <Show when={!failed()} fallback={<p class="side-meta" role="status">{t('details.startCardError')}</p>}>
+      <details class="disclosure start-card" data-testid="start-card" onToggle={(e) => setOpen(e.currentTarget.open)}>
+        <summary>{t('details.startCard')}</summary>
+        <Show when={open()}><For each={cards()}>{(card) => <div class="start-card-body">
+          <Show when={cards()!.length > 1}><p class="det-state">{vendorName(card.vendor)}</p></Show>
+          <p class="side-meta">{t('details.startCardSize', { n: card.bytes })}</p>
+          <p class="side-meta">{t('details.startCardOmitted', { rules: card.omittedRules, decisions: card.omittedDecisions, taste: card.omittedTaste })}</p>
+          <pre class="command-output">{card.text}</pre>
+        </div>}</For></Show>
+      </details>
+    </Show>
+  </section></Show>;
+}
+
 /** A view of facts in the existing column, mounted only while open. Task 019 extends the live running list here. */
 export function DetailsPane(props: {
   conversationId: string; messages: Message[]; background: BackgroundCommand[]; copy?: WorkCopy;
@@ -180,6 +203,7 @@ export function DetailsPane(props: {
     <div class="rc-body side-body details-view">
       {/* The copy's branch and folder stay here, for people who look, instead of in the topbar. */}
       <Show when={props.copy}>{(copy) => <p class="det-copy" data-testid="details-copy">{t('details.copy', { branch: copy().branch })}<span>{copy().path}</span></p>}</Show>
+      <Show when={props.conversationId} keyed>{(id) => <StartCards id={id} />}</Show>
       <Show when={work().length}><section class="det-g"><h3>{t('background.title')}</h3>
         <BackgroundList rows={work()} conversationId={props.conversationId} follows={follows()} />
       </section></Show>

@@ -445,6 +445,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_start_card_details_are_bound_to_current_project_sessions() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        assert!(engine.start_cards("missing").is_empty());
+        engine.with(|core| {
+            conversation(core, Area::Project, None, &folder, "Explain this project");
+        });
+        assert!(engine.start_cards("kit").is_empty());
+        let text = "```faber-start-card\n- Keep ação.\n- And 99 older decisions; search them with memory_search.\nAnd 2 more rule lines; search them with memory_search.\nAnd 3 older decisions; search them with memory_search.\nAnd 4 more taste lines; search them with memory_search.\n```";
+        engine.with(|core| {
+            let c = core.convs.get_mut("kit").unwrap();
+            c.sessions.insert(Vendor::Claude, "previous".into());
+            c.tentative.insert(Vendor::Claude, "accepted".into());
+            c.session_start_cards.insert(Vendor::Claude, ("accepted".into(), text.into()));
+            c.session_start_cards.insert(Vendor::Codex, ("old".into(), "STALE".into()));
+            c.sessions.insert(Vendor::Codex, "replacement".into());
+        });
+        let cards = engine.start_cards("kit");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].text, text);
+        assert_eq!(cards[0].bytes, text.len());
+        assert_eq!((cards[0].omitted_rules, cards[0].omitted_decisions, cards[0].omitted_taste), (2, 3, 4));
+        assert!(engine.open_for_screen("kit").unwrap().session_start_cards.is_empty());
+        assert_eq!(engine.start_cards("kit"), cards, "screen snapshots cannot discard the engine's record");
+        let saved = serde_json::to_value(engine.open("kit").unwrap()).unwrap();
+        let restored: Conversation = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.session_start_cards[&Vendor::Claude].1, text, "the running record survives a reload");
+        engine.with(|core| core.convs.get_mut("kit").unwrap().area = Area::Chat);
+        assert!(engine.start_cards("kit").is_empty(), "Chat never exposes a project card");
+        let empty = crate::model::StartCard::sent(Vendor::Claude, "```faber-start-card\nNothing omitted.\n```");
+        assert_eq!((empty.omitted_rules, empty.omitted_decisions, empty.omitted_taste), (0, 0, 0));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn tools_in_use_are_the_saved_kit_of_the_ai_at_work_with_each_job_group() {
         let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
@@ -1111,6 +1148,8 @@ mod tests {
                 core.handle("kit", sid, EngineEvent::TurnStarted);
                 assert_eq!(core.convs["kit"].session_start_cards.get(&vendor), Some(&("native-history".into(), sent.clone())));
             });
+            assert_eq!(engine.start_cards("kit")[0].text, sent, "Technical details returns exactly what the fake CLI received");
+            assert!(engine.open_for_screen("kit").unwrap().session_start_cards.is_empty(), "ordinary snapshots carry no card text");
             engine.shutdown();
             if state == "fresh" {
                 previous_card = Some(sent);
