@@ -101,9 +101,16 @@ pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     json!({ "default_permissions": id, format!("permissions.{id}"): profile }).as_object().unwrap().clone()
 }
 
-/// File reads remain available. Command text is best effort: hidden paths need the native sandbox too.
+/// File reads remain available; requests naming approval records or engine-owned notes are refused in every mode.
+/// Command text is best effort; Full access can bypass the refusal and change the records.
 pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Value, cwd: Option<&str>) -> bool {
-    if mode == crate::model::Permissions::FullAccess || ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+    if ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+        return false;
+    }
+    if names_record(input) {
+        return true;
+    }
+    if mode == crate::model::Permissions::FullAccess {
         return false;
     }
     let roots: Vec<String> = crate::store::Store::data_roots().iter().map(|p| normal(&p.to_string_lossy())).collect();
@@ -409,6 +416,7 @@ const CREDENTIAL_FILES: [&str; 5] = [".claude.json", ".credentials.json", ".git-
 /// folder of the work method. An agent that wrote one could forge the person's approval, so no agent may change them in any
 /// mode, and a command that names one is refused like a sign-in. Their names are distinct enough to match anywhere.
 pub const FABER_RECORDS: [&str; 2] = ["decisions-kept.json", "faber-trust"];
+pub const ENGINE_NOTES: [&str; 2] = ["taste.md", "lessons.md"];
 
 /// A variable the CLIs document for moving their sign-in somewhere else: the variable, whether it names a file, and the
 /// folder inside its value that holds the sign-in.
@@ -548,15 +556,16 @@ pub(crate) fn credential_piece(piece: &str) -> bool {
 }
 
 fn record_piece(piece: &str) -> bool {
-    FABER_RECORDS.contains(&piece.trim_end_matches(['.', ' ']))
+    let piece = piece.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']);
+    FABER_RECORDS.contains(&piece) || ENGINE_NOTES.contains(&piece)
 }
 
-/// Does a path or a command of a tool's input name one of `FABER_RECORDS`? What is written (a file's text, an edit's old
+/// Does a path or command name one of `FABER_RECORDS` or `ENGINE_NOTES`? What is written (a file's text, an edit's old
 /// and new strings, a patch) is skipped: a source file or a note that mentions a record's name is ordinary work.
 fn names_record(input: &Value) -> bool {
     const CONTENTS: [&str; 5] = ["content", "old_string", "new_string", "diff", "new_source"];
     match input {
-        Value::String(s) => normal(s).split(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).any(record_piece),
+        Value::String(s) => normal(s).split(|c: char| c == '/' || c.is_whitespace() || ":\"'`;|&<>()=,".contains(c)).any(record_piece),
         Value::Array(items) => items.iter().any(names_record),
         Value::Object(map) => map.iter().any(|(key, value)| !CONTENTS.contains(&key.as_str()) && names_record(value)),
         _ => false,

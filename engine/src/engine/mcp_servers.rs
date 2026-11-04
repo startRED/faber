@@ -282,7 +282,7 @@ impl Core {
         let kept = (area == Area::Project && name == owner)
             .then(|| self.convs.get(owner).and_then(|c| c.project_id.as_deref()))
             .flatten()
-            .map(|project| self.store.kept_decisions_reader(project));
+            .map(|project| (self.store.kept_decisions_reader(project), self.store.approved_learning_reader(project)));
         #[cfg(test)]
         let hook = self.kit_check_hook.take();
         self.opts.runtime.spawn(async move {
@@ -311,11 +311,16 @@ impl Core {
                 } else {
                     raw
                 };
-                if let Some(read_kept) = kept {
+                if let Some((read_kept, read_learning)) = kept {
                     use crate::project::{memory, rules};
                     let facts = rules::facts(&key.cwd).unwrap_or_default();
                     let decisions = memory::kept_for_card(&key.cwd, &read_kept()).unwrap_or_default();
-                    raw.0.start_card = Some(rules::card(&facts, &decisions.iter().map(String::as_str).collect::<Vec<_>>(), &[]));
+                    let taste = memory::taste_for_card(&key.cwd, &read_learning()).unwrap_or_default();
+                    raw.0.start_card = Some(rules::card(
+                        &facts,
+                        &decisions.iter().map(String::as_str).collect::<Vec<_>>(),
+                        &taste.iter().map(String::as_str).collect::<Vec<_>>(),
+                    ));
                 }
                 let checked = verify_kit(store, key, raw);
                 #[cfg(test)]

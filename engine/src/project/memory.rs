@@ -24,6 +24,40 @@ pub enum AdoptedKind {
     Tasks,
 }
 
+/// Only these two engine-owned notes accept an approved line, never an arbitrary path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LearningKind {
+    Taste,
+    Lessons,
+}
+
+pub type LearningRecords = std::collections::BTreeMap<LearningKind, Vec<String>>;
+
+impl LearningKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Taste => "taste.md",
+            Self::Lessons => "lessons.md",
+        }
+    }
+
+    fn target(self) -> usize {
+        match self {
+            Self::Taste => 1024,
+            Self::Lessons => 2048,
+        }
+    }
+
+    pub fn for_path(path: &str) -> Option<Self> {
+        match path {
+            ".faber/taste.md" => Some(Self::Taste),
+            ".faber/lessons.md" => Some(Self::Lessons),
+            _ => None,
+        }
+    }
+}
+
 /// Authority lives outside the repository; body-only records from older versions remain readable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
@@ -79,7 +113,7 @@ pub struct Entry {
     pub text: String,
     /// Decision lists only (R16), from the trailing mark of `mark`: the text without it and its author ("ai" or "person").
     /// An entry with no mark has neither: its author is unknown, never the AI's. `reviewed` is never read from the file
-    /// (an agent could write it): `mark_kept` sets it from what the person kept, which Faber stores outside the project.
+    /// (an agent could write it): `mark_kept` and `mark_learning` use Faber's records outside the project.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +133,9 @@ pub struct Edit {
     /// Keeps an AI decision: nothing is written to the project, `apply` returns its identity and content hash to store.
     #[serde(default)]
     pub keep: bool,
+    /// Separate person consent to exceed a taste or lesson file's target, as for appending.
+    #[serde(default, rename = "overTarget")]
+    pub over_target: bool,
 }
 
 fn source(path: &str) -> Option<&'static str> {
@@ -679,6 +716,14 @@ pub(super) fn faber_file_hash(project: &Path, name: &str) -> Result<String, &'st
 /// same no-follow handles and atomic replacement as an edit: a link planted in place of either is refused, never followed.
 /// Returns whether it wrote.
 pub(super) fn write_faber_file(project: &Path, name: &str, bytes: &[u8]) -> Result<bool, &'static str> {
+    update_faber_file(project, name, |_| Ok(bytes.to_vec()))
+}
+
+fn update_faber_file(
+    project: &Path,
+    name: &str,
+    update: impl FnOnce(&[u8]) -> Result<Vec<u8>, &'static str>,
+) -> Result<bool, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let protected = resolved_private(&private_roots());
     let (_, project_dir) = project_directory(project, &protected)?;
@@ -693,13 +738,83 @@ pub(super) fn write_faber_file(project: &Path, name: &str, bytes: &[u8]) -> Resu
         Err(_) => return Err(REFUSED),
     };
     let permissions = file.metadata().map_err(|_| READ)?.permissions();
+    if permissions.readonly() {
+        return Err("error.memory.readOnly");
+    }
     let mut current = Vec::new();
     file.take(MAX_BYTES as u64 + 1).read_to_end(&mut current).map_err(|_| READ)?;
+    if current.len() > MAX_BYTES {
+        return Err(REFUSED);
+    }
+    let bytes = update(&current)?;
+    if bytes.len() > MAX_BYTES {
+        return Err(REFUSED);
+    }
     if current == bytes {
         return Ok(false);
     }
-    dir.replace(name, bytes, permissions, &revision(&current)).map_err(|_| "error.memory.write")?;
+    dir.replace(name, &bytes, permissions, &revision(&current)).map_err(|_| "error.memory.write")?;
     Ok(true)
+}
+
+/// Called only after the person's approval. A failed record save leaves a proposal, never an approval.
+pub(crate) fn append_approved(project: &Path, kind: LearningKind, line: &str, over_target: bool) -> Result<String, &'static str> {
+    let line = line.trim();
+    if line.is_empty() || line.contains(['\r', '\n', '\0']) || line.len() > MAX_BYTES - 3 {
+        return Err(REFUSED);
+    }
+    let item = format!("- {line}\n");
+    let parsed = entries(&item, 1);
+    if parsed.len() != 1 || parsed[0].text != item.trim_end() {
+        return Err(REFUSED);
+    }
+    if !over_target && item.len() > kind.target() {
+        return Err(REFUSED);
+    }
+    update_faber_file(project, kind.name(), |bytes| {
+        let text = std::str::from_utf8(bytes).map_err(|_| READ)?;
+        let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        let mut next = text.to_string();
+        // A blank separator keeps a trailing paragraph or fenced block from absorbing the approved item.
+        if !next.is_empty() {
+            if !next.ends_with('\n') {
+                next.push_str(newline);
+            }
+            next.push_str(newline);
+        }
+        let start = next.len();
+        next.push_str(item.trim_end());
+        next.push_str(newline);
+        if !over_target && next.len() > kind.target() {
+            return Err(REFUSED);
+        }
+        let parsed = entries(&next, MAX_ENTRIES);
+        if !parsed.iter().any(|entry| entry.start == start && entry.text == item.trim_end()) {
+            return Err(REFUSED);
+        }
+        Ok(next.into_bytes())
+    })?;
+    Ok(revision(item.trim_end().as_bytes()))
+}
+
+/// Repository marks never confer approval on taste or lessons.
+pub fn mark_learning(list: &mut MemoryList, records: &LearningRecords) {
+    for file in &mut list.files {
+        let Some(kind) = LearningKind::for_path(&file.path) else { continue };
+        for entry in &mut file.entries {
+            entry.reviewed = records.get(&kind).is_some_and(|hashes| hashes.contains(&revision(entry.text.trim().as_bytes())));
+        }
+    }
+}
+
+/// Fresh bounded reads for the card, independent of Memory's discovery window. Lessons have no card share.
+pub(crate) fn taste_for_card(project: &Path, records: &LearningRecords) -> Result<Vec<String>, &'static str> {
+    let Some(hashes) = records.get(&LearningKind::Taste).filter(|hashes| !hashes.is_empty()) else { return Ok(vec![]) };
+    let protected = resolved_private(&private_roots());
+    let (_, root) = project_directory(project, &protected)?;
+    let dir = root.under(Path::new(".faber")).map_err(|_| REFUSED)?;
+    let file = read_file(&dir, "taste.md", ".faber/taste.md".into(), "faber", MAX_ENTRIES)?;
+    Ok(file.entries.into_iter().filter(|entry| hashes.contains(&revision(entry.text.trim().as_bytes()))).map(|entry| entry.text).collect())
 }
 
 fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Option<&'static str>, &'static str> {
@@ -1127,7 +1242,8 @@ fn descend(path: &str) -> bool {
         return i + 1 == parts.len();
     }
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
-        return i + 1 == parts.len() || ["decisions", "taste", "plans", "recipes", "learning", "memory", "tasks"].contains(&parts[i + 1]);
+        return i + 1 == parts.len()
+            || ["decisions", "taste", "lessons", "plans", "recipes", "learning", "memory", "tasks"].contains(&parts[i + 1]);
     }
     let name = parts.last().copied().unwrap_or_default();
     !matches!(name, ".git" | ".codex" | "node_modules" | "target" | "dist" | "vendor")
@@ -1145,12 +1261,18 @@ pub fn apply(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'stat
 /// One writer at a time for the notes and `rules.md`.
 static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// The review a Memory edit takes away, read before it writes: a decision deleted, or rewritten into other words, loses
+pub enum RemovedReview {
+    Decision(KeptDecision),
+    Learning { kind: LearningKind, hash: String },
+}
+
+/// The review a Memory edit takes away, read before it writes: an entry deleted, or rewritten into other words, loses
 /// the review of its words, so the same words written again later are not reviewed by themselves. Every copy of them
 /// loses it, since no listing can vouch that another copy is still there (an agent writes the project meanwhile); the
 /// person keeps them again. The file is read as `apply` reads it, so a changed file is refused here as there.
-pub fn removes(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'static str> {
-    if edit.keep || !decisions(&edit.path) {
+pub fn removes(project: &Path, edit: &Edit) -> Result<Option<RemovedReview>, &'static str> {
+    let learning = LearningKind::for_path(&edit.path);
+    if edit.keep || (!decisions(&edit.path) && learning.is_none()) {
         return Ok(None);
     }
     // What `apply` would refuse takes nothing back.
@@ -1166,19 +1288,44 @@ pub fn removes(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'st
     let path = Path::new(&edit.path);
     let dir = project_dir.under(path.parent().ok_or(REFUSED)?).map_err(|_| REFUSED)?;
     let name = path.file_name().and_then(|s| s.to_str()).ok_or(REFUSED)?;
-    if dir.file(name).map_err(|_| REFUSED)?.metadata().map_err(|_| READ)?.permissions().readonly() {
+    let mut file = dir.file(name).map_err(|_| REFUSED)?;
+    if file.metadata().map_err(|_| READ)?.permissions().readonly() {
         return Err("error.memory.readOnly");
     }
-    let file = read_file(&dir, name, edit.path.clone(), "faber", MAX_ENTRIES)?;
-    if format!("{}:{}", project_dir.identity().map_err(|_| READ)?, file.revision) != edit.revision {
+    let mut bytes = Vec::new();
+    (&mut file).take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
+    if bytes.len() > MAX_BYTES || format!("{}:{}", project_dir.identity().map_err(|_| READ)?, revision(&bytes)) != edit.revision {
         return Err(CHANGED);
     }
-    let entry = file.entries.iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
-    let old = entry.body.as_deref().unwrap_or(&entry.text);
+    let original = std::str::from_utf8(&bytes).map_err(|_| READ)?;
+    let entry = entries(original, MAX_ENTRIES).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
+    if let Some(kind) = learning {
+        if let Some(text) = &edit.text {
+            let size = bytes.len() - (entry.end - entry.start) + replacement(original, &entry, text).len();
+            if size > MAX_BYTES || (!edit.over_target && size > kind.target()) {
+                return Err(REFUSED);
+            }
+        }
+        let same = edit.text.as_deref().is_some_and(|text| text.trim().replace("\r\n", "\n") == entry.text.trim().replace("\r\n", "\n"));
+        return Ok((!same).then(|| RemovedReview::Learning { kind, hash: revision(entry.text.trim().as_bytes()) }));
+    }
+    let old = mark(&entry.text).map_or(entry.text.as_str(), |m| entry.text[..m.open].trim_end());
     // Compared with the line ends `apply` writes, so saving the same words with other line ends takes nothing back.
     let lf = |text: &str| KeptDecision::of(&text.replace("\r\n", "\n"));
     let same = edit.text.as_deref().is_some_and(|text| lf(mark(text).map_or(text, |m| &text[..m.open])) == lf(old));
-    Ok((!same).then(|| KeptDecision::of(old)))
+    Ok((!same).then(|| RemovedReview::Decision(KeptDecision::of(old))))
+}
+
+fn replacement(original: &str, entry: &Entry, text: &str) -> String {
+    let old = &original[entry.start..entry.end];
+    let first = old.find('\n').map(|i| &old[..=i]).or_else(|| original.find('\n').map(|i| &original[..=i]));
+    let newline = if first.is_some_and(|line| line.ends_with("\r\n")) { "\r\n" } else { "\n" };
+    let text = text.replace("\r\n", "\n").replace('\n', newline);
+    let mut replacement = text.trim_end_matches(['\r', '\n']).to_string();
+    if old.ends_with('\n') {
+        replacement.push_str(if old.ends_with("\r\n") { "\r\n" } else { "\n" });
+    }
+    replacement
 }
 
 fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<KeptDecision>, &'static str> {
@@ -1213,29 +1360,26 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
     }
     let original = std::str::from_utf8(&bytes).map_err(|_| READ)?;
     let entry = entries(original, MAX_ENTRIES).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
-    let mut replacement = String::new();
     if edit.keep {
         let text = &original[entry.start..entry.end];
         let kept = decisions(&edit.path).then(|| mark(text)).flatten().ok_or(REFUSED)?;
         return Ok(Some(kept_item(&text[..kept.open], &project_dir, &root, &protected)));
     }
-    if let Some(text) = &edit.text {
+    let replacement = if let Some(text) = &edit.text {
         if text.trim().is_empty() || text.contains('\0') || text.len() > MAX_BYTES {
             return Err(REFUSED);
         }
-        let old = &original[entry.start..entry.end];
-        let first = old.find('\n').map(|i| &old[..=i]).or_else(|| original.find('\n').map(|i| &original[..=i]));
-        let newline = if first.is_some_and(|line| line.ends_with("\r\n")) { "\r\n" } else { "\n" };
-        replacement = text.replace("\r\n", "\n").replace('\n', newline);
-        replacement = replacement.trim_end_matches(['\r', '\n']).into();
-        if old.ends_with('\n') {
-            replacement.push_str(if old.ends_with("\r\n") { "\r\n" } else { "\n" });
-        }
-    }
+        replacement(original, &entry, text)
+    } else {
+        String::new()
+    };
     let mut next = bytes[..entry.start].to_vec();
     next.extend_from_slice(replacement.as_bytes());
     next.extend_from_slice(&bytes[entry.end..]);
     if next.len() > MAX_BYTES {
+        return Err(REFUSED);
+    }
+    if edit.text.is_some() && !edit.over_target && LearningKind::for_path(&edit.path).is_some_and(|kind| next.len() > kind.target()) {
         return Err(REFUSED);
     }
     drop(file);
@@ -1302,6 +1446,107 @@ mod tests {
 
     fn folder() -> tempfile::TempDir {
         tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn taste_lesson_memory_edits_require_separate_over_target_consent() {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        for kind in [LearningKind::Taste, LearningKind::Lessons] {
+            let path = format!(".faber/{}", kind.name());
+            let target = project.path().join(&path);
+            let rest = "- Other.\n";
+            std::fs::write(&target, format!("- Small.\n{rest}")).unwrap();
+            let request = |text: Option<String>| -> Edit {
+                let file = list(project.path()).unwrap().files.into_iter().find(|file| file.path == path).unwrap();
+                serde_json::from_value(serde_json::json!({
+                    "path": path, "revision": file.revision, "start": file.entries[0].start, "end": file.entries[0].end, "text": text
+                }))
+                .unwrap()
+            };
+            let at_target = format!("- {}", "x".repeat(kind.target() - rest.len() - 3));
+            edit(project.path(), &request(Some(at_target.clone()))).unwrap();
+            assert_eq!(std::fs::metadata(&target).unwrap().len(), kind.target() as u64);
+            let before = std::fs::read(&target).unwrap();
+            let mut over = request(Some(format!("{at_target}x")));
+            assert!(!over.over_target, "old callers do not consent by omission");
+            assert_eq!(edit(project.path(), &over), Err(REFUSED));
+            assert_eq!(std::fs::read(&target).unwrap(), before);
+            over.over_target = true;
+            edit(project.path(), &over).unwrap();
+            assert_eq!(std::fs::metadata(&target).unwrap().len(), kind.target() as u64 + 1);
+            let before = std::fs::read(&target).unwrap();
+            let mut huge = request(Some(format!("- {}", "x".repeat(MAX_BYTES - 3))));
+            huge.over_target = true;
+            assert_eq!(edit(project.path(), &huge), Err(REFUSED));
+            assert_eq!(std::fs::read(&target).unwrap(), before);
+            edit(project.path(), &request(None)).unwrap();
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), rest);
+        }
+    }
+
+    #[test]
+    fn taste_lesson_project_records_never_approve_hand_written_card_text() {
+        let project = folder();
+        let data = folder();
+        let store = crate::store::Store::new(data.path());
+        let id = "project";
+        let kept = "- Approved taste.";
+        let hand_written = "- Hand-written taste. [by person]";
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        std::fs::write(project.path().join(".faber/taste.md"), format!("{kept}\n{hand_written}\n")).unwrap();
+        let forged = serde_json::json!({(id): {"taste": [revision(hand_written.as_bytes())]}});
+        for parent in [project.path().to_path_buf(), project.path().join(".faber")] {
+            let trust = parent.join("faber-trust");
+            std::fs::create_dir(&trust).unwrap();
+            std::fs::write(trust.join("learning-kept.json"), serde_json::to_vec(&forged).unwrap()).unwrap();
+        }
+        assert!(store.approved_learning_reader(id)().is_empty());
+        assert!(taste_for_card(project.path(), &store.approved_learning_reader(id)()).unwrap().is_empty());
+        store.keep_learning(id, LearningKind::Taste, revision(kept.as_bytes())).unwrap();
+        assert!(data.path().join("faber-trust/learning-kept.json").is_file());
+        let records = store.approved_learning_reader(id)();
+        assert_eq!(records[&LearningKind::Taste], [revision(kept.as_bytes())]);
+        assert_eq!(taste_for_card(project.path(), &records).unwrap(), [kept]);
+        std::fs::write(project.path().join(".faber/taste.md"), format!("{kept}\n  Changed continuation.\n{hand_written}\n")).unwrap();
+        assert!(taste_for_card(project.path(), &records).unwrap().is_empty(), "the complete entry must still match its recorded hash");
+        let mut displayed = list(project.path()).unwrap();
+        mark_learning(&mut displayed, &records);
+        assert!(displayed.files.iter().flat_map(|file| &file.entries).all(|entry| !entry.reviewed));
+    }
+
+    #[test]
+    fn taste_lesson_append_refuses_links_and_unclosed_blocks_and_keeps_the_target_soft() {
+        let project = folder();
+        let outside = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let target = project.path().join(".faber/taste.md");
+        let other = outside.path().join("note.md");
+        std::fs::write(&other, "Outside.").unwrap();
+        std::fs::hard_link(&other, &target).unwrap();
+        assert!(append_approved(project.path(), LearningKind::Taste, "New.", false).is_err());
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "Outside.");
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, "```\nunclosed\n").unwrap();
+        assert_eq!(append_approved(project.path(), LearningKind::Taste, "New.", false), Err(REFUSED));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "```\nunclosed\n");
+        std::fs::remove_file(&target).unwrap();
+        append_approved(project.path(), LearningKind::Taste, &"é".repeat(510), false).unwrap();
+        assert_eq!(std::fs::metadata(&target).unwrap().len(), 1023);
+        assert_eq!(append_approved(project.path(), LearningKind::Taste, "New.", false), Err(REFUSED));
+        append_approved(project.path(), LearningKind::Taste, "New.", true).unwrap();
+        let records = LearningRecords::from([(LearningKind::Taste, vec![revision("- New.".as_bytes())])]);
+        assert_eq!(taste_for_card(project.path(), &records).unwrap(), ["- New."]);
+        std::fs::remove_file(&target).unwrap();
+        std::fs::remove_dir(project.path().join(".faber")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join(".faber")).unwrap();
+        assert!(append_approved(project.path(), LearningKind::Lessons, "New.", false).is_err());
+        assert!(!outside.path().join("lessons.md").exists());
+        #[cfg(windows)]
+        junction::delete(project.path().join(".faber")).unwrap();
     }
 
     #[test]
@@ -1568,6 +1813,7 @@ mod tests {
                     end: file.entries[0].end,
                     text: Some("Changed global instructions.".into()),
                     keep: false,
+                    over_target: false,
                 },
                 &protected,
             );
@@ -1602,6 +1848,7 @@ mod tests {
                 end: file.entries[0].end,
                 text: None,
                 keep: false,
+                over_target: false,
             },
             &protected,
         );
@@ -1670,6 +1917,7 @@ mod tests {
                     end: entry.end,
                     text: None,
                     keep: false,
+                    over_target: false,
                 };
                 assert!(apply(project.path(), &edit).is_err());
             }
@@ -1849,6 +2097,7 @@ mod tests {
                 end: file.entries[i].end,
                 text: None,
                 keep: true,
+                over_target: false,
             },
         )
     }
@@ -1917,6 +2166,7 @@ mod tests {
                 end: entry.end,
                 text: Some("- Preserve `src/lib.rs`\n  and the public API. [by person]".into()),
                 keep: false,
+                over_target: false,
             },
         )
         .unwrap()
@@ -1996,8 +2246,15 @@ mod tests {
         let after = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&hash));
         assert_eq!((after.entries[0].author, after.entries[0].reviewed), (Some("ai"), false));
         let note = listed(project.path(), "CLAUDE.md", &[]);
-        let attempt =
-            Edit { path: note.path.clone(), revision: note.revision.clone(), start: 0, end: note.entries[0].end, text: None, keep: true };
+        let attempt = Edit {
+            path: note.path.clone(),
+            revision: note.revision.clone(),
+            start: 0,
+            end: note.entries[0].end,
+            text: None,
+            keep: true,
+            over_target: false,
+        };
         assert_eq!(apply(project.path(), &attempt), Err(REFUSED), "keeping is for the decision list only");
     }
 
@@ -2013,6 +2270,7 @@ mod tests {
                 end: entry.end,
                 text: Some(text.into()),
                 keep: false,
+                over_target: false,
             };
             apply(project.path(), &edit).unwrap()
         };

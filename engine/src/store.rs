@@ -7,7 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
-use crate::project::memory::{AdoptedKind, KeptDecision};
+use crate::project::memory::{AdoptedKind, KeptDecision, LearningKind, LearningRecords};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -150,6 +150,7 @@ pub struct Store {
     settings: PathBuf,
     recents: PathBuf,
     decisions_kept: PathBuf,
+    learning_kept: PathBuf,
     rules_sources: PathBuf,
     adoptions: PathBuf,
     budget: PathBuf,
@@ -280,6 +281,7 @@ impl Store {
             settings: data_dir.join("settings.json"),
             recents: data_dir.join("recents.json"),
             decisions_kept: data_dir.join("decisions-kept.json"),
+            learning_kept: data_dir.join("faber-trust/learning-kept.json"),
             rules_sources: data_dir.join("rules-sources.json"),
             adoptions: data_dir.join("faber-trust/adoptions.json"),
             budget: data_dir.join("budget.json"),
@@ -1063,6 +1065,35 @@ impl Store {
     /// reviewed" again.
     pub fn kept_decisions(&self, project: &str) -> Vec<KeptDecision> {
         self.kept_decisions_reader(project)()
+    }
+
+    /// Damaged provenance approves nothing. Read on the worker, with no retained cache or watcher.
+    pub fn approved_learning_reader(&self, project: &str) -> impl FnOnce() -> LearningRecords + Send + 'static + use<> {
+        let (path, project) = (self.learning_kept.clone(), project.to_string());
+        move || read::<BTreeMap<String, LearningRecords>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// Called under the engine lock; a failed write never reports an approval as saved.
+    pub(crate) fn keep_learning(&self, project: &str, kind: LearningKind, hash: String) -> Result<(), Fault> {
+        let mut all: BTreeMap<String, LearningRecords> = read_checked(&self.learning_kept)?.unwrap_or_default();
+        let hashes = all.entry(project.into()).or_default().entry(kind).or_default();
+        if !hashes.contains(&hash) {
+            hashes.push(hash);
+        }
+        fs::create_dir_all(self.learning_kept.parent().expect("record has a parent")).map_err(|e| Fault::of_write(&e))?;
+        self.write(&self.learning_kept, &all)
+    }
+
+    /// Revoke before editing the project; an unreadable record must never let an old approval survive a deletion.
+    pub(crate) fn revoke_learning(&self, project: &str, kind: LearningKind, hash: &str) -> Result<(), Fault> {
+        let mut all: BTreeMap<String, LearningRecords> = read_checked(&self.learning_kept)?.unwrap_or_default();
+        let Some(hashes) = all.get_mut(project).and_then(|records| records.get_mut(&kind)) else { return Ok(()) };
+        let before = hashes.len();
+        hashes.retain(|kept| kept != hash);
+        if hashes.len() == before {
+            return Ok(());
+        }
+        self.write(&self.learning_kept, &all)
     }
 
     /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.

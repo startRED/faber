@@ -24,6 +24,26 @@ const button = (root: HTMLElement, key: Parameters<typeof t>[0]) => {
   return found;
 };
 
+check('taste_lesson: project memory marks unreviewed notes without offering decision Keep', async () => {
+  const before = api.projectMemory;
+  api.projectMemory = async () => ({ incomplete: false, files: ['taste', 'lessons'].map((name) => ({
+    path: `.faber/${name}.md`, source: 'faber', revision: 'fixture', tooLarge: false, entries: [
+      { start: 0, end: 10, line: 1, text: '- Proposal', reviewed: false },
+      { start: 11, end: 21, line: 2, text: '- Approved', reviewed: true },
+    ],
+  })) });
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language); await settle();
+      equal([...root.querySelectorAll('.memory-flag')].filter((flag) => flag.textContent === t('memory.notReviewed')).length, 2);
+      ok(![...root.querySelectorAll('button')].some((b) => b.textContent === t('memory.keep')));
+    }
+  } finally { dispose(); root.remove(); api.projectMemory = before; useLanguage('en'); }
+});
+
 check('project memory: the project page lists each source and line, edits and deletes only after confirmation, and rereads on refresh', async () => {
   const before = { read: api.projectMemory, edit: api.editProjectMemory };
   let reads = 0;

@@ -68,6 +68,8 @@ A Faber note over its target shows one quiet line with its size and target, once
 Memory refuses Gemini's default private folder for reads and edits, alongside the other CLI private folders.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 
+Root `.faber/taste.md` and `.faber/lessons.md` entries without a matching external approval show the quiet “Not reviewed” flag in every language, with no decision Keep action. Their existing Edit and Delete actions do not approve new words. Editing or deleting an entry revokes approval of the removed words before saving, so restoring those words still needs fresh approval; a failed revocation preserves the text. Replacements enforce the same 1/2 KiB file targets as append, unless the caller supplies separate explicit consent; deletion can reduce an oversized file. The engine-only append function requires the person’s approval; proposal controls remain unbuilt. Only approved taste enters the next start card, within its existing share. Damaged approval records leave the notes readable and unreviewed.
+
 Keeping another decision preserves every older approval of a live project. If approval records or the current project
 list cannot be read safely, Keep reports the existing save error and leaves the approval records untouched.
 

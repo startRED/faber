@@ -983,6 +983,8 @@ export interface MemoryEdit {
   text: string | null;
   /** Marks an AI decision as kept; `text` is then ignored. */
   keep?: boolean;
+  /** Separate person consent to exceed a taste or lesson file's target. */
+  overTarget?: boolean;
 }
 
 /** A Firefox profile Faber's browser can bring sign-ins from; 'default' names the one Firefox made itself. */

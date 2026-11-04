@@ -16,12 +16,14 @@ impl Core {
             return self.answer_toolbox(conv, sid, &call, false, toolbox::MEMORY_NOT_HERE.into());
         };
         let (search, kept) = (self.store.search(), self.store.kept_decisions_reader(&project));
+        let approved = self.store.approved_learning_reader(&project);
         let (me, conv) = (self.me.clone(), conv.to_string());
         let asking = conv.clone();
         let read = self.opts.runtime.spawn_blocking(move || {
             let found = search.query_project(&query, &project, &asking, memory_search::ASKED);
             let list = crate::project::memory::list_faber(Path::new(&folder)).map(|mut list| {
                 crate::project::memory::mark_kept(&mut list, &kept());
+                crate::project::memory::mark_learning(&mut list, &approved());
                 list
             });
             memory_search::answer(&query, &found, &list, now())

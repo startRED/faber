@@ -256,6 +256,7 @@ fn project_memory_lists_and_edits_a_project_under_a_linked_parent() {
                     end: entry.end,
                     text: Some("Changed through the selected project.".into()),
                     keep: false,
+                    over_target: false,
                 },
             )?;
             assert!(std::fs::read_to_string(project.join(path)).unwrap().contains("Changed through the selected project."));
@@ -280,7 +281,15 @@ fn project_memory_review_rejects_replaced_roots_ancestors_and_project_identity()
             std::fs::create_dir_all(&project).unwrap();
             std::fs::write(project.join("CLAUDE.md"), "Keep local.\n").unwrap();
             let file = list(&project).unwrap().files.remove(0);
-            let request = Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text: None, keep: false };
+            let request = Edit {
+                path: file.path,
+                revision: file.revision,
+                start: 0,
+                end: file.entries[0].end,
+                text: None,
+                keep: false,
+                over_target: false,
+            };
             let target = if ancestor { &parent } else { &project };
             let moved = base.path().join("moved");
             std::fs::rename(target, &moved).unwrap();
@@ -325,8 +334,10 @@ fn project_memory_review_refuses_read_only_files_before_edit_or_delete() {
         let mut readonly = original.clone();
         readonly.set_readonly(true);
         std::fs::set_permissions(&path, readonly).unwrap();
-        let result =
-            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text, keep: false });
+        let result = edit(
+            root.path(),
+            &Edit { path: file.path, revision: file.revision, start: 0, end: file.entries[0].end, text, keep: false, over_target: false },
+        );
         std::fs::set_permissions(&path, original).unwrap();
         assert_eq!(result, Err("error.memory.readOnly"));
         assert_eq!(std::fs::read(&path).unwrap(), b"Keep local.\n");
@@ -361,7 +372,8 @@ fn project_memory_review_codex_uses_only_first_nonempty_file_per_folder() {
                 start: 0,
                 end: stale.entries[0].end,
                 text: None,
-                keep: false
+                keep: false,
+                over_target: false,
             }
         ),
         Err("error.memory.changed")
@@ -411,6 +423,7 @@ fn project_memory_edits_and_deletes_both_clis_preserving_every_other_byte_and_li
                 end: entry.end,
                 text: Some("- Use the runner.\n  Save the result.".into()),
                 keep: false,
+                over_target: false,
             };
             edit(root.path(), &request).unwrap();
             let old = fixture["entries"][1]["text"].as_str().unwrap().replace("\r\n", newline) + newline;
@@ -440,7 +453,15 @@ fn project_memory_refuses_changed_files_forged_ranges_and_oversized_edits() {
     for path in ["CLAUDE.md", "AGENTS.md"] {
         let file = list(root.path()).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
         let entry = &file.entries[0];
-        let mut request = Edit { path: path.into(), revision: file.revision, start: entry.start, end: entry.end, text: None, keep: false };
+        let mut request = Edit {
+            path: path.into(),
+            revision: file.revision,
+            start: entry.start,
+            end: entry.end,
+            text: None,
+            keep: false,
+            over_target: false,
+        };
         request.start += 1;
         assert_eq!(edit(root.path(), &request), Err("error.memory.refused"));
         request.start -= 1;
@@ -474,6 +495,7 @@ fn project_memory_preserves_bom_mixed_newlines_blank_separators_and_no_final_new
             end: first.end,
             text: Some("Changed paragraph.".into()),
             keep: false,
+            over_target: false,
         },
     )
     .unwrap();
@@ -490,6 +512,7 @@ fn project_memory_preserves_bom_mixed_newlines_blank_separators_and_no_final_new
             end: last.end,
             text: Some("- Changed last.".into()),
             keep: false,
+            over_target: false,
         },
     )
     .unwrap();
@@ -510,7 +533,10 @@ fn project_memory_size_cap_lists_the_file_name_without_splitting_or_editing_it()
         assert!(file.entries.is_empty());
         assert!(file.revision.is_empty());
         assert_eq!(
-            edit(root.path(), &Edit { path: file.path, revision: file.revision, start: 0, end: 1, text: None, keep: false }),
+            edit(
+                root.path(),
+                &Edit { path: file.path, revision: file.revision, start: 0, end: 1, text: None, keep: false, over_target: false }
+            ),
             Err("error.memory.changed")
         );
     }
@@ -598,7 +624,10 @@ fn project_memory_never_reads_cli_profiles_imports_or_old_faber_private_files() 
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, [0xff, 0x00]).unwrap(); // Reading this as an instruction would fail UTF-8.
         assert_eq!(
-            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false }),
+            edit(
+                root.path(),
+                &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false, over_target: false }
+            ),
             Err("error.memory.refused")
         );
     }
@@ -609,7 +638,10 @@ fn project_memory_never_reads_cli_profiles_imports_or_old_faber_private_files() 
     assert_eq!(files.iter().find(|f| f.path == "CLAUDE.md").unwrap().entries[0].text, imported.trim());
     for path in ["../AGENTS.md", "/AGENTS.md", "C:/AGENTS.md", ".claude.json", ".claude/auth.json"] {
         assert_eq!(
-            edit(root.path(), &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false }),
+            edit(
+                root.path(),
+                &Edit { path: path.into(), revision: String::new(), start: 0, end: 1, text: None, keep: false, over_target: false }
+            ),
             Err("error.memory.refused")
         );
     }
@@ -632,7 +664,18 @@ fn project_memory_refuses_outside_links_before_read_or_write() {
     std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
     assert!(list(root.path()).unwrap().files.is_empty());
     assert_eq!(
-        edit(root.path(), &Edit { path: "linked/AGENTS.md".into(), revision: revision.clone(), start: 0, end: 1, text: None, keep: false }),
+        edit(
+            root.path(),
+            &Edit {
+                path: "linked/AGENTS.md".into(),
+                revision: revision.clone(),
+                start: 0,
+                end: 1,
+                text: None,
+                keep: false,
+                over_target: false
+            }
+        ),
         Err("error.memory.refused")
     );
     #[cfg(unix)]
@@ -641,7 +684,7 @@ fn project_memory_refuses_outside_links_before_read_or_write() {
     std::fs::hard_link(&path, root.path().join("AGENTS.md")).unwrap();
     assert_eq!(list(root.path()).unwrap_err(), "error.memory.refused");
     assert_eq!(
-        edit(root.path(), &Edit { path: "AGENTS.md".into(), revision, start: 0, end: 1, text: None, keep: false }),
+        edit(root.path(), &Edit { path: "AGENTS.md".into(), revision, start: 0, end: 1, text: None, keep: false, over_target: false }),
         Err("error.memory.refused")
     );
     assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0]);
@@ -677,6 +720,7 @@ async fn project_memory_engine_commands_accept_parent_components_in_a_project_pa
                     end: file.entries[0].end,
                     text: Some("Edited through the selected path.".into()),
                     keep: false,
+                    over_target: false,
                 },
             )
             .expect("the same added project path must support memory editing");
@@ -716,6 +760,7 @@ async fn project_memory_engine_commands_accept_a_short_project_root_name() {
                 end: file.entries[0].end,
                 text: None,
                 keep: false,
+                over_target: false,
             },
         )
         .unwrap();
@@ -747,6 +792,7 @@ async fn project_memory_engine_commands_use_only_the_selected_project_and_never_
                 end: file.entries[0].end,
                 text: None,
                 keep: false,
+                over_target: false,
             },
         )
         .unwrap();
@@ -782,6 +828,7 @@ async fn project_memory_keep_is_stored_outside_the_project_and_follows_the_words
         end: f.entries[0].end,
         text: None,
         keep: true,
+        over_target: false,
     };
     engine.edit_project_memory(&project.id, &keep(&before)).unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), written, "Keep writes nothing to the project");
@@ -819,6 +866,7 @@ async fn project_memory_words_deleted_or_rewritten_in_memory_lose_their_review()
         end: f.entries[i].end,
         text: text.map(Into::into),
         keep,
+        over_target: false,
     };
     for i in 0..3 {
         engine.edit_project_memory(&project.id, &edit(&read(), i, None, true)).unwrap();
@@ -838,6 +886,78 @@ async fn project_memory_words_deleted_or_rewritten_in_memory_lose_their_review()
     // An agent writes the deleted and the replaced words again: they wait for a new review; the kept one stays kept.
     std::fs::write(&file, written).unwrap();
     assert_eq!(reviewed(), [false, true, false], "a review dies with the words Memory took away");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn taste_lesson_memory_edit_and_delete_revoke_approval_before_removing_words() {
+    use faber_engine::project::memory::{Edit, LearningKind};
+    use serde_json::Value;
+    let data = support::DataFolder::new();
+    let root = support::work_folder();
+    let other = support::work_folder();
+    let spawn: Spawner = Arc::new(|_, _, _| panic!("memory must never launch a CLI"));
+    let (engine, _) = engine(&data, Vendor::Claude, spawn);
+    let project = engine.add_project(root.path().to_str().unwrap()).unwrap();
+    let second = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    let record = data.path().join("faber-trust/learning-kept.json");
+    for kind in [LearningKind::Taste, LearningKind::Lessons] {
+        engine.append_project_learning(&project.id, kind, "Keep this.", false).unwrap();
+        engine.append_project_learning(&second.id, kind, "Keep this.", false).unwrap();
+    }
+    for (kind, path) in [(LearningKind::Taste, ".faber/taste.md"), (LearningKind::Lessons, ".faber/lessons.md")] {
+        engine.append_project_learning(&project.id, kind, "Remove this. [by AI]", false).unwrap();
+        engine.append_project_learning(&project.id, kind, "Rewrite this. [by person]", false).unwrap();
+        let file = root.path().join(path);
+        let written = std::fs::read_to_string(&file).unwrap();
+        let read = || engine.project_memory(&project.id).unwrap().files.into_iter().find(|f| f.path == path).unwrap();
+        let edit = |index: usize, text: Option<&str>| {
+            let f = read();
+            Edit {
+                path: path.into(),
+                revision: f.revision,
+                start: f.entries[index].start,
+                end: f.entries[index].end,
+                text: text.map(Into::into),
+                keep: false,
+                over_target: false,
+            }
+        };
+        assert!(read().entries.iter().all(|e| e.reviewed));
+        engine.edit_project_memory(&project.id, &edit(0, Some("- Keep this."))).unwrap();
+        assert!(read().entries[0].reviewed, "saving unchanged words preserves approval");
+        assert!(engine.edit_project_memory(&project.id, &edit(1, Some("   "))).is_err());
+        assert!(read().entries[1].reviewed, "a refused edit preserves approval");
+        let too_large = "x".repeat(if kind == LearningKind::Taste { 1100 } else { 2100 });
+        assert!(engine.edit_project_memory(&project.id, &edit(1, Some(&too_large))).is_err());
+        assert!(read().entries[1].reviewed, "an over-target refusal preserves approval");
+        // An unreadable record may still hold approval: refuse the edit and preserve both files.
+        let approvals = std::fs::read(&record).unwrap();
+        std::fs::write(&record, "{damaged").unwrap();
+        for text in [None, Some("- Replacement.")] {
+            assert!(engine.edit_project_memory(&project.id, &edit(1, text)).is_err());
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), written);
+            assert_eq!(std::fs::read_to_string(&record).unwrap(), "{damaged");
+        }
+        std::fs::write(&record, approvals).unwrap();
+        engine.edit_project_memory(&project.id, &edit(1, None)).unwrap();
+        engine.edit_project_memory(&project.id, &edit(1, Some("- Replacement."))).unwrap();
+        let approvals: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        let key = if kind == LearningKind::Taste { "taste" } else { "lessons" };
+        assert_eq!(approvals[&project.id][key].as_array().unwrap().len(), 1, "both removed hashes are revoked");
+        std::fs::write(&file, &written).unwrap();
+        assert_eq!(
+            read().entries.iter().map(|e| e.reviewed).collect::<Vec<_>>(),
+            [true, false, false],
+            "replanted words need approval again"
+        );
+    }
+    let approvals: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    for id in [&project.id, &second.id] {
+        for key in ["taste", "lessons"] {
+            assert_eq!(approvals[id][key].as_array().unwrap().len(), 1, "unrelated approvals survive");
+        }
+    }
     engine.shutdown();
 }
 
@@ -868,6 +988,7 @@ async fn project_memory_an_edit_that_keeps_or_cannot_change_the_words_keeps_thei
             end: f.entries[0].end,
             text: text.map(Into::into),
             keep,
+            over_target: false,
         }
     };
     engine.edit_project_memory(&project.id, &edit(None, true)).unwrap();
@@ -7123,6 +7244,7 @@ async fn project_adopted_sources_require_external_approval_and_stay_read_only_af
                     end: 1,
                     text: Some("overwrite".into()),
                     keep: false,
+                    over_target: false,
                 },
             )
             .unwrap_err(),

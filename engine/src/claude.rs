@@ -195,6 +195,7 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     // Faber's approval records may be read but never changed (`permissions::FABER_RECORDS`); an Edit rule covers Write too.
     let [kept, trust] = crate::permissions::FABER_RECORDS;
     rules.extend([format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)")]);
+    rules.extend(crate::permissions::ENGINE_NOTES.map(|name| format!("Edit(//**/{name})")));
     rules
 }
 
@@ -1030,7 +1031,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     if crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
-                                            "response": { "behavior": "deny", "message": "Faber's data folder is read-only in this permission mode." } } });
+                                            "response": { "behavior": "deny", "message": "Faber refused a write to its protected notes or data folder." } } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
                                             shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;

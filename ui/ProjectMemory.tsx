@@ -94,7 +94,7 @@ function MemoryList(props: { projectId: string }) {
       <ul class="memory-entries">
         <For each={rows().slice(0, shown())}>{({ file, entry, first }) => (
           <li class="memory-entry" data-entry={entry ? key(file, entry) : undefined}>
-            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}</div>
+            <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry && ['.faber/taste.md', '.faber/lessons.md'].includes(file.path) && !entry.reviewed && <> · <span class="memory-flag ask">{t('memory.notReviewed')}</span></>}{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}</div>
             <Show when={first && file.overLimit}><p class="hint">{t('memory.overLimit', { size: file.overLimit![0], target: file.overLimit![1] })}</p></Show>
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>

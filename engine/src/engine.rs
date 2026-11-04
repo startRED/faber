@@ -1470,7 +1470,30 @@ impl Engine {
             self.with(|c| c.store.migrate_kept_decisions(id, &kept, &upgraded).map_err(|e| e.key().to_string()))?;
         }
         crate::project::memory::mark_kept(&mut list, &kept);
+        let approved = self.with(|c| c.store.approved_learning_reader(id));
+        crate::project::memory::mark_learning(&mut list, &approved());
         Ok(list)
+    }
+    /// Person-only approval, never exposed as an agent tool. The caller must obtain a separate yes to exceed the target.
+    pub fn append_project_learning(
+        &self,
+        id: &str,
+        kind: crate::project::memory::LearningKind,
+        line: &str,
+        over_target: bool,
+    ) -> Result<(), String> {
+        self.with(|c| {
+            let project = c
+                .store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == id)
+                .ok_or("error.project.notFound")?;
+            let hash =
+                crate::project::memory::append_approved(Path::new(&project.path), kind, line, over_target).map_err(str::to_string)?;
+            c.store.keep_learning(id, kind, hash).map_err(|e| e.key().to_string())
+        })
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
         let project = self.project(id)?;
@@ -1479,6 +1502,12 @@ impl Engine {
         // leaves the words "not reviewed". Not under the memory write lock, which the engine lock is held around.
         if let Some(gone) = crate::project::memory::removes(Path::new(&project.path), edit).map_err(str::to_string)? {
             self.with(|c| {
+                let gone = match gone {
+                    crate::project::memory::RemovedReview::Learning { kind, hash } => {
+                        return c.store.revoke_learning(id, kind, &hash).map_err(|e| e.key().to_string());
+                    }
+                    crate::project::memory::RemovedReview::Decision(gone) => gone,
+                };
                 let kept = c.store.kept_decisions_now(id).map_err(|e| e.key().to_string())?;
                 let left: Vec<_> = kept.iter().filter(|older| !older.matches(&gone)).cloned().collect();
                 // Legacy records included; nothing is written when none matches.

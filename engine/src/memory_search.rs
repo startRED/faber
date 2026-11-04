@@ -75,7 +75,12 @@ fn notes(list: &MemoryList, query: &str) -> Vec<String> {
             let text = e.body.as_deref().unwrap_or(&e.text).trim_start();
             // The list marker is Markdown, not what was written.
             let text = ["- ", "* ", "+ "].iter().find_map(|m| text.strip_prefix(m)).unwrap_or(text);
-            crate::search::matches(text, query).then(|| format!("{}:{} · {} · {}", flat(&f.path), e.line, author(e), cut(text, NOTE_CHARS)))
+            let who = if crate::project::memory::LearningKind::for_path(&f.path).is_some() {
+                if e.reviewed { "kept by the person" } else { "not reviewed" }
+            } else {
+                author(e)
+            };
+            crate::search::matches(text, query).then(|| format!("{}:{} · {} · {}", flat(&f.path), e.line, who, cut(text, NOTE_CHARS)))
         })
         .collect()
 }
@@ -273,7 +278,16 @@ mod tests {
                         entry(9, "Unrelated", Some("person"), false),
                     ],
                 ),
-                file(".faber/taste.md", "faber", vec![entry(1, "- Prefer postgres tools", None, false)]),
+                file(
+                    ".faber/taste.md",
+                    "faber",
+                    vec![entry(1, "- Prefer postgres tools", None, false), entry(3, "- Prefer postgres labels", None, true)],
+                ),
+                file(
+                    ".faber/lessons.md",
+                    "faber",
+                    vec![entry(1, "- Check postgres migrations", None, false), entry(3, "- Check postgres backups", None, true)],
+                ),
             ],
         };
         let text = answer("POSTGRES", &results(true, vec![]), &Ok(list), NOW);
@@ -286,7 +300,10 @@ mod tests {
                 ".faber/decisions.md:2 · the person's, in Faber's record · Use Postgres",
                 ".faber/decisions.md:5 · marked [by AI], kept by the person · Use Postgrés for all",
                 ".faber/decisions.md:7 · an AI proposal, not reviewed · Use Postgres here",
-                ".faber/taste.md:1 · author unknown · Prefer postgres tools",
+                ".faber/taste.md:1 · not reviewed · Prefer postgres tools",
+                ".faber/taste.md:3 · kept by the person · Prefer postgres labels",
+                ".faber/lessons.md:1 · not reviewed · Check postgres migrations",
+                ".faber/lessons.md:3 · kept by the person · Check postgres backups",
             ]
         );
         assert!(!text.contains("CLAUDE.md") && !text.contains("AGENTS.md") && !text.contains("Unrelated"));

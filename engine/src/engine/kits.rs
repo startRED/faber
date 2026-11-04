@@ -880,6 +880,7 @@ mod tests {
                         end: entry.end,
                         text: None,
                         keep: true,
+                        over_target: false,
                     },
                 )
                 .unwrap();
@@ -956,6 +957,7 @@ mod tests {
                         end: entry.end,
                         text: None,
                         keep: true,
+                        over_target: false,
                     },
                 )
                 .unwrap();
@@ -1038,6 +1040,9 @@ mod tests {
             let (spawn, args, messages) = fake();
             let engine = engine(&dir, spawn);
             let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine
+                .append_project_learning(&project.id, crate::project::memory::LearningKind::Taste, "KEPT_VISUAL_PREFERENCE", false)
+                .unwrap();
             engine.with(|core| {
                 core.store.keep_decision(&project.id, KeptDecision::of(approved), std::slice::from_ref(&project.id)).unwrap();
                 conversation(core, Area::Project, Some(&project.id), &folder, "CARD_CAPTURE_TURN");
@@ -1092,6 +1097,7 @@ mod tests {
                 );
             }
             let card = prompt.split_once("```faber-start-card\n").expect("the real driver sends the project start card").1;
+            assert!(card.contains("- KEPT_VISUAL_PREFERENCE"), "approved taste reaches both real drivers");
             assert_eq!(card.contains("Preserve public exports."), state != "revoked", "exact current approved content only: {state}");
             for denied in ["UNTRUSTED_DESCRIPTION", "FORGED_PERSON", "UNREVIEWED_AI", "UNAPPROVED_TASTE"] {
                 assert!(!prompt.contains(denied), "unapproved repository prose must stay out: {denied}");
@@ -1116,6 +1122,12 @@ mod tests {
                 previous_card = Some(sent);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn taste_lesson_approved_taste_reaches_both_drivers_and_unreviewed_taste_stays_out() {
+        project_start_card_captured(Vendor::Claude).await;
+        project_start_card_captured(Vendor::Codex).await;
     }
 
     #[tokio::test]

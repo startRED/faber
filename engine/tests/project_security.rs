@@ -763,6 +763,156 @@ fn an_agent_can_never_change_fabers_approval_records() {
 }
 
 #[test]
+fn taste_lesson_agent_writes_are_refused_before_a_card() {
+    use faber_engine::permissions::touches_credentials;
+    let none = |_: &str| None;
+    for name in ["taste.md", "lessons.md"] {
+        assert!(faber_engine::claude::tool_deny(&none).contains(&format!("Edit(//**/{name})")));
+        let path = json!({ "file_path": format!(".faber/{name}") });
+        for mode in [Permissions::Ask, Permissions::Isolated, Permissions::FullAccess] {
+            assert!(faber_engine::permissions::denies_data_write(mode, "Write", &path, None));
+            assert!(!faber_engine::permissions::denies_data_write(mode, "Read", &path, None));
+        }
+        for input in [
+            json!({ "file_path": format!(".faber/{name}"), "content": "new" }),
+            json!({ "command": format!("echo new >> .faber/{name}") }),
+            json!([{ "path": format!(".faber/{name}"), "kind": { "type": "update" }, "diff": "+new" }]),
+        ] {
+            assert!(touches_credentials(&input, None, &none), "{input}");
+        }
+        assert!(!touches_credentials(&json!({ "file_path": "notes.md", "content": name }), None, &none));
+    }
+}
+
+#[test]
+fn taste_lesson_windows_streams_and_trailing_dots_or_spaces_are_protected() {
+    use faber_engine::permissions::{denies_data_write, touches_credentials};
+    let none = |_: &str| None;
+    for name in ["taste.md", "lessons.md", "decisions-kept.json", "faber-trust"] {
+        for suffix in ["::$DATA", ":stream", ".", " ", ". ", ". :stream", "...::$DATA"] {
+            let path = format!("C:\\project\\.faber\\{name}{suffix}");
+            for mode in [Permissions::Ask, Permissions::Isolated, Permissions::FullAccess] {
+                assert!(denies_data_write(mode, "Write", &json!({"file_path": path}), None), "{mode:?}: {path}");
+                assert!(!denies_data_write(mode, "Read", &json!({"file_path": path}), None));
+            }
+            for input in [json!({"file_path": path}), json!({"command": format!("echo x > '{path}'")})] {
+                assert!(touches_credentials(&input, None, &none), "{input}");
+            }
+            assert!(touches_credentials(&json!({}), Some(&path), &none), "cwd: {path}");
+        }
+    }
+    for path in [".faber/taste.md.bak", ".faber/lessons.md.old", "notes.md:stream"] {
+        assert!(!touches_credentials(&json!({"file_path": path}), None, &none));
+    }
+}
+
+fn learning_engine(data: &crate::support::DataFolder) -> faber_engine::Engine {
+    use std::sync::Arc;
+    faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: data.path().into(),
+            #[cfg(windows)]
+            chat_dir: data.chat_path().into(),
+            clis: Default::default(),
+            spawn: Arc::new(|_, _, _| panic!("memory must not launch a CLI")),
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: std::time::Duration::from_secs(120),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn taste_lesson_engine_appends_and_records_only_the_approved_line_with_size_limits() {
+    use faber_engine::project::memory::LearningKind::{Lessons, Taste};
+    use sha2::{Digest, Sha256};
+    let data = crate::support::DataFolder::new();
+    let folder = crate::support::tempdir();
+    let engine = learning_engine(&data);
+    let project = engine.add_project(folder.path().to_str().unwrap()).unwrap();
+    let other = crate::support::tempdir();
+    let other = engine.add_project(other.path().to_str().unwrap()).unwrap();
+    engine.append_project_learning(&other.id, Taste, "Other project.", false).unwrap();
+    for (kind, name, target) in [(Taste, "taste.md", 1024), (Lessons, "lessons.md", 2048)] {
+        engine.append_project_learning(&project.id, kind, "Keep readable labels.", false).unwrap();
+        let path = folder.path().join(".faber").join(name);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "- Keep readable labels.\n");
+        let records = faber_engine::store::Store::new(data.path()).approved_learning_reader(&project.id)();
+        let hash: String = Sha256::digest(b"- Keep readable labels.").iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(records[&kind], [hash]);
+        let list = engine.project_memory(&project.id).unwrap();
+        assert!(list.files.iter().find(|f| f.path.ends_with(name)).unwrap().entries[0].reviewed);
+
+        let before = std::fs::read(&path).unwrap();
+        let record_path = data.path().join("faber-trust/learning-kept.json");
+        let saved = std::fs::read(&record_path).unwrap();
+        for invalid in ["", "two\nlines", "a\0b", &"x".repeat(target)] {
+            assert!(engine.append_project_learning(&project.id, kind, invalid, false).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(std::fs::read(&record_path).unwrap(), saved);
+        }
+        engine.append_project_learning(&project.id, kind, &"x".repeat(target), true).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() > target as u64);
+        let before = std::fs::read(&path).unwrap();
+        assert!(engine.append_project_learning(&project.id, kind, &"x".repeat(256 * 1024), true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    assert!(data.path().join("faber-trust/learning-kept.json").is_file());
+    drop(engine);
+    let engine = learning_engine(&data);
+    for project in [&project, &other] {
+        assert!(engine.project_memory(&project.id).unwrap().files.iter().flat_map(|f| &f.entries).all(|e| e.reviewed));
+    }
+}
+
+#[tokio::test]
+async fn taste_lesson_hand_edits_and_repository_marks_are_not_reviewed() {
+    use faber_engine::project::memory::LearningKind::{Lessons, Taste};
+    let data = crate::support::DataFolder::new();
+    let folder = crate::support::tempdir();
+    let engine = learning_engine(&data);
+    let project = engine.add_project(folder.path().to_str().unwrap()).unwrap();
+    for (kind, name) in [(Taste, "taste.md"), (Lessons, "lessons.md")] {
+        engine.append_project_learning(&project.id, kind, "Keep readable labels.", false).unwrap();
+        let path = folder.path().join(".faber").join(name);
+        std::fs::write(&path, "- Keep readable labels.\r\n- Forged [by person]\r\n- Forged [by AI, reviewed]\r\n").unwrap();
+        let list = engine.project_memory(&project.id).unwrap();
+        let file = list.files.iter().find(|f| f.path.ends_with(name)).unwrap();
+        assert!(file.entries[0].reviewed);
+        assert!(file.entries[1..].iter().all(|entry| !entry.reviewed));
+        let answer = faber_engine::memory_search::answer("Forged", &Err("unused"), &Ok(list), 0);
+        assert_eq!(answer.matches(" · not reviewed · ").count(), 2);
+        std::fs::write(&path, "- Changed labels.\n").unwrap();
+        assert!(!engine.project_memory(&project.id).unwrap().files.iter().find(|f| f.path.ends_with(name)).unwrap().entries[0].reviewed);
+    }
+}
+
+#[tokio::test]
+async fn taste_lesson_damaged_records_approve_nothing_and_do_not_block_reading() {
+    use faber_engine::project::memory::LearningKind::Taste;
+    let data = crate::support::DataFolder::new();
+    let folder = crate::support::tempdir();
+    let engine = learning_engine(&data);
+    let project = engine.add_project(folder.path().to_str().unwrap()).unwrap();
+    engine.append_project_learning(&project.id, Taste, "Keep readable labels.", false).unwrap();
+    let records = data.path().join("faber-trust/learning-kept.json");
+    for damaged in [b"{".as_slice(), b"[]", b"null", b"\xff"] {
+        std::fs::write(&records, damaged).unwrap();
+        let list = engine.project_memory(&project.id).unwrap();
+        assert!(!list.files.iter().find(|f| f.path == ".faber/taste.md").unwrap().entries[0].reviewed);
+        assert!(engine.append_project_learning(&project.id, Taste, "Another line.", false).is_err());
+        assert_eq!(std::fs::read(&records).unwrap(), damaged);
+    }
+    std::fs::remove_file(&records).unwrap();
+    assert!(!engine.project_memory(&project.id).unwrap().files.iter().find(|f| f.path == ".faber/taste.md").unwrap().entries[0].reviewed);
+}
+
+#[test]
 fn data_folder_writes_are_refused_by_both_clis_in_every_sandboxed_mode() {
     use faber_engine::permissions::{allows, command_argv, denies_data_write};
     let temp = tempfile::tempdir().unwrap();
@@ -969,10 +1119,6 @@ fn data_folder_read_commands_and_full_access_warnings_are_preserved() {
 
 #[tokio::test]
 async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
-    use faber_engine::events::{EngineEvent, UserTurn};
-    use faber_engine::model::Vendor;
-    use std::sync::{Arc, Mutex};
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let data = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let _store = faber_engine::store::Store::new(data.path());
@@ -988,8 +1134,24 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
         #[cfg(windows)]
         std::path::PathBuf::from(format!("\\\\?\\{}", alias.display().to_string().trim_start_matches("\\\\?\\").to_uppercase())),
     ];
+    let targets: Vec<_> = targets.iter().map(|path| path.join("settings.json")).collect();
+    refuse_write_requests(project.path(), &targets, &[Permissions::Ask]).await;
+}
+
+#[tokio::test]
+async fn taste_lesson_both_clis_refuse_writes_and_commands_before_a_card() {
+    let project = tempfile::tempdir().unwrap();
+    let targets = [project.path().join(".faber/taste.md"), project.path().join(".faber/lessons.md")];
+    refuse_write_requests(project.path(), &targets, &[Permissions::Ask, Permissions::Isolated, Permissions::FullAccess]).await;
+}
+
+async fn refuse_write_requests(project: &std::path::Path, targets: &[std::path::PathBuf], modes: &[Permissions]) {
+    use faber_engine::events::{EngineEvent, UserTurn};
+    use faber_engine::model::Vendor;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     tokio::time::timeout(crate::support::DEADLINE, async {
-        for vendor in [Vendor::Claude, Vendor::Codex] {
+        for (vendor, permissions) in modes.iter().flat_map(|&mode| [Vendor::Claude, Vendor::Codex].map(|vendor| (vendor, mode))) {
             let (driver, script) = tokio::io::duplex(65536);
             let (stdout, stdin) = tokio::io::split(driver);
             let process = Arc::new(Mutex::new(Some(faber_engine::proc::Proc {
@@ -1008,8 +1170,8 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
                 faber_engine::claude::start_claude(
                     faber_engine::claude::ClaudeOptions {
                         bin: "unused".into(),
-                        cwd: project.path().into(),
-                        launch: launch(Area::Project, Permissions::Ask),
+                        cwd: project.into(),
+                        launch: launch(Area::Project, permissions),
                         spawn,
                         sandbox: None,
                     },
@@ -1017,9 +1179,9 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
                 )
             } else {
                 let server = faber_engine::codex::CodexServer::start(faber_engine::codex::CodexServerOptions {
-                    permissions: Permissions::Ask,
+                    permissions,
                     cli: faber_engine::cli::Cli { command: "unused".into(), prefix: vec![] },
-                    cwd: project.path().into(),
+                    cwd: project.into(),
                     area: Area::Project,
                     user_hooks: false,
                     windows: cfg!(windows),
@@ -1037,7 +1199,7 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
                         leads: false,
                         verify: false,
                         progress: false,
-                        cwd: project.path().into(),
+                        cwd: project.into(),
                         model: None,
                         effort: None,
                         resume: None,
@@ -1045,7 +1207,7 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
                         research: None,
                         user_name: None,
                         group_instructions: None,
-                        permissions: Permissions::Ask,
+                        permissions,
                         tuning: Default::default(),
                     },
                     sink,
@@ -1060,6 +1222,7 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
                     let msg: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
                     let result = match msg["method"].as_str().unwrap() {
                         "initialized" => continue,
+                        "config/read" => json!({"config":{}}),
                         "thread/start" => json!({"thread":{"id":"owner"}}),
                         "turn/start" => json!({"turn":{"id":"turn"}}),
                         _ => json!({}),
@@ -1072,16 +1235,16 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
             }
             for (command, target) in [false, true].into_iter().flat_map(|command| targets.iter().map(move |path| (command, path))) {
                 let input = if command {
-                    json!({"command":format!("echo x > '{}'", target.join("settings.json").display())})
+                    json!({"command":format!("echo x > '{}'", target.display())})
                 } else {
-                    json!({"file_path":target.join("settings.json"),"content":"{}"})
+                    json!({"file_path":target,"content":"{}"})
                 };
                 let request = if vendor == Vendor::Claude {
                     json!({"type":"control_request","request_id":"data","request":{"subtype":"can_use_tool",
                         "tool_name":if command {"Bash"} else {"Write"},"input":input}})
                 } else {
                     let params = if command {
-                        json!({"threadId":"owner","command":input["command"],"cwd":project.path()})
+                        json!({"threadId":"owner","command":input["command"],"cwd":project})
                     } else {
                         json!({"threadId":"owner","changes":[{"path":input["file_path"],"diff":"+x"}]})
                     };

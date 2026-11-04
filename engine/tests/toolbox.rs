@@ -464,10 +464,10 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
                     ".faber/decisions.md",
                     "- Zebra storage is the choice [by person]\n- Zebra cache stays in memory [by AI]\n- Zebra logs go to disk [by AI]\n",
                 ),
-                (".faber/taste.md", "- Zebra stripes stay subtle\n"),
                 ("CLAUDE.md", "- Zebra rule only the CLI needs\n"),
             ],
         );
+        app.append_project_learning(&a, faber_engine::project::memory::LearningKind::Taste, "Zebra stripes stay subtle", false).unwrap();
         write_notes(theirs.path(), &[(".faber/decisions.md", "- Zebra belongs to the other project [by person]\n")]);
         let list = app.project_memory(&a).unwrap();
         let decisions = list.files.iter().find(|f| f.path == ".faber/decisions.md").unwrap();
@@ -479,6 +479,7 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
             end: second.end,
             text: None,
             keep: true,
+            over_target: false,
         };
         app.edit_project_memory(&a, &keep).unwrap();
 
@@ -510,7 +511,7 @@ async fn claude_code_searches_only_this_projects_other_conversations_and_its_fab
             ".faber/decisions.md:1 · an AI proposal, not reviewed · Zebra storage is the choice",
             ".faber/decisions.md:2 · marked [by AI], kept by the person · Zebra cache stays in memory",
             ".faber/decisions.md:3 · an AI proposal, not reviewed · Zebra logs go to disk",
-            ".faber/taste.md:1 · author unknown · Zebra stripes stay subtle",
+            ".faber/taste.md:1 · kept by the person · Zebra stripes stay subtle",
         ] {
             assert!(lines.contains(&note), "{note} missing: {found}");
         }
@@ -549,7 +550,7 @@ async fn codex_searches_the_projects_notes_through_its_dynamic_tool_and_leaves_t
     let (spawn, made) = pipes();
     let app = engine(&dir, Vendor::Codex, spawn);
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
-    write_notes(folder.path(), &[(".faber/taste.md", "- Zebra stripes stay subtle\n")]);
+    app.append_project_learning(&project, faber_engine::project::memory::LearningKind::Taste, "Zebra stripes stay subtle", false).unwrap();
     let asking = SendRequest { text: "Plan the week's stripes".into(), ..request(Vendor::Codex, Area::Project, Some(project)) };
     app.send(asking).unwrap();
     let mut pipe = next_pipe(&made).await;
@@ -559,7 +560,7 @@ async fn codex_searches_the_projects_notes_through_its_dynamic_tool_and_leaves_t
     assert!(found.contains("Nothing in this project's earlier conversations or notes matches"), "every word must match: {found}");
     let (found, failed) = codex_call(&mut pipe, 911, "memory_search", json!({ "query": "stripes" })).await;
     assert!(!failed, "{found}");
-    assert!(found.contains(".faber/taste.md:1 · author unknown · Zebra stripes stay subtle"), "{found}");
+    assert!(found.contains(".faber/taste.md:1 · kept by the person · Zebra stripes stay subtle"), "{found}");
     assert!(!found.contains("Plan the week"), "the asking conversation holds the word and is left out: {found}");
     app.shutdown();
 }
