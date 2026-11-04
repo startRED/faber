@@ -29,8 +29,9 @@ async function backup(dir: string): Promise<void> {
     }
     let count = 0;
     let bytes = 0;
-    const files: string[] = [];
-    async function checked(relative: string) {
+    const files: { root: string; relative: string; target: string }[] = [];
+    async function checked(root: string, relative: string) {
+      if ((await lstat(root)).isSymbolicLink()) throw new Error('Linked user data');
       const full = path.join(root, relative);
       const parts = relative.split(path.sep);
       for (let i = 1; i <= parts.length; i++) {
@@ -41,20 +42,24 @@ async function backup(dir: string): Promise<void> {
       }
       return lstat(full);
     }
-    async function visit(relative: string): Promise<void> {
-      const info = await checked(relative);
+    async function visit(root: string, relative: string, target = relative): Promise<void> {
+      const info = await checked(root, relative);
       if (info.isDirectory()) {
-        for (const name of await readdir(path.join(root, relative))) await visit(path.join(relative, name));
+        for (const name of await readdir(path.join(root, relative))) await visit(root, path.join(relative, name), path.join(target, name));
       } else if (info.isFile()) {
         count++;
         bytes += info.size;
         if (count > maxFiles || bytes > maxBytes) throw new RangeError('Backup skipped: file count or size limit exceeded.');
-        files.push(relative);
+        files.push({ root, relative, target });
       } else throw new Error('Unsupported user data');
     }
     for (const entry of await readdir(root, { withFileTypes: true })) {
-      if (entry.name === 'conversations' || entry.name.endsWith('.json')) await visit(entry.name);
+      if (['conversations', 'child-transcripts', 'attachments', 'chat', 'side-chats', 'chat-groups'].includes(entry.name) || entry.name.endsWith('.json')) await visit(root, entry.name);
     }
+    // Current Chat work is a fixed sibling, relocated out of the protected data directory by the engine.
+    const work = `${root}-chat-work`;
+    const workInfo = await lstat(work).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return null; });
+    if (workInfo) await visit(work, '', 'chat-work');
     const space = await statfs(root);
     if (!enoughSpace(space.bavail * space.bsize, bytes)) { log(dir, 'Backup skipped: not enough free disk space.'); return; }
     dest = path.join(root, `backup-before-electron-${randomUUID()}`);
@@ -62,16 +67,16 @@ async function backup(dir: string): Promise<void> {
     created = true;
     let copiedBytes = 0;
     for (const file of files) {
-      const info = await checked(file);
+      const info = await checked(file.root, file.relative);
       if (!info.isFile()) throw new Error('User data changed');
-      const source = await open(path.join(root, file), constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+      const source = await open(path.join(file.root, file.relative), constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
       try {
         const opened = await source.stat();
-        const after = await checked(file);
+        const after = await checked(file.root, file.relative);
         if (!opened.isFile() || opened.dev !== after.dev || opened.ino !== after.ino) throw new Error('User data changed');
         copiedBytes += opened.size;
         if (copiedBytes > maxBytes) throw new RangeError('Backup skipped: file count or size limit exceeded.');
-        const target = path.join(dest, file);
+        const target = path.join(dest, file.target);
         await mkdir(path.dirname(target), { recursive: true });
         const output = await open(target, 'wx');
         try {

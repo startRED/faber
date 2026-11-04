@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
+import { migrateDrafts } from './migrate.ts';
 import { apply, type Picked, release } from './orders.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
@@ -120,7 +121,7 @@ function serveScreen(): void {
   // Keep internal file reads outside the default session's fail-closed visual-page guard.
   const assets = session.fromPartition('screen-assets');
   protocol.handle(SCHEME, async (request) => {
-    if (testmode.testing && request.url === `${ORIGIN}/__test_blank__`) {
+    if (request.url === `${ORIGIN}/__draft_import__` || (testmode.testing && request.url === `${ORIGIN}/__test_blank__`)) {
       return new Response('', { headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP } });
     }
     const file = screenFile(request.url);
@@ -322,7 +323,7 @@ app.on('before-quit', (event) => {
   void host.stop(HOST_STOP_MS).finally(() => app.quit());
 });
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   readyWayback(dataDir);
   // The screen asks for nothing a browser grants: no camera, no notifications from the page, no geolocation, no devices.
   // The exceptions are the clipboard, which Copy and the right-click menu's Paste use (Tauri's window allowed it too).
@@ -333,6 +334,9 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => clipboard(permission) && wc === win?.webContents && origin === ORIGIN);
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
+  try { await migrateDrafts(dataDir); } catch {
+    console.error('faber: draft import failed; the original profile is intact and the next start will retry.');
+  }
   installVisual(() => host, () => win);
   relay();
   const window = {
