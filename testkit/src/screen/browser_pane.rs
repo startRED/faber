@@ -18,6 +18,38 @@ const OPEN_FAILURE: &str = "browser pane: baseline-compatible opening failure ph
 const CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b1";
 const OTHER_CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b2";
 
+// Frames never wait for native getters; two staggered pipelines replace each answer without a frame-clock gap.
+const CLOSE_SAMPLER: &str = r#"window.__sampleBrowserClose=duration=>new Promise((resolve,reject)=>{
+  const samples=[],probes=[],end=performance.now()+duration;
+  let stopped=false,frameId;
+  const stop=()=>{stopped=true;cancelAnimationFrame(frameId);clearTimeout(timeout);};
+  const fail=error=>{stop();reject(error);};
+  const timeout=setTimeout(()=>fail(new Error('browser close probes timed out')),5000);
+  const place=kind=>{
+    const column=document.querySelector('.runcol');
+    return {kind,t:performance.now(),x:column?.getBoundingClientRect().x,viewport:innerWidth,dpr:devicePixelRatio,
+      opacity:column?Number(getComputedStyle(column).opacity):null,exiting:column?.dataset.exiting==='true'};
+  };
+  const probe=async()=>{
+    while(!stopped && performance.now()<end && document.querySelector('.runcol')){
+      const sample=place('probe');samples.push(sample);
+      const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
+      const after=place('answer');samples.push(after);
+      sample.afterX=after.x;sample.answered=after.t;sample.shown=native.shown;sample.nativeX=native.x;
+    }
+  };
+  const frame=()=>{
+    if(stopped)return;
+    samples.push(place('frame'));
+    if(probes.length<2 && performance.now()<end)probes.push(probe().catch(fail));
+    if(performance.now()<end)frameId=requestAnimationFrame(frame);
+    else Promise.all(probes).then(()=>{stop();resolve(samples);},fail);
+  };
+  // The capture listener runs before the close handler; this first probe cannot satisfy the exiting bracket.
+  probes.push(probe().catch(fail));
+  frameId=requestAnimationFrame(frame);
+})"#;
+
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: NAME, run: browser_pane },
@@ -33,6 +65,7 @@ pub fn scenarios() -> Vec<Scenario> {
 fn interrupt_width(ctx: &mut Ctx) -> Result {
     let (mut app, fixture) = open_browser(ctx)?;
     let page = &mut app.page;
+    page.eval(CLOSE_SAMPLER)?;
     super::system_motion(page, false)?;
     enter(page, &fixture.url("/one"))?;
     wait_page(page, &fixture, "one")?;
@@ -129,7 +162,6 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
           window.__widthRecord('after-aside');
           const active=()=>shell.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty) && a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty,time:a.currentTime}));
           window.__interruptPreparation={events:[]};
-          window.__interruptTrace=[];
           window.__interruptClick=null;
           window.__interruptMissed=false;
           let pending=false;
@@ -156,17 +188,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
               shell.removeEventListener('transitionrun',observe);
               button.addEventListener('click',event=>{
                 window.__interruptClick={active:active(),trusted:event.isTrusted,glide:shell.classList.contains('glide'),native:window.__interruptPreparation.native,x:column.getBoundingClientRect().x,t:performance.now()};
-                const end=performance.now()+650;
-                const frame=async()=>{
-                  const el=document.querySelector('.runcol'),before=el?.getBoundingClientRect();
-                  const exiting=el?.dataset.exiting==='true',t=performance.now();
-                  const opacity=el?Number(getComputedStyle(el).opacity):null;
-                  const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
-                  const after=document.querySelector('.runcol')?.getBoundingClientRect();
-                  window.__interruptTrace.push({x:before?.x,after:after?.x,opacity,nativeX:native.x,shown:native.shown,viewport:innerWidth,dpr:devicePixelRatio,exiting,t});
-                  if(performance.now()<end)requestAnimationFrame(frame);
-                };
-                requestAnimationFrame(frame);
+                window.__interruptDone=window.__sampleBrowserClose(650);
               },{once:true,capture:true});
               button.click();
             };
@@ -219,8 +241,7 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
                 && clicked["active"].as_array().is_some_and(|a| !a.is_empty()),
             || format!("the programmatic close missed an actual width transition: {clicked}"),
         )?;
-        page.eval("new Promise(resolve=>setTimeout(resolve,700))")?;
-        let trace = page.eval("window.__interruptTrace")?;
+        let trace = page.eval("window.__interruptDone")?;
         let preparation = page.eval("({...window.__interruptPreparation,widthDiagnostic:window.__widthFinish(false)})")?;
         std::fs::create_dir_all(&ctx.paths.shots).map_err(|e| e.to_string())?;
         std::fs::write(
@@ -235,16 +256,24 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
                 s["exiting"] == true
                     && s["t"].as_f64().zip(clicked["t"].as_f64()).is_some_and(|(sample, click)| sample >= click)
                     && s["x"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))
-                    && s["after"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))
             })
             .collect();
-        ensure(departing.len() >= 2, || format!("fewer than two visible departing samples: {trace}"))?;
+        ensure(departing.iter().filter(|s| s["kind"] == "frame").count() >= 2, || {
+            format!("fewer than two visible departing frames: {trace}")
+        })?;
         ensure(samples.iter().filter_map(|s| s["opacity"].as_f64()).all(|opacity| opacity >= 0.99), || {
             format!("the pane faded during its interrupted close: {trace}")
         })?;
-        ensure(departing.iter().all(|s| s["shown"] == true && s["nativeX"].as_f64().is_some_and(|x| x > -10000.0)), || {
-            format!("the native page disappeared while its moving column was visible: {trace}")
+        ensure(departing.iter().any(|s| s["afterX"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))), || {
+            format!("no native answer bracketed a visible departing column: {trace}")
         })?;
+        ensure(
+            departing
+                .iter()
+                .filter(|s| s["afterX"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width)))
+                .all(|s| s["shown"] == true && s["nativeX"].as_f64().is_some_and(|x| x > -10000.0)),
+            || format!("the native page disappeared while its moving column was visible: {trace}"),
+        )?;
         let mut previous = clicked["x"].as_f64().ok_or("the click omitted the column's position")?;
         for sample in &departing {
             let x = sample["x"].as_f64().ok_or("departing column omitted its position")?;
@@ -523,6 +552,7 @@ fn resize(page: &mut crate::page::Page, width: u32, height: u32) -> Result {
 fn browser_pane(ctx: &mut Ctx) -> Result {
     let (mut app, fixture) = open_browser(ctx)?;
     let page = &mut app.page;
+    page.eval(CLOSE_SAMPLER)?;
     page.eval("localStorage.setItem('faber.browser-proof.host','keep-host-marker'); true")?;
     super::system_motion(page, false)?;
     let started = Instant::now();
@@ -629,25 +659,17 @@ fn browser_pane(ctx: &mut Ctx) -> Result {
         resize(page, width, 800)?;
         // Native resize intentionally suppresses travel for 250 ms; exercise a close after that resize has settled.
         page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
+        reopen_snapshot(ctx, page, width, "before")?;
         page.eval(
             r#"(() => {
-          window.__browserCloseTrace = new Promise(resolve => {
-            const samples = [], end = performance.now() + 800;
-            const frame = async () => {
-              const column = document.querySelector('.runcol');
-              const box = column?.getBoundingClientRect();
-              const opacity = column ? Number(getComputedStyle(column).opacity) : null;
-              const p = await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
-              const after=document.querySelector('.runcol')?.getBoundingClientRect();
-          samples.push({x:box?.x,afterX:after?.x,viewport:innerWidth,opacity,shown:p.shown,nativeX:p.x});
-              if (performance.now()<end) requestAnimationFrame(frame); else resolve(samples);
-            };
-            requestAnimationFrame(frame);
-          });
+          window.__browserCloseTrace=null;
+          document.querySelector(".site-head button[aria-label='Close the running list']")
+            .addEventListener('click',()=>{
+          window.__browserCloseTrace=window.__sampleBrowserClose(800);
+            },{once:true,capture:true});
           return true;
         })()"#,
         )?;
-        reopen_snapshot(ctx, page, width, "before")?;
         page.click(&css(".site-head button[aria-label='Close the running list']"))?;
         page.wait_gone(&css(".site-address"))?;
         let trace = page.eval("window.__browserCloseTrace")?;
@@ -655,10 +677,11 @@ fn browser_pane(ctx: &mut Ctx) -> Result {
         let visible: Vec<_> = samples
             .iter()
             .filter(|sample| {
-                sample["x"].as_f64().is_some_and(|x| {
-                    x + 24.0 < sample["viewport"].as_f64().unwrap_or_default()
-                        && sample["afterX"].as_f64().is_some_and(|after| after + 24.0 < sample["viewport"].as_f64().unwrap_or_default())
-                })
+                sample["exiting"] == true
+                    && sample["x"].as_f64().is_some_and(|x| {
+                        x + 24.0 < sample["viewport"].as_f64().unwrap_or_default()
+                            && sample["afterX"].as_f64().is_some_and(|after| after + 24.0 < sample["viewport"].as_f64().unwrap_or_default())
+                    })
             })
             .collect();
         ensure(!visible.is_empty(), || format!("no visible close sample captured at {width}px: {trace}"))?;
@@ -667,7 +690,7 @@ fn browser_pane(ctx: &mut Ctx) -> Result {
         })?;
         let xs: Vec<f64> = samples
             .iter()
-            .filter(|sample| sample["shown"] == true)
+            .filter(|sample| sample["exiting"] == true && sample["shown"] == true)
             .filter_map(|sample| sample["nativeX"].as_f64())
             .filter(|x| *x > -10000.0)
             .collect();
@@ -819,7 +842,8 @@ impl Fixture {
                     Ok((stream, _)) => {
                         connection += 1;
                         fixture_event(&thread_events, started, connection, "accepted".into());
-                        serve(stream, &thread_requests, &thread_events, started, connection);
+                        let (requests, events) = (thread_requests.clone(), thread_events.clone());
+                        std::thread::spawn(move || serve(stream, &requests, &events, started, connection));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
                     Err(e) => {
@@ -866,8 +890,15 @@ fn fixture_event(events: &Mutex<Vec<String>>, started: Instant, connection: usiz
 }
 
 fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>, events: &Mutex<Vec<String>>, started: Instant, connection: usize) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    // Accepted sockets inherit the listener's nonblocking mode on Windows.
+    if let Err(e) = stream
+        .set_nonblocking(false)
+        .and_then(|()| stream.set_read_timeout(Some(Duration::from_secs(2))))
+        .and_then(|()| stream.set_write_timeout(Some(Duration::from_secs(2))))
+    {
+        fixture_event(events, started, connection, format!("socket setup error: {e}"));
+        return;
+    }
     let mut raw = [0u8; 4096];
     let count = match stream.read(&mut raw) {
         Ok(count) => {
@@ -904,4 +935,23 @@ fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>, events: &Mutex<Ve
     fixture_event(events, started, connection, format!("response {} bytes: {written:?}", response.len()));
     let flushed = stream.flush();
     fixture_event(events, started, connection, format!("flush: {flushed:?}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_fixture_waits_for_the_request_after_accepting_a_connection() {
+        let fixture = Fixture::start().unwrap();
+        let mut stream = TcpStream::connect(fixture.origin.trim_start_matches("http://")).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        // WebView2 can connect before it has a request ready, especially under load.
+        std::thread::sleep(Duration::from_millis(100));
+        stream.write_all(b"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}; {}", fixture.diagnostics());
+        assert_eq!(fixture.requests(), ["/one"]);
+    }
 }
