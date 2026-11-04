@@ -20,6 +20,10 @@ In the narrow sidebar overlay, switching Chat and Projects keeps navigation open
 The What's New page starts below the 36 px titlebar. Its scrolling viewport never extends behind the brand or window
 controls, including when focus scrolls to Continue in a short window (`tests/ui/notes.check.ts`, `notes: scrolling`).
 
+Quit in the Electron tray waits for the engine to finish saving and exit, including repeated Quit requests while it
+closes. Slow storage gets up to a minute before force termination; the shell still waits for confirmed process exit.
+The window's Close keeps the existing tray behavior (`scripts/electron-sidecar.test.mjs`).
+
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
 inside its own area.
 

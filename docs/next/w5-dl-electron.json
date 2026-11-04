@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Quitting gives slow saves more time to finish before Faber closes.",
+      "pt-BR": "Ao sair do Faber, gravações demoradas têm mais tempo pra terminar antes de ele fechar.",
+      "es": "Al salir de Faber, los guardados lentos tienen más tiempo para terminar antes de que se cierre.",
+      "fr": "Quand vous quittez Faber, les enregistrements lents ont plus de temps pour se terminer avant la fermeture.",
+      "de": "Wenn du Faber beendest, bleibt mehr Zeit, damit langsame Speichervorgänge vor dem Schließen fertig werden."
+    }
+  }
+}

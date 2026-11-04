@@ -8,6 +8,10 @@ The shipped app is still Tauri until the Electron release workflow lands. The sw
 
 Electron CI run 41354470235 measured 108 MB idle and 3.9% focused / 0.5% unfocused CPU on one core; it failed 38 UI checks. Run 41409242442 could not open the screen or measure memory. These are not comparable to the older Tauri measurements below.
 
+Electron Quit closes the sidecar's input and waits for its exit, giving shutdown saves 60 seconds before force
+termination. Repeated Quit requests cannot bypass that wait, and no new screen calls are accepted after input closes
+(`scripts/electron-sidecar.test.mjs`). The timer exists only while quitting; no background polling is added.
+
 ```text
 App (Tauri 2: window, tray, notifications, auto-update)
  └─ UI (SolidJS + TypeScript, in the system webview) ── fixed command list ──┐

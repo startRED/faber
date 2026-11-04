@@ -81,8 +81,8 @@ export class Sidecar {
     child.on('exit', gone);
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
     child.on('error', (error) => {
-      console.error(`faber: the host could not start: ${error.message}`);
-      gone();
+      console.error(`faber: host process error: ${error.message}`);
+      if (child.pid === undefined) gone();
     });
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
@@ -92,7 +92,7 @@ export class Sidecar {
   }
 
   call(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-    if (!this.alive) return Promise.reject(new Error('error.host.gone'));
+    if (!this.alive || this.child.stdin.writableEnded) return Promise.reject(new Error('error.host.gone'));
     if (this.pending.size >= MAX_PENDING) return Promise.reject(new Error('error.host.busy'));
     const id = this.next++;
     let line: string;
@@ -121,7 +121,7 @@ export class Sidecar {
     if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 
-  /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
+  /** Closes input to flush saves; after `patience` ms requests termination, still waiting for confirmed exit. */
   async stop(patience: number): Promise<void> {
     if (!this.alive) return;
     this.child.stdin.end();
@@ -129,8 +129,12 @@ export class Sidecar {
     const late = new Promise<'late'>((resolve) => {
       timer = setTimeout(() => resolve('late'), patience);
     });
-    if ((await Promise.race([this.exited, late])) === 'late') this.child.kill();
+    const result = await Promise.race([this.exited, late]);
     clearTimeout(timer);
+    if (result === 'late') {
+      if (!this.child.kill()) throw new Error('faber: the host could not stop');
+      await this.exited;
+    }
   }
 
   private heard(line: string, listen: Listeners): void {
