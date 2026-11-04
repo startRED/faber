@@ -3,7 +3,10 @@
 ; and features shows one Faber. The data folder is never touched: settings and conversations stay where they are.
 ; FABER_INSTALLER_SMOKE=1 (scripts/electron-smoke.mjs) leaves the real registry alone.
 !macro customHeader
-  Var /GLOBAL WaybackTemp
+  ; The uninstaller build includes this header too and never uses it (warning 6001 is an error).
+  !ifndef BUILD_UNINSTALLER
+    Var /GLOBAL WaybackTemp
+  !endif
 !macroend
 
 !macro customInit
