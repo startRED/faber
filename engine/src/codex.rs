@@ -49,6 +49,22 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Perm
     args
 }
 
+fn approval_details(method: &str, params: &Value) -> (String, Value) {
+    let tool = match method {
+        "item/commandExecution/requestApproval" => "command",
+        "item/fileChange/requestApproval" => "fileChange",
+        _ => return (params["kind"].as_str().unwrap_or(method).to_string(), params.clone()),
+    };
+    // Keep the request's explanation and folder beside the action, without carrying routing identifiers into the card.
+    let mut input = Map::new();
+    for key in ["command", "changes", "cwd", "reason", "grantRoot"] {
+        if let Some(value) = params.get(key).filter(|value| !value.is_null()) {
+            input.insert(key.to_string(), value.clone());
+        }
+    }
+    (tool.into(), Value::Object(input))
+}
+
 /// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks before every command that
 /// is not a plain read and before every file change, inside that folder too. The other guarded modes (R140) keep that sandbox and
 /// ask only for what leaves it: Accept edits and Auto let `on-request` decide, Plan makes the folder read-only, and Auto sends
@@ -2109,8 +2125,7 @@ async fn serve(
                                 }
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
-                                let tool = params["kind"].as_str().unwrap_or(method).to_string();
-                                let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
+                                let (tool, input) = approval_details(method, params);
                                 // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
                                 // refusal is always safe, so it is written here instead of racing the engine's mode.
                                 if crate::permissions::touches_credentials(&input, params["cwd"].as_str(), &|name| std::env::var(name).ok())
@@ -2742,9 +2757,28 @@ mod rewind_tests {
         );
     }
 
+    #[test]
+    fn permission_details_keep_the_reason_and_working_folder() {
+        let params = json!({ "command": ["pwsh", "-Command", "Get-ChildItem"], "cwd": "C:/work", "reason": "Read the build files", "threadId": "private" });
+        let (tool, input) = approval_details("item/commandExecution/requestApproval", &params);
+        assert_eq!(tool, "command");
+        assert_eq!(input["command"], params["command"]);
+        assert_eq!(input["cwd"], params["cwd"]);
+        assert_eq!(input["reason"], params["reason"]);
+        assert!(input.get("threadId").is_none());
+        let (tool, input) = approval_details(
+            "item/fileChange/requestApproval",
+            &json!({ "changes": { "app.ts": { "add": { "content": "hello" } } }, "reason": "Add the view" }),
+        );
+        assert_eq!(tool, "fileChange");
+        assert!(input["changes"]["app.ts"].is_object());
+        assert_eq!(input["reason"], "Add the view");
+    }
+
     #[tokio::test]
     async fn rewind_failed_native_open_releases_its_writer_without_stopping_a_real_servers_peer() {
         use tokio::io::AsyncWriteExt;
+
         for failure in ["thread/resume", "thread/revert"] {
             tokio::time::timeout(Duration::from_secs(5), async {
                 let root = proc::ProcessIdentity { pid: 100, created: 1 };

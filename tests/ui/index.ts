@@ -75,6 +75,7 @@ import './pace.check.ts';
 import './auto-learned.check.ts';
 import './plan.check.ts';
 import './question.check.ts';
+import './permissions.check.ts';
 import './selfchange.check.ts';
 import './quiet.check.ts';
 import './agents.check.ts';
