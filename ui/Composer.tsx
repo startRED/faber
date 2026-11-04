@@ -22,6 +22,7 @@ export interface Draft {
 const EMPTY: Draft = { text: '', images: [], files: [] };
 
 interface Props {
+  temporary?: boolean;
   vendors: Vendor[];
   options: Option[];
   choice: Choice;
@@ -596,6 +597,9 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
+      <Show when={props.temporary}>
+        <p class="hint" data-temporary-chat role="status" id="temporary-chat">{t('chat.temporaryNotice')}</p>
+      </Show>
       <Show when={attachmentError()}>
         <p class="hint" id={draftNoticeId} role="status">{t(attachmentLoadFailed() ? 'composer.draftLoadFailed' : 'composer.draftSaveFailed')}
           <Show when={attachmentLoadFailed()}>
@@ -641,7 +645,7 @@ export function Composer(props: Props) {
       <textarea
         data-restore="composer"
         aria-label={t('composer.message')}
-        aria-describedby={[attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
+        aria-describedby={[props.temporary && 'temporary-chat', attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
         rows={1}
         placeholder={historyMode() === 'search' ? t('composer.history') : props.placeholder}
         value={draft().text}

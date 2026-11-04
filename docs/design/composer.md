@@ -3,6 +3,13 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+A temporary Chat shows one quiet, static hint above its field: it is deleted when the person leaves. The field refers
+to that hint for screen readers; without a connected AI the same hint appears in the empty conversation. It uses the
+existing hint typography and wraps long words at the supported 720 px width. Its unsent text and attachments have no
+draft key, so they stay in memory instead of browser storage. Side-question and message-edit drafts share that private
+lifetime and are released on close; late callbacks remain barred from disk. Ordinary drafts keep their recovery behavior.
+Checks: `tests/ui/sidebar-exit.check.ts` (`temporary chat:`), with all five languages, 18 px text and reduced motion.
+
 After the first answer, an ordinary new conversation may receive a title of at most six words in the first message's
 language. A link-only or code-only message uses the Settings language. A bare web link immediately shows a localized
 host-only fallback, with no URL credentials, path or query. The existing sidebar row receives the title through the

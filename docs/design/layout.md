@@ -23,6 +23,13 @@ controls, including when focus scrolls to Continue in a short window (`tests/ui/
 Text size up to 18 px must not push the page past the window width at any of these widths: content wraps or scrolls
 inside its own area.
 
+Chat keeps New conversation and its Ctrl+N shortcut. A quiet arrow beside that button opens the existing Faber menu
+with New conversation and Temporary chat; Projects does not show this choice. Choosing Temporary chat closes the
+narrow sidebar and focuses its message box. The existing menu supplies keyboard navigation, Escape and focus return.
+Leaving for a conversation, a new conversation, a group or Projects asks the host to close the temporary chat before
+changing place. A refused deletion retains the current screen and shows the existing error notice.
+Checks: `tests/ui/sidebar-exit.check.ts` (`temporary chat:`), including 720 px and all five languages.
+
 ### Arranging the shell
 
 The numbers above are the usual widths. The person can change them, and the shell keeps what they choose (R211).

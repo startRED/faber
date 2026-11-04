@@ -344,6 +344,7 @@ export interface VisualPiece {
 }
 export interface Conversation {
   id: string;
+  temporary?: boolean;
   title: string;
   choice?: Choice;
   area: Area;
@@ -1008,6 +1009,8 @@ export const api = {
   backgroundCommands: () => invoke<BackgroundList>('background_commands'),
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
+  startTemporaryChat: () => invoke<string>('start_temporary_chat'),
+  closeChat: (id: string) => invoke<void>('close_chat', { id }),
   messagesBefore: (id: string, messageId: string) => invoke<Message[] | null>('messages_before', { id, messageId }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),

@@ -29,7 +29,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { forgetDraft, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
+import { forgetDraft, forgetPrivateDrafts, keepPrivateDrafts, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
@@ -901,8 +901,21 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
+  let temporaryChat: string | undefined;
   const go = async (next: Place, messageIndex?: number) => {
     const generation = ++historyGeneration;
+    const leaving = temporaryChat ?? (current()?.temporary ? current()?.id : undefined);
+    if (leaving && leaving !== next.id) {
+      try {
+        await api.closeChat(leaving);
+        forgetPrivateDrafts(leaving);
+        if (temporaryChat === leaving) temporaryChat = undefined;
+      } catch (err) {
+        if (generation === historyGeneration) fail(err);
+        return;
+      }
+      if (generation !== historyGeneration) return;
+    }
     olderPage = undefined;
     keepReading(); saveReading();
     reading = undefined;
@@ -938,6 +951,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // Messages that came while the snapshot was on its way are already in it, merged by `opening`.
     const done = opening.finish(token, snapshot);
     if (done.stale) return;
+    if (done.conversation?.temporary) {
+      temporaryChat = done.conversation.id;
+      keepPrivateDrafts(temporaryChat);
+    }
     setLoading(false);
     const offset = done.conversation?.earlier ?? 0;
     const target = messageIndex !== undefined && messageIndex >= offset && messageIndex < offset + (done.conversation?.messages.length ?? 0) ? messageIndex - offset : undefined;
@@ -984,6 +1001,26 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const fresh = (next: Pick<Place, 'area' | 'projectId' | 'groupId'>) => {
     const group = next.area === 'chat' ? next.groupId ?? (next === place() ? groupForChat()?.id : undefined) : undefined;
     return group ? newGroupChat(group) : go({ area: next.area, projectId: next.projectId, id: undefined });
+  };
+  let startingTemporary = false;
+  const startTemporary = async () => {
+    if (startingTemporary) return;
+    startingTemporary = true;
+    const generation = historyGeneration;
+    try {
+      const id = await api.startTemporaryChat();
+      if (generation !== historyGeneration) return await api.closeChat(id);
+      if (temporaryChat) forgetPrivateDrafts(temporaryChat);
+      temporaryChat = id;
+      keepPrivateDrafts(id);
+      closeSide(false);
+      await go({ area: 'chat', id });
+      if (place().id === id) queueMicrotask(() => document.querySelector<HTMLElement>('.composer textarea')?.focus());
+    } catch (err) {
+      fail(err);
+    } finally {
+      startingTemporary = false;
+    }
   };
   // A session started in a terminal (parity F5) becomes this project's conversation, or opens the one it already is.
   const pickUpSession = async (projectId: string, session: CliSession) => {
@@ -1586,12 +1623,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const restartForUpdate = () => void api.updateRestart().catch((err) => setSaveError(failureText(err)));
   const composerKey = () => place().id ?? `new-${area()}-${projectId() ?? ''}`;
+  const temporary = () => !!place().id && (temporaryChat === place().id || (current()?.id === place().id && !!current()?.temporary));
   const title = () => state().conversations.find((c) => c.id === place().id)?.title ?? current()?.title;
   // The same conversation's draft survives moving between the greeting and the dock.
   const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
-        draftKey={composerKey()}
+        draftKey={temporary() ? undefined : composerKey()}
+        temporary={temporary()}
         vendors={state().vendors}
         options={options()}
         choice={picked()}
@@ -1936,6 +1975,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 usage={state().usage ?? []}
                 now={clock()}
                 onNew={() => (closeSide(false), void fresh(place()).catch(fail))}
+                onTemporary={() => void startTemporary()}
                 onArea={switchArea}
                 onProject={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
@@ -2107,6 +2147,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                 onCleanup(() => tailWatch().unobserve(el));
                               });
                             }}>
+                              <Show when={temporary() && state().vendors.length === 0}>
+                                <p class="hint" data-temporary-chat role="status">{t('chat.temporaryNotice')}</p>
+                              </Show>
                               <MissingFolder project={area() === 'project' ? project() : undefined} onFind={(id) => void findProjectFolder(id)} onRemove={(id) => void removeProjectFromFaber(id)} />
                               <Show
                                 when={current()?.messages.length || current()?.rewindNotice ? current() : undefined}
