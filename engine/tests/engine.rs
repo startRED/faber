@@ -16,6 +16,110 @@ use tokio::sync::mpsc::UnboundedReceiver;
 const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
+#[tokio::test]
+async fn temporary_chat_follow_up_reuses_live_context_without_replaying_history() {
+    let data = support::DataFolder::new();
+    let mut entries = fixture("claude", "chat");
+    entries.extend(fixture("claude", "chat"));
+    let f = fake(entries);
+    let (engine, mut rx) = engine(&data, Vendor::Claude, f.spawn.clone());
+    let id = engine.start_temporary_chat().unwrap();
+    engine.warm(WarmRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Chat,
+        project_id: None,
+        choice: choice("claude", Some("haiku")),
+    });
+    assert!(f.args.lock().unwrap().is_empty());
+    for _ in 0..2 {
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, SKY, choice("claude", Some("haiku"))) }).unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        assert_ne!(reply.note.as_deref(), Some("note.historyResent"));
+    }
+    let sent = f.wire.messages();
+    let turns: Vec<_> = sent.iter().filter(|m| m["type"] == "user").collect();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[1]["message"]["content"], SKY);
+    assert!(f.args.lock().unwrap()[0].iter().any(|a| a == "--no-session-persistence"));
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    engine.close_chat(&id).unwrap();
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn temporary_chat_close_switch_and_shutdown_preserve_ordinary_conversations() {
+    let data = support::DataFolder::new();
+    let store = faber_engine::store::Store::new(data.path());
+    let mut ordinary: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    ordinary.id = "ordinary".into();
+    store.save_checked(&ordinary).unwrap();
+    let path = data.path().join("conversations/ordinary.json");
+    let original = std::fs::read(&path).unwrap();
+    let (engine, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
+    engine.close_chat("ordinary").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), original, "close must not write or delete an ordinary record");
+    let id = engine.start_temporary_chat().unwrap();
+    assert!(engine.open(&id).unwrap().temporary);
+    engine.answer_plan(Vendor::Claude, "pro");
+    assert!(engine.open(&id).is_some(), "account changes never close the temporary chat");
+    assert!(engine.state().conversations.iter().all(|c| c.id != id));
+    engine.close_chat(&id).unwrap();
+    assert!(store.get(&id).is_none());
+    assert!(engine.open(&id).is_none());
+    let id = engine.start_temporary_chat().unwrap();
+    assert!(engine.open_for_screen("missing").is_none());
+    assert!(store.get(&id).is_some(), "a failed open does not leave the temporary chat");
+    assert!(engine.open_for_screen_window("ordinary", 40).is_some());
+    assert!(store.get(&id).is_none(), "switching conversations deletes the temporary record");
+    let id = engine.start_temporary_chat().unwrap();
+    engine.shutdown();
+    assert!(store.get(&id).is_none());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn temporary_chat_startup_sweep_only_deletes_explicit_temporary_records() {
+    let data = support::DataFolder::new();
+    let store = faber_engine::store::Store::new(data.path());
+    let mut record: faber_engine::model::Conversation =
+        serde_json::from_str(include_str!("../../tests/fixtures/conversation-export.json")).unwrap();
+    record.id = "crash-left".into();
+    record.temporary = true;
+    record.sessions.insert(Vendor::Claude, "synthetic-session".into());
+    store.save_checked(&record).unwrap();
+    let locked = support::work_folder();
+    let blocked = locked.path().join("blocked-owned");
+    std::fs::create_dir(&blocked).unwrap();
+    record.id = "blocked".into();
+    record.temporary_attachments = vec![blocked.to_string_lossy().into_owned()];
+    store.save_checked(&record).unwrap();
+    // Historical records omit the flag; a literal occurrence in a title must never count as a flag.
+    record.id = "ordinary".into();
+    record.title = "temporary: true".into();
+    record.temporary = false;
+    record.temporary_attachments.clear();
+    record.branch_of = Some(faber_engine::model::BranchOf { conversation_id: "crash-left".into(), message_id: "reply".into() });
+    store.save_checked(&record).unwrap();
+    let normal = data.path().join("conversations/ordinary.json");
+    let before = std::fs::read(&normal).unwrap();
+    let damaged = data.path().join("conversations/damaged.json");
+    std::fs::write(&damaged, br#"{"temporary":true,"id":"damaged","#).unwrap();
+    let mismatch = data.path().join("conversations/mismatch.json");
+    std::fs::write(&mismatch, br#"{"temporary":true,"id":"ordinary"}"#).unwrap();
+    let (engine, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
+    assert!(!data.path().join("conversations/crash-left.json").exists());
+    assert!(store.get("crash-left").is_none());
+    assert!(store.get("blocked").is_some(), "a cleanup failure must not prevent startup or the other deletions");
+    assert_eq!(std::fs::read(&normal).unwrap(), before);
+    assert!(store.get("ordinary").unwrap().sessions.contains_key(&Vendor::Claude));
+    assert!(damaged.exists());
+    assert!(mismatch.exists());
+    assert!(engine.open_for_screen("ordinary").is_some(), "a blocked cleanup never prevents opening an ordinary chat");
+    engine.shutdown();
+    assert_eq!(std::fs::read(&normal).unwrap(), before);
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn cli_lifetime_kill_during_job_termination_is_idempotent() {
@@ -2333,19 +2437,21 @@ async fn r107_a_saved_chat_folder_is_used_and_is_never_deleted_with_the_conversa
 }
 
 #[tokio::test]
-async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept() {
+async fn r106_orphaned_chat_scratch_keeps_untracked_files_and_saved_conversations() {
     let data = support::DataFolder::new();
     let legacy = data.path().join("chat");
     let orphan = legacy.join("11111111-1111-4111-8111-111111111111");
     std::fs::create_dir_all(&orphan).unwrap();
     std::fs::write(orphan.join("temporary.txt"), "orphan").unwrap();
+    std::fs::create_dir_all(legacy.join("33333333-3333-4333-8333-333333333333")).unwrap();
     let retained = legacy.join("22222222-2222-4222-8222-222222222222");
     std::fs::create_dir_all(&retained).unwrap();
     std::fs::create_dir_all(data.path().join("conversations")).unwrap();
     // Even an unreadable record is retained: cleanup must not discard a person's files on a parse failure.
     std::fs::write(data.path().join("conversations/22222222-2222-4222-8222-222222222222.json"), "{}").unwrap();
     let (engine, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
-    assert!(!chat_root(&data).join("11111111-1111-4111-8111-111111111111").exists());
+    assert_eq!(std::fs::read_to_string(chat_root(&data).join("11111111-1111-4111-8111-111111111111/temporary.txt")).unwrap(), "orphan");
+    assert!(chat_root(&data).join("33333333-3333-4333-8333-333333333333").exists());
     assert!(chat_root(&data).join("22222222-2222-4222-8222-222222222222").exists());
     engine.shutdown();
 }
@@ -4506,6 +4612,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             bin: "claude".into(),
             cwd: dir.path().into(),
             launch: ClaudeLaunch {
+                temporary: false,
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
