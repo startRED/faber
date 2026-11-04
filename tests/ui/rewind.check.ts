@@ -406,11 +406,17 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
   api.rewindRestore = async () => { conversation = { ...conversation, messages: [], rewindNotice: 'note.rewind.savedMessages' }; return result(); };
   api.rewindRedos = async () => conversation.rewindNotice ? [{ id: 'redo-1', messageId: 'u1', mode: 'both', expiresAt: Date.now() + 86_400_000 }] : [];
   localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: conversation.id }));
+  let onScroll: (event: Event) => void;
+  const scrolled = new Promise<void>((resolve) => {
+    onScroll = (event) => { if (event.target instanceof Element && event.target.matches('.thread')) resolve(); };
+    root.addEventListener('scroll', onScroll, true);
+  });
   const dispose = render(() => [createComponent(App, { initial, inbox: { take: () => {} } }), createComponent(ContextMenuHost, {})], root);
   try {
     await settle();
     const mine = root.querySelector<HTMLElement>('.mine')!;
     ok(mine, 'the saved conversation opened');
+    if (root.querySelector<HTMLElement>('.thread')!.scrollTop > 0) await scrolled;
     let refusalStarted = performance.now();
     const refusalCheckpoints: Array<Record<string, unknown>> = [];
     const menuIds = new WeakMap<Element, number>();
@@ -480,6 +486,7 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
     equal(root.querySelector('.welcome-grid'), null, 'the empty saved conversation is not a new chat');
     equal(dialog(root).querySelector('[role=alert]'), null, 'reloading the saved conversation never previews its removed message again');
   } finally {
+    root.removeEventListener('scroll', onScroll!, true);
     dispose(); root.remove(); Object.assign(api, before); restore(); useLanguage(language);
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
