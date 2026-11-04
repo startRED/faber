@@ -65,6 +65,7 @@ watches. The shared Collapse follows the look’s normal/reduced/no-motion rules
 Each row shows the source, relative file and original line, then literal Markdown text. Paths and paragraphs wrap at
 720 px; only 50 rows mount first, with Show more. A file over 256 KiB shows its path and a short reason without entries.
 A Faber note over its target shows one quiet line with its size and target, once per file. The generated rules file is read-only. An empty list and a failed read are distinct, and Refresh retries. A partial scan says it is partial.
+At conversation close, missing file references get one quiet localized line beneath the entry. The stored `(stale?)` mark is hidden in reading mode and retained in the editor; personal entries with a matching record keep their text unchanged. Stale entries leave the next start card and return after a later close finds their files again. Links and ambiguous text are left alone; no timer, watcher, motion or new control is added.
 Memory refuses Gemini's default private folder for reads and edits, alongside the other CLI private folders.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 

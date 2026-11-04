@@ -359,6 +359,7 @@ impl Core {
                 let concluded = box_.outcome.is_some();
                 m.wrap_up = Some(box_);
                 let id = m.id.clone();
+                self.check_stale_paths(conv, &id);
                 if done {
                     self.count_close(conv);
                 }

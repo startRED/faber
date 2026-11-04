@@ -43,6 +43,18 @@ fn child(parent: &File, name_text: &str, directory: bool, create: bool, replacin
 }
 
 fn child_access(parent: &File, name_text: &str, directory: bool, create: bool, replacing: bool, access: u32) -> io::Result<File> {
+    child_access_inner(parent, name_text, directory, create, replacing, access, false)
+}
+
+fn child_access_inner(
+    parent: &File,
+    name_text: &str,
+    directory: bool,
+    create: bool,
+    replacing: bool,
+    access: u32,
+    metadata_only: bool,
+) -> io::Result<File> {
     let mut wide = name(name_text)?;
     let mut unicode = UNICODE_STRING { Length: (wide.len() * 2) as u16, MaximumLength: (wide.len() * 2) as u16, Buffer: wide.as_mut_ptr() };
     let attributes = OBJECT_ATTRIBUTES {
@@ -55,7 +67,9 @@ fn child_access(parent: &File, name_text: &str, directory: bool, create: bool, r
     let mut handle = std::ptr::null_mut();
     let mut ios = IO_STATUS_BLOCK::default();
     // DELETE access on a retained new directory would block a second shared guard from opening it.
-    let access = access | 0x8000_0000 | if create { if directory { 0x4000_0000 } else { 0x4001_0000 } } else { 0 };
+    let access = access
+        | if metadata_only { 0x80 } else { 0x8000_0000 }
+        | if create { if directory { 0x4000_0000 } else { 0x4001_0000 } } else { 0 };
     let options =
         FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | if directory { FILE_DIRECTORY_FILE } else { FILE_NON_DIRECTORY_FILE };
     // SAFETY: the counted UTF-16 name and attributes live through this synchronous call. RootDirectory is an owned
@@ -164,6 +178,28 @@ impl MemoryDirectory {
 
     pub fn file(&self, name: &str, create: bool) -> io::Result<File> {
         child(self.directory(), name, false, create, false)
+    }
+
+    /// Check a regular file using attributes-only handles; every component rejects reparse points.
+    pub fn file_exists(&self, relative: &Path) -> io::Result<bool> {
+        let mut parents = vec![self.directory().try_clone()?];
+        let parts: Vec<_> = relative.components().collect();
+        if parts.is_empty() {
+            return Err(denied());
+        }
+        for (index, part) in parts.iter().enumerate() {
+            let Component::Normal(value) = part else { return Err(denied()) };
+            parents.push(child_access_inner(
+                parents.last().ok_or_else(denied)?,
+                value.to_str().ok_or_else(denied)?,
+                index + 1 < parts.len(),
+                false,
+                false,
+                0,
+                true,
+            )?);
+        }
+        Ok(true)
     }
 
     /// Keep in-place writers out through replacement, while allowing the prepared file to atomically replace this name.

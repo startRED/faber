@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "Memory marks missing file references and leaves those items out of the start card; your words stay unchanged.",
+      "pt-BR": "A Memória avisa quando um arquivo citado sumiu e deixa o item fora do cartão inicial; seus textos ficam intactos.",
+      "es": "Memoria avisa si falta un archivo citado y retira ese elemento de la tarjeta inicial; tus palabras se conservan.",
+      "fr": "Mémoire signale les fichiers cités introuvables et retire ces éléments de la fiche de départ ; vos textes restent intacts.",
+      "de": "Das Gedächtnis kennzeichnet fehlende Dateiverweise und lässt diese Einträge auf der Startkarte weg; deine eigenen Texte bleiben unverändert."
+    }
+  }
+}

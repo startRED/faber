@@ -8,6 +8,7 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
 pub const MAX_BYTES: usize = 256 * 1024;
+pub const STALE: &str = " (stale?)";
 // Adopted logs include the reference decision table, which exceeds Memory's ordinary file cap.
 const ADOPTED_MAX_BYTES: usize = 512 * 1024;
 const MAX_ENTRIES: usize = 4096;
@@ -33,16 +34,19 @@ pub enum KeptDecision {
         hash: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stale: bool,
     },
     Legacy(String),
 }
 
 impl KeptDecision {
     pub(crate) fn of(body: &str) -> Self {
+        let body = body.trim_end().strip_suffix(STALE).unwrap_or(body);
         let line = body.lines().next().unwrap_or_default().trim();
         let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")).unwrap_or(line);
         let normal = line.split_whitespace().collect::<Vec<_>>().join(" ");
-        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()), files: vec![] }
+        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()), files: vec![], stale: false }
     }
 
     pub(crate) fn matches(&self, record: &Self) -> bool {
@@ -86,6 +90,8 @@ pub struct Entry {
     pub author: Option<&'static str>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reviewed: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -153,6 +159,10 @@ fn mark(text: &str) -> Option<Mark> {
         return None;
     }
     parts.next().is_none().then_some(Mark { open, author })
+}
+
+pub(crate) fn is_stale(text: &str) -> bool {
+    mark(text).map_or(text, |m| &text[..m.open]).trim_end().ends_with(STALE)
 }
 
 fn normal(path: &Path) -> String {
@@ -275,6 +285,25 @@ impl Directory {
                 fd = openat(&fd, name, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty())?;
             }
             Ok(Self { fd })
+        }
+    }
+
+    fn file_exists(&self, relative: &Path) -> std::io::Result<bool> {
+        #[cfg(windows)]
+        let result = self.dir.file_exists(relative);
+        #[cfg(unix)]
+        let result: std::io::Result<bool> = (|| {
+            use rustix::fs::{AtFlags, FileType, statat};
+            let parent = self.under(relative.parent().ok_or(std::io::ErrorKind::PermissionDenied)?)?;
+            let stat = statat(&parent.fd, relative.file_name().ok_or(std::io::ErrorKind::PermissionDenied)?, AtFlags::SYMLINK_NOFOLLOW)?;
+            match FileType::from_raw_mode(stat.st_mode) {
+                FileType::RegularFile if stat.st_nlink == 1 => Ok(true),
+                _ => Err(std::io::ErrorKind::PermissionDenied.into()),
+            }
+        })();
+        match result {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            other => other,
         }
     }
 
@@ -853,6 +882,10 @@ pub fn mark_kept(list: &mut MemoryList, kept: &[KeptDecision]) {
             entry.author = Some("ai");
         }
         entry.reviewed = entry.author == Some("ai") && recorded;
+        entry.stale |= entry.body.as_deref().is_some_and(|body| {
+            let item = KeptDecision::of(body);
+            kept.iter().any(|record| record.matches(&item) && matches!(record, KeptDecision::Item { stale: true, .. }))
+        });
     }
 }
 
@@ -913,7 +946,16 @@ fn entries(text: &str, limit: usize) -> Vec<Entry> {
             let content_end = text[..end].trim_end_matches(['\r', '\n']).len();
             line += text[cursor..range.start].bytes().filter(|b| *b == b'\n').count();
             cursor = range.start;
-            Entry { start: range.start, end, line, text: text[range.start..content_end].into(), body: None, author: None, reviewed: false }
+            Entry {
+                start: range.start,
+                end,
+                line,
+                text: text[range.start..content_end].into(),
+                body: None,
+                author: None,
+                reviewed: false,
+                stale: is_stale(&text[range.start..content_end]),
+            }
         })
         .collect()
 }
@@ -958,6 +1000,125 @@ pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
 /// `CLAUDE.md` or `AGENTS.md` is read, and a note that cannot be read is skipped (the list says it may be incomplete).
 pub fn list_faber(project: &Path) -> Result<MemoryList, &'static str> {
     scan(project, &private_roots(), true)
+}
+
+fn file_reference(code: &str) -> Option<String> {
+    let name = code.replace('\\', "/");
+    if name.len() > 1024
+        || name.chars().any(|c| c.is_whitespace() || ":;|&=$<>*?\"()\0".contains(c))
+        || name.split('/').any(|part| part.is_empty() || matches!(part, "." | ".."))
+        || Path::new(&name).is_absolute()
+    {
+        return None;
+    }
+    let extension = Path::new(&name).extension()?.to_str()?;
+    // Conventional file suffixes keep dotted routes, branches and setting names out of the check.
+    if ![
+        "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "md", "toml", "yaml", "yml", "css", "scss", "html", "py", "txt", "lock",
+        "svg", "png", "jpg", "jpeg", "webp", "gif", "ico", "sh", "ps1", "c", "h", "cpp", "hpp", "go", "mod", "sum", "sql", "xml", "ini",
+        "cfg", "conf", "svelte", "vue", "cs", "java", "kt", "swift", "rb", "wasm", "woff2", "ttf",
+    ]
+    .contains(&extension)
+    {
+        return None;
+    }
+    Some(name)
+}
+
+/// Only close calls this: at most 200 metadata probes, with ordinary revision-guarded entry edits.
+pub(crate) fn refresh_stale(
+    project: &Path,
+    kept: &[KeptDecision],
+    mut admitted: impl FnMut() -> bool,
+) -> Result<Vec<KeptDecision>, &'static str> {
+    let protected = resolved_private(&private_roots());
+    let (root, directory) = project_directory(project, &protected)?;
+    let identity = directory.identity().map_err(|_| READ)?;
+    let notes = match directory.under(Path::new(".faber")) {
+        Ok(notes) => notes,
+        Err(_) => return Ok(kept.to_vec()),
+    };
+    let mut list = MemoryList::default();
+    for name in ["decisions.md", "taste.md"] {
+        let path = format!(".faber/{name}");
+        if private(&root.join(&path), &protected) {
+            continue;
+        }
+        if let Ok(mut file) = read_file(&notes, name, path, "faber", MAX_BYTES) {
+            file.revision = format!("{identity}:{}", file.revision);
+            list.files.push(file);
+        }
+    }
+    let mut records = upgrade_kept(&list, kept);
+    let mut remaining = 200usize;
+    for file in list.files {
+        if !file.revision.starts_with(&format!("{identity}:")) {
+            return Err(CHANGED);
+        }
+        let path = Path::new(&file.path);
+        let name = path.file_name().and_then(|n| n.to_str()).ok_or(REFUSED)?;
+        let mut expected = file.revision.clone();
+        let mut current: Option<MemoryFile> = None;
+        for (index, entry) in file.entries.iter().enumerate().rev() {
+            if current.as_ref().is_some_and(|file| {
+                file.entries.get(index).is_none_or(|e| e.start != entry.start || e.end != entry.end || e.text != entry.text)
+            }) {
+                return Err(CHANGED);
+            }
+            let body = entry.body.as_deref().unwrap_or(&entry.text);
+            let mut seen = false;
+            let mut missing = false;
+            let mut unknown = false;
+            for code in Parser::new(body).filter_map(|event| if let Event::Code(code) = event { Some(code) } else { None }) {
+                let Some(reference) = file_reference(&code) else { continue };
+                seen = true;
+                if remaining == 0 || private(&root.join(&reference), &protected) || adopted_relative(&reference).is_err() {
+                    unknown = true;
+                    continue;
+                }
+                remaining -= 1;
+                match directory.file_exists(Path::new(&reference)) {
+                    Ok(exists) => missing |= !exists,
+                    Err(_) => unknown = true,
+                }
+            }
+            if !seen || unknown || !admitted() {
+                continue;
+            }
+            let item = KeptDecision::of(body);
+            if entry.author == Some("person") && kept.iter().any(|record| record.matches(&item)) {
+                for record in records.iter_mut().filter(|record| record.matches(&item)) {
+                    if let KeptDecision::Item { stale, .. } = record {
+                        *stale = missing;
+                    }
+                }
+                continue;
+            }
+            if entry.stale == missing {
+                continue;
+            }
+            let clean = body.trim_end().strip_suffix(STALE).unwrap_or(body.trim_end());
+            let mut text = format!("{clean}{}", if missing { STALE } else { "" });
+            if let Some(mark) = mark(&entry.text) {
+                text.push_str(&format!(" {}", &entry.text[mark.open..]));
+            }
+            edit(
+                project,
+                &Edit {
+                    path: file.path.clone(),
+                    revision: expected.clone(),
+                    start: entry.start,
+                    end: entry.end,
+                    text: Some(text),
+                    keep: false,
+                },
+            )?;
+            let updated = read_file(&notes, name, file.path.clone(), "faber", MAX_BYTES)?;
+            expected = format!("{identity}:{}", updated.revision);
+            current = Some(updated);
+        }
+    }
+    Ok(records)
 }
 
 fn reference_exists(directory: &Directory, root: &Path, name: &str, protected: &[String]) -> bool {
@@ -1014,7 +1175,9 @@ pub(crate) fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec
             let mut matching = kept.iter().filter(|record| record.matches(&item)).peekable();
             matching.peek().is_some()
                 && matching.all(|record| match record {
-                    KeptDecision::Item { files, .. } => files.iter().all(|name| reference_exists(&directory, &root, name, &protected)),
+                    KeptDecision::Item { files, stale, .. } => {
+                        !stale && files.iter().all(|name| reference_exists(&directory, &root, name, &protected))
+                    }
                     KeptDecision::Legacy(_) => true,
                 })
         })
@@ -1212,7 +1375,7 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
         return Err(CHANGED);
     }
     let original = std::str::from_utf8(&bytes).map_err(|_| READ)?;
-    let entry = entries(original, MAX_ENTRIES).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
+    let entry = entries(original, MAX_BYTES).into_iter().find(|e| e.start == edit.start && e.end == edit.end).ok_or(REFUSED)?;
     let mut replacement = String::new();
     if edit.keep {
         let text = &original[entry.start..entry.end];
@@ -1250,6 +1413,143 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_paths_mark_missing_restore_existing_and_preserve_people() {
+        let (project, _) =
+            decisions_file("- Use `src/missing.rs`. [by AI]\n- Keep `src/live.rs`. [by AI]\n- Person uses `src/gone.rs`. [by person]\n");
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/live.rs"), "live").unwrap();
+        let before = list_faber(project.path()).unwrap().files.remove(0);
+        let person = keep(project.path(), &before, 2).unwrap().unwrap();
+        let start = std::time::Instant::now();
+        let outside = KeptDecision::of("- Keep this nested decision.");
+        let legacy = KeptDecision::Legacy("a".repeat(32));
+        let records = refresh_stale(project.path(), &[person, outside.clone(), legacy.clone()], || true).unwrap();
+        assert_eq!(&records[1..], &[outside, legacy], "unscanned approvals are preserved");
+        eprintln!("stale_paths: three paths at close: {:?}", start.elapsed());
+        let mut list = list_faber(project.path()).unwrap();
+        mark_kept(&mut list, &records);
+        let entries = &list.files[0].entries;
+        assert!(entries[0].text.contains("src/missing.rs`. (stale?) [by AI]"));
+        assert!(!entries[1].stale);
+        assert_eq!(entries[1].text, before.entries[1].text);
+        assert_eq!(entries[2].text, before.entries[2].text);
+        assert!(entries[2].stale);
+        assert_eq!(entries[2].author, Some("person"));
+        assert!(kept_for_card(project.path(), &records).unwrap().is_empty());
+        std::fs::write(project.path().join("src/missing.rs"), "back").unwrap();
+        std::fs::write(project.path().join("src/gone.rs"), "back").unwrap();
+        let records = refresh_stale(project.path(), &records, || true).unwrap();
+        let mut restored = list_faber(project.path()).unwrap();
+        mark_kept(&mut restored, &records);
+        assert!(restored.files[0].entries.iter().all(|entry| !entry.stale));
+        assert_eq!(
+            std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap(),
+            before.entries.iter().map(|e| format!("{}\n", e.text)).collect::<String>()
+        );
+        assert_eq!(kept_for_card(project.path(), &records).unwrap(), [before.entries[2].body.clone().unwrap()]);
+    }
+
+    #[test]
+    fn stale_paths_leave_embedded_marks_as_prose_and_preserve_approvals() {
+        let body = "- Explain (stale?) while keeping `src/live.rs`.";
+        let (project, file) = decisions_file(&format!("{body} [by AI]\n"));
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/live.rs"), "live").unwrap();
+        let record = keep(project.path(), &file, 0).unwrap().unwrap();
+        assert!(!file.entries[0].stale);
+        refresh_stale(project.path(), std::slice::from_ref(&record), || true).unwrap();
+        assert!(crate::project::rules::card(&Default::default(), &[body], &[]).contains("Explain (stale?)"));
+        std::fs::remove_file(project.path().join("src/live.rs")).unwrap();
+        refresh_stale(project.path(), std::slice::from_ref(&record), || true).unwrap();
+        let marked = listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&record));
+        assert!(marked.entries[0].stale && marked.entries[0].reviewed);
+        assert!(!crate::project::rules::card(&Default::default(), &[marked.entries[0].body.as_deref().unwrap()], &[]).contains("Explain"));
+        std::fs::write(project.path().join("src/live.rs"), "live").unwrap();
+        refresh_stale(project.path(), std::slice::from_ref(&record), || true).unwrap();
+        assert_eq!(kept_for_card(project.path(), &[record]).unwrap(), [body]);
+    }
+
+    #[test]
+    fn stale_paths_check_the_newest_card_items_beyond_the_memory_display_limit() {
+        let text = format!("{}- Missing `src/newest.rs`. [by AI]\n", "- Older choice. [by AI]\n".repeat(MAX_ENTRIES + 1));
+        let (project, _) = decisions_file(&text);
+        refresh_stale(project.path(), &[], || true).unwrap();
+        assert!(
+            std::fs::read_to_string(project.path().join(".faber/decisions.md"))
+                .unwrap()
+                .ends_with("- Missing `src/newest.rs`. (stale?) [by AI]\n")
+        );
+    }
+
+    #[test]
+    fn stale_paths_ignore_prose_commands_settings_escapes_and_links() {
+        let original = "- Prose src/old.rs, `cargo test`, `setting.name`, `release/1.2`, `api/v1.2`, `feature/x.y`, `settings/feature.enabled`, `../x.rs`, `/absolute.rs`, `C:/x.rs`, `https://a/x.rs`, `linked/absent.rs`. [by AI]\n";
+        let (project, _) = decisions_file(original);
+        let outside = folder();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("linked")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("linked")).unwrap();
+        let (_, dir) = project_directory(project.path(), &[]).unwrap();
+        assert!(dir.file_exists(Path::new("linked/absent.rs")).is_err());
+        for text in [
+            "../x.rs",
+            "/absolute.rs",
+            "C:/x.rs",
+            "https://a/x.rs",
+            "cargo test",
+            "setting.name",
+            "release/1.2",
+            "api/v1.2",
+            "feature/x.y",
+            "settings/feature.enabled",
+        ] {
+            assert!(file_reference(text).is_none(), "{text}");
+        }
+        refresh_stale(project.path(), &[], || true).unwrap();
+        assert_eq!(std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap(), original);
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+        #[cfg(windows)]
+        junction::delete(project.path().join("linked")).unwrap();
+    }
+
+    #[test]
+    fn stale_paths_check_root_files_without_reading_contents() {
+        let (project, _) = decisions_file("- Keep `Cargo.toml` and `old.txt`. [by AI]\n");
+        std::fs::write(project.path().join("Cargo.toml"), "").unwrap();
+        let (_, dir) = project_directory(project.path(), &[]).unwrap();
+        assert!(dir.file_exists(Path::new("Cargo.toml")).unwrap());
+        assert!(!dir.file_exists(Path::new("old.txt")).unwrap());
+        refresh_stale(project.path(), &[], || true).unwrap();
+        assert!(list_faber(project.path()).unwrap().files[0].entries[0].stale);
+        std::fs::write(project.path().join("old.txt"), "").unwrap();
+        refresh_stale(project.path(), &[], || true).unwrap();
+        assert!(!list_faber(project.path()).unwrap().files[0].entries[0].stale);
+    }
+
+    #[test]
+    fn stale_paths_bound_probes_and_refuse_a_lost_admission_or_revision() {
+        let text = (0..201).map(|n| format!("- Missing `src/{n}.rs`. [by AI]\n")).collect::<String>();
+        let (project, _) = decisions_file(&text);
+        refresh_stale(project.path(), &[], || false).unwrap();
+        assert_eq!(std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap(), text);
+        let start = std::time::Instant::now();
+        refresh_stale(project.path(), &[], || true).unwrap();
+        eprintln!("stale_paths: 200 missing paths and guarded edits at close: {:?}", start.elapsed());
+        let result = std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap();
+        assert_eq!(result.matches(STALE).count(), 200);
+        let (project, _) = decisions_file("- Missing `src/gone.rs`. [by AI]\n");
+        assert_eq!(
+            refresh_stale(project.path(), &[], || {
+                std::fs::write(project.path().join(".faber/decisions.md"), "- Person changed this.\n").unwrap();
+                true
+            }),
+            Err(CHANGED)
+        );
+        assert_eq!(std::fs::read_to_string(project.path().join(".faber/decisions.md")).unwrap(), "- Person changed this.\n");
+    }
 
     #[test]
     fn follow_up_files_are_bounded_ready_and_excluded_from_memory_and_start_sources() {
@@ -1862,9 +2162,10 @@ mod tests {
         assert_eq!(value["hash"], revision(b"- Keep exports\n  for older customers."));
         assert_eq!(
             KeptDecision::of("*  Keep\t exports"),
-            KeptDecision::Item { id: revision(b"Keep exports"), hash: revision(b"*  Keep\t exports"), files: vec![] }
+            KeptDecision::Item { id: revision(b"Keep exports"), hash: revision(b"*  Keep\t exports"), files: vec![], stale: false }
         );
-        let wrong_id = KeptDecision::Item { id: revision(b"another item"), hash: value["hash"].as_str().unwrap().into(), files: vec![] };
+        let wrong_id =
+            KeptDecision::Item { id: revision(b"another item"), hash: value["hash"].as_str().unwrap().into(), files: vec![], stale: false };
         assert!(!listed(project.path(), ".faber/decisions.md", &[wrong_id]).entries[0].reviewed);
         assert!(listed(project.path(), ".faber/decisions.md", std::slice::from_ref(&record)).entries[0].reviewed);
         std::fs::write(project.path().join(".faber/decisions.md"), "- Keep exports\n  but remove old customers. [by person]\n").unwrap();

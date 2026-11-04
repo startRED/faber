@@ -1876,6 +1876,7 @@ export const en = {
   "memory.source.claude": "Claude Code",
   "memory.source.codex": "Codex",
   "memory.source.faber": "Faber",
+  'memory.stale': 'A referenced file is missing. Left out of the start card.',
   'memory.overLimit': 'Over its limit: {size} bytes (target: {target} bytes).',
   "memory.tooLarge": "This file is over 256 KB. Its entries are not shown.",
   "memory.noEntries": "No paragraphs or top-level list items in this file.",

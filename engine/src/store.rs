@@ -728,6 +728,11 @@ impl Store {
         read_checked(&self.projects).map(Option::unwrap_or_default)
     }
 
+    pub(crate) fn project_reader(&self, id: &str) -> impl Fn() -> Option<Project> + Send + 'static {
+        let (path, id) = (self.projects.clone(), id.to_string());
+        move || read_checked::<Vec<Project>>(&path).ok().flatten()?.into_iter().find(|p| p.id == id)
+    }
+
     pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
         let mut raw = serde_json::to_value(projects).map_err(|_| Fault::Corrupt)?;
         if let Some(items) = raw.as_array_mut() {
@@ -1069,6 +1074,12 @@ impl Store {
     pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<KeptDecision> + Send + 'static {
         let (path, project) = (self.decisions_kept.clone(), project.to_string());
         move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// Automatic edits must stop on unreadable consent records instead of assuming nobody wrote an item.
+    pub(crate) fn kept_decisions_checked_reader(&self, project: &str) -> impl Fn() -> Result<Vec<KeptDecision>, Fault> + Send + 'static {
+        let (path, project) = (self.decisions_kept.clone(), project.to_string());
+        move || Ok(read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&path)?.unwrap_or_default().remove(&project).unwrap_or_default())
     }
 
     /// `kept_decisions` for taking a review back, where a file that cannot be read is an error, as for Keep: one unreadable now,

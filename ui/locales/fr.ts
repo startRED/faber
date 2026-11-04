@@ -1937,6 +1937,7 @@ export const fr: Messages = {
   "memory.source.claude": "Claude Code",
   "memory.source.codex": "Codex",
   "memory.source.faber": "Faber",
+  'memory.stale': 'Un fichier cité est introuvable. Cet élément ne figure plus dans la fiche de départ.',
   'memory.overLimit': 'Au-dessus de la limite : {size} octets (objectif : {target} octets).',
   "memory.tooLarge": "Ce fichier dépasse 256 Ko. Ses entrées ne sont pas affichées.",
   "memory.noEntries": "Ce fichier ne contient ni paragraphe ni élément de liste de premier niveau.",

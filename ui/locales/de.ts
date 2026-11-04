@@ -1937,6 +1937,7 @@ export const de: Messages = {
   "memory.source.claude": "Claude Code",
   "memory.source.codex": "Codex",
   "memory.source.faber": "Faber",
+  'memory.stale': 'Eine genannte Datei fehlt. Dieser Eintrag erscheint nicht auf der Startkarte.',
   'memory.overLimit': 'Über dem Limit: {size} Byte (Ziel: {target} Byte).',
   "memory.tooLarge": "Diese Datei ist größer als 256 KB. Ihre Einträge werden nicht angezeigt.",
   "memory.noEntries": "Diese Datei enthält weder Absätze noch Listeneinträge auf oberster Ebene.",

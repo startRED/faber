@@ -1937,6 +1937,7 @@ export const es: Messages = {
   "memory.source.claude": "Claude Code",
   "memory.source.codex": "Codex",
   "memory.source.faber": "Faber",
+  'memory.stale': 'Falta un archivo citado. Este elemento queda fuera de la tarjeta inicial.',
   'memory.overLimit': 'Supera el límite: {size} bytes (objetivo: {target} bytes).',
   "memory.tooLarge": "Este archivo supera los 256 KB. No se muestran sus entradas.",
   "memory.noEntries": "Este archivo no tiene párrafos ni elementos de lista de primer nivel.",

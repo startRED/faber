@@ -85,6 +85,7 @@ mod settings_change;
 mod siblings;
 mod silence;
 mod stage;
+mod stale_paths;
 mod stuck_watch;
 mod temporary;
 mod title;
@@ -1473,6 +1474,7 @@ impl Engine {
         Ok(list)
     }
     pub fn edit_project_memory(&self, id: &str, edit: &crate::project::memory::Edit) -> Result<(), String> {
+        let _edit = stale_paths::EDITS.lock().map_err(|_| "error.memory.write".to_string())?;
         let project = self.project(id)?;
         // Keeping writes nothing to the project: the person's review is stored here, out of an agent's reach (R16). Words an
         // edit takes away lose their review first: a failed revocation keeps the text, and one whose write then fails only

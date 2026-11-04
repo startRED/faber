@@ -24,6 +24,28 @@ const button = (root: HTMLElement, key: Parameters<typeof t>[0]) => {
   return found;
 };
 
+check('project memory: stale file references have plain words in every language, including unchanged personal entries', async () => {
+  const before = api.projectMemory;
+  api.projectMemory = async () => ({ incomplete: false, files: [{ path: '.faber/decisions.md', source: 'faber', revision: 'stale', tooLarge: false, entries: [
+    { start: 0, end: 40, line: 1, text: '- Use `src/old.rs`. (stale?) [by AI]', body: '- Use `src/old.rs`. (stale?)', author: 'ai', stale: true },
+    { start: 41, end: 70, line: 2, text: '- My `src/gone.rs`. [by person]', body: '- My `src/gone.rs`.', author: 'person', stale: true },
+  ] }] });
+  const root = document.createElement('div'); root.style.width = '440px'; root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language); await settle();
+      equal([...root.querySelectorAll('.memory-entry .hint')].filter((p) => p.textContent === t('memory.stale')).length, 2);
+      ok(!root.textContent!.includes('(stale?)'), 'the stored mark uses plain words on screen');
+      equal(root.querySelectorAll('.memory-text')[1].textContent, '- My `src/gone.rs`.');
+      ok(root.scrollWidth <= root.clientWidth + 1, 'the mark wraps in a narrow reading column');
+    }
+    button(root, 'memory.edit').click(); await settle();
+    equal(root.querySelector('textarea')!.value, '- Use `src/old.rs`. (stale?) [by AI]', 'editing keeps the exact stored entry');
+  } finally { dispose(); root.remove(); api.projectMemory = before; useLanguage('en'); }
+});
+
 check('project memory: the project page lists each source and line, edits and deletes only after confirmation, and rereads on refresh', async () => {
   const before = { read: api.projectMemory, edit: api.editProjectMemory };
   let reads = 0;

@@ -1934,6 +1934,7 @@ export const ptBR: Messages = {
   "memory.source.claude": "Claude Code",
   "memory.source.codex": "Codex",
   "memory.source.faber": "Faber",
+  'memory.stale': 'Um arquivo citado não existe mais. Este item fica fora do cartão inicial.',
   'memory.overLimit': 'Acima do limite: {size} bytes (meta: {target} bytes).',
   "memory.tooLarge": "Este arquivo tem mais de 256 KB. As entradas não são exibidas.",
   "memory.noEntries": "Este arquivo não tem parágrafos nem itens de lista no primeiro nível.",

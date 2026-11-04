@@ -685,11 +685,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
         (kept, "\n## Decisions the person kept, newest first\n\n", 2 * 1024, "older decisions"),
         (taste, "\n## Taste the person kept\n\n", 1024, "more taste lines"),
     ] {
-        if bodies.is_empty() {
-            continue;
-        }
         let lines: Vec<_> = bodies
             .iter()
+            .filter(|body| !super::memory::is_stale(body))
             .map(|body| {
                 let line = body.lines().next().unwrap_or_default().trim();
                 let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).unwrap_or(line);
@@ -701,7 +699,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
                 }
             })
             .collect();
-        out.push_str(&card_lines(head, &lines, share, omitted));
+        if !lines.is_empty() {
+            out.push_str(&card_lines(head, &lines, share, omitted));
+        }
     }
     out.push_str(CLOSE);
     out
@@ -745,6 +745,15 @@ pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_start_card_omits_marked_items() {
+        let text = card(&Facts::default(), &["- Missing `src/old.rs` (stale?)", "- Keep this"], &["- Old taste (stale?)"]);
+        assert!(!text.contains("Missing"));
+        assert!(!text.contains("Old taste"));
+        assert!(!text.contains("## Taste"));
+        assert!(text.contains("Keep this"));
+    }
 
     #[test]
     fn project_start_card_sections_count_overflow_and_include_framing_in_the_byte_cap() {
