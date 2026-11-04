@@ -2437,19 +2437,21 @@ async fn r107_a_saved_chat_folder_is_used_and_is_never_deleted_with_the_conversa
 }
 
 #[tokio::test]
-async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept() {
+async fn r106_orphaned_chat_scratch_keeps_untracked_files_and_saved_conversations() {
     let data = support::DataFolder::new();
     let legacy = data.path().join("chat");
     let orphan = legacy.join("11111111-1111-4111-8111-111111111111");
     std::fs::create_dir_all(&orphan).unwrap();
     std::fs::write(orphan.join("temporary.txt"), "orphan").unwrap();
+    std::fs::create_dir_all(legacy.join("33333333-3333-4333-8333-333333333333")).unwrap();
     let retained = legacy.join("22222222-2222-4222-8222-222222222222");
     std::fs::create_dir_all(&retained).unwrap();
     std::fs::create_dir_all(data.path().join("conversations")).unwrap();
     // Even an unreadable record is retained: cleanup must not discard a person's files on a parse failure.
     std::fs::write(data.path().join("conversations/22222222-2222-4222-8222-222222222222.json"), "{}").unwrap();
     let (engine, _) = engine(&data, Vendor::Claude, fake(vec![]).spawn);
-    assert!(!chat_root(&data).join("11111111-1111-4111-8111-111111111111").exists());
+    assert_eq!(std::fs::read_to_string(chat_root(&data).join("11111111-1111-4111-8111-111111111111/temporary.txt")).unwrap(), "orphan");
+    assert!(chat_root(&data).join("33333333-3333-4333-8333-333333333333").exists());
     assert!(chat_root(&data).join("22222222-2222-4222-8222-222222222222").exists());
     engine.shutdown();
 }

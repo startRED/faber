@@ -96,22 +96,47 @@ impl Core {
     }
 
     pub(super) fn remove_temporary_attachments(&mut self, id: &str) -> Result<(), String> {
-        let Some(c) = self.load(id).filter(|c| c.id == id && c.temporary) else { return Ok(()) };
+        if !self.load(id).is_some_and(|c| c.id == id && c.temporary) {
+            return Ok(());
+        }
+        let c = &self.convs[id];
+        if c.temporary_attachments.is_empty() {
+            return Ok(());
+        }
+        let area = c.area;
+        let root = if area == Area::Chat { self.workspace_of(id) } else { self.opts.data_dir.clone() };
+        let root = crate::permissions::checked_folder(&root).ok_or("error.chat.deleteFailed")?;
+        let attached = root.join("attachments");
+        let folder = if area == Area::Chat { attached.clone() } else { attached.join(id) };
+        if [&attached, &folder].iter().any(|p| p.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink())) {
+            return Err("error.chat.deleteFailed".into());
+        }
+        let expected = folder.canonicalize().ok();
         for file in &c.temporary_attachments {
             let path = Path::new(file);
-            if path.symlink_metadata().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
-                continue;
-            }
-            let Some(parent) = path.parent().and_then(crate::permissions::checked_folder) else {
+            if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
                 return Err("error.chat.deleteFailed".into());
+            }
+            let metadata = match path.symlink_metadata() {
+                Ok(metadata) => metadata,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err("error.chat.deleteFailed".into()),
             };
+            let resolved = path.canonicalize().map_err(|_| "error.chat.deleteFailed")?;
+            if !metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || resolved.parent() != Some(expected.as_deref().ok_or("error.chat.deleteFailed")?)
+            {
+                return Err("error.chat.deleteFailed".into());
+            }
             let Some(name) = path.file_name().and_then(|n| n.to_str()).filter(|n| n.starts_with(&format!("{id}-"))) else {
                 return Err("error.chat.deleteFailed".into());
             };
-            if !crate::permissions::host_write_allowed(&parent, name) {
+            let relative = folder.strip_prefix(&root).map_err(|_| "error.chat.deleteFailed")?.join(name);
+            if !crate::permissions::host_write_allowed(&root, &relative.to_string_lossy()) {
                 return Err("error.chat.deleteFailed".into());
             }
-            match crate::tools::retry_busy(|| std::fs::remove_file(parent.join(name))) {
+            match crate::tools::retry_busy(|| std::fs::remove_file(&resolved)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(_) => return Err("error.chat.deleteFailed".into()),
@@ -126,6 +151,214 @@ mod tests {
     use super::*;
     use crate::events::SessionCommand;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn temporary_chat_startup_preserves_an_orphan_workspace_used_by_an_ordinary_chat() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let (scratch, empty, ordinary) = engine.with(|core| {
+            let scratch = core.scratch_of(&new_id());
+            std::fs::create_dir_all(&scratch).unwrap();
+            std::fs::write(scratch.join("ordinary.txt"), "keep").unwrap();
+            let ordinary = core.blank(Area::Chat, None);
+            core.convs.get_mut(&ordinary).unwrap().working_folder = Some(scratch.to_string_lossy().into_owned());
+            core.store.save_checked(&core.convs[&ordinary]).unwrap();
+            let empty = core.scratch_of(&new_id());
+            std::fs::create_dir(&empty).unwrap();
+            let other = core.blank(Area::Chat, None);
+            core.convs.get_mut(&other).unwrap().working_folder = Some(empty.to_string_lossy().into_owned());
+            core.store.save_checked(&core.convs[&other]).unwrap();
+            (scratch, empty, ordinary)
+        });
+        engine.shutdown();
+        drop(engine);
+        let (restarted, _) = super::super::answer::tests::engine(&dir);
+        assert!(restarted.open(&ordinary).is_some());
+        assert_eq!(std::fs::read_to_string(scratch.join("ordinary.txt")).unwrap(), "keep");
+        assert!(empty.is_dir(), "an ordinary conversation also needs its empty chosen folder");
+        restarted.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_cleanup_rejects_recorded_paths_outside_its_attachments() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        engine.with(|core| {
+            let root = core.scratch_of(&id);
+            let attached = root.join("attachments");
+            let outside = root.join("ordinary");
+            std::fs::create_dir_all(&attached).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            let other = outside.join(format!("{id}-keep.txt"));
+            std::fs::write(&other, "keep").unwrap();
+            let link = attached.join("linked");
+            #[cfg(windows)]
+            junction::create(&outside, &link).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            for path in
+                [other.clone(), attached.join("../ordinary").join(other.file_name().unwrap()), link.join(other.file_name().unwrap())]
+            {
+                core.convs.get_mut(&id).unwrap().temporary_attachments = vec![path.to_string_lossy().into_owned()];
+                core.store.save_checked(&core.convs[&id]).unwrap();
+                assert_eq!(core.remove_temporary_attachments(&id), Err("error.chat.deleteFailed".into()), "{}", path.display());
+                assert_eq!(std::fs::read_to_string(&other).unwrap(), "keep");
+                assert!(core.store.get(&id).unwrap().temporary);
+            }
+            std::fs::rename(&attached, root.join("kept-attachments")).unwrap();
+            #[cfg(windows)]
+            junction::create(&outside, &attached).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&outside, &attached).unwrap();
+            core.convs.get_mut(&id).unwrap().temporary_attachments =
+                vec![attached.join(other.file_name().unwrap()).to_string_lossy().into_owned()];
+            core.store.save_checked(&core.convs[&id]).unwrap();
+            assert_eq!(core.remove_temporary_attachments(&id), Err("error.chat.deleteFailed".into()));
+            assert_eq!(std::fs::read_to_string(&other).unwrap(), "keep");
+            core.convs.get_mut(&id).unwrap().temporary_attachments.clear();
+            core.store.save_checked(&core.convs[&id]).unwrap();
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_branch_and_branch_here_never_make_an_ordinary_copy() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        engine.with(|core| {
+            core.convs.get_mut(&id).unwrap().messages.push(Message::new("private".into(), Role::User, "private text".into(), 1));
+            core.store.save_checked(&core.convs[&id]).unwrap();
+        });
+        assert_eq!(engine.branch_here(&id, "private"), Err("error.messageGone".into()));
+        assert_eq!(
+            engine.branch(BranchRequest {
+                conversation_id: id.clone(),
+                message_id: "private".into(),
+                text: "edit".into(),
+                choice: Choice { vendor: "auto".into(), model: None, effort: None },
+            }),
+            Err("error.messageGone".into())
+        );
+        engine.with(|core| {
+            assert_eq!(core.convs.len(), 1);
+            assert_eq!(core.store.temporary_ids(), [id.as_str()]);
+            assert!(core.store.list().is_empty());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_transcript_cleanup_failure_keeps_a_record_for_the_next_startup() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        let root = dir.path().join("child-transcripts");
+        std::fs::create_dir_all(&root).unwrap();
+        let blocked = root.join(&id);
+        std::fs::write(&blocked, "private transcript").unwrap();
+        assert_eq!(engine.close_chat(&id), Err("error.chat.deleteFailed".into()));
+        engine.with(|core| assert!(core.store.get(&id).unwrap().temporary));
+        engine.shutdown();
+        drop(engine);
+        // Restore a readable transcript directory after the deletion failure, as a later retry would find it.
+        std::fs::remove_file(&blocked).unwrap();
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("private.json"), "private transcript").unwrap();
+        let (restarted, _) = super::super::answer::tests::engine(&dir);
+        assert!(!blocked.exists());
+        restarted.with(|core| assert!(core.store.get(&id).is_none()));
+        restarted.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_side_chat_cleanup_failure_keeps_a_record_for_retry() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        let blocked = dir.path().join("side-chats").join(format!("{id}.json"));
+        std::fs::create_dir_all(&blocked).unwrap();
+        std::fs::write(blocked.join("private.txt"), "private side chat").unwrap();
+        assert_eq!(engine.close_chat(&id), Err("error.chat.deleteFailed".into()));
+        engine.with(|core| assert!(core.store.get(&id).unwrap().temporary));
+        assert_eq!(std::fs::read_to_string(blocked.join("private.txt")).unwrap(), "private side chat");
+        std::fs::remove_file(blocked.join("private.txt")).unwrap();
+        std::fs::remove_dir(&blocked).unwrap();
+        std::fs::write(&blocked, "private side chat").unwrap();
+        engine.with(|core| {
+            core.sweep_temporary();
+            assert!(core.store.get(&id).is_none());
+        });
+        assert!(!blocked.exists());
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_move_to_project_cannot_create_untracked_private_copies() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        let (project, owned) = engine.with(|core| {
+            let project = Project::new(new_id(), "Project".into(), dir.work().to_string_lossy().into_owned());
+            core.store.save_projects(std::slice::from_ref(&project)).unwrap();
+            let root = core.scratch_of(&id);
+            std::fs::create_dir_all(&root).unwrap();
+            let files = [Attachment { name: "private.txt".into(), base64: "cHJpdmF0ZQ==".into() }];
+            let owned = core.save_attachments(&id, &root, &root.join("attachments"), &files).unwrap().remove(0);
+            let mut message = Message::new("private".into(), Role::User, "private text".into(), 1);
+            message.attachments = Some(vec![owned.file_name().unwrap().to_string_lossy().into_owned()]);
+            core.convs.get_mut(&id).unwrap().messages.push(message);
+            core.store.save_checked(&core.convs[&id]).unwrap();
+            (project, owned)
+        });
+        assert_eq!(engine.move_to_project(&id, &project.id), Err("error.moveChat.unavailable".into()));
+        assert!(!dir.path().join("attachments").join(&id).exists());
+        assert!(engine.open(&id).unwrap().temporary);
+        engine.close_chat(&id).unwrap();
+        assert!(!owned.exists());
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn temporary_chat_cleanup_keeps_the_record_until_active_transcript_writers_finish() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        let transcript = dir.path().join("child-transcripts").join(&id);
+        std::fs::create_dir_all(&transcript).unwrap();
+        std::fs::write(transcript.join("private.json"), "private transcript").unwrap();
+        engine.with(|core| {
+            core.old_inputs_active.insert(id.clone());
+        });
+        assert_eq!(engine.close_chat(&id), Err("error.chat.deleteFailed".into()));
+        engine.with(|core| {
+            assert!(core.store.get(&id).unwrap().temporary);
+            assert!(transcript.is_dir());
+            core.old_inputs_active.remove(&id);
+            core.sweep_temporary();
+            assert!(core.store.get(&id).is_none());
+        });
+        assert!(!transcript.exists());
+        engine.shutdown();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn temporary_chat_cleanup_accepts_existing_attachment_directory_casing() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = engine.start_temporary_chat().unwrap();
+        let owned = engine.with(|core| {
+            let root = core.scratch_of(&id);
+            std::fs::create_dir_all(root.join("Attachments")).unwrap();
+            let files = [Attachment { name: "private.txt".into(), base64: "cHJpdmF0ZQ==".into() }];
+            core.save_attachments(&id, &root, &root.join("attachments"), &files).unwrap().remove(0)
+        });
+        engine.close_chat(&id).unwrap();
+        assert!(!owned.exists());
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn temporary_chat_failed_cleanup_still_stops_the_session_and_pending_work() {
@@ -218,6 +451,7 @@ mod tests {
         let id = engine.start_temporary_chat().unwrap();
         let owned = engine.with(|core| {
             let files = [Attachment { name: "private.pdf".into(), base64: "cHJpdmF0ZQ==".into() }];
+            core.convs.get_mut(&id).unwrap().working_folder = Some(shared.to_string_lossy().into_owned());
             core.save_attachments(&id, &shared, &attached, &files).unwrap()
         });
         std::fs::write(attached.join("ordinary.pdf"), "ordinary attachment").unwrap();

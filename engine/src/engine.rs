@@ -694,19 +694,6 @@ impl Engine {
             }
         });
         let search = store.search();
-        // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
-        let scratch = &chat_dir;
-        if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
-            for entry in std::fs::read_dir(scratch).into_iter().flatten().flatten() {
-                let id = entry.file_name().to_string_lossy().into_owned();
-                if Uuid::parse_str(&id).is_ok()
-                    && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists()
-                    && !entry.path().join("attachments").exists()
-                {
-                    let _ = std::fs::remove_dir_all(entry.path());
-                }
-            }
-        }
         let learned = store.auto_learned();
         let owned = store.claim_budget().is_ok();
         let mut ledger = store.ledger();
@@ -5302,6 +5289,9 @@ impl Core {
             return Err("error.update.activeOperations".into());
         }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
+        if source.temporary {
+            return Err("error.messageGone".into());
+        }
         let group = if source.area == Area::Chat { self.group_for(&source.id)? } else { None };
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let (id, copy) = copy.map_or_else(|| (new_id(), None), |(id, copy)| (id, Some(copy)));
@@ -5607,9 +5597,16 @@ impl Core {
         let existed = stored.is_some() || self.convs.contains_key(id);
         let heir = self.convs.get(id).map_or_else(|| stored.and_then(|c| c.branch_of), |c| c.branch_of.clone());
         let removed = if temporary {
-            self.remove_temporary_attachments(id)
-                .map_err(|_| crate::store::Fault::Write)
-                .and_then(|_| self.store.remove_temporary_checked(id))
+            // An active pager can still write private files outside Core's lock; its recovery record must stay.
+            if self.old_inputs_active.contains(id) {
+                Err(crate::store::Fault::Write)
+            } else {
+                self.remove_temporary_attachments(id)
+                    .map_err(|_| crate::store::Fault::Write)
+                    // Keep the flagged record until every private file is gone, so a failed cleanup can be retried.
+                    .and_then(|_| self.store.transcripts.remove_conversation(id))
+                    .and_then(|_| self.store.remove_temporary_checked(id))
+            }
         } else {
             self.store.remove_checked(id)
         };
@@ -5653,8 +5650,8 @@ impl Core {
             if !temporary {
                 let _ = std::fs::remove_dir_all(self.scratch_of(id));
                 let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
+                let _ = self.store.transcripts.remove_conversation(id);
             }
-            let _ = self.store.transcripts.remove_conversation(id);
         }
         self.list_changed();
         Ok(())

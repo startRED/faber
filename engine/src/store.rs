@@ -669,8 +669,11 @@ impl Store {
         if self.read_group_move()?.is_some_and(|(pending, _)| pending.conversation_id == id) {
             self.recover_group_move_locked(id)?;
         }
-        if temporary_only && read_checked::<Conversation>(&self.file(id))?.is_some_and(|c| c.id != id || !c.temporary) {
-            return Err(Fault::Corrupt);
+        if temporary_only {
+            if read_checked::<Conversation>(&self.file(id))?.is_some_and(|c| c.id != id || !c.temporary) {
+                return Err(Fault::Corrupt);
+            }
+            self.save_side_chat::<()>(id, &[])?;
         }
         match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
             Ok(()) => self.search.removed(id),
@@ -678,8 +681,10 @@ impl Store {
             Err(e) => return Err(Fault::of_write(&e)),
         }
         *written = Some(u64::MAX);
-        // Its side chat goes with it; best effort, the conversation is gone already.
-        let _ = self.save_side_chat::<()>(id, &[]);
+        if !temporary_only {
+            // An ordinary side chat goes with its record; best effort, the conversation is gone already.
+            let _ = self.save_side_chat::<()>(id, &[]);
+        }
         Ok(())
     }
 
