@@ -370,6 +370,7 @@ impl Core {
                 // with none. The spend stays, and a new estimate counts from it.
                 let estimate = if done { self.convs.get_mut(conv).and_then(|c| c.estimate.take()) } else { None };
                 let ended = estimate.is_some();
+                // Publish durably before deleting task files, which may live on another filesystem.
                 if let Err(error) = self.try_save(conv) {
                     self.turn(conv).unwrap().wrap_up = previous_wrap_up;
                     if done {
@@ -422,6 +423,86 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn t515g_conclusion_syncs_directory_before_deleting_any_task() {
+        use crate::store::{Disk, RealDisk, Store};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct RecordingDisk {
+            tasks: Vec<PathBuf>,
+            events: Mutex<Vec<&'static str>>,
+            fail: AtomicBool,
+        }
+        impl Disk for RecordingDisk {
+            fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+                let mut events = self.events.lock().unwrap();
+                if self.tasks.iter().all(|task| !task.exists()) && !events.contains(&"task deletion") {
+                    events.push("task deletion");
+                }
+                RealDisk.write(path, bytes)?;
+                events.push("temp sync");
+                Ok(())
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                RealDisk.rename(from, to)?;
+                self.events.lock().unwrap().push("rename");
+                Ok(())
+            }
+            fn flush(&self, path: &Path) -> std::io::Result<()> {
+                self.events.lock().unwrap().push("dir sync");
+                if self.fail.load(Ordering::Relaxed) {
+                    return Err(std::io::Error::other("directory sync failed"));
+                }
+                RealDisk.flush(path)
+            }
+        }
+
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let tasks: Vec<_> = ["Fix export", "Fix import"]
+            .into_iter()
+            .map(|title| {
+                let task = serde_json::from_value(serde_json::json!({"title":title, "done":"Check passes"})).unwrap();
+                let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+                task.sent = true;
+                task.message = Some("question-0".into());
+                task
+            })
+            .collect();
+        let disk = Arc::new(RecordingDisk {
+            tasks: tasks.iter().map(|task| Path::new(&project.path).join(&task.file)).collect(),
+            events: Mutex::default(),
+            fail: AtomicBool::new(true),
+        });
+        let originals: Vec<_> = disk.tasks.iter().map(|task| std::fs::read(task).unwrap()).collect();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups = tasks;
+            c.try_save(&id).unwrap();
+            c.store = Arc::new(Store::with_disk(dir.path(), disk.clone()));
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed files", "result":"Files work", "verified":"Checks pass"});
+            assert_eq!(c.write_progress(&id, progress::WRAP_UP_TOOL, &input), Err("error.chat.saveFailed".into()));
+            assert_eq!(*disk.events.lock().unwrap(), ["temp sync", "rename", "dir sync"]);
+            for (task, original) in disk.tasks.iter().zip(&originals) {
+                assert_eq!(&std::fs::read(task).unwrap(), original, "failed directory sync must retain every task");
+            }
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            assert_eq!(c.convs[&id].follow_ups.len(), 2);
+            disk.fail.store(false, Ordering::Relaxed);
+            disk.events.lock().unwrap().clear();
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            assert_eq!(&disk.events.lock().unwrap()[..4], ["temp sync", "rename", "dir sync", "task deletion"]);
+            assert!(disk.tasks.iter().all(|task| !task.exists()));
+            assert!(c.store.get(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
 
     #[tokio::test]
     async fn t515a_rejected_conclusion_keeps_the_sent_follow_up_file() {
