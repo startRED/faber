@@ -98,6 +98,14 @@ table! {
         if answered { h.announce(&json!({"type": "asks", "asks": pending})); }
         Ok(answered)
     }
+    /// Starts a private Chat record; send uses the returned id.
+    Write Screen fn start_temporary_chat(h) -> String {
+        h.engine.start_temporary_chat()
+    }
+    /// Leaving an ordinary conversation never deletes it.
+    Write Screen fn close_chat(h, id: String) -> () {
+        h.engine.close_chat(&id)
+    }
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
         lock(&h.feed).forget();

@@ -5,7 +5,7 @@ impl Engine {
     pub fn move_to_project(&self, id: &str, project_id: &str) -> Result<Conversation, String> {
         self.with(|core| {
             let mut moved = core.load(id).ok_or("error.conversationGone")?.clone();
-            if moved.area != Area::Chat || moved.archived_at.is_some() {
+            if moved.temporary || moved.area != Area::Chat || moved.archived_at.is_some() {
                 return Err("error.moveChat.unavailable".into());
             }
             if core.rewind_blocked(id) {

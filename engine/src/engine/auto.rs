@@ -178,6 +178,9 @@ impl Core {
     /// only the first answer is Auto's own pick.
     pub(super) fn kept_kind(&mut self, req: &SendRequest) -> Option<String> {
         let c = self.load(req.conversation_id.as_deref()?)?;
+        if c.temporary {
+            return None;
+        }
         let last = c.messages.last().filter(|m| c.messages.len() == 2 && m.role == Role::Assistant && m.status == Some(Status::Done))?;
         last.reason.as_deref().and_then(auto_learned::kind_of).map(str::to_string)
     }
@@ -427,6 +430,7 @@ impl Core {
             Vendor::Gemini => return None,
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    temporary: false,
                     title: None,
                     leave_plan: false,
                     helper: Default::default(),
@@ -453,6 +457,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        temporary: false,
                         helper: Default::default(),
                         browse: false,
                         conversations: false,
@@ -884,6 +889,9 @@ mod tests {
             assert_eq!(c.kept_kind(&req), None, "a model picked by hand is not Auto's pick");
             set(c, "reason.route.code.hard", Status::Done);
             assert_eq!(c.kept_kind(&req).as_deref(), Some("code"));
+            c.convs.get_mut(&id).unwrap().temporary = true;
+            assert_eq!(c.kept_kind(&req), None, "temporary conversations teach nothing");
+            c.convs.get_mut(&id).unwrap().temporary = false;
             assert_eq!(c.kept_kind(&SendRequest { conversation_id: None, ..req.clone() }), None, "a new conversation keeps nothing");
             // Later answers keep the first one's model: they are not Auto's pick, so they are not marked again.
             let mut later = Message::new("later".into(), Role::Assistant, "x".into(), 3);
@@ -931,6 +939,12 @@ mod tests {
             }
             assert!(!lifted(c), "a refused retry is not counted");
             c.opts.clis.insert(Vendor::Claude, crate::cli::Cli { command: "fake".into(), prefix: vec![] });
+            c.convs.get_mut(&id).unwrap().temporary = true;
+            for _ in 0..3 {
+                again(c, "question-0", "question");
+            }
+            assert!(!lifted(c), "retrying a temporary conversation never teaches Auto");
+            c.convs.get_mut(&id).unwrap().temporary = false;
             for _ in 0..3 {
                 again(c, "question-0", "question");
             }
