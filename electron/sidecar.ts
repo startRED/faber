@@ -105,8 +105,8 @@ export class Sidecar {
     child.on('exit', gone);
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
     child.on('error', (error) => {
-      console.error(`faber: the host could not start: ${error.message}`);
-      gone();
+      console.error(`faber: host process error: ${error.message}`);
+      if (child.pid === undefined) gone();
     });
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
@@ -154,11 +154,14 @@ export class Sidecar {
     const late = new Promise<'late'>((resolve) => {
       timer = setTimeout(() => resolve('late'), patience);
     });
-    if ((await Promise.race([this.exited, late])) === 'late') {
-      this.child.kill();
-      await this.exited;
+    try {
+      if ((await Promise.race([this.exited, late])) === 'late') {
+        if (this.child.kill() === false) throw new Error('error.host.stop');
+        await this.exited;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-    clearTimeout(timer);
   }
 
   private heard(line: string, listen: Listeners): void {

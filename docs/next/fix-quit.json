@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "If Quit fails, Faber keeps its window and tray so you can try again; pressing Quit twice no longer interrupts saving.",
+      "pt-BR": "Se falhar ao sair, o Faber continua acessível pelo ícone perto do relógio; repetir Sair não interrompe o salvamento.",
+      "es": "Si falla al salir, Faber conserva la ventana y su icono para reintentarlo; pulsar Salir dos veces ya no interrumpe el guardado.",
+      "fr": "Si quitter échoue, Faber reste accessible pour réessayer ; demander à quitter plusieurs fois n’interrompt plus l’enregistrement.",
+      "de": "Schlägt das Beenden fehl, bleiben Fenster und Infobereich erreichbar; du kannst es erneut versuchen. Mehrfaches Beenden unterbricht das Speichern nicht mehr."
+    }
+  }
+}
