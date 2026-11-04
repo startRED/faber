@@ -36,6 +36,10 @@ pub(super) struct Run {
     earlier_turn: bool,
     /// The agent stopped: the turn that ends now is the last, whatever is still on its way.
     stopping: bool,
+    /// Whether a message can reach the helper's turn now: Claude Code reads its input from the start, Codex only once its turn
+    /// has begun (`turn/steer` names the turn). What the person wrote before that waits in `early` (id, words).
+    ready: bool,
+    early: Vec<(String, String)>,
 }
 
 struct Ended {
@@ -91,6 +95,11 @@ impl Core {
             }
             self.finish_worker_admission(&format!("helper:{call}"));
             self.kit_checks.remove(&format!("helper:{call}"));
+            self.mark_helper_seen(&call);
+            if let Some(early) = self.helper_early.remove(&call) {
+                let ids: Vec<String> = early.into_iter().map(|(id, _)| id).collect();
+                self.never_read(conv, &call, &ids);
+            }
             let (_, text) = helper::report(false, "", &[], Some(why));
             if let Some(l) = self.live.get(conv) {
                 l.session.helper_reply(&call, false, text);
@@ -258,7 +267,7 @@ impl Core {
         }
         session.send(UserTurn::text(prompt));
         let started = self.secs();
-        let run = Run {
+        let mut run = Run {
             conv: conv.to_string(),
             sid,
             hsid,
@@ -275,13 +284,52 @@ impl Core {
             held: None,
             earlier_turn: false,
             stopping: false,
+            ready: vendor == Vendor::Claude,
+            early: vec![],
         };
+        self.mark_helper_seen(call);
+        // What the person wrote while the helper was still starting (the box shows from its call on) is first in line.
+        if let Some(early) = self.helper_early.remove(call) {
+            run.waiting.extend(early.iter().map(|(id, _)| id.clone()));
+            run.early = early;
+        }
         if let Some(old) = self.helpers.insert(call.to_string(), run) {
             self.rewind_helper_retire(call, old.hsid);
             old.session.close();
         }
         self.expire_helper(call, hsid, MAX_RUN, "it ran out of time");
+        self.flush_early(call);
         Ok(())
+    }
+
+    /// Remembers a call that started or failed to start; only recent ones matter, so the set stays small.
+    fn mark_helper_seen(&mut self, call: &str) {
+        self.helper_seen.insert(call.to_string());
+        if self.helper_seen.len() > 256 {
+            self.helper_seen.retain(|seen| seen == call || self.helpers.contains_key(seen));
+        }
+    }
+
+    /// The helper can take messages now: what the person wrote before goes in, in order.
+    fn flush_early(&mut self, call: &str) {
+        let Some(h) = self.helpers.get_mut(call) else { return };
+        if h.ready || h.vendor == Vendor::Claude {
+            for (id, text) in std::mem::take(&mut h.early) {
+                h.session.steer(UserTurn::text(helper::from_person(&text)), &id);
+            }
+        }
+    }
+
+    /// A helper whose call shows but whose CLI is not at work yet (waiting for memory or a check of its tools, or starting).
+    fn helper_starting(&self, conv: &str, call: &str) -> bool {
+        !self.helper_seen.contains(call)
+            && self.convs.get(conv).is_some_and(|c| {
+                c.messages
+                    .iter()
+                    .rev()
+                    .flat_map(|m| m.tools.iter().flatten())
+                    .any(|t| t.id == call && t.name == "Helper" && t.ended.is_none())
+            })
     }
 
     /// The person wrote to a helper at work (R161 step 5). Codex takes the message into its running turn; Claude Code reads it
@@ -292,10 +340,22 @@ impl Core {
             return Err("error.helperEmpty".into());
         }
         self.rewind.bump(conv);
-        let h = self.helpers.get_mut(call).filter(|h| h.conv == conv).ok_or("error.helperDone")?;
         let id = new_id();
-        h.waiting.push(id.clone());
-        h.session.steer(UserTurn::text(helper::from_person(text)), &id);
+        let starting = self.helper_starting(conv, call);
+        match self.helpers.get_mut(call).filter(|h| h.conv == conv) {
+            Some(h) if h.ready => {
+                h.waiting.push(id.clone());
+                h.session.steer(UserTurn::text(helper::from_person(text)), &id);
+            }
+            Some(h) => {
+                h.waiting.push(id.clone());
+                h.early.push((id.clone(), text.to_string()));
+            }
+            None if starting => {
+                self.helper_early.entry(call.to_string()).or_default().push((id.clone(), text.to_string()));
+            }
+            None => return Err("error.helperDone".into()),
+        }
         self.mark_told(conv, call, |told| told.push(Told { id, text: text.to_string(), taken: None }));
         Ok(())
     }
@@ -381,6 +441,12 @@ impl Core {
                 | EngineEvent::Error { .. }
         ) {
             self.flush_helper_words(call);
+        }
+        if matches!(event, EngineEvent::TurnStarted)
+            && let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid)
+        {
+            h.ready = true;
+            self.flush_early(call);
         }
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
@@ -631,6 +697,8 @@ mod tests {
                         held: None,
                         earlier_turn: false,
                         stopping: false,
+                        ready: true,
+                        early: vec![],
                     },
                 );
                 if partial {

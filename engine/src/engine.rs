@@ -625,6 +625,10 @@ struct Core {
     copying: HashMap<String, copies::Held>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    /// What the person wrote to a helper before its CLI was at work (call id, then message id and words), and the calls that
+    /// started or failed to start, so a message after their end is refused rather than kept.
+    helper_early: HashMap<String, Vec<(String, String)>>,
+    helper_seen: HashSet<String>,
     reviews: HashMap<String, review::Run>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
@@ -790,6 +794,8 @@ impl Engine {
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
                 helpers: HashMap::new(),
+                helper_early: HashMap::new(),
+                helper_seen: HashSet::new(),
                 reviews: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),

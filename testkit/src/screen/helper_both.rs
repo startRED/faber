@@ -5,6 +5,7 @@ use crate::app::Ctx;
 use crate::page::css;
 use crate::sandbox::{CliSlot, Launch};
 use serde_json::{Value, json};
+use std::time::Duration;
 
 const TOLD: &str = "Also say whether retries above 5 would be risky.";
 pub const CLAUDE: &str = "helper_both: Claude asks Codex and receives its report";
@@ -89,8 +90,20 @@ fn round(ctx: &mut Ctx, leader: &str) -> Result {
     ask(page, prompt)?;
     let row = css("article .agents .agent").has_text("Check config");
     page.wait_visible(&row)?;
-    page.click(&row)?;
     let box_ = css("#running .side-write textarea");
+    // The thread is still moving while the reply streams, so a press can land beside the row (seen once in six runs on a
+    // loaded PC, with the row on screen and nothing opened): press again until the helper's view is open. Opening twice is the same as once.
+    for attempt in 0..3 {
+        page.click(&row)?;
+        let open = page.wait_for_within(
+            "the helper's view to open",
+            "!!document.querySelector('#running .side-write textarea')",
+            Duration::from_secs(4),
+        );
+        if open.is_ok() || attempt == 2 {
+            break;
+        }
+    }
     page.wait_visible(&box_)?;
     let (running_mb, webview) = ctx.memory_mb(app.id)?;
     ensure(webview && running_mb <= 400.0, || format!("helper round uses {running_mb:.1} MB while running"))?;

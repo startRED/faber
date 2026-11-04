@@ -2455,6 +2455,7 @@ export const en = {
   'notes.404.new': 'You can start a follow-up from the done card; its task stays saved until the work finishes or you dismiss it.',
   'notes.405.fixed': 'Updates restart Faber during a working conversation, which continues afterward. Older versions may need another restart or a manual install.',
   'notes.406.fixed': 'Preferences and lessons you edit or delete lose approval; restoring their old words needs your approval again.',
+  'notes.407.fixed': 'Writing to a helper just after it appears no longer says it has finished: your words wait and reach it as soon as it starts.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

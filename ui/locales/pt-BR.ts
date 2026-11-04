@@ -2562,6 +2562,7 @@ export const ptBR: Messages = {
   'notes.404.new': 'Você pode começar outra tarefa pelo cartão de conclusão; ela fica salva até o trabalho terminar ou você dispensar.',
   'notes.405.fixed': 'O Faber reinicia durante uma conversa em andamento, que continua depois. Versões antigas podem precisar de outro reinício ou instalação manual.',
   'notes.406.fixed': 'Editar ou apagar uma preferência ou lição retira sua aprovação; recuperar o texto antigo precisa de uma nova aprovação sua.',
+  'notes.407.fixed': 'Escrever para um ajudante logo depois que ele aparece não diz mais que ele terminou: suas palavras esperam e chegam a ele assim que começa.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

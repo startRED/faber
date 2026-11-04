@@ -6102,7 +6102,12 @@ const TOLD: &str = "Also say whether retries above 5 would be risky.";
 /// R161 step 5: a project's agent on `main` calls a helper; once the helper's recording stops for the person's message (it
 /// waits for that line), the person writes to the helper. Returns the helper's call, the report Faber gave the agent, and
 /// what each recording saw differently from what Faber sent.
-async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber_engine::model::ToolUse, String, Vec<String>, Vec<String>) {
+async fn tell_a_helper(
+    main: &str,
+    prompt: &str,
+    helper: (&str, &str),
+    eager: bool,
+) -> (faber_engine::model::ToolUse, String, Vec<String>, Vec<String>) {
     let dir = support::DataFolder::new();
     let (agent, other) = (fake(fixture(main, "helper-call")), fake(fixture(helper.0, helper.1)));
     let (to_agent, to_other, main_bin) = (agent.spawn.clone(), other.spawn.clone(), main.to_string());
@@ -6117,10 +6122,11 @@ async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber
     let call = helper_call(&until(&engine, &id, |c| helper_call(c).is_some()).await).unwrap();
     assert_eq!(engine.tell_helper(&id, &call, "  "), Err("error.helperEmpty".into()), "an empty message is not sent");
     assert_eq!(engine.tell_helper(&id, "other", TOLD), Err("error.helperDone".into()), "only a helper at work is written to");
-    // The helper's CLI starts a moment after its call shows; it is written to only once it is at work.
+    // The helper's CLI starts a moment after its call shows. The screen offers the box from the call on, so a message written
+    // before the helper is at work is kept and reaches it once it is (`eager`); the other path waits until it is.
     for _ in 0..300 {
         match engine.tell_helper(&id, &call, TOLD) {
-            Err(e) if e == "error.helperDone" => tokio::time::sleep(Duration::from_millis(10)).await,
+            Err(e) if e == "error.helperDone" && !eager => tokio::time::sleep(Duration::from_millis(10)).await,
             sent => {
                 sent.unwrap();
                 break;
@@ -6160,7 +6166,7 @@ fn told_was_taken(tool: &faber_engine::model::ToolUse, report: &str) {
 #[tokio::test]
 async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_message_into_its_turn() {
     let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
-    let (tool, report, agent, helper) = tell_a_helper("claude", text, ("codex", "helper-told")).await;
+    let (tool, report, agent, helper) = tell_a_helper("claude", text, ("codex", "helper-told"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new(), "the message is steered into the helper's turn, in the helper's own words");
     told_was_taken(&tool, &report);
@@ -6172,13 +6178,28 @@ async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_messa
     );
 }
 
+/// R161 step 5: the box is offered from the helper's call on, before its CLI is at work (the screen test `helper_both` wrote
+/// into that window and was told "finished"): the message is kept and reaches the helper once its turn is on, for either AI.
+#[tokio::test]
+async fn r161_a_message_written_before_the_helper_is_at_work_reaches_it_once_it_is() {
+    let claude =
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+    let (tool, report, agent, helper) = tell_a_helper("codex", claude, ("claude", "helper-told"), true).await;
+    assert_eq!((agent, helper), (Vec::<String>::new(), Vec::<String>::new()));
+    told_was_taken(&tool, &report);
+    let codex = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let (tool, report, agent, helper) = tell_a_helper("claude", codex, ("codex", "helper-told"), true).await;
+    assert_eq!((agent, helper), (Vec::<String>::new(), Vec::<String>::new()));
+    told_was_taken(&tool, &report);
+}
+
 /// R161 step 5: Claude Code reads a line written during a tool step at its next step, with one result for both, and echoes
 /// it then: the helper ends at that result, its last words the report.
 #[tokio::test]
 async fn r161_the_person_writes_to_a_claude_helper_during_a_tool_step_and_it_reads_it_at_its_next_step() {
     let text =
         "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
-    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told")).await;
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new());
     told_was_taken(&tool, &report);
@@ -6191,7 +6212,7 @@ async fn r161_the_person_writes_to_a_claude_helper_during_a_tool_step_and_it_rea
 async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_turn_and_that_is_its_report() {
     let text =
         "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
-    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told-later")).await;
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told-later"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new());
     told_was_taken(&tool, &report);

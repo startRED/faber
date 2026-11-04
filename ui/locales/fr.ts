@@ -2575,6 +2575,7 @@ export const fr: Messages = {
   'notes.404.new': "Vous pouvez lancer une autre tâche depuis la carte de fin ; elle reste enregistrée jusqu'à sa réalisation ou son abandon.",
   'notes.405.fixed': 'Faber redémarre pendant une conversation qui reprend ensuite. Les anciennes versions peuvent nécessiter un autre redémarrage ou une installation manuelle.',
   'notes.406.fixed': 'Modifier ou supprimer une préférence ou une leçon retire votre validation ; rétablir l’ancien texte exige votre accord à nouveau.',
+  'notes.407.fixed': "Écrire à un assistant juste après son apparition n'affirme plus qu'il a fini : vos mots attendent et lui parviennent dès qu'il démarre.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

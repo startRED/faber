@@ -2575,6 +2575,7 @@ export const de: Messages = {
   'notes.404.new': 'Du kannst weitere Aufgaben direkt nach Abschluss starten; sie bleiben gespeichert, bis sie erledigt sind oder du sie verwirfst.',
   'notes.405.fixed': 'Faber startet während einer Unterhaltung neu, die danach weitergeht. Ältere Versionen benötigen möglicherweise einen weiteren Neustart oder eine manuelle Installation.',
   'notes.406.fixed': 'Bearbeitete oder gelöschte Vorlieben und Erkenntnisse verlieren deine Freigabe; auch ihr früherer Wortlaut braucht danach wieder deine Zustimmung.',
+  'notes.407.fixed': 'Wer einem Helfer gleich nach seinem Erscheinen schreibt, bekommt nicht mehr gesagt, er sei fertig: Deine Worte warten und erreichen ihn, sobald er startet.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
