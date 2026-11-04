@@ -23,13 +23,13 @@ when it renews, and, for running work, who is building and who is reviewing.
 
 Both areas can go back before a message through its menu: files, conversation or both, with a preview, conflict choices
 and Redo. It works without a connected AI. Private file history has fixed size and age limits and reports incomplete,
-unsaved or expired coverage; continuing uses the saved messages and says so. The engine never rolls back spending,
+unsaved or expired coverage; Codex continues in its native session at the restored point when available. Claude and
+other fallback cases continue from the saved messages and say so. The engine never rolls back spending,
 permissions or remote effects, and going back waits until overlapping work is idle.
 
 ### Not built yet
 
-Native CLI continuation after going back, rich rewind diffs and configurable history limits are not built (moving a
-chat to a project is, task 270). The existing Changes preview supplies rewind's file list.
+Rich rewind diffs and configurable history limits are not built (moving a chat to a project is, task 270). The existing Changes preview supplies rewind's file list.
 
 ## Universal by design
 

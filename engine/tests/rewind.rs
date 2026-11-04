@@ -1518,3 +1518,301 @@ fn rewind_restart_cleans_a_deletion_stage_created_before_displacement() {
     assert_eq!(s.bytes("created"), b"after");
     assert!(!staging.exists());
 }
+
+#[tokio::test]
+async fn rewind_codex_resumes_the_recorded_thread_reverts_and_sends_only_the_new_message() {
+    native_rewind_case(None).await;
+}
+
+#[test]
+fn rewind_native_restore_modes_vendor_switch_and_legacy_points_keep_their_continuation_rules() {
+    for (vendor, mode, native, retained) in [
+        (Vendor::Codex, Mode::Conversation, true, true),
+        (Vendor::Codex, Mode::Both, true, true),
+        (Vendor::Codex, Mode::Files, true, false),
+        (Vendor::Claude, Mode::Conversation, true, false),
+        (Vendor::Codex, Mode::Conversation, false, false),
+    ] {
+        let mut s = Setup::new();
+        let point = s.capture("cut", 1);
+        s.seal(2);
+        let path = std::fs::read_dir(s.data.path().join("rewind"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|dir| dir.path().join("points").join(format!("{}.json", point.id)))
+            .find(|p| p.is_file())
+            .unwrap();
+        let mut saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        if native {
+            saved["saved"]["native"] = json!({"thread":"native-thread","before_turn":"native-cut"});
+        } else {
+            saved["saved"].as_object_mut().unwrap().remove("native");
+        }
+        std::fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
+        s.history = History::open(s.data.path(), 3).unwrap();
+        // An automatic recovery can change the actual vendor while the composer's original choice stays the same.
+        s.conversation.choice = Some(faber_engine::router::Choice { vendor: "codex".into(), model: None, effort: None });
+        let mut answer = Message::new("answer".into(), Role::Assistant, "work".into(), 2);
+        answer.vendor = Some(vendor);
+        s.conversation.messages.push(answer);
+        let result = s.history.restore(&s.request("cut", mode), &mut s.conversation, 4).unwrap();
+        assert_eq!(s.conversation.rewind_native.is_some(), retained);
+        assert_eq!(s.conversation.sessions.get(&Vendor::Codex).map(String::as_str), retained.then_some("native-thread"));
+        assert_eq!(result.notice.as_deref(), (!retained).then_some("note.rewind.savedMessages"));
+    }
+}
+
+#[tokio::test]
+async fn rewind_codex_failed_resume_hands_over_saved_messages_once_without_losing_the_new_message() {
+    native_rewind_case(Some("thread/resume")).await;
+}
+
+#[tokio::test]
+async fn rewind_codex_failed_revert_hands_over_saved_messages_once_without_replaying_work() {
+    native_rewind_case(Some("thread/revert")).await;
+}
+
+async fn native_rewind_case(failure: Option<&'static str>) {
+    use faber_engine::cli::Cli;
+    use faber_engine::model::{Area, Status};
+    use faber_engine::proc::{Proc, Spawner};
+    use faber_engine::router::Choice;
+    use faber_engine::store::Store;
+    use faber_engine::{Engine, EngineOptions, SendRequest};
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let s = Setup::new();
+    let mut conversation = s.conversation.clone();
+    conversation.area = Area::Chat;
+    Store::new(s.data.path()).save(&conversation);
+    let recording = Arc::new(support::fixture("codex", "native-rewind"));
+    let requests: Vec<_> = recording
+        .iter()
+        .filter(|e| e.input && e.msg["method"] == "turn/start")
+        .map(|e| e.msg["params"]["input"][0]["text"].as_str().unwrap().to_string())
+        .collect();
+    let cut = recording.iter().find(|e| e.input && e.msg["method"] == "thread/revert").unwrap().msg["params"].clone();
+    let wire = support::Wire::default();
+    let turns = Arc::new(AtomicUsize::new(0));
+    let failures = Arc::new(AtomicUsize::new(0));
+    let spawn: Spawner = {
+        let (wire, recording, turns, failures) = (wire.clone(), recording.clone(), turns.clone(), failures.clone());
+        Arc::new(move |_, _, _| {
+            let (stdin, fake_input) = tokio::io::duplex(65536);
+            let (mut output, stdout) = tokio::io::duplex(65536);
+            let (recording, turns, failures) = (recording.clone(), turns.clone(), failures.clone());
+            tokio::spawn(async move {
+                let mut input = BufReader::new(fake_input).lines();
+                let mut fresh_fallback = false;
+                while let Ok(Some(line)) = input.next_line().await {
+                    let sent: Value = serde_json::from_str(&line).unwrap();
+                    let method = sent["method"].as_str().unwrap_or_default();
+                    if failure == Some(method) && failures.fetch_add(1, Ordering::SeqCst) == 0 {
+                        support::emit(
+                            &mut output,
+                            json!({"id":sent["id"],"error":{"code":-32000,"message":"injected native continuation failure"}}),
+                        )
+                        .await;
+                        continue;
+                    }
+                    if method == "thread/unsubscribe" || method == "config/read" {
+                        let result = if method == "thread/unsubscribe" { json!({"status":"notLoaded"}) } else { json!({"config":{}}) };
+                        support::emit(&mut output, json!({"id":sent["id"],"result":result})).await;
+                        continue;
+                    }
+                    if matches!(method, "initialized" | "skills/list" | "thread/name/set") {
+                        continue;
+                    }
+                    if method == "thread/start" {
+                        fresh_fallback = turns.load(Ordering::SeqCst) >= 2;
+                    }
+                    let turn = (method == "turn/start").then(|| turns.fetch_add(1, Ordering::SeqCst));
+                    let mut matching = recording.iter().enumerate().filter(|(_, e)| e.input && e.msg["method"] == method);
+                    let (at, _) = matching.nth(turn.unwrap_or(0)).unwrap_or_else(|| panic!("unexpected fake request: {sent}"));
+                    // Replay the qualified replies and notifications; request ids belong to this engine run.
+                    for entry in recording[at + 1..].iter().take_while(|e| !e.input) {
+                        let mut reply = entry.msg.clone();
+                        if reply.get("id").is_some() {
+                            reply["id"] = sent["id"].clone();
+                        }
+                        if fresh_fallback {
+                            if reply["result"].get("thread").is_some() {
+                                reply["result"]["thread"]["id"] = "fallback-thread".into();
+                            }
+                            if reply["params"].get("threadId").is_some() {
+                                reply["params"]["threadId"] = "fallback-thread".into();
+                            }
+                        }
+                        support::emit(&mut output, reply).await;
+                    }
+                }
+            });
+            Ok(wire.wrap(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None }))
+        })
+    };
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: s.data.path().into(),
+            #[cfg(windows)]
+            chat_dir: s.data.chat_path().into(),
+            clis: BTreeMap::from([(Vendor::Codex, Cli { command: "fake".into(), prefix: vec![] })]),
+            spawn,
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 3,
+            idle: Duration::from_secs(120),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    let git = s.git.clone();
+    engine.set_git(Arc::new(move || Some(Box::new(git.clone()))));
+    for (index, text) in requests.iter().enumerate() {
+        if index == 2 {
+            let points = engine.rewind_points(CONVERSATION).unwrap();
+            let point = points.last().unwrap();
+            if failure.is_none() {
+                let first = engine
+                    .rewind_restore(RestoreRequest {
+                        conversation_id: CONVERSATION.into(),
+                        message_id: points[0].message_id.clone(),
+                        mode: Mode::Conversation,
+                        saved_versions: vec![],
+                    })
+                    .unwrap();
+                let empty = engine.open(CONVERSATION).unwrap();
+                assert!(
+                    empty.sessions.is_empty() && empty.rewind_native.is_none(),
+                    "a point captured before the session id existed stays on the saved-message path"
+                );
+                assert_eq!(empty.rewind_notice.as_deref(), Some("note.rewind.savedMessages"));
+                engine.rewind_redo(RedoRequest { conversation_id: CONVERSATION.into(), id: first.id, saved_versions: vec![] }).unwrap();
+            }
+            let request = RestoreRequest {
+                conversation_id: CONVERSATION.into(),
+                message_id: point.message_id.clone(),
+                mode: Mode::Conversation,
+                saved_versions: vec![],
+            };
+            let mut persisted = None;
+            support::until("native cut is durable on its exact point", || {
+                persisted = std::fs::read_dir(s.data.path().join("rewind"))
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .find_map(|dir| std::fs::read(dir.path().join("points").join(format!("{}.json", point.id))).ok())
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+                persisted.as_ref().is_some_and(|p| p["saved"]["native"]["before_turn"] == cut["beforeTurnId"])
+            })
+            .await;
+            assert_eq!(persisted.unwrap()["saved"]["native"]["thread"], cut["threadId"]);
+            let result = engine.rewind_restore(request).unwrap();
+            assert!(!result.recovery);
+            assert!(result.notice.is_none(), "native restore hides the saved-message notice in its result too");
+            assert!(engine.open(CONVERSATION).unwrap().rewind_notice.is_none());
+            if failure.is_none() {
+                engine.rewind_redo(RedoRequest { conversation_id: CONVERSATION.into(), id: result.id, saved_versions: vec![] }).unwrap();
+                let redone = engine.open(CONVERSATION).unwrap();
+                assert!(redone.sessions.is_empty() && redone.rewind_native.is_none(), "redo always clears the native session");
+                assert_eq!(redone.rewind_notice.as_deref(), Some("note.rewind.savedMessages"));
+                engine
+                    .rewind_restore(RestoreRequest {
+                        conversation_id: CONVERSATION.into(),
+                        message_id: point.message_id.clone(),
+                        mode: Mode::Both,
+                        saved_versions: vec![],
+                    })
+                    .unwrap();
+                assert!(engine.open(CONVERSATION).unwrap().rewind_notice.is_none(), "both restore modes retain the native cut");
+            }
+        }
+        engine
+            .send(SendRequest {
+                conversation_id: Some(CONVERSATION.into()),
+                area: Area::Chat,
+                project_id: None,
+                text: text.clone(),
+                images: vec![],
+                files: vec![],
+                choice: Choice { vendor: "codex".into(), model: None, effort: None },
+            })
+            .unwrap();
+        tokio::time::timeout(support::DEADLINE, async {
+            loop {
+                let c = engine.open(CONVERSATION).unwrap();
+                if c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.status == Some(Status::Done))
+                    && engine.rewind_points(CONVERSATION).unwrap().last().is_some_and(|p| p.sealed)
+                    && engine.rewind_history_idle()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "recorded native turn {index} did not finish and seal: conversation={:?}; points={:?}; wire={:?}",
+                engine.open(CONVERSATION),
+                engine.rewind_points(CONVERSATION),
+                wire.messages()
+            )
+        });
+        if index == 0 {
+            assert!(engine.open(CONVERSATION).unwrap().rewind_native.is_none());
+        }
+    }
+    let messages = wire.messages();
+    let sent: Vec<_> = messages.iter().filter(|m| m["method"] == "turn/start").collect();
+    assert_eq!(sent.len(), 3, "a failed native open must not replay any turn");
+    assert_eq!(sent[0]["params"]["input"][0]["text"], requests[0]);
+    assert_eq!(sent[1]["params"]["input"][0]["text"], requests[1]);
+    let last = sent[2]["params"]["input"][0]["text"].as_str().unwrap();
+    let resumed = messages.iter().position(|m| m["method"] == "thread/resume").expect("native resume is attempted");
+    assert_eq!(messages[resumed]["params"]["threadId"], cut["threadId"]);
+    let reverted = messages.iter().position(|m| m["method"] == "thread/revert");
+    if failure == Some("thread/resume") {
+        assert!(reverted.is_none(), "resume failed before revert");
+    } else {
+        let reverted = reverted.expect("native cut is sent");
+        assert!(resumed < reverted);
+        assert_eq!(messages[reverted]["params"], cut);
+        assert!(reverted < messages.iter().rposition(|m| m["method"] == "turn/start").unwrap());
+    }
+    let c = engine.open(CONVERSATION).unwrap();
+    assert_eq!(c.messages.last().unwrap().text, "BLUE");
+    assert!(c.rewind_native.is_none());
+    if failure.is_none() {
+        assert_eq!(last, requests[2], "native continuation sends only the new message");
+        assert!(c.messages.last().unwrap().note.is_none());
+    } else {
+        assert!(last.contains(&requests[0]) && last.contains(&requests[2]), "fallback preserves history and pending input: {last}");
+        assert!(!last.contains(&requests[1]), "discarded work must stay discarded");
+        assert_eq!(last.matches(&requests[0]).count(), 1);
+        assert_eq!(last.matches(&requests[2]).count(), 1);
+        assert_eq!(c.messages.last().unwrap().note.as_deref(), Some("note.rewind.savedMessages"));
+        assert_eq!(messages.iter().filter(|m| m["method"] == "thread/start").count(), 2);
+        assert_eq!(messages.iter().filter(|m| m["method"] == "thread/resume").count(), 1);
+        let point = engine.rewind_points(CONVERSATION).unwrap().pop().unwrap();
+        let result = engine
+            .rewind_restore(RestoreRequest {
+                conversation_id: CONVERSATION.into(),
+                message_id: point.message_id,
+                mode: Mode::Conversation,
+                saved_versions: vec![],
+            })
+            .unwrap();
+        let restored = engine.open(CONVERSATION).unwrap();
+        assert!(
+            restored.sessions.is_empty() && restored.rewind_native.is_none(),
+            "a turn from the fallback thread cannot be bound to the captured original thread"
+        );
+        assert_eq!(result.notice.as_deref(), Some("note.rewind.savedMessages"));
+    }
+    engine.shutdown();
+}

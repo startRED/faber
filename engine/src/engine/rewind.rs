@@ -22,7 +22,7 @@ pub(super) struct State {
     exited_sessions: HashSet<(String, u64)>,
     // Deleting the visible conversation does not terminate its writers; None keeps an unlocated writer unknown.
     deleted_folders: HashMap<String, Option<PathBuf>>,
-    cursors: HashMap<(String, String), Cursor>,
+    cursors: HashMap<(String, String), (Cursor, Option<String>)>,
     seen_writers: HashMap<String, HashSet<String>>,
     admission: Vec<PathBuf>,
     admission_changed: Arc<std::sync::Condvar>,
@@ -337,6 +337,12 @@ impl Engine {
         preview.running = running;
         preview.recovery |= recovery;
         Ok(preview)
+    }
+
+    /// Test synchronization: publication precedes the worker's durable save and release.
+    #[doc(hidden)]
+    pub fn rewind_history_idle(&self) -> bool {
+        self.with(|c| !c.rewind.worker.load(Ordering::Acquire))
     }
 
     pub fn rewind_points(&self, id: &str) -> Result<Vec<PointInfo>, String> {
@@ -746,6 +752,24 @@ impl Core {
             self.rewind.bump(conv);
         }
         match event {
+            EngineEvent::Error { fatal: true, .. } if self.convs.get(conv).is_some_and(|c| c.rewind_native.is_some()) => {
+                let turn = self.live.get(conv).and_then(|live| live.turn.clone());
+                let safe = !self.reply_has_work(conv, turn.as_deref());
+                if let Some(c) = self.convs.get_mut(conv) {
+                    c.rewind_native = None;
+                    c.forget_session(Vendor::Codex);
+                    c.rewind_notice = Some("note.rewind.savedMessages".into());
+                }
+                safe && self.rerun_fresh(conv, turn.as_deref())
+            }
+            EngineEvent::TurnStarted => {
+                if let Some(c) = self.convs.get_mut(conv)
+                    && c.rewind_native.take().is_some()
+                {
+                    self.save(conv);
+                }
+                false
+            }
             EngineEvent::WriterExit { confirmed } => {
                 let key = (conv.to_string(), sid);
                 if *confirmed {
@@ -774,7 +798,14 @@ impl Core {
             }
             EngineEvent::Cursor { entry, turn } => {
                 if let Some(reply) = self.live.get(conv).and_then(|l| l.turn.clone()) {
-                    self.rewind.cursors.insert((conv.into(), reply), Cursor { entry: entry.clone(), turn: turn.clone() });
+                    let thread =
+                        self.live.get(conv).filter(|live| live.vendor == Vendor::Codex).and_then(|live| {
+                            live.unsaved_session.clone().or_else(|| self.convs.get(conv)?.resumable(Vendor::Codex).cloned())
+                        });
+                    self.rewind
+                        .cursors
+                        .entry((conv.into(), reply))
+                        .or_insert_with(|| (Cursor { entry: entry.clone(), turn: turn.clone() }, thread));
                 }
                 true
             }
@@ -960,8 +991,8 @@ impl Core {
                 return Ok(None);
             }
             let mut exec = git().ok_or("error.rewind.git")?;
-            for ((conv, turn), cursor) in cursors {
-                history.turn_cursor(&conv, &turn, cursor);
+            for ((conv, turn), (cursor, thread)) in cursors {
+                history.turn_cursor(&conv, &turn, cursor, thread.as_deref());
             }
             for (conv, writers) in writers {
                 history.record_writers(&conv, &writers.into_iter().collect::<Vec<_>>());

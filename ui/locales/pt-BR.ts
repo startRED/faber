@@ -2549,6 +2549,7 @@ export const ptBR: Messages = {
   'notes.398.better': 'Você pode ver no plano o que o agente pretende mudar e como vai conferir o trabalho.',
   'notes.399.fixed': 'O Continuar sozinho e as verificações do projeto aguardam enquanto outra pessoa usa a conta; suas mensagens continuam funcionando.',
   'notes.400.better': 'A revisão de um projeto agora dá nota de 0 a 25 às mudanças e corrige, em até três rodadas, só os problemas que os dois revisores apontaram.',
+  'notes.401.better': 'Depois de voltar, o Codex pode continuar lembrando do trabalho que fez.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

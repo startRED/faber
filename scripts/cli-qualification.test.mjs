@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 assert.ok(existsSync(new URL('./cli-qualification.mjs', import.meta.url)), 'nightly candidate contract checker is not implemented');
-const { checkHelp, checkSchema, checkVersion, isolatedEnv, report } = await import('./cli-qualification.mjs');
+const { checkHelp, checkSchema, checkRevertSchema, checkVersion, isolatedEnv, report } = await import('./cli-qualification.mjs');
 
 test('required Claude launch options must be actual help tokens', () => {
   const help = '--input-format --output-format --verbose --include-partial-messages --permission-prompt-tool --safe-mode --restricted --strict-mcp-config --setting-sources --no-session-persistence';
@@ -24,6 +24,38 @@ test('schema requires real request method branches, never prose or unrelated enu
   assert.deepEqual(checkSchema({ description: methods.join(' '), enum: methods }), methods);
   assert.deepEqual(checkSchema(schema(methods.slice(0, -1))), ['turn/interrupt']);
   assert.deepEqual(checkSchema({ definitions: { unused: schema(methods) } }), methods);
+});
+
+test('rewind requires the revert method and both required string identifiers', () => {
+  const requests = schema(['thread/revert']);
+  const params = { type: 'object', required: ['threadId', 'beforeTurnId'], properties: { threadId: { type: 'string' }, beforeTurnId: { type: 'string' } } };
+  assert.equal(checkRevertSchema(requests, params), true);
+  assert.equal(checkRevertSchema(schema([]), params), false);
+  assert.equal(checkRevertSchema(requests, { ...params, required: ['threadId'] }), false);
+  assert.equal(checkRevertSchema(requests, { ...params, properties: { ...params.properties, beforeTurnId: { type: 'integer' } } }), false);
+});
+
+test('recorded Codex rewind retains the first turn and resumes with its context', () => {
+  const entries = readFileSync(new URL('../tests/fixtures/codex/native-rewind.jsonl', import.meta.url), 'utf8')
+    .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  const requests = entries.filter((entry) => entry.dir === 'in').map((entry) => entry.msg);
+  const turns = requests.filter((msg) => msg.method === 'turn/start');
+  const response = (id) => entries.find((entry) => entry.dir === 'out' && entry.msg.id === id)?.msg.result;
+  const revert = requests.find((msg) => msg.method === 'thread/revert');
+  const list = requests.find((msg) => msg.method === 'thread/turns/list');
+  const resume = requests.find((msg) => msg.method === 'thread/resume');
+  assert.equal(revert.params.beforeTurnId, response(turns[1].id).turn.id);
+  assert.equal(response(revert.id).thread.id, revert.params.threadId);
+  assert.deepEqual(response(list.id).data.map((turn) => turn.id), [response(turns[0].id).turn.id]);
+  assert.equal(resume.params.threadId, revert.params.threadId);
+  assert.equal(response(resume.id).thread.id, revert.params.threadId);
+  assert.equal(turns[2].params.input[0].text, 'What is the remembered code? Reply with the code only.');
+  const finalTurn = response(turns[2].id).turn.id;
+  assert.ok(entries.some((entry) => entry.dir === 'out'
+    && entry.msg.method === 'item/completed'
+    && entry.msg.params?.threadId === revert.params.threadId
+    && entry.msg.params?.turnId === finalTurn
+    && entry.msg.params?.item?.text === 'BLUE'));
 });
 
 test('version identity must agree with the installed exact package version', () => {

@@ -26,6 +26,13 @@ export function checkSchema(schema) {
   return METHODS.filter((method) => !methods.has(method));
 }
 
+export function checkRevertSchema(requests, params) {
+  const method = (requests?.oneOf ?? []).some((branch) => branch.required?.includes('method')
+    && branch.properties?.method?.type === 'string' && branch.properties.method.enum?.includes('thread/revert'));
+  return method && params?.type === 'object' && ['threadId', 'beforeTurnId'].every((key) =>
+    params.required?.includes(key) && params.properties?.[key]?.type === 'string');
+}
+
 export function checkVersion(provider, text, version) {
   return VERSION.test(version) && text.trim() === (provider === 'claude' ? `${version} (Claude Code)` : `codex-cli ${version}`);
 }
@@ -131,6 +138,7 @@ export async function probe(provider, binary, version, destination) {
   }
   const folder = mkdtempSync(join(tmpdir(), 'faber-cli-contract-'));
   const checks = [];
+  const capabilities = {};
   const identity = { provider, version, platform: process.platform, arch: process.arch, checkedAt: new Date().toISOString() };
   try {
     if (statSync(binary).size > 512 * 1024 * 1024) throw new Error('binary-size');
@@ -151,12 +159,19 @@ export async function probe(provider, binary, version, destination) {
         if (statSync(path).size > 8 * 1024 * 1024) return false;
         return checkSchema(JSON.parse(readFileSync(path, 'utf8'))).length === 0;
       });
+      try {
+        const requests = JSON.parse(readFileSync(join(schemaFolder, 'ClientRequest.json'), 'utf8'));
+        const params = JSON.parse(readFileSync(join(schemaFolder, 'v2', 'ThreadRevertParams.json'), 'utf8'));
+        capabilities.nativeRewindSchema = checkRevertSchema(requests, params);
+      } catch {
+        capabilities.nativeRewindSchema = false;
+      }
     }
     checks.push(await startup(binary, folder, spawn, provider));
   } catch {
     checks.push({ name: 'probe', passed: false, reason: 'probe-failed' });
   }
-  const result = report({ ...identity, checks });
+  const result = report({ ...identity, checks, capabilities });
   writeFileSync(destination, `${JSON.stringify(result, null, 2)}\n`, { flag: 'wx' });
   return result;
 }

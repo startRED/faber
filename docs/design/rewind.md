@@ -38,8 +38,8 @@ The message menu's confirmation and its saved-message notice, in Chat and Projec
   are its footer. Focus stays inside, Esc cancels while idle and closing returns focus to the menu's message. Repeated
   activation cannot launch another restore. Every state has a static word or mark; reduced and no motion need no animation.
 - Restoring, redoing and recovery reload the conversation before releasing the controls. Removed messages disappear,
-  and an empty saved conversation keeps its notice and menu instead of returning to the new-chat home. Continuing from
-  saved messages leaves one calm thread line: "The AI will continue from the saved messages". Undo and redo need no
+  and an empty saved conversation keeps its notice and menu instead of returning to the new-chat home. Codex continues in its native session at the restored point when available. Claude continues from saved messages,
+  as do Redo and a restore without an available native session. Continuing from saved messages leaves one calm thread line: "The AI will continue from the saved messages". Undo and redo need no
   connected AI and never rerun commands or turn Keep going back on.
 - Redo remains discoverable as interrupted work until the caller durably saves the conversation and acknowledges it;
   after acknowledgement it disappears and cannot run again. A missing working folder leaves recovery pending with

@@ -1221,11 +1221,13 @@ pub struct Conversation {
     /// them again after it closed, another conversation or a restart. Never exported, and a branch starts with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<crate::browser::tabs::Tabs>,
-    /// Saved-message continuation after rewind; consumed by the next reply, never a native CLI resume.
+    /// Saved-message continuation after rewind; consumed by the next reply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_notice: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_native: Option<crate::rewind::NativeRewind>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]

@@ -64,6 +64,10 @@ name = "engine"
 path = "tests/all.rs"
 
 [[test]]
+name = "rewind"
+path = "tests/rewind/main.rs"
+
+[[test]]
 name = "install_memory"
 path = "tests/install_memory.rs"
 

@@ -1173,6 +1173,7 @@ mod tests {
         let id = Uuid::new_v4().to_string();
         let pack = format!("{:064x}", history.points.len() + 1);
         let saved = SavedConversation {
+            native: None,
             messages: Vec::new(),
             piece_values: Vec::new(),
             sessions: BTreeMap::new(),

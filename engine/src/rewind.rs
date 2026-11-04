@@ -224,6 +224,13 @@ impl Snapshot {
     }
 }
 
+/// A qualified native cut; an incomplete point never gets one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NativeRewind {
+    pub thread: String,
+    pub before_turn: String,
+}
+
 /// Only conversation state that can go back. Grants, spend and publication are deliberately absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SavedConversation {
@@ -237,6 +244,8 @@ pub(crate) struct SavedConversation {
     context: Option<ContextFill>,
     summary: Option<String>,
     queued: Vec<QueuedTurn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native: Option<NativeRewind>,
 }
 impl SavedConversation {
     fn bindings(c: &Conversation) -> Self {
@@ -250,6 +259,7 @@ impl SavedConversation {
             context: c.context,
             summary: c.rewind_summary.clone(),
             queued: Vec::new(),
+            native: None,
         }
     }
     pub(crate) fn take(c: &Conversation) -> Self {
@@ -263,14 +273,18 @@ impl SavedConversation {
             context: c.context,
             summary: c.rewind_summary.clone(),
             queued: c.queued.clone(),
+            native: c.rewind_native.clone(),
         }
     }
     pub(crate) fn apply(&self, c: &mut Conversation) {
         c.messages.clone_from(&self.messages);
         c.piece_values.clone_from(&self.piece_values);
-        // Native rewind semantics are unproved. Both restore and redo continue from saved messages.
         c.sessions.clear();
         c.tentative.clear();
+        c.rewind_native.clone_from(&self.native);
+        if let Some(native) = &self.native {
+            c.sessions.insert(Vendor::Codex, native.thread.clone());
+        }
         c.choice.clone_from(&self.choice);
         c.plan.clone_from(&self.plan);
         c.context = self.context;
@@ -279,7 +293,7 @@ impl SavedConversation {
         c.queued.clone_from(&self.queued);
         c.queued.iter_mut().for_each(|q| q.sending = false);
         c.compacting = false;
-        c.rewind_notice = Some("note.rewind.savedMessages".into());
+        c.rewind_notice = self.native.is_none().then(|| "note.rewind.savedMessages".into());
         c.rewind_summary.clone_from(&self.summary);
     }
 }
@@ -887,8 +901,19 @@ impl History {
         }
     }
 
-    pub(crate) fn turn_cursor(&mut self, conversation: &str, turn: &str, cursor: Cursor) {
+    pub(crate) fn turn_cursor(&mut self, conversation: &str, turn: &str, cursor: Cursor, thread: Option<&str>) {
         for p in self.points.values_mut().filter(|p| p.conversation == conversation && p.info.turn_id == turn) {
+            if p.info.cursor.turn.is_none() {
+                p.saved.native = p
+                    .saved
+                    .sessions
+                    .get(&Vendor::Codex)
+                    .or_else(|| p.saved.tentative.get(&Vendor::Codex))
+                    .filter(|saved| thread == Some(saved.as_str()) && !saved.is_empty())
+                    .zip(cursor.turn.as_ref())
+                    .filter(|(_, turn)| !turn.is_empty())
+                    .map(|(thread, before_turn)| NativeRewind { thread: thread.clone(), before_turn: before_turn.clone() });
+            }
             p.info.cursor = cursor.clone();
         }
     }
@@ -1116,7 +1141,9 @@ impl History {
                 BTreeMap::new(),
             )
         };
-        let before = SavedConversation::take(conversation);
+        let mut before = SavedConversation::take(conversation);
+        // Redo always hands over saved messages, including when it undoes a pending native cut.
+        before.native = None;
         let mut after = before.clone();
         if request.mode.messages() {
             let cut = after
@@ -1128,6 +1155,9 @@ impl History {
             after.piece_values.retain(|entry| after.messages.iter().any(|message| message.id == entry.message_id));
             after.queued.clear();
             if let Some(point) = &point {
+                if before.messages.iter().rev().find_map(|m| m.vendor) == Some(Vendor::Codex) {
+                    after.native = point.saved.native.clone();
+                }
                 after.plan = point.saved.plan.clone();
                 after.context = point.saved.context;
                 after.choice = point.saved.choice.clone();
@@ -1184,8 +1214,11 @@ impl History {
             retained: Vec::new(),
             partial,
         };
-        let mut result =
-            RestoreResult { id: journal.id.clone(), notice: Some("note.rewind.savedMessages".into()), ..RestoreResult::default() };
+        let mut result = RestoreResult {
+            id: journal.id.clone(),
+            notice: journal.after.native.is_none().then(|| "note.rewind.savedMessages".into()),
+            ..RestoreResult::default()
+        };
         // The conversation and cursor are journaled even if every file must be kept.
         self.save_journal(&journal)?;
         self.journals.insert(journal.id.clone(), journal.clone());

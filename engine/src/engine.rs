@@ -4486,7 +4486,16 @@ impl Core {
         if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
             return Ok(());
         }
-        if self.convs.get(id).is_some_and(|c| c.rewind_notice.is_some())
+        if let Some(c) = self.convs.get_mut(id)
+            && c.rewind_native.is_some()
+            && pick.vendor != Vendor::Codex
+        {
+            c.rewind_native = None;
+            c.sessions.clear();
+            c.tentative.clear();
+            c.rewind_notice = Some("note.rewind.savedMessages".into());
+        }
+        if self.convs.get(id).is_some_and(|c| c.rewind_notice.is_some() || c.rewind_native.is_some())
             && let Some(live) = self.retire(id)
         {
             live.session.close();
@@ -4514,6 +4523,14 @@ impl Core {
             }
             result => result?,
         };
+        if self.convs.get(id).is_some_and(|c| c.rewind_native.is_some())
+            && self.live.get(id).is_some_and(|live| !live.resumed)
+            && let Some(c) = self.convs.get_mut(id)
+        {
+            c.rewind_native = None;
+            c.forget_session(Vendor::Codex);
+            c.rewind_notice = Some("note.rewind.savedMessages".into());
+        }
         if let Some(live) = self.live.get_mut(id) {
             live.visual_root = crate::visual::pin(&live.cwd).map(Arc::new);
         }
@@ -4911,6 +4928,12 @@ impl Core {
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
                 let title = self.convs.get(conv).map(|c| c.title.clone());
+                let before_turn = self
+                    .convs
+                    .get(conv)
+                    .and_then(|c| c.rewind_native.as_ref())
+                    .filter(|native| resume.as_ref() == Some(&native.thread))
+                    .map(|native| native.before_turn.clone());
                 self.codex_server(area, user_hooks, permissions, &cli).open_identified(
                     CodexThread {
                         title,
@@ -4936,6 +4959,7 @@ impl Core {
                     project_tools,
                     identity,
                     command_spawn,
+                    before_turn,
                 )
             }
         };
@@ -5066,6 +5090,7 @@ impl Core {
             browser: None,
             rewind_notice: None,
             rewind_summary: None,
+            rewind_native: None,
             reported: (None, None),
             compacting: false,
             stopped: false,

@@ -2562,6 +2562,7 @@ export const es: Messages = {
   'notes.398.better': 'Puedes ver en el plan qué piensa cambiar el agente y cómo comprobará el trabajo.',
   'notes.399.fixed': 'Seguir solo y las comprobaciones del proyecto esperan mientras otra persona usa la cuenta; tus mensajes siguen llegando.',
   'notes.400.better': 'La revisión de un proyecto ahora puntúa los cambios sobre 25 y corrige, en hasta tres rondas, solo los problemas que ven los dos revisores.',
+  'notes.401.better': 'Al volver atrás, Codex puede continuar recordando el trabajo que hizo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

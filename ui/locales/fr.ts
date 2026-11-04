@@ -2562,6 +2562,7 @@ export const fr: Messages = {
   'notes.398.better': 'Le plan indique ce que l’agent compte changer et comment il vérifiera son travail.',
   'notes.399.fixed': 'Continuer seul et les vérifications du projet attendent si une autre personne utilise le compte ; vos messages passent toujours.',
   'notes.400.better': "La révision d'un projet note maintenant les changements sur 25 et corrige, en trois tours au plus, seulement les problèmes relevés par les deux réviseurs.",
+  'notes.401.better': 'Après un retour en arrière, Codex peut continuer en gardant son travail en mémoire.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

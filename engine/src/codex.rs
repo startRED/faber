@@ -810,7 +810,14 @@ pub struct CodexThread {
 }
 
 enum ServerCommand {
-    Open { key: u64, thread: Box<CodexThread>, sink: EventSink, tools: Option<crate::tools::Delivery>, identity: Option<ThreadIdentity> },
+    Open {
+        key: u64,
+        thread: Box<CodexThread>,
+        sink: EventSink,
+        tools: Option<crate::tools::Delivery>,
+        identity: Option<ThreadIdentity>,
+        before_turn: Option<String>,
+    },
     Session(u64, SessionCommand),
     Tools(crate::tools::Delivery),
     Retire,
@@ -832,6 +839,7 @@ enum Waiting {
     Initialize,
     Unsubscribe(u64),
     Thread(u64),
+    Revert(u64),
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
     Steer(u64, String),
@@ -870,6 +878,7 @@ fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::mo
 
 /// A conversation's side of the shared process.
 struct Thread {
+    before_turn: Option<String>,
     early_completion: Vec<Value>,
     sink: EventSink,
     params: CodexThread,
@@ -1257,12 +1266,12 @@ impl CodexServer {
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
     pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
-        self.open_inner(thread, sink, None, None)
+        self.open_inner(thread, sink, None, None, None)
     }
 
     /// Uses the project's catalog choices for this launch, leaving already open conversations alone.
     pub fn open_with_tools(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery) -> Session {
-        self.open_inner(thread, sink, Some(tools), None)
+        self.open_inner(thread, sink, Some(tools), None, None)
     }
 
     pub(crate) fn open_identified(
@@ -1272,8 +1281,9 @@ impl CodexServer {
         tools: crate::tools::Delivery,
         identity: Arc<proc::ConversationIdentity>,
         spawn: Spawner,
+        before_turn: Option<String>,
     ) -> Session {
-        self.open_inner(thread, sink, Some(tools), Some(ThreadIdentity { identity, spawn }))
+        self.open_inner(thread, sink, Some(tools), Some(ThreadIdentity { identity, spawn }), before_turn)
     }
 
     fn open_inner(
@@ -1282,13 +1292,14 @@ impl CodexServer {
         sink: EventSink,
         tools: Option<crate::tools::Delivery>,
         identity: Option<ThreadIdentity>,
+        before_turn: Option<String>,
     ) -> Session {
         let session_identity = identity.as_ref().map(|i| i.identity.clone());
         let sink =
             identity.as_ref().and_then(|i| i.identity.token.clone()).map_or_else(|| sink.clone(), |token| redact_sink(sink.clone(), token));
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) =
-            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, identity })
+            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, identity, before_turn })
         {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
             sink(EngineEvent::WriterExit { confirmed: true });
@@ -1778,9 +1789,18 @@ async fn serve(
                                 continue;
                             }
                             let detail = error["message"].as_str().map(String::from).unwrap_or_else(|| error.to_string());
+                            if let Waiting::Thread(key) | Waiting::Revert(key) = kind
+                                && threads.get(&key).is_some_and(|t| t.before_turn.is_some())
+                                && let Some(t) = threads.remove(&key)
+                            {
+                                // No turn was sent: release this unopened owner without stopping the shared server.
+                                (t.sink)(EngineEvent::Error { message: format!("Codex thread failed: {detail}"), fatal: true });
+                                (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                                continue;
+                            }
                             let (keys, what, fatal): (Vec<u64>, &str, bool) = match kind {
                                 Waiting::Initialize => (threads.keys().copied().collect(), "initialize", true),
-                                Waiting::Thread(key) => (vec![key], "thread", true),
+                                Waiting::Thread(key) | Waiting::Revert(key) => (vec![key], "thread", true),
                                 Waiting::Other(key, m) => (vec![key], m, false),
                                 Waiting::Steer(..) => unreachable!("handled above"),
                                 Waiting::McpStatus { .. } => unreachable!("handled above"),
@@ -1847,11 +1867,25 @@ async fn serve(
                                     open_thread!(key, t);
                                 }
                             }
-                            Waiting::Thread(key) => {
-                                let Some(t) = threads.get_mut(&key) else { continue };
+                            Waiting::Thread(key) | Waiting::Revert(key) => {
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
+                                if threads.get(&key).is_some_and(|t| t.before_turn.is_some() && (id.is_empty() || t.params.resume.as_deref() != Some(id.as_str())))
+                                    && let Some(t) = threads.remove(&key)
+                                {
+                                    (t.sink)(EngineEvent::Error { message: "error.sessionLost".into(), fatal: true });
+                                    (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                                    continue;
+                                }
+                                let Some(t) = threads.get_mut(&key) else { continue };
+                                if matches!(kind, Waiting::Thread(_)) && let Some(before_turn) = &t.before_turn {
+                                    t.state.model = msg["result"]["model"].as_str().unwrap_or_default().to_string();
+                                    request!("thread/revert", json!({"threadId":id,"beforeTurnId":before_turn}), Waiting::Revert(key));
+                                    continue;
+                                }
                                 let actual_model = msg["result"]["model"].as_str().or_else(|| thread["model"].as_str()).unwrap_or_default().to_string();
+                                let actual_model = if actual_model.is_empty() { t.state.model.clone() } else { actual_model };
+                                t.before_turn = None;
                                 let shown = if actual_model.is_empty() { "codex".into() } else { actual_model.clone() };
                                 t.state.model = actual_model;
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
@@ -2239,10 +2273,10 @@ async fn serve(
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
-                Some(ServerCommand::Open { key, thread, sink, tools, identity }) => {
+                Some(ServerCommand::Open { key, thread, sink, tools, identity, before_turn }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
                     if let Some(token) = identity.as_ref().and_then(|i| i.identity.token.clone()) { tokens.insert(token); }
-                    let t = Thread { sink, params: *thread, tools, identity, unsubscribed: false, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { before_turn, sink, params: *thread, tools, identity, unsubscribed: false, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -2704,6 +2738,115 @@ mod rewind_tests {
     }
 
     #[tokio::test]
+    async fn rewind_failed_native_open_releases_its_writer_without_stopping_a_real_servers_peer() {
+        use tokio::io::AsyncWriteExt;
+        for failure in ["thread/resume", "thread/revert"] {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let root = proc::ProcessIdentity { pid: 100, created: 1 };
+                let stopped = Arc::new(AtomicBool::new(false));
+                let ended = stopped.clone();
+                let contained =
+                    proc::Containment::scripted_descendants(root, move || Ok(vec![root]), move || ended.store(true, Ordering::Release));
+                let (driver, script) = tokio::io::duplex(65536);
+                let (stdout, stdin) = tokio::io::split(driver);
+                let (read, mut input) = tokio::io::split(script);
+                let mut output = BufReader::new(read).lines();
+                let (tx, rx) = unbounded_channel();
+                let (sent, mut events) = unbounded_channel();
+                let sink = |key| {
+                    let sent = sent.clone();
+                    Arc::new(move |event| drop(sent.send((key, event)))) as EventSink
+                };
+                let alive = Arc::new(AtomicBool::new(true));
+                let opts = CodexServerOptions {
+                    permissions: Permissions::FullAccess,
+                    cli: crate::cli::Cli { command: "unused".into(), prefix: vec![] },
+                    cwd: PathBuf::new(),
+                    area: Area::Chat,
+                    user_hooks: false,
+                    windows: false,
+                    spawn: Arc::new(|_, _, _| panic!("scripted driver must not spawn")),
+                    tools: Default::default(),
+                };
+                let process =
+                    proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: Some(contained) };
+                let server = tokio::spawn(serve(Ok(process), opts, rx, alive.clone()));
+                let read = |line: String| serde_json::from_str::<Value>(&line).unwrap();
+                let init = read(output.next_line().await.unwrap().unwrap());
+                input.write_all(format!("{}\n", json!({"id":init["id"],"result":{}})).as_bytes()).await.unwrap();
+                assert_eq!(read(output.next_line().await.unwrap().unwrap())["method"], "initialized");
+                tx.send(ServerCommand::Open {
+                    key: 2,
+                    thread: Box::new(thread(sink(2)).params),
+                    sink: sink(2),
+                    tools: None,
+                    identity: None,
+                    before_turn: None,
+                })
+                .unwrap();
+                let open = read(output.next_line().await.unwrap().unwrap());
+                input.write_all(format!("{}\n", json!({"id":open["id"],"result":{"thread":{"id":"peer"}}})).as_bytes()).await.unwrap();
+                while !matches!(events.recv().await.unwrap(), (2, EngineEvent::Started { .. })) {}
+                // A peer holds the real server open while the replacement fails before its first turn.
+                input
+                    .write_all(
+                        format!("{}\n", json!({"method":"turn/started","params":{"threadId":"peer","turn":{"id":"peer-turn"}}})).as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                let mut params = thread(sink(1)).params;
+                params.resume = Some("original".into());
+                tx.send(ServerCommand::Open {
+                    key: 1,
+                    thread: Box::new(params),
+                    sink: sink(1),
+                    tools: None,
+                    identity: None,
+                    before_turn: Some("cut".into()),
+                })
+                .unwrap();
+                tx.send(ServerCommand::Session(1, SessionCommand::Send(UserTurn::text("pending")))).unwrap();
+                loop {
+                    let request = read(output.next_line().await.unwrap().unwrap());
+                    if request["method"] == "skills/list" {
+                        continue;
+                    }
+                    if request["method"] == failure {
+                        input
+                            .write_all(format!("{}\n", json!({"id":request["id"],"error":{"message":"injected failure"}})).as_bytes())
+                            .await
+                            .unwrap();
+                        break;
+                    }
+                    assert_eq!(request["method"], "thread/resume");
+                    input
+                        .write_all(format!("{}\n", json!({"id":request["id"],"result":{"thread":{"id":"original"}}})).as_bytes())
+                        .await
+                        .unwrap();
+                }
+                while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { fatal: true, .. })) {}
+                while !matches!(events.recv().await.unwrap(), (1, EngineEvent::WriterExit { confirmed: true })) {}
+                assert!(alive.load(Ordering::Acquire) && !stopped.load(Ordering::Acquire));
+                input
+                    .write_all(
+                        format!(
+                            "{}\n",
+                            json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}})
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                while !matches!(events.recv().await.unwrap(), (2, EngineEvent::Done { ok: true, .. })) {}
+                assert!(!stopped.load(Ordering::Acquire), "the peer finishes without its server being stopped");
+                server.abort();
+            })
+            .await
+            .expect("failed native startup releases its owner in a real shared server");
+        }
+    }
+
+    #[tokio::test]
     async fn shared_threads_keep_separate_identity_and_refresh_it_before_resume() {
         use tokio::io::AsyncWriteExt;
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -2755,7 +2898,7 @@ mod rewind_tests {
                             identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some(format!("key-cancel-{cancel_key}")) }),
                             spawn: spawn.clone(),
                         });
-                        tx.send(ServerCommand::Open { key: cancel_key, thread: Box::new(params.clone()), sink, tools: None, identity }).unwrap();
+                        tx.send(ServerCommand::Open { key: cancel_key, thread: Box::new(params.clone()), sink, tools: None, identity, before_turn: None }).unwrap();
                         assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err());
                         tx.send(ServerCommand::Session(cancel_key, cancel)).unwrap();
                         loop {
@@ -2763,7 +2906,7 @@ mod rewind_tests {
                         }
                     }
                 }
-                tx.send(ServerCommand::Open { key, thread: Box::new(params), sink, tools: None, identity }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(params), sink, tools: None, identity, before_turn: None }).unwrap();
                 if resume.is_some() {
                     assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err(), "a native writer must survive token rotation until it finishes");
                     input.write_all(format!("{}\n",json!({"method":"item/completed","params":{"threadId":"native-one","item":{"id":"background","type":"commandExecution","processId":"terminal-one","exitCode":0}}})).as_bytes()).await.unwrap();
@@ -2806,7 +2949,7 @@ mod rewind_tests {
                 identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("key-failed".into()) }),
                 spawn,
             });
-            tx.send(ServerCommand::Open { key: 4, thread: Box::new(params), sink, tools: None, identity }).unwrap();
+            tx.send(ServerCommand::Open { key: 4, thread: Box::new(params), sink, tools: None, identity, before_turn: None }).unwrap();
             let unsubscribe: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(unsubscribe["method"], "thread/unsubscribe");
             input.write_all(format!("{}\n", json!({"id":unsubscribe["id"],"error":{"message":"unsupported"}})).as_bytes()).await.unwrap();
@@ -2892,7 +3035,7 @@ mod rewind_tests {
             let mut params = thread(sink.clone()).params;
             params.cwd = root.path().into();
             params.permissions = Permissions::Isolated;
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None, identity: Some(ThreadIdentity { identity, spawn }) }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None, identity: Some(ThreadIdentity { identity, spawn }), before_turn: None }).unwrap();
             let config = read(&mut output).await;
             assert_eq!(config["method"], "config/read");
             write(&mut input, json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
@@ -2932,7 +3075,7 @@ mod rewind_tests {
         };
         let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
         let server = CodexServer::start(opts);
-        let _session = server.open_identified(thread(Arc::new(|_| {})).params, Arc::new(|_| {}), Default::default(), identity, spawn);
+        let _session = server.open_identified(thread(Arc::new(|_| {})).params, Arc::new(|_| {}), Default::default(), identity, spawn, None);
         let recorded = recorded.lock().unwrap();
         let (args, env) = recorded.as_ref().unwrap();
         assert!(args.iter().all(|arg| !arg.contains("test-key")));
@@ -2943,6 +3086,7 @@ mod rewind_tests {
 
     fn thread(sink: EventSink) -> Thread {
         Thread {
+            before_turn: None,
             sink,
             identity: None,
             unsubscribed: false,
@@ -3256,8 +3400,15 @@ mod rewind_tests {
             let init = read(&mut output).await;
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, identity: None })
-                .unwrap();
+            tx.send(ServerCommand::Open {
+                key: 1,
+                thread: Box::new(thread(sink.clone()).params),
+                sink,
+                tools: None,
+                identity: None,
+                before_turn: None,
+            })
+            .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -3366,7 +3517,7 @@ mod rewind_tests {
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
             for (key, id) in [(1, "owner"), (2, "peer")] {
-                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, identity: None }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, identity: None, before_turn: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                 while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -3475,7 +3626,7 @@ mod rewind_tests {
                 write(&mut input, json!({"id":init["id"],"result":{}})).await;
                 assert_eq!(read(&mut output).await["method"], "initialized");
                 for (key, id) in [(1, "owner"), (2, "peer")] {
-                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, identity: None }).unwrap();
+                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, identity: None, before_turn: None }).unwrap();
                     let open = read(&mut output).await;
                     write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                     while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
@@ -3495,7 +3646,7 @@ mod rewind_tests {
                 while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
                 let mut next = thread(sink(3)).params;
                 next.effort = Some("high".into());
-                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, identity: None }).unwrap();
+                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, identity: None, before_turn: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
                 while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
@@ -3556,8 +3707,15 @@ mod rewind_tests {
             assert_eq!(init["method"], "initialize");
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(thread(sink.clone()).params), sink, tools: None, identity: None })
-                .unwrap();
+            tx.send(ServerCommand::Open {
+                key: 1,
+                thread: Box::new(thread(sink.clone()).params),
+                sink,
+                tools: None,
+                identity: None,
+                before_turn: None,
+            })
+            .unwrap();
             let open = read(&mut output).await;
             write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":"owner"}}})).await;
             while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}

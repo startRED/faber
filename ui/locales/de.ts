@@ -2562,6 +2562,7 @@ export const de: Messages = {
   'notes.398.better': 'Im Plan siehst du, was der Agent ändern und wie er seine Arbeit prüfen will.',
   'notes.399.fixed': 'Selbst weitermachen und Projektprüfungen warten, solange jemand anderes das Konto nutzt; deine Nachrichten kommen weiterhin durch.',
   'notes.400.better': 'Die Prüfung in einem Projekt bewertet Änderungen jetzt mit bis zu 25 Punkten und behebt in höchstens drei Runden nur Probleme, die beide Prüfenden sehen.',
+  'notes.401.better': 'Nach dem Zurückgehen kann Codex mit seiner Erinnerung an die Arbeit weitermachen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

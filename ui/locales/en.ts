@@ -2442,6 +2442,7 @@ export const en = {
   'notes.398.better': 'You can see what the agent plans to change and how it will check the work in its plan.',
   'notes.399.fixed': 'Keep going and project checks wait while someone else uses the account; your messages still go through.',
   'notes.400.better': 'Review in a project now scores the changes out of 25 and fixes, in up to three rounds, only the problems both reviewers agree on.',
+  'notes.401.better': 'After you go back, Codex can continue with the work it remembers.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
