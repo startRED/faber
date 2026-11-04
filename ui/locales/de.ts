@@ -2572,6 +2572,7 @@ export const de: Messages = {
   'notes.402.better': 'Du siehst, wenn eine Gedächtnisdatei des Projekts größer als empfohlen ist.',
   'notes.403.new': 'Sieh den API-Wert von Faber für die letzten 30 Tage in den Details jedes Kontos.',
   'notes.404.new': 'Du kannst weitere Aufgaben direkt nach Abschluss starten; sie bleiben gespeichert, bis sie erledigt sind oder du sie verwirfst.',
+  'notes.405.fixed': 'Faber startet während einer Unterhaltung neu, die danach weitergeht. Ältere Versionen benötigen möglicherweise einen weiteren Neustart oder eine manuelle Installation.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -269,6 +269,7 @@ async function land(number, dry, given, args, opts = {}) {
     if (settled.refused) {
       console.error(`#${pr.number} conflicts with ${BASE} in:\n  ${settled.refused.join('\n  ')}`);
       console.error(`Merge origin/${BASE} into its branch, settle them, push, and run this again.`);
+      opts.conflict = true;
       return 1;
     }
     tree = settled.tree;
@@ -908,6 +909,15 @@ function blame(number, oid, commit, why) {
   drop(number, commit);
 }
 
+/**
+ * What a train does with a rider that did not squash: only one whose own changes conflict with the base alone is
+ * blamed. One that conflicts only with the riders before it, or failed for another reason (a push the server refused),
+ * waits for the next train.
+ */
+export function riderFate(onBase, conflict) {
+  return onBase && conflict ? 'blame' : 'wait';
+}
+
 /** The land or report job's end of the train at `sha`: the next one leaves with whoever still waits. */
 async function next(sha, self, why) {
   console.log(`${why}: the next train leaves with whoever waits.`);
@@ -956,11 +966,18 @@ async function train({ after = '', self = '', only = null, later = [] } = {}) {
       if ((await land(e.pr, false, e.oid, ['--alone'], opts)) === 0 && opts.commit) {
         parent = opts.commit;
         members.push(e.pr);
-      } else if (parent === base) {
+      } else if (riderFate(parent === base, opts.conflict) === 'blame') {
         // Not even on the base alone: only its author can settle it.
         blame(e.pr, e.oid, e.commit, `it does not squash on ${BASE}`);
       } else {
+        // It squashes on the base alone (or failed for a reason that is not its own): nothing is wrong with it, so it
+        // keeps a pending `queue` status and rides the next train.
         console.log(`#${e.pr} does not go on top of the riders before it: it waits for the next train.`);
+        try {
+          run('gh', ['api', `repos/{owner}/{repo}/statuses/${e.oid}`, '-f', 'state=pending', '-f', 'context=queue', '-f', `description=Waits for the next train: it does not go on top of the riders before it (${e.commit.slice(0, 9)})`]);
+        } catch {
+          // Only a light on the pull request.
+        }
         behind.push(e.pr);
       }
     }

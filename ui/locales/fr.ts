@@ -2572,6 +2572,7 @@ export const fr: Messages = {
   'notes.402.better': 'Vous voyez quand un fichier de mémoire du projet dépasse la taille conseillée.',
   'notes.403.new': 'Retrouvez la valeur d’API de Faber des 30 derniers jours dans les détails de chaque compte.',
   'notes.404.new': "Vous pouvez lancer une autre tâche depuis la carte de fin ; elle reste enregistrée jusqu'à sa réalisation ou son abandon.",
+  'notes.405.fixed': 'Faber redémarre pendant une conversation qui reprend ensuite. Les anciennes versions peuvent nécessiter un autre redémarrage ou une installation manuelle.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

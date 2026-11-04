@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
-import { MAX_ENVELOPE_BYTES, verifyEnvelope } from './live-manifest.mjs';
+import { MAX_ENVELOPE_BYTES, parsePayload, verifyEnvelope } from './live-manifest.mjs';
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const trusted = new Map([['fixture', publicKey]]);
@@ -56,4 +56,59 @@ test('authenticated payload must be valid UTF-8 without replacing invalid bytes'
 test('authentication returns bytes without granting schema or revision authorization', () => {
   const payload = Buffer.from('not JSON; schema and revision validation still required');
   assert.deepEqual(verifyEnvelope(JSON.stringify(envelopeFor(payload)), trusted), payload);
+});
+
+const now = '2026-10-24T12:00:00Z';
+const hash = 'a'.repeat(64);
+const document = () => ({
+  schema: 1, revision: 1, issued_at: '2026-10-24T11:00:00Z', expires_at: '2026-10-25T11:00:00Z',
+  minimum_app_version: '0.1.0', catalog: [], policies: [],
+  drivers: [{ id: 'fixture', provider: 'claude', variant: 'stream-json' }],
+  compatibility: [{ provider: 'claude', version: '1.2.3', operating_system: 'windows', architecture: 'x86_64',
+    artifact_digest: hash, driver: 'fixture', outcome: 'qualified', reason: 'Fixture evidence',
+    evidence: { startup: hash, turn: hash, cancellation: hash, cleanup: hash } }],
+});
+const parse = (value) => parsePayload(Buffer.from(JSON.stringify(value)), now, '0.2.0');
+
+test('offline payload schema accepts only bounded, current, supported metadata', () => {
+  assert.deepEqual(parse(document()), document());
+  for (const mutate of [
+    (d) => { d.schema = 2; }, (d) => { d.revision = 0; }, (d) => { d.revision = 1.5; },
+    (d) => { d.issued_at = '2026-02-30T11:00:00Z'; }, (d) => { d.expires_at = now; },
+    (d) => { d.minimum_app_version = '0.3.0'; }, (d) => { d.drivers[0].variant = 'downloaded-code'; },
+    (d) => { d.drivers[0].command = 'run'; }, (d) => { d.compatibility[0].evidence.cleanup = null; },
+    (d) => { d.compatibility.push(d.compatibility[0]); }, (d) => { d.permissions = 'full'; },
+    (d) => { d.policies.push({ provider: 'codex', install: 'allow', launch: 'allow', reason: 'No suspension', evidence: hash }); },
+  ]) { const d = document(); mutate(d); assert.throws(() => parse(d)); }
+  const raw = JSON.stringify(document());
+  assert.throws(() => parsePayload(Buffer.from(raw.replace('"revision":1', '"revision":2,"revision":1')), now, '0.2.0'));
+  assert.throws(() => parsePayload(Buffer.alloc(MAX_ENVELOPE_BYTES + 1), now, '0.2.0'));
+});
+
+
+test('policy, identities, formats and size limits stay closed', () => {
+  const valid = document();
+  valid.policies.push({ provider: 'codex', install: 'suspend', launch: 'unchanged', reason: 'Qualification paused', evidence: hash });
+  assert.deepEqual(parse(valid), valid);
+  for (const mutate of [
+    (d) => { d.catalog = [{ id: 'tool', commit: 'b'.repeat(40), digest: hash }, { id: 'tool', commit: 'b'.repeat(40), digest: hash }]; },
+    (d) => { d.drivers.push(d.drivers[0]); }, (d) => { d.drivers[0].endpoint = 'https://example.org'; },
+    (d) => { d.compatibility[0].model = 'chosen'; }, (d) => { d.compatibility[0].artifact_digest = null; },
+    (d) => { d.compatibility[0].version = 'latest'; }, (d) => { d.compatibility[0].architecture = 'aarch64'; },
+    (d) => { d.compatibility[0].evidence.startup = 'A'.repeat(64); },
+    (d) => { d.policies.push({ provider: 'codex', install: 'unchanged', launch: 'unchanged', reason: 'Nothing', evidence: hash }); },
+    (d) => { d.compatibility = Array(513).fill(d.compatibility[0]); },
+    (d) => { d.minimum_app_version = '0.01.0'; },
+  ]) { const d = document(); mutate(d); assert.throws(() => parse(d)); }
+  const raw = JSON.stringify(document());
+  assert.throws(() => parsePayload(Buffer.from(raw.replace('"startup":', '"start\\u0075p":null,"startup":')), now, '0.2.0'));
+  assert.throws(() => parsePayload(Buffer.from([0xc3, 0x28]), now, '0.2.0'));
+  assert.throws(() => parsePayload(Buffer.from(raw), now, '0.1.0-preview.1'));
+});
+
+
+test('one comma-containing field cannot replace all four evidence fields', () => {
+  const d = document();
+  d.compatibility[0].evidence = { 'cancellation,cleanup,startup,turn': hash };
+  assert.throws(() => parse(d));
 });

@@ -31,6 +31,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
             |spawn, sink| {
                 if vendor == "claude" {
                     let launch = ClaudeLaunch {
+                        temporary: false,
                         area: Area::Project,
                         model: None,
                         effort: None,
@@ -61,6 +62,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                     start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch, spawn, sandbox: None }, sink)
                 } else {
                     let thread = CodexThread {
+                        temporary: false,
                         title: None,
                         cwd: ".".into(),
                         model: None,

@@ -187,6 +187,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        temporary: false,
                         area: Area::Project,
                         model: model.clone(),
                         effort,
@@ -214,6 +215,7 @@ impl Core {
             ),
             Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
+                    temporary: false,
                     title: None,
                     leave_plan: false,
                     cwd,

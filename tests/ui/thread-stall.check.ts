@@ -19,7 +19,7 @@ check('thread stall: open and scroll 300 messages', async () => {
   const page = (): Conversation => ({ id, title: 'Long conversation', area: 'chat', sessions: {}, createdAt: 1, updatedAt: 1,
     earlier: 260, messages: messages.slice(-40) });
   let dispose = () => {};
-  let timer: ReturnType<typeof setInterval> | undefined;
+  let frame = 0;
   try {
     const base = await original.state();
     const initial: AppState = { ...base, conversations: [{ id, title: 'Long conversation', area: 'chat', updatedAt: 1 }],
@@ -35,14 +35,28 @@ check('thread stall: open and scroll 300 messages', async () => {
       } });
     localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id }));
     localStorage.removeItem('faber.reading');
-    let last = performance.now(), longest = 0;
-    timer = setInterval(() => { const now = performance.now(); longest = Math.max(longest, now - last - 16); last = now; }, 16);
-    dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
     const wait = async (test: () => boolean, message: string) => {
       for (let i = 0; i < 200 && !test(); i++) await new Promise((done) => setTimeout(done, 20));
       ok(test(), message);
     };
+    const gaps = { open: { longestMs: 0, frames: 0 }, scroll: { longestMs: 0, frames: 0 } };
+    let phase: keyof typeof gaps = 'open';
+    let last: number | undefined;
+    const sample = (at: number) => {
+      if (last !== undefined) {
+        gaps[phase].longestMs = Math.max(gaps[phase].longestMs, at - last);
+        gaps[phase].frames++;
+      }
+      last = at;
+      frame = requestAnimationFrame(sample);
+    };
+    frame = requestAnimationFrame(sample);
+    await wait(() => last !== undefined, 'animation frames must run in the hidden test window');
+    dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
     await wait(() => !!root.querySelector('[data-message-index="299"]'), 'the newest message must open');
+    const opened = gaps.open.frames;
+    await wait(() => gaps.open.frames > opened, 'a frame must follow opening the conversation');
+    phase = 'scroll';
     const thread = root.querySelector<HTMLDivElement>('.thread')!;
     for (const index of [220, 180, 140, 100, 60, 20, 0]) {
       thread.scrollTop = 0;
@@ -50,11 +64,14 @@ check('thread stall: open and scroll 300 messages', async () => {
       await wait(() => !!thread.querySelector(`[data-message-index="${index}"]`), `message ${index} must load`);
       await frames();
     }
-    await new Promise((done) => setTimeout(done, 30));
-    (window as unknown as { threadStallMs: number }).threadStallMs = longest;
-    console.info(`300-message open and scroll longest timer delay: ${longest.toFixed(1)} ms`);
+    const scrolled = gaps.scroll.frames;
+    await wait(() => gaps.scroll.frames > scrolled, 'a frame must follow loading all 300 messages');
+    ok(gaps.open.frames > 0 && gaps.scroll.frames > 0, 'both phases must have frame samples');
+    const measurement = { ...gaps, visibility: document.visibilityState };
+    (window as unknown as { threadStall: typeof measurement }).threadStall = measurement;
+    console.info(`300-message frame gaps: ${JSON.stringify(measurement)}`);
   } finally {
-    clearInterval(timer); dispose(); root.remove(); Object.assign(api, original);
+    cancelAnimationFrame(frame); dispose(); root.remove(); Object.assign(api, original);
     for (const [key, value] of saved) { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); }
   }
 });

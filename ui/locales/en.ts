@@ -2452,6 +2452,7 @@ export const en = {
   'notes.402.better': 'You can see when a project memory file is over its target size.',
   'notes.403.new': 'You can see Faber’s API value for the last 30 days in each account’s details.',
   'notes.404.new': 'You can start a follow-up from the done card; its task stays saved until the work finishes or you dismiss it.',
+  'notes.405.fixed': 'Updates restart Faber during a working conversation, which continues afterward. Older versions may need another restart or a manual install.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

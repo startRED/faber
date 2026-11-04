@@ -21,11 +21,11 @@ Build:
 - Refuse the whole server, with an `error.*` key, when any package in the tree has an install script (`preinstall`,
   `install`, `postinstall`), a native addon (`binding.gyp` or a `.node` file), a host other than registry.npmjs.org, or
   an integrity that does not match. Also refuse when the tree passes a size cap measured on the candidates and written
-  in the R-next row.
+  in the R545 row.
 - Then admit, under the same rules as `chrome-devtools`, the candidates from the #671 note that pass now. Each must be
   free and need no key, and no account Faber would have to store. Show each licence and give each a Chat declaration
   (R373).
-- Record the change as an R-next row that amends R253. Its author is IA (Erick delegated).
+- Record the change as an R545 row that amends R253. Its author is IA (Erick delegated).
 
 Leave out: servers that need a key or an account, plugins, and any install path that runs package scripts.
 
