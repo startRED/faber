@@ -99,7 +99,7 @@ test('a crashed engine restarts, refreshes the screen and never replays requests
   assert.deepEqual(replacement.requests.map((request) => request.cmd), ['state']);
   replacement.stdout.write(JSON.stringify({ id: replacement.requests[0].id, ok: {} }) + '\n');
   await flush();
-  assert.deepEqual(events, [{ type: 'lagged' }], 'reload only after the replacement answers');
+  assert.deepEqual(events, [{ type: 'lagged' }], 'refresh the live screen only after the replacement answers');
   const stopping = host.stop(budget); replacement.emit('exit', 0); await stopping;
   t.mock.timers.tick(60_000); await flush();
   assert.equal(children.at(-1), replacement, 'Quit never starts another host');

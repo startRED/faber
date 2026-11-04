@@ -91,7 +91,8 @@ function written(key: string, ok: boolean): void {
 export function keep(key: string, text: string): boolean {
   if (forgotten.has(key) && text.trim()) return false;
   try {
-    resolveImport(key);
+    // Empty hydration is not consumption; only new text or an existing/failed draft resolves the legacy field.
+    if (text !== '' || memory.has(key) || localStorage.getItem(KEPT + key) !== null) resolveImport(key);
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
     memory.delete(key);

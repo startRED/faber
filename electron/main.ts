@@ -348,11 +348,9 @@ void app.whenReady().then(async () => {
   };
   host = Sidecar.start({
     event: (event) => {
-      // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
-      // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
+      // Recovery reaches the live screen too: reloading here would lose drafts whose storage writes failed.
       const type = (event as { type?: unknown } | null)?.type;
-      if (type === 'lagged') win?.webContents.reload();
-      else if (type === 'pane') {
+      if (type === 'pane') {
         // What the browser pane tells the screen, on the channel the host names (only the pane's own channels reach it).
         const { channel, payload } = event as { channel?: unknown; payload?: unknown };
         if (typeof channel === 'string' && SCREEN_CHANNELS.has(channel)) win?.webContents.send(channel, payload);

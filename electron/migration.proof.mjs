@@ -48,7 +48,7 @@ void app.whenReady().then(async () => { try {
     console.log('seeded legacy profile', ses.storagePath);
   } else {
     protocol.handle('faber', blank);
-    if (mode === 'quota' || mode === 'partial' || mode === 'failed-use') {
+    if (mode === 'quota' || mode === 'partial' || mode === 'failed-use' || mode === 'failed-idle') {
       const failingKey = mode === 'partial' ? 'faber.tauri-drafts-imported' : 'faber.unsent-attachments.new-chat-';
       app.on('web-contents-created', (_event, contents) => contents.on('did-finish-load', () => {
         // Force the failed field first, so this launch also leaves a known field unvisited.
@@ -67,10 +67,29 @@ void app.whenReady().then(async () => { try {
     }
     const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } });
     await window.loadURL('faber://app/');
+    if (mode === 'restart-dirty' || mode === 'failed-idle') await window.webContents.executeJavaScript(`globalThis.faberShell = {
+      invoke: async () => undefined, listen: () => () => {}, window: { isMaximized: async () => false, onResized: () => () => {} },
+    }; void 0;`);
+    if (mode === 'restart-dirty') {
+      await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
+      await window.webContents.executeJavaScript('draftScreen.restartWithFailedDraft()');
+      window.destroy(); console.log('PASS: engine recovery retains newer unsaved words and refreshes state');
+      clearTimeout(watchdog); app.quit(); return;
+    }
     await window.webContents.executeJavaScript("localStorage.setItem('faber.unsent.existing', 'newer Electron draft')");
     const { migrateDrafts = async () => {} } = await import('../out/electron/migrate.js').catch((error) => {
       if (error.code === 'ERR_MODULE_NOT_FOUND') return {}; throw error;
     });
+    if (mode === 'failed-idle') {
+      await assert.rejects(migrateDrafts(dir), /injected quota failure/);
+      assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.unsent.new-chat-')"), null, 'failed publication rolls back text');
+      await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
+      await window.webContents.executeJavaScript("void draftScreen.mountComposer('new-chat-')");
+      assert.equal(await window.webContents.executeJavaScript("document.querySelector('textarea').value"), '', 'the untouched real composer starts empty');
+      session.defaultSession.flushStorageData(); window.destroy();
+      console.log('PASS: failed import followed by untouched composer mount');
+      clearTimeout(watchdog); app.quit(); return;
+    }
     if (mode === 'failed-use') {
       await assert.rejects(migrateDrafts(dir), /injected quota failure/);
       assert.equal(await window.webContents.executeJavaScript("localStorage.getItem('faber.tauri-drafts-imported.text-only')"), null, 'the loop has not reached this field');
