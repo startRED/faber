@@ -599,7 +599,9 @@ mod tests {
             None
         }
         fn shut_down(&self, _: bool) {}
-        fn quit(&self) {}
+        fn quit(&self) -> std::sync::mpsc::Receiver<()> {
+            std::sync::mpsc::channel().1
+        }
         fn emit(&self, _: faber_update::Status) {}
     }
 

@@ -7,7 +7,7 @@
 
 use faber_host::Host;
 use faber_host::sidecar::SidecarShell;
-use faber_host::wire::{Event, Order, Ordered, line};
+use faber_host::wire::{Event, line};
 use faber_update::{App, Status, Updater, Who};
 use serde_json::{Value, json};
 use std::any::Any;
@@ -34,6 +34,7 @@ struct Carrier {
     host: Weak<Host>,
     shell: Weak<SidecarShell>,
     write: Write,
+    quit: Arc<dyn Fn() -> std::sync::mpsc::Receiver<()> + Send + Sync>,
     previews: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
@@ -66,8 +67,8 @@ impl App for Carrier {
         }
     }
 
-    fn quit(&self) {
-        (self.write)(line(&Ordered { order: Order::Quit }));
+    fn quit(&self) -> std::sync::mpsc::Receiver<()> {
+        (self.quit)()
     }
 
     fn emit(&self, status: Status) {
@@ -76,12 +77,21 @@ impl App for Carrier {
 }
 
 /// Starts the updater when updates are on. The shell hears of it first, so a status asked for at once is answered.
-pub fn start(host: &Arc<Host>, shell: &Arc<SidecarShell>, write: Write, data_dir: PathBuf, version: &str, dir: PathBuf) {
+pub fn start(
+    host: &Arc<Host>,
+    shell: &Arc<SidecarShell>,
+    write: Write,
+    quit: Arc<dyn Fn() -> std::sync::mpsc::Receiver<()> + Send + Sync>,
+    data_dir: PathBuf,
+    version: &str,
+    dir: PathBuf,
+) {
     let engine = host.engine.clone();
     let carrier = Carrier {
         host: Arc::downgrade(host),
         shell: Arc::downgrade(shell),
         write,
+        quit,
         previews: Box::new(move || engine.settings().previews == Some(true)),
     };
     // A refusal is already in `update.log`; Faber then stays on this version.
@@ -94,6 +104,7 @@ pub fn start(host: &Arc<Host>, shell: &Arc<SidecarShell>, write: Write, data_dir
 #[cfg(test)]
 mod tests {
     use super::*;
+    use faber_host::wire::{Order, Ordered};
     use faber_update::Phase;
     use std::ffi::OsString;
 

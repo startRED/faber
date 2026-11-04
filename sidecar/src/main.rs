@@ -89,15 +89,8 @@ async fn run() -> ExitCode {
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
 
     // One writer, so two lines never mix on stdout.
-    let (out, mut lines) = mpsc::unbounded_channel::<String>();
-    let writer = tokio::spawn(async move {
-        let mut stdout = tokio::io::stdout();
-        while let Some(line) = lines.recv().await {
-            if stdout.write_all(line.as_bytes()).await.is_err() || stdout.flush().await.is_err() {
-                break;
-            }
-        }
-    });
+    let (out, lines) = mpsc::unbounded_channel::<(String, Option<std::sync::mpsc::Sender<()>>)>();
+    let writer = tokio::spawn(write_lines(tokio::io::stdout(), lines));
 
     // The shell, which the host keeps to the end, sends orders through this; it is emptied at the end so the writer can finish.
     let orders = Arc::new(Mutex::new(Some(out.clone())));
@@ -111,7 +104,7 @@ async fn run() -> ExitCode {
             let orders = orders.clone();
             Arc::new(move |order| {
                 if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-                    let _ = out.send(wire::line(&Ordered { order }));
+                    let _ = out.send((wire::line(&Ordered { order }), None));
                 }
             })
         },
@@ -130,7 +123,7 @@ async fn run() -> ExitCode {
                 let (channel, payload) = event.wire();
                 let event = serde_json::json!({ "type": "pane", "channel": channel, "payload": payload });
                 if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-                    let _ = out.send(wire::line(&Event { event }));
+                    let _ = out.send((wire::line(&Event { event }), None));
                 }
             }
         });
@@ -180,13 +173,24 @@ async fn run() -> ExitCode {
             let orders = orders.clone();
             Arc::new(move |text| {
                 if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-                    let _ = out.send(text);
+                    let _ = out.send((text, None));
                 }
             })
         };
         let version = std::env::var("FABER_VERSION").ok().filter(|version| !version.is_empty());
         let version = version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
-        updates::start(&host, &shell, write, update_data, &version, dir);
+        let quit = {
+            let orders = orders.clone();
+            Arc::new(move || {
+                let (sent, received) = std::sync::mpsc::channel();
+                if let Some(out) = orders.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                    let line = wire::line(&Ordered { order: wire::Order::Quit });
+                    let _ = out.send((line, Some(sent)));
+                }
+                received
+            })
+        };
+        updates::start(&host, &shell, write, quit, update_data, &version, dir);
     }
 
     let events = {
@@ -199,7 +203,7 @@ async fn run() -> ExitCode {
                     Err(broadcast::error::RecvError::Lagged(missed)) => serde_json::json!({ "type": "lagged", "missed": missed }),
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                if out.send(wire::line(&Event { event })).is_err() {
+                if out.send((wire::line(&Event { event }), None)).is_err() {
                     break;
                 }
             }
@@ -233,12 +237,12 @@ async fn run() -> ExitCode {
                 running.spawn(async move {
                     // The sidecar serves the screen, so its calls use the screen dispatcher.
                     let result = host.dispatch(&request.cmd, request.args).await;
-                    let _ = out.send(wire::line(&Reply::of(request.id, result)));
+                    let _ = out.send((wire::line(&Reply::of(request.id, result)), None));
                 });
             }
             // A line that is not a request has no id to answer under: the peer hears id 0 and the stream goes on.
             Err(key) => {
-                let _ = out.send(wire::line(&Reply::of(0, Err(key.into()))));
+                let _ = out.send((wire::line(&Reply::of(0, Err(key.into()))), None));
             }
         }
         // Finished commands leave the set as they are met, so it never grows with the session.
@@ -271,5 +275,37 @@ async fn skip_line<R: tokio::io::AsyncBufRead + Unpin>(input: &mut R) -> std::io
         if found.is_some() {
             return Ok(());
         }
+    }
+}
+
+async fn write_lines<W: tokio::io::AsyncWrite + Unpin>(
+    mut writer: W,
+    mut lines: mpsc::UnboundedReceiver<(String, Option<std::sync::mpsc::Sender<()>>)>,
+) {
+    while let Some((line, ack)) = lines.recv().await {
+        if writer.write_all(line.as_bytes()).await.is_err() || writer.flush().await.is_err() {
+            break;
+        }
+        if let Some(ack) = ack {
+            let _ = ack.send(());
+        }
+    }
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+    #[tokio::test(flavor = "current_thread")]
+    async fn quit_order_flushes_before_exit() {
+        let (out, lines) = mpsc::unbounded_channel();
+        let (writer, mut reader) = tokio::io::duplex(128);
+        tokio::spawn(write_lines(writer, lines));
+        let (ack, flushed) = std::sync::mpsc::channel();
+        out.send(("quit\n".into(), Some(ack))).unwrap();
+        tokio::task::yield_now().await;
+        assert!(flushed.try_recv().is_ok(), "the writer must flush before exit");
+        let mut line = String::new();
+        BufReader::new(&mut reader).read_line(&mut line).await.unwrap();
+        assert_eq!(line, "quit\n");
     }
 }
