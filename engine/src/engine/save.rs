@@ -246,6 +246,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn temporary_pending_conversations_never_enter_summaries() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = engine(root.path(), Arc::new(|_| {}));
+        engine.with(|c| {
+            let ordinary = conversation();
+            c.store.save_checked(&ordinary).unwrap();
+            c.convs.insert(ordinary.id.clone(), ordinary);
+            let mut private = conversation();
+            private.id = "private".into();
+            private.temporary = true;
+            c.convs.insert(private.id.clone(), private);
+            // Leave snapshots pending in memory, as when the disk writer is busy.
+            c.saves.pending.lock().unwrap().insert("private".into(), 1);
+            assert_eq!(c.listed().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["save-check"]);
+            c.convs.get_mut("save-check").unwrap().temporary = true;
+            c.saves.pending.lock().unwrap().insert("save-check".into(), 1);
+            assert!(c.listed().is_empty(), "an older ordinary disk row cannot expose a temporary conversation");
+            c.saves.pending.lock().unwrap().clear();
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn an_engine_call_answers_during_a_write_and_the_newer_snapshot_wins() {
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");

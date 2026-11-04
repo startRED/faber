@@ -2447,7 +2447,7 @@ impl Core {
         let mut list: Vec<Summary> = self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect();
         let pending = self.saves.pending.lock().unwrap_or_else(|e| e.into_inner());
         for id in pending.keys() {
-            if let Some(c) = self.convs.get(id) {
+            if let Some(c) = self.convs.get(id).filter(|c| !c.temporary) {
                 let mut current = crate::store::summary(c);
                 current.ended = current.ended.filter(|e| e.current(now()));
                 if let Some(row) = list.iter_mut().find(|row| row.id == *id) {
@@ -2457,7 +2457,7 @@ impl Core {
                 }
             }
         }
-        list.retain(|row| !row.title.is_empty());
+        list.retain(|row| !row.title.is_empty() && !self.convs.get(&row.id).is_some_and(|c| c.temporary));
         list.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
         for row in &mut list {
             row.state = match self.convs.get(&row.id) {
@@ -5017,6 +5017,7 @@ impl Core {
             commands: BTreeMap::new(),
             id,
             title: String::new(),
+            temporary: false,
             choice: None,
             area,
             project_id,
@@ -5397,6 +5398,7 @@ impl Core {
             wake,
         );
         if sent.is_ok()
+            && !source.temporary
             && let Some((again, choice)) = lesson
         {
             self.learn_from_redo(&source.messages[at + 1], again, &choice);

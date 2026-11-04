@@ -197,6 +197,7 @@ fn stamp(path: &Path) -> Option<Stamp> {
 /// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
 pub(crate) fn summary(c: &Conversation) -> Summary {
     Summary {
+        temporary: c.temporary,
         reason: None,
         keep_going: c.keep_going.is_some(),
         archived: c.archived_at.is_some(),
@@ -401,6 +402,7 @@ impl Store {
                             drop(fs::remove_file(&copy));
                         }
                         Some(Summary {
+                            temporary: false,
                             id: id.into(),
                             reason: Some("reason.conversation_damaged".into()),
                             title: id.into(),
@@ -427,6 +429,7 @@ impl Store {
                     }
                 }
             })
+            .filter(|row| !row.temporary)
             .map(|mut row| {
                 row.ended = row.ended.filter(|e| e.current(now));
                 row
@@ -605,7 +608,7 @@ impl Store {
         *written = Some(generation);
         self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.written_summary(path, row.clone());
-        self.search.saved_metadata(&row.id, row.area, row.project_id.clone(), row.updated_at);
+        self.search.saved_metadata(&row.id, row.area, row.project_id.clone(), row.updated_at, row.temporary);
         Ok(())
     }
 
@@ -1130,6 +1133,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_conversations_are_not_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut chat: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "private", "title": "private", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        chat.temporary = true;
+        store.save_checked(&chat).unwrap();
+        chat.id = "ordinary".into();
+        chat.temporary = false;
+        store.save_checked(&chat).unwrap();
+        let ordinary_file = dir.path().join("conversations/ordinary.json");
+        let ordinary_bytes = fs::read(&ordinary_file).unwrap();
+        assert_eq!(store.list().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["ordinary"]);
+        let reopened = Store::new(dir.path());
+        assert_eq!(reopened.list().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["ordinary"]);
+        assert_eq!(reopened.get("ordinary").unwrap(), chat);
+        assert_eq!(fs::read(ordinary_file).unwrap(), ordinary_bytes, "listing and reopening never rewrite ordinary conversations");
+        assert!(reopened.get("private").unwrap().temporary, "this slice filters without deleting any conversation");
+    }
 
     #[test]
     fn store_snapshot_and_recovery_hold_the_move_lock_during_writes() {

@@ -282,7 +282,7 @@ impl Search {
                 let doc = crate::store::read_checked::<Conversation>(&search.directory.join(format!("{id}.json")))
                     .ok()
                     .flatten()
-                    .filter(|c| c.id == id)
+                    .filter(|c| c.id == id && !c.temporary)
                     .map(|c| document(&c));
                 let mut index = search.state.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(mut doc) = doc
@@ -310,6 +310,9 @@ impl Search {
                 return;
             }
             let Some(c) = crate::store::read_checked::<Conversation>(&file.path()).ok().flatten() else { continue };
+            if c.temporary {
+                continue;
+            }
             let doc = document(&c);
             let mut index = self.state.lock().unwrap_or_else(|e| e.into_inner());
             // A save or removal during the scan always wins over the older record read from disk.
@@ -325,10 +328,14 @@ impl Search {
     }
 
     pub(crate) fn saved(&self, c: &Conversation) {
-        self.saved_metadata(&c.id, c.area, c.project_id.clone(), c.updated_at);
+        self.saved_metadata(&c.id, c.area, c.project_id.clone(), c.updated_at, c.temporary);
     }
 
-    pub(crate) fn saved_metadata(&self, id: &str, area: Area, project_id: Option<String>, updated: u64) {
+    pub(crate) fn saved_metadata(&self, id: &str, area: Area, project_id: Option<String>, updated: u64, temporary: bool) {
+        if temporary {
+            self.removed(id);
+            return;
+        }
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return;
         }
@@ -426,7 +433,7 @@ impl Search {
             let Some(c) = crate::store::read_checked::<Conversation>(&self.directory.join(format!("{id}.json"))).ok().flatten() else {
                 continue;
             };
-            if c.id != id || c.area != area || project.is_some_and(|p| c.project_id.as_deref() != Some(p)) {
+            if c.temporary || c.id != id || c.area != area || project.is_some_and(|p| c.project_id.as_deref() != Some(p)) {
                 continue;
             }
             // A conversation another agent started opens with that agent's brief, which is not the person's own words.
@@ -521,6 +528,36 @@ mod tests {
             "id": id, "title": "A title", "area": "chat", "createdAt": 1, "updatedAt": 1,
             "messages": texts.iter().enumerate().map(|(i, text)| Message::new(i.to_string(), Role::User, (*text).into(), 1)).collect::<Vec<_>>()
         })).unwrap()
+    }
+
+    #[test]
+    fn temporary_conversations_do_not_enter_search_or_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut private = conversation("private", &["secretword"]);
+        private.temporary = true;
+        store.save_checked(&private).unwrap();
+        store.save_checked(&conversation("ordinary", &["publicword"])).unwrap();
+        assert!(store.search().query("secretword", Area::Chat).unwrap().hits.is_empty());
+        assert_eq!(store.search().query("publicword", Area::Chat).unwrap().hits.len(), 1);
+        assert_eq!(store.search().prompt_history(Some("private"), Area::Chat, None).unwrap(), ["publicword"]);
+        let rebuilt = Search::new(dir.path().join("conversations"));
+        rebuilt.build();
+        assert!(rebuilt.query("secretword", Area::Chat).unwrap().hits.is_empty());
+        assert_eq!(rebuilt.query("publicword", Area::Chat).unwrap().hits.len(), 1);
+        assert_eq!(rebuilt.prompt_history(Some("private"), Area::Chat, None).unwrap(), ["publicword"]);
+        assert!(!rebuilt.state.lock().unwrap().documents.contains_key("private"));
+        // A record that used to be ordinary must also lose its already indexed words.
+        private.temporary = false;
+        store.save_checked(&private).unwrap();
+        rebuilt.saved(&private);
+        assert_eq!(rebuilt.query("secretword", Area::Chat).unwrap().hits.len(), 1);
+        private.temporary = true;
+        store.save_checked(&private).unwrap();
+        assert!(rebuilt.query("secretword", Area::Chat).unwrap().hits.is_empty(), "stale candidates cannot expose temporary text");
+        rebuilt.saved(&private);
+        assert!(!rebuilt.state.lock().unwrap().documents.contains_key("private"));
+        assert_eq!(rebuilt.query("publicword", Area::Chat).unwrap().hits.len(), 1);
     }
 
     #[test]
