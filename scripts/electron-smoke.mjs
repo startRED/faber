@@ -33,6 +33,15 @@ function run(program, args) {
 function requireFile(name) {
   if (!existsSync(path.join(folder, name))) throw new Error(`Missing ${name}`);
 }
+// Remove the temp folder, retrying only lock errors with a bounded backoff (about 60 s); anything else throws.
+async function removeTemp() {
+  for (let attempt = 0; ; attempt++) {
+    try { return rmSync(temp, { recursive: true, force: true }); } catch (error) {
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY', 'EACCES'].includes(error?.code) || attempt >= 30) throw error;
+      await delay(Math.min(500 * 2 ** attempt, 3000));
+    }
+  }
+}
 try {
   mkdirSync(folder);
   run(oldInstaller, ['/S', `/D=${folder}`]);
@@ -61,6 +70,8 @@ try {
 } finally {
   if (app?.pid && app.exitCode === null) spawnSync(path.join(system, 'taskkill.exe'), ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true, shell: false });
   if (sidecarPid) spawnSync(path.join(system, 'taskkill.exe'), ['/PID', String(sidecarPid), '/F'], { windowsHide: true, shell: false });
-  if (installed) run(path.join(folder, 'Uninstall Faber.exe'), ['/S']);
-  rmSync(temp, { recursive: true, force: true });
+  if (installed) {
+    // The NSIS uninstaller copies itself aside and returns at once, so files stay locked for a while.
+    try { run(path.join(folder, 'Uninstall Faber.exe'), ['/S']); } finally { await removeTemp(); }
+  } else await removeTemp();
 }
