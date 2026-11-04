@@ -1502,6 +1502,45 @@
     "conversation": "/id"
   },
   {
+    "name": "follow_up",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "file",
+        "String"
+      ],
+      [
+        "dismiss",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "dismiss": {
+          "type": "boolean"
+        },
+        "file": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "dismiss"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
     "name": "remove_queued",
     "args": [
       [

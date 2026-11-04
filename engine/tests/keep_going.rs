@@ -1787,3 +1787,148 @@ async fn faber_adds_at_most_one_automatic_message_to_a_typed_one() {
         engine.shutdown();
     }
 }
+
+#[tokio::test]
+async fn follow_up_at_close_is_a_task_file_offered_until_sent_and_removed_only_when_done() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _, mut pipe, id) = started(&dir, project.path()).await;
+    let closed = json!({"outcome":"done", "did":"Fixed login", "result":"Login works", "verified":"Login test passes"});
+    let mut oversized = closed.clone();
+    oversized["follow_ups"] = json!([{"title":"Export", "done":"x".repeat(6000)}]);
+    let (said, error) = calls(&mut pipe, "large-task", "wrap_up", oversized).await;
+    assert!(error && said.contains("6,000 bytes"), "{said}");
+    assert!(!project.path().join(".faber/tasks").exists());
+    let mut with_task = closed.clone();
+    with_task["follow_ups"] =
+        json!([{"title":"Fix export", "area":"Export", "files":"export.rs", "depends":[], "done":"Export test passes"}]);
+    let (said, error) = calls(&mut pipe, "new-task", "wrap_up", with_task).await;
+    assert!(!error, "{said}");
+    answers(&mut pipe, "Login works.", true).await;
+    let c = until(&engine, &id, idle).await;
+    let file = c.follow_ups[0].file.clone();
+    assert!(project.path().join(&file).is_file());
+    let row = engine.state().conversations.into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(row.follow_ups.len(), 1);
+    assert!(row.follow_ups[0].ready);
+    engine.seen(&id).unwrap();
+    assert_eq!(engine.state().conversations.into_iter().find(|s| s.id == id).unwrap().follow_ups.len(), 1);
+    engine.follow_up(&id, &file, false).unwrap();
+    assert!(engine.state().conversations.into_iter().find(|s| s.id == id).unwrap().follow_ups.is_empty());
+    assert!(engine.follow_up(&id, &file, false).is_err(), "a repeated click never sends twice");
+    assert!(project.path().join(&file).is_file(), "sending is not completion");
+    assert!(
+        engine
+            .open(&id)
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| m.role == Role::User && m.text == format!("Fix export\n\n{}", project.path().join(&file).display()))
+    );
+    let (said, error) = calls(&mut pipe, "finish-task", "wrap_up", closed).await;
+    assert!(!error, "{said}");
+    assert!(!project.path().join(&file).exists());
+    answers(&mut pipe, "Export works.", true).await;
+    until(&engine, &id, idle).await;
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn follow_up_dismiss_removes_the_file_and_adopted_folders_receive_nothing_new() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _, mut pipe, id) = started(&dir, project.path()).await;
+    let closed = json!({"outcome":"done", "did":"Fixed login", "result":"Login works", "verified":"Login test passes", "follow_ups":[{"title":"Fix export", "done":"Export test passes"}]});
+    let (_, error) = calls(&mut pipe, "new-task", "wrap_up", closed.clone()).await;
+    assert!(!error);
+    answers(&mut pipe, "Login works.", true).await;
+    let c = until(&engine, &id, idle).await;
+    let file = c.follow_ups[0].file.clone();
+    engine.follow_up(&id, &file, true).unwrap();
+    assert!(!project.path().join(&file).exists());
+    assert!(engine.open(&id).unwrap().follow_ups.is_empty());
+    std::fs::create_dir(project.path().join("tasks")).unwrap();
+    engine.approve_project_tasks(c.project_id.as_ref().unwrap(), "tasks").unwrap();
+    engine
+        .send(SendRequest {
+            conversation_id: Some(id.clone()),
+            area: Area::Project,
+            project_id: c.project_id,
+            text: "Continue".into(),
+            images: vec![],
+            files: vec![],
+            choice: c.choice.unwrap(),
+        })
+        .unwrap();
+    let (said, error) = calls(&mut pipe, "adopted-task", "wrap_up", closed).await;
+    assert!(error && said.contains("read-only"), "{said}");
+    assert_eq!(std::fs::read_dir(project.path().join("tasks")).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(project.path().join(".faber/tasks")).unwrap().count(), 0);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn follow_up_failed_save_rolls_back_the_file_and_retry_keeps_one_task() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _, mut pipe, id) = started(&dir, project.path()).await;
+    let closed = json!({"outcome":"done", "did":"Fixed login", "result":"Login works", "verified":"Login test passes", "follow_ups":[{"title":"Fix export", "done":"Export test passes"}]});
+    let blocker = dir.path().join("conversations").join(format!("{id}.json.tmp"));
+    std::fs::create_dir(&blocker).unwrap();
+    let (_, error) = calls(&mut pipe, "save-fails", "wrap_up", closed.clone()).await;
+    assert!(error);
+    assert!(engine.open(&id).unwrap().follow_ups.is_empty());
+    assert_eq!(std::fs::read_dir(project.path().join(".faber/tasks")).unwrap().count(), 0);
+    std::fs::remove_dir(blocker).unwrap();
+    let (said, error) = calls(&mut pipe, "save-retry", "wrap_up", closed.clone()).await;
+    assert!(!error, "{said}");
+    let (said, error) = calls(&mut pipe, "same-retry", "wrap_up", closed).await;
+    assert!(!error, "{said}");
+    assert_eq!(engine.open(&id).unwrap().follow_ups.len(), 1);
+    assert_eq!(std::fs::read_dir(project.path().join(".faber/tasks")).unwrap().count(), 1);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn follow_up_blocked_work_can_retry_and_a_different_task_closes_only_its_own_file() {
+    let (dir, project) = (support::DataFolder::new(), support::work_folder());
+    let (engine, _, mut pipe, id) = started(&dir, project.path()).await;
+    let closed = json!({"outcome":"done", "did":"Fixed login", "result":"Login works", "verified":"Login test passes"});
+    let mut offered = closed.clone();
+    offered["follow_ups"] = json!([{"title":"First", "done":"First test passes"}, {"title":"Second", "done":"Second test passes"}]);
+    let (_, error) = calls(&mut pipe, "offer-two", "wrap_up", offered).await;
+    assert!(!error);
+    answers(&mut pipe, "Login works.", true).await;
+    let c = until(&engine, &id, idle).await;
+    let first = c.follow_ups[0].file.clone();
+    let second = c.follow_ups[1].file.clone();
+    engine.follow_up(&id, &first, false).unwrap();
+    let saved = faber_engine::store::Store::new(dir.path()).get(&id).unwrap();
+    assert!(saved.follow_ups[0].sent && saved.follow_ups[0].message.is_some(), "acceptance persists the task and message together");
+    let (_, error) = calls(
+        &mut pipe,
+        "blocked-first",
+        "wrap_up",
+        json!({"outcome":"blocked", "did":"Checked first", "result":"Needs an external service"}),
+    )
+    .await;
+    assert!(!error);
+    answers(&mut pipe, "Blocked.", true).await;
+    until(&engine, &id, idle).await;
+    assert_eq!(
+        engine.state().conversations.iter().find(|s| s.id == id).unwrap().follow_ups.len(),
+        2,
+        "blocked work can retry or be dismissed"
+    );
+    engine.follow_up(&id, &second, false).unwrap();
+    let (_, error) = calls(&mut pipe, "done-second", "wrap_up", closed.clone()).await;
+    assert!(!error);
+    assert!(project.path().join(&first).exists(), "a different task's close never removes blocked work");
+    assert!(!project.path().join(&second).exists());
+    answers(&mut pipe, "Second works.", true).await;
+    until(&engine, &id, idle).await;
+    engine.follow_up(&id, &first, false).unwrap();
+    std::fs::write(project.path().join(&first), "The person added new requirements").unwrap();
+    let (said, error) = calls(&mut pipe, "edited-first", "wrap_up", closed).await;
+    assert!(!error && said.contains("file was kept"), "{said}");
+    assert!(engine.open(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+    assert_eq!(std::fs::read_to_string(project.path().join(&first)).unwrap(), "The person added new requirements");
+    engine.shutdown();
+}

@@ -418,6 +418,9 @@ table! {
     Read Screen fn seen(h, id: String) -> () {
         h.engine.seen(&id)
     }
+    StartsTurn Own("/id") fn follow_up(h, id: String, file: String, dismiss: bool) -> () {
+        h.engine.follow_up(&id, &file, dismiss)
+    }
     Write Own("/id") fn remove_queued(h, id: String, turn_id: String) -> () {
         h.engine.remove_queued(&id, &turn_id);
         Ok(())

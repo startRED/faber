@@ -3,7 +3,130 @@
 use super::*;
 use crate::progress;
 
+impl Engine {
+    /// Accepts a ready task through the ordinary send path, or dismisses its unchanged file.
+    pub fn follow_up(&self, id: &str, file: &str, dismiss: bool) -> Result<(), String> {
+        self.with(|c| c.follow_up(id, file, dismiss))
+    }
+}
+
 impl Core {
+    fn follow_up_project(&self, id: &str) -> Option<crate::model::Project> {
+        let c = self.convs.get(id)?;
+        if c.area != Area::Project {
+            return None;
+        }
+        self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())
+    }
+
+    pub(super) fn ready_follow_ups(&self, id: &str, tasks: &[crate::model::FollowUpTask]) -> Vec<crate::model::FollowUpTask> {
+        if tasks.is_empty() {
+            return vec![];
+        }
+        // Saved rows also project offers after restart, before their conversation has loaded.
+        let project_id = self.convs.get(id).and_then(|c| c.project_id.clone()).or_else(|| self.store.get(id).and_then(|c| c.project_id));
+        let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == project_id.as_ref()) else { return vec![] };
+        let root = Path::new(&project.path);
+        // shortcut: adopted task folders remain read-only; add an approved writer before offering new tasks there.
+        if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
+            return vec![];
+        }
+        let active = self.live.get(id).is_some_and(|l| l.turn.is_some())
+            || self.convs.get(id).is_some_and(|c| c.compacting || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
+        let tasks: Vec<_> = tasks.iter().map(|t| crate::model::FollowUpTask { sent: t.sent && active, ..t.clone() }).collect();
+        crate::project::memory::ready_follow_ups(root, &tasks).unwrap_or_default()
+    }
+
+    fn follow_up(&mut self, id: &str, file: &str, dismiss: bool) -> Result<(), String> {
+        let c = self.load(id).ok_or("error.conversationGone")?;
+        let task = c.follow_ups.iter().find(|t| t.file == file).cloned().ok_or("error.memory.changed")?;
+        let project = self.follow_up_project(id).ok_or("error.projectGone")?;
+        if dismiss {
+            crate::project::memory::remove_follow_up(Path::new(&project.path), &task)?;
+            self.convs.get_mut(id).unwrap().follow_ups.retain(|t| t.file != file);
+            self.try_save(id)?;
+        } else {
+            let c = &self.convs[id];
+            if self.live.get(id).is_some_and(|l| l.turn.is_some())
+                || c.compacting
+                || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+                || !self.ready_follow_ups(id, &c.follow_ups).iter().any(|t| t.file == file)
+            {
+                return Err("error.memory.changed".into());
+            }
+            let request = SendRequest {
+                conversation_id: Some(id.into()),
+                area: c.area,
+                project_id: c.project_id.clone(),
+                text: format!("{}\n\n{}", task.title, Path::new(&project.path).join(&task.file).display()),
+                images: vec![],
+                files: vec![],
+                choice: c.choice.clone().ok_or("error.noSubscription")?,
+            };
+            // The task and its message commit together in send's admission save, before dispatch starts.
+            if let Err(error) = self.send_task(request, None, Some(file)) {
+                *self.convs.get_mut(id).unwrap().follow_ups.iter_mut().find(|t| t.file == file).unwrap() = task;
+                self.try_save(id)?;
+                return Err(error);
+            }
+        }
+        (self.emit)(AppEvent::List);
+        Ok(())
+    }
+
+    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value, done: bool) -> Result<&'static str, String> {
+        let tasks: Vec<progress::FollowUp> = match input.get("follow_ups") {
+            Some(value) => serde_json::from_value(value.clone()).map_err(|_| "Send follow_ups as task objects with title and done.")?,
+            None => vec![],
+        };
+        if tasks.len() > 32 {
+            return Err("Send at most 32 follow-ups at once.".into());
+        }
+        for task in &tasks {
+            task.task_file()?;
+        }
+        let Some(project) = self.follow_up_project(conv) else {
+            return if tasks.is_empty() { Ok("") } else { Err("Follow-ups need a project folder.".into()) };
+        };
+        let root = Path::new(&project.path);
+        if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
+            return if tasks.is_empty() {
+                Ok("")
+            } else {
+                Err("This project's task folder is read-only in Faber. No new task was written.".into())
+            };
+        }
+        let mut notice = "";
+        if done {
+            let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| &m.id);
+            let sent: Vec<_> = self.convs[conv].follow_ups.iter().filter(|t| t.sent && t.message.as_ref() == question).cloned().collect();
+            for task in sent {
+                if crate::project::memory::remove_follow_up(root, &task).is_ok() {
+                    self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != task.file);
+                } else {
+                    self.convs.get_mut(conv).unwrap().follow_ups.iter_mut().find(|t| t.file == task.file).unwrap().sent = false;
+                    notice = "The follow-up file was kept because it changed or could not be removed. The work can still conclude.";
+                }
+            }
+        }
+        if self.convs[conv].follow_ups.len() + tasks.len() > 256 {
+            return Err("Dismiss existing follow-ups before adding more.".into());
+        }
+        for task in tasks {
+            let revision = crate::project::memory::revision(task.task_file()?.as_bytes());
+            if self.convs[conv].follow_ups.iter().any(|t| t.revision == revision) {
+                continue;
+            }
+            let saved = crate::project::memory::write_follow_up(root, &task)?;
+            self.convs.get_mut(conv).unwrap().follow_ups.push(saved.clone());
+            if let Err(error) = self.try_save(conv) {
+                crate::project::memory::remove_follow_up(root, &saved)?;
+                self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != saved.file);
+                return Err(error);
+            }
+        }
+        Ok(notice)
+    }
     /// Adds what something cost, in US$, to the job's running total (rule 7): the conversation's, and its parent's when an
     /// agent started it. It is called where each cost is written (a turn, a helper, a quick side question), so the spend is
     /// read in one step and never counted again from the conversations. A cost not known adds nothing, so the warning can
@@ -227,6 +350,10 @@ impl Core {
             }
             progress::WRAP_UP_TOOL => {
                 let box_ = progress::wrap_up(input)?;
+                if self.turn(conv).is_none() {
+                    return Err("No reply is under way.".into());
+                }
+                let follow_ups_notice = self.close_follow_ups(conv, input, box_.done)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
                 let concluded = box_.outcome.is_some();
@@ -252,7 +379,7 @@ impl Core {
                 let r = crate::results::tally(self.convs.get(conv).ok_or("The conversation is gone.")?);
                 let (d, c) = (r.delivered, r.cost);
                 Ok(format!(
-                    "{lead}\nResults: {} files, {}/{} checks passed, {} commits, {} pull requests, {} artifacts, {} answers; cost: {}${} API value, {} input and {} output tokens, {} ms work (current turn may be incomplete).",
+                    "{lead}\n{follow_ups_notice}\nResults: {} files, {}/{} checks passed, {} commits, {} pull requests, {} artifacts, {} answers; cost: {}${} API value, {} input and {} output tokens, {} ms work (current turn may be incomplete).",
                     d.files,
                     d.checks_passed,
                     d.checks_run,
@@ -270,5 +397,41 @@ impl Core {
             }
             _ => Err("Faber has no such tool.".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn follow_up_refuses_compaction_and_streaming_admission_without_queueing_duplicates() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("finished", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let task: crate::progress::FollowUp =
+            serde_json::from_value(serde_json::json!({"title":"Fix export", "done":"Export test passes"})).unwrap();
+        let task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+        app.with(|c| {
+            c.live.remove(&id);
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups.push(task.clone());
+            conv.messages.last_mut().unwrap().status = Some(Status::Done);
+            conv.compacting = true;
+        });
+        assert_eq!(app.follow_up(&id, &task.file, false), Err("error.memory.changed".into()));
+        app.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            assert!(conv.queued.is_empty() && !conv.follow_ups[0].sent);
+            conv.compacting = false;
+            conv.messages.last_mut().unwrap().status = Some(Status::Streaming);
+        });
+        assert_eq!(app.follow_up(&id, &task.file, false), Err("error.memory.changed".into()));
+        assert!(app.open(&id).unwrap().queued.is_empty());
+        app.shutdown();
     }
 }

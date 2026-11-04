@@ -235,3 +235,53 @@ check('running: ended states keep their words and distinct shared drawings', () 
     ok(root.querySelector('.ri.done .verb')?.textContent, 'the state words stay visible');
   } finally { dispose(); root.remove(); }
 });
+
+check('follow-ups: the done card offers five ready tasks, counts the rest and removes a sent offer', async () => {
+  const { createSignal } = await import('solid-js');
+  const { t, useLanguage, lang } = await import('../../ui/i18n.ts');
+  const before = lang();
+  useLanguage('de');
+  const tasks = Array.from({ length: 7 }, (_, i) => ({ title: `Export ${i}`, file: `.faber/tasks/00${i}-export.md`, ready: i !== 6, sent: false }));
+  const [all, setAll] = createSignal<Summary[]>([{ id: 'c1', title: 'Project work', area: 'project', projectId: 'p1', updatedAt: 2, followUps: tasks }]);
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const sent: string[] = [];
+  let reject = false;
+  const dispose = render(() => createComponent(Running, {
+    items: [], get done() { return doneCards(all(), [], 'c1'); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+    onFollowUp: async (_c, file, dismiss) => {
+      if (reject) throw new Error('error.memory.changed');
+      sent.push(`${dismiss}:${file}`);
+      setAll((rows) => rows.map((c) => ({ ...c, followUps: c.followUps?.filter((t) => t.file !== file) })));
+    },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    equal(root.querySelectorAll('[data-testid="follow-up"]').length, 5);
+    ok(root.textContent!.includes(t('run.followUpMore', { n: 1 })));
+    const button = root.querySelector<HTMLButtonElement>('[data-testid="follow-up"] button')!;
+    button.focus();
+    equal(document.activeElement, button, 'a native button is keyboard reachable');
+    equal(button.textContent, t('run.followUp'));
+    reject = true;
+    button.click();
+    await settle();
+    equal(sent.length, 0, 'a refused send keeps the offer');
+    equal(root.querySelectorAll('[data-testid="follow-up"]').length, 5);
+    ok(root.querySelector('[role="status"]'), 'a refusal is visible and retryable');
+    reject = false;
+    button.click();
+    await settle();
+    deepEqual(sent, ['false:.faber/tasks/000-export.md']);
+    ok(!root.querySelector('.ri.done')!.textContent!.includes('Export 0'), 'sending removes the offer');
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="follow-up"] button')[1]!.click();
+    await settle();
+    equal(sent[1], 'true:.faber/tasks/001-export.md');
+    ok(!root.querySelector('.ri.done')!.textContent!.includes('Export 1'), 'dismissal removes its offer');
+    const row = root.querySelector<HTMLElement>('.ri.done')!;
+    ok(row.scrollWidth <= row.clientWidth + 1, 'the done card fits the narrow window in German');
+  } finally { dispose(); root.remove(); useLanguage(before); }
+});

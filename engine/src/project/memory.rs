@@ -725,7 +725,108 @@ fn codex_file(dir: &Directory, folder: &Path, protected: &[String]) -> Result<Op
     Ok(None)
 }
 
-fn revision(bytes: &[u8]) -> String {
+fn task_directory(project: &Path, create: bool) -> Result<Directory, &'static str> {
+    let protected = resolved_private(&private_roots());
+    let (_, mut dir) = project_directory(project, &protected)?;
+    for name in [".faber", "tasks"] {
+        dir = match dir.under(Path::new(name)) {
+            Ok(child) => child,
+            Err(e) if create && e.kind() == std::io::ErrorKind::NotFound => dir.create_dir(name).map_err(|_| REFUSED)?,
+            Err(_) => return Err(REFUSED),
+        };
+    }
+    Ok(dir)
+}
+
+/// Creates one bounded task through pinned no-follow handles; a second worker never replaces the first one's task.
+pub fn write_follow_up(project: &Path, task: &crate::progress::FollowUp) -> Result<crate::model::FollowUpTask, String> {
+    let text = task.task_file()?;
+    let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
+    let dir = task_directory(project, true)?;
+    let (names, incomplete) = dir.names_bounded(MAX_ENTRIES).map_err(|_| READ)?;
+    if incomplete {
+        return Err(REFUSED.into());
+    }
+    let mut order = names.iter().filter_map(|n| n.split_once('-')?.0.parse::<u64>().ok()).max().unwrap_or(0);
+    let slug: String = task.title.chars().take(64).map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    for _ in 0..32 {
+        order = order.checked_add(1).ok_or(REFUSED)?;
+        let name = format!("{order:03}-{}.md", slug.trim_matches('-'));
+        let file = match dir.create(&name) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err(REFUSED.into()),
+        };
+        let permissions = file.metadata().map_err(|_| READ)?.permissions();
+        drop(file);
+        if dir.replace(&name, text.as_bytes(), permissions, &revision(b"")).is_err() {
+            return Err("error.memory.write".into());
+        }
+        return Ok(crate::model::FollowUpTask {
+            title: task.title.trim().into(),
+            file: format!(".faber/tasks/{name}"),
+            revision: revision(text.as_bytes()),
+            sent: false,
+            message: None,
+            ready: false,
+        });
+    }
+    Err(REFUSED.into())
+}
+
+fn task_name(task: &crate::model::FollowUpTask) -> Result<&str, &'static str> {
+    task.file
+        .strip_prefix(".faber/tasks/")
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\', ':', '\0']) && n.ends_with(".md"))
+        .ok_or(REFUSED)
+}
+
+/// Readiness follows the current task folder, never the start card or an agent's claimed state.
+pub fn ready_follow_ups(project: &Path, tasks: &[crate::model::FollowUpTask]) -> Result<Vec<crate::model::FollowUpTask>, &'static str> {
+    let dir = task_directory(project, false)?;
+    let (names, incomplete) = dir.names_bounded(MAX_ENTRIES).map_err(|_| READ)?;
+    if incomplete {
+        return Err(REFUSED);
+    }
+    let mut ready = Vec::new();
+    for task in tasks.iter().filter(|t| !t.sent) {
+        let mut text = String::new();
+        let Ok(file) = dir.file(task_name(task)?) else { continue };
+        file.take(6001).read_to_string(&mut text).map_err(|_| READ)?;
+        if text.len() <= 6000 && revision(text.as_bytes()) == task.revision && crate::progress::follow_up_ready(&text, &names) {
+            ready.push(crate::model::FollowUpTask { ready: true, ..task.clone() });
+        }
+    }
+    Ok(ready)
+}
+
+/// Removes only the unchanged task that was offered. Links and edited briefs are preserved.
+pub fn remove_follow_up(project: &Path, task: &crate::model::FollowUpTask) -> Result<(), &'static str> {
+    let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
+    let dir = task_directory(project, false)?;
+    let name = task_name(task)?;
+    #[cfg(windows)]
+    let mut file = match dir.dir.removal_file(name) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(REFUSED),
+    };
+    #[cfg(unix)]
+    let mut file = match dir.file(name) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(REFUSED),
+    };
+    let mut bytes = Vec::new();
+    (&mut file).take(6001).read_to_end(&mut bytes).map_err(|_| READ)?;
+    if bytes.len() > 6000 || revision(&bytes) != task.revision {
+        return Err(CHANGED);
+    }
+    // shortcut: Unix rename-over can race unlink; quarantine before supporting concurrent task replacement.
+    dir.discard(&file, name).map_err(|_| "error.memory.write")
+}
+
+pub(crate) fn revision(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -1149,6 +1250,55 @@ fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_up_files_are_bounded_ready_and_excluded_from_memory_and_start_sources() {
+        let project = folder();
+        let mut task = crate::progress::FollowUp {
+            title: "Fix export".into(),
+            area: "Projects".into(),
+            files: "ui/Export.tsx".into(),
+            depends: vec![],
+            size: "small".into(),
+            done: "Export opens correctly.".into(),
+        };
+        let first = write_follow_up(project.path(), &task).unwrap();
+        assert_eq!(std::fs::read_to_string(project.path().join(&first.file)).unwrap(), task.task_file().unwrap());
+        task.depends = vec![first.file.rsplit('/').next().unwrap().into()];
+        let second = write_follow_up(project.path(), &task).unwrap();
+        assert_ne!(first.file, second.file);
+        assert_eq!(ready_follow_ups(project.path(), &[first.clone(), second.clone()]).unwrap().len(), 1);
+        // Memory lists task files since #648 (it marks one over its 6 KB target); the start card below still leaves them out.
+        assert!(list_faber(project.path()).unwrap().files.iter().any(|f| f.path.contains("tasks/")));
+        let facts = crate::project::rules::facts(project.path()).unwrap();
+        assert!(!crate::project::rules::card(&facts, &[], &[]).contains("Export opens correctly"));
+        remove_follow_up(project.path(), &first).unwrap();
+        assert_eq!(ready_follow_ups(project.path(), std::slice::from_ref(&second)).unwrap().len(), 1);
+        task.done = "é".repeat(3000);
+        assert!(write_follow_up(project.path(), &task).unwrap_err().contains("6,000 bytes"));
+        assert_eq!(std::fs::read_dir(project.path().join(".faber/tasks")).unwrap().count(), 1);
+        std::fs::write(project.path().join(&second.file), "Person edited this task").unwrap();
+        assert_eq!(remove_follow_up(project.path(), &second), Err(CHANGED));
+        assert_eq!(std::fs::read_to_string(project.path().join(&second.file)).unwrap(), "Person edited this task");
+        assert!(ready_follow_ups(project.path(), &[second]).unwrap().is_empty());
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn follow_up_files_refuse_linked_task_folders() {
+        let project = folder();
+        let outside = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join(".faber/tasks")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join(".faber/tasks")).unwrap();
+        let task: crate::progress::FollowUp = serde_json::from_value(serde_json::json!({"title":"Fix it", "done":"Test passes"})).unwrap();
+        assert!(write_follow_up(project.path(), &task).is_err());
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+        #[cfg(windows)]
+        junction::delete(project.path().join(".faber/tasks")).unwrap();
+    }
 
     fn folder() -> tempfile::TempDir {
         tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()

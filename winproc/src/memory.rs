@@ -171,6 +171,11 @@ impl MemoryDirectory {
         child(self.directory(), name, false, false, true)
     }
 
+    /// A no-follow guard with delete access, excluding in-place writers until removal.
+    pub fn removal_file(&self, name: &str) -> io::Result<File> {
+        child_access(self.directory(), name, false, false, true, 0x0001_0000)
+    }
+
     pub fn under(&self, relative: &Path) -> io::Result<Self> {
         let mut parents = self.parents.iter().map(File::try_clone).collect::<io::Result<Vec<_>>>()?;
         for part in relative.components() {

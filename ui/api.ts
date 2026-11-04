@@ -394,6 +394,7 @@ export interface Stuck { noticedAt: number; since: number; turns: number; usd: n
 export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
 
 export interface Summary {
+  followUps?: { title: string; file: string; ready: boolean; sent: boolean }[];
   reason?: 'reason.conversation_damaged';
   results?: Results;
   stuck?: boolean;
@@ -1028,6 +1029,7 @@ export const api = {
   keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
   /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
   seen: (id: string) => invoke<void>('seen', { id }),
+  followUp: (id: string, file: string, dismiss: boolean) => invoke<void>('follow_up', { id, file, dismiss }),
   /** Archives a conversation, or brings an archived one back. */
   archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
   pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),

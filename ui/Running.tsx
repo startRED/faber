@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show, type Accessor, type ComponentProps } from 'solid-js';
-import { api, type AgentAsk, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
+import { api, errorText, type AgentAsk, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { DetailsPane } from './Details.tsx';
 import { Changes } from './Changes.tsx';
@@ -40,6 +40,7 @@ export function Running(props: {
   /** A done card's click opens its conversation, which clears it; its × only clears it. */
   onOpenDone?: (c: Summary) => void;
   onDismiss?: (c: Summary) => void;
+  onFollowUp?: (c: Summary, file: string, dismiss: boolean) => Promise<void>;
   onClose: () => void;
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
@@ -252,7 +253,18 @@ export function Running(props: {
                           )}
                         </For>
                         <For each={block().done}>
-                          {(c) => (
+                          {(c) => {
+                            const [pending, setPending] = createSignal(false);
+                            const [error, setError] = createSignal<string>();
+                            const tasks = () => c.followUps?.filter((t) => t.ready && !t.sent) ?? [];
+                            const act = async (file: string, dismiss: boolean) => {
+                              if (pending()) return;
+                              setPending(true); setError(undefined);
+                              try { await props.onFollowUp?.(c, file, dismiss); }
+                              catch (err) { setError(errorText(err)); }
+                              finally { setPending(false); }
+                            };
+                            return (
                             <li class="ri done" classList={{ need: ended(c).kind !== 'done' }} ref={animateList}>
                               <div class="rhead">
                                 <span class="vm end">
@@ -268,8 +280,17 @@ export function Running(props: {
                                 {c.title || t('run.untitled')}
                               </button>
                               <Show when={ended(c).line}>{(line) => <p class="run-kg"><span class="last" title={line()}>{line()}</span></p>}</Show>
+                              <For each={tasks().slice(0, 5)}>{(task) => <div class="wrap-ask" data-testid="follow-up">
+                                <p class="q">{task.title}</p>
+                                <div class="wrap-actions">
+                                  <button type="button" class="btn secondary" disabled={pending()} onClick={() => void act(task.file, false)}>{t('run.followUp')}</button>
+                                  <button type="button" class="btn ghost" disabled={pending()} aria-label={t('run.dismiss', { title: task.title })} onClick={() => void act(task.file, true)}>{t('run.followUpDismiss')}</button>
+                                </div>
+                              </div>}</For>
+                              <Show when={tasks().length > 5}><p class="note">{t('run.followUpMore', { n: tasks().length - 5 })}</p></Show>
+                              <Show when={error()}>{(why) => <p class="note" role="status">{why()}</p>}</Show>
                             </li>
-                          )}
+                          ); }}
                         </For>
                       </ul>
                     </section>

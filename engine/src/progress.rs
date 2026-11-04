@@ -6,6 +6,68 @@
 use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanStep, StepState, WrapUp};
 use serde_json::{Value, json};
 
+/// A task found while closing a project conversation. Its complete text is kept, never shortened.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct FollowUp {
+    pub title: String,
+    #[serde(default)]
+    pub area: String,
+    #[serde(default)]
+    pub files: String,
+    #[serde(default)]
+    pub depends: Vec<String>,
+    #[serde(default)]
+    pub size: String,
+    pub done: String,
+}
+
+impl FollowUp {
+    /// Render one complete task brief, rejecting oversized or ambiguous fields.
+    pub fn task_file(&self) -> Result<String, &'static str> {
+        let line = |s: &str| !s.trim().is_empty() && !s.contains(['\r', '\n']);
+        if !line(&self.title)
+            || self.done.trim().is_empty()
+            || [&self.area, &self.files, &self.size].iter().any(|s| !s.is_empty() && !line(s))
+            || self.depends.iter().any(|s| !line(s) || s.contains(','))
+        {
+            return Err("A follow-up needs a title and what done looks like; its fields must each fit on one line.");
+        }
+        let mut text = format!("# {}\n\n", self.title.trim());
+        for (name, value) in [("Area", &self.area), ("Files", &self.files)] {
+            if !value.trim().is_empty() {
+                text.push_str(&format!("{name}: {}\n", value.trim()));
+            }
+        }
+        text.push_str(&format!(
+            "Depends: {}\n",
+            if self.depends.is_empty() { "none".into() } else { self.depends.iter().map(|s| s.trim()).collect::<Vec<_>>().join(", ") }
+        ));
+        if !self.size.trim().is_empty() {
+            text.push_str(&format!("Size: {}\n", self.size.trim()));
+        }
+        text.push_str(&format!("\n{}\n", self.done.trim()));
+        if text.len() > 6000 {
+            return Err("The follow-up is over 6,000 bytes. Shorten it and try again; nothing was cut.");
+        }
+        Ok(text)
+    }
+}
+
+/// A dependency remains unmet while its named task file is still in the folder.
+pub fn follow_up_ready(text: &str, files: &[String]) -> bool {
+    let depends = text.lines().find_map(|line| line.strip_prefix("Depends:")).unwrap_or("");
+    !depends.split(',').map(str::trim).filter(|name| !name.is_empty() && *name != "none").any(|name| {
+        files.iter().any(|file| {
+            file.strip_suffix(".md").is_some_and(|stem| {
+                stem == name.trim_end_matches(".md")
+                    || stem.split_once('-').is_some_and(|(order, task)| {
+                        !order.is_empty() && order.bytes().all(|b| b.is_ascii_digit()) && (task == name || order == name)
+                    })
+            })
+        })
+    })
+}
+
 /// The names both drivers give the calls, whatever the CLI calls them.
 pub const PLAN_TOOL: &str = "Plan";
 pub const STATUS_TOOL: &str = "Status";
@@ -111,6 +173,12 @@ fn wrap_up_schema() -> Value {
             "result": { "type": "string", "description": "What is now true." },
             "not_done": { "type": "string", "description": "What is left or not verified; leave out when nothing is." },
             "verified": { "type": "string", "description": "What you ran or looked at that shows the result. Required for done." },
+            "follow_ups": { "type": "array", "maxItems": 32, "description": "Project tasks discovered at close, each under 6,000 bytes. Depends names existing task files; omit when there are none.", "items": {
+                "type": "object", "properties": {
+                    "title": { "type": "string" }, "area": { "type": "string" }, "files": { "type": "string" },
+                    "depends": { "type": "array", "items": { "type": "string" } }, "size": { "type": "string" }, "done": { "type": "string" }
+                }, "required": ["title", "done"], "additionalProperties": false
+            } },
             "ask": { "type": "string", "description": "One short question for the person, only when the next move is theirs." },
             "actions": {
                 "type": "array",
@@ -572,6 +640,35 @@ pub fn first_sentence(recap: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_up_brief_keeps_its_contents_and_refuses_oversize() {
+        let mut task = FollowUp {
+            title: "Fix export".into(),
+            area: "Projects".into(),
+            files: "ui/Export.tsx".into(),
+            depends: vec!["010-login".into()],
+            size: "small".into(),
+            done: "Export opens correctly.".into(),
+        };
+        assert_eq!(
+            task.task_file().unwrap(),
+            "# Fix export\n\nArea: Projects\nFiles: ui/Export.tsx\nDepends: 010-login\nSize: small\n\nExport opens correctly.\n"
+        );
+        task.done = "é".repeat(3000);
+        assert!(task.task_file().unwrap_err().contains("6,000 bytes"));
+        task.done = "Done".into();
+        task.title = "One\n# Another".into();
+        assert!(task.task_file().is_err());
+    }
+
+    #[test]
+    fn follow_up_waits_only_while_its_dependency_is_a_task_file() {
+        let files = vec!["010-login.md".into(), "020-export.md".into(), "notes.md".into()];
+        assert!(!follow_up_ready("# Export\nDepends: login, old\n", &files));
+        assert!(follow_up_ready("# Export\nDepends: old\n", &files));
+        assert!(follow_up_ready("# Export\nDepends: none\n", &files));
+    }
 
     fn states(p: &Plan) -> Vec<(&str, StepState)> {
         p.steps.iter().map(|s| (s.text.as_str(), s.state)).collect()

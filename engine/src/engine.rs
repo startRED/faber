@@ -2463,6 +2463,7 @@ impl Core {
         list.retain(|row| !row.title.is_empty());
         list.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
         for row in &mut list {
+            row.follow_ups = self.ready_follow_ups(&row.id, &row.follow_ups);
             row.state = match self.convs.get(&row.id) {
                 Some(c) => (!c.messages.is_empty()).then(|| ended::run_state(c, self.live.get(&row.id).is_some_and(|l| l.turn.is_some()))),
                 None if row.state == Some(crate::sibling::State::Working)
@@ -5043,6 +5044,7 @@ impl Core {
     fn blank_as(&mut self, id: String, area: Area, project_id: Option<String>) -> String {
         let at = now();
         let c = Conversation {
+            follow_ups: vec![],
             commands: BTreeMap::new(),
             id,
             title: String::new(),
@@ -5102,6 +5104,10 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest, wake: Option<Wake>) -> Result<String, String> {
+        self.send_task(req, wake, None)
+    }
+
+    fn send_task(&mut self, req: SendRequest, wake: Option<Wake>, task: Option<&str>) -> Result<String, String> {
         if self.installing {
             return Err("error.update.activeOperations".into());
         }
@@ -5222,6 +5228,10 @@ impl Core {
         reply.finished_at = None;
         let reply_id = reply.id.clone();
         let question_id = question.id.clone();
+        if let Some(task) = task.and_then(|file| c.follow_ups.iter_mut().find(|t| t.file == file)) {
+            task.sent = true;
+            task.message = Some(question_id.clone());
+        }
         c.stopped = false;
         c.waiting_on = None;
         c.messages.push(question);

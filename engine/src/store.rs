@@ -197,6 +197,7 @@ fn stamp(path: &Path) -> Option<Stamp> {
 /// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
 pub(crate) fn summary(c: &Conversation) -> Summary {
     Summary {
+        follow_ups: c.follow_ups.clone(),
         reason: None,
         keep_going: c.keep_going.is_some(),
         archived: c.archived_at.is_some(),
@@ -401,6 +402,7 @@ impl Store {
                             drop(fs::remove_file(&copy));
                         }
                         Some(Summary {
+                            follow_ups: vec![],
                             id: id.into(),
                             reason: Some("reason.conversation_damaged".into()),
                             title: id.into(),

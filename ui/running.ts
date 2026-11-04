@@ -62,7 +62,9 @@ export function blocksOf(items: RunningItem[], done: Summary[] = []): Block[] {
  * not one put away, and not the one on screen while the window shows it (the screen tells the engine it was seen). */
 export function doneCards(all: Summary[], items: RunningItem[], onScreen?: string): Summary[] {
   const busy = new Set(items.filter((i) => !i.settled).map((i) => i.conversationId));
-  return all.filter((c) => c.ended && !c.archived && !busy.has(c.id) && c.id !== onScreen).sort((a, b) => b.ended!.at - a.ended!.at);
+  return all.filter((c) => !c.archived && !busy.has(c.id) && ((c.ended && c.id !== onScreen) || c.followUps?.some((t) => t.ready && !t.sent)))
+    .map((c) => c.ended ? c : { ...c, ended: { at: c.updatedAt, kind: 'done' as const, workMs: 0 } })
+    .sort((a, b) => b.ended!.at - a.ended!.at);
 }
 
 /** What the screen shows as running: a reply whose agent finished, with only the CLI's turn still closing, is done for the person. The

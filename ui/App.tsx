@@ -1730,7 +1730,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         if (!docked()) closeColumn();
         openSummary(c);
       }}
-      onDismiss={(c) => void api.seen(c.id).catch(() => {})}
+      onDismiss={(c) => void (async () => {
+        for (const task of c.followUps ?? []) await api.followUp(c.id, task.file, true);
+        await api.seen(c.id);
+      })().catch(fail)}
+      onFollowUp={async (c, file, dismiss) => {
+        await api.followUp(c.id, file, dismiss);
+        if (!dismiss) openSummary(c);
+      }}
       onClose={closeColumn}
       details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages, copy: current()?.id === place().id ? sideDetails()!.copy : undefined,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,

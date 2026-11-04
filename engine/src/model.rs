@@ -1087,6 +1087,9 @@ pub struct WaitingOn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
+    /// Tasks discovered at close; sent tasks stay on disk until a done conclusion or explicit dismissal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_ups: Vec<FollowUpTask>,
     /// The commands advertised by each of this conversation's CLIs. Never saved.
     #[serde(skip)]
     pub commands: BTreeMap<Vendor, Vec<Command>>,
@@ -1310,6 +1313,8 @@ impl Project {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_ups: Vec<FollowUpTask>,
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -1353,6 +1358,20 @@ pub struct Summary {
     /// The watchdog found it delivering nothing for a long run of turns.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stuck: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowUpTask {
+    pub title: String,
+    pub file: String,
+    pub revision: String,
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub ready: bool,
 }
 
 /// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the

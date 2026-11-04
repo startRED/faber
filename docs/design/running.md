@@ -43,6 +43,13 @@ rest of the shell are in [layout.md](layout.md).
 - A run that ended while nobody looked keeps a calm card in its block (R242): no fill, a thin line around it, a check
   and "done" (amber when it needs the person), the time it worked and its last line. A click opens it, its × clears it;
   nothing else moves. The sidebar row shows a 6 px accent dot until the conversation is seen.
+- A project done card also offers ready follow-ups saved as individual task files: at most five titles, each with
+  "Do this next" and a quiet "Dismiss", then a count of the rest. A dependency still present as a task file holds its
+  offer back. Opening the conversation clears its dot but keeps ready offers available. Sending hides the offer and
+  sends its title and absolute task-file path to the existing conversation; its file stays until the closing box says
+  done. Dismiss removes the unchanged file; the card's × dismisses its ready offers together. Failed actions keep the
+  offer and show a calm retryable line. Native buttons use the existing wrapping actions, focus and reduced-motion
+  behavior, with no new motion, process or timer. Adopted task folders remain read-only and receive no new offers.
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
