@@ -267,6 +267,8 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 
 ## Other stored state
 
+`repoint_project` repairs existing linked worktrees through the guarded Git runner, outside the engine lock, and saves `WorkCopy.root` and `sub` for loaded and unloaded conversations before publishing the project's new folder. Uncommitted files stay in place; a repair failure leaves the project unrepointed (`engine::tool_in_tests::t515a_moved_project_repairs_loaded_and_unloaded_copies_without_touching_edits`).
+
 A rejected closing box keeps the sent follow-up task file. Capacity and replacement writes run first; the conclusion must save successfully before completed task files are removed (`engine::plan::tests::t515a_rejected_conclusion_keeps_the_sent_follow_up_file`).
 
 `save_file` copies to an exclusive temporary sibling, synchronizes it and replaces the chosen destination only after the entire copy succeeds. A failed read, write or publication preserves the previous destination (`table::revoke_tests::t515a_failed_workspace_copy_preserves_existing_destination`).

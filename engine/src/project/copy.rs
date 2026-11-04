@@ -101,6 +101,35 @@ fn git(exec: &mut dyn Executor, cwd: &Path, args: &[&str]) -> Option<String> {
     out.success.then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string())
 }
 
+/// Repairs a linked copy after its repository moved, without checking out or deleting any of its files.
+pub fn repair(exec: &mut dyn Executor, folder: &Path, data: &Path, id: &str, copy: &WorkCopy) -> Result<WorkCopy, &'static str> {
+    let path = home(data).join(id);
+    if !valid_conversation(id) || !own_branch(&copy.branch) || Path::new(&copy.path) != path {
+        return Err("error.copy.failed");
+    }
+    real_path(&path).map_err(|_| "error.copy.failed")?;
+    let top = git(exec, folder, &["rev-parse", "--show-toplevel", "--show-prefix"]).ok_or("error.copy.failed")?;
+    let mut lines = top.lines();
+    let root = lines.next().unwrap_or_default().trim();
+    let sub = lines.next().unwrap_or_default().trim().trim_end_matches('/');
+    if root.is_empty() || sub.split('/').any(|part| part == ".." || part == ".git") {
+        return Err("error.copy.failed");
+    }
+    if path.is_dir() {
+        let listed = git(exec, Path::new(root), &["worktree", "list", "--porcelain", "-z"]).ok_or("error.copy.failed")?;
+        if !listed.split('\0').filter_map(|field| field.strip_prefix("worktree ")).any(|p| crate::recents::same_place(p, &copy.path)) {
+            return Err("error.copy.failed");
+        }
+        let common = git(exec, Path::new(root), &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or("error.copy.failed")?;
+        git(exec, Path::new(root), &["worktree", "repair", "--", &native_path(&path)]).ok_or("error.copy.failed")?;
+        let linked = git(exec, &path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or("error.copy.failed")?;
+        if !crate::recents::same_place(&common, &linked) {
+            return Err("error.copy.failed");
+        }
+    }
+    Ok(WorkCopy { root: root.into(), sub: sub.into(), ..copy.clone() })
+}
+
 /// The full id of the commit a build names (a crash line's `commit`: 7 to 40 hexadecimal digits) in the repository of `folder`,
 /// or `None` when the text is not such a name or the repository has no such commit. The text is checked before git sees it.
 pub fn resolve(exec: &mut dyn Executor, folder: &Path, name: &str) -> Option<String> {

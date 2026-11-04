@@ -1535,7 +1535,37 @@ impl Engine {
     }
     /// Points a moved or missing project at its new folder (`Find the folder`), keeping its id and conversations intact.
     pub fn repoint_project(&self, id: &str, path: &str) -> Result<Project, String> {
-        self.with(|c| c.repoint_project(id, path))
+        let (copies, run, data) = self.with(|c| {
+            c.repoint_check(id, path)?;
+            let ids: HashSet<_> = c
+                .store
+                .list()
+                .into_iter()
+                .filter(|s| s.project_id.as_deref() == Some(id))
+                .map(|s| s.id)
+                .chain(c.convs.values().filter(|v| v.project_id.as_deref() == Some(id)).map(|v| v.id.clone()))
+                .collect();
+            let copies: Vec<_> = ids
+                .into_iter()
+                .filter_map(|id| {
+                    let copy = match c.convs.get(&id) {
+                        Some(conv) => conv.copy.clone(),
+                        None => c.store.get(&id).and_then(|conv| conv.copy),
+                    };
+                    copy.filter(|copy| !copy.root.is_empty()).map(|copy| (id, copy))
+                })
+                .collect();
+            Ok::<_, String>((copies, c.git.clone(), c.opts.data_dir.clone()))
+        })?;
+        let mut repaired = Vec::new();
+        if !copies.is_empty() {
+            let mut exec = run.and_then(|run| run()).ok_or("error.copy.failed")?;
+            for (conv, before) in copies {
+                let after = crate::project::copy::repair(&mut *exec, Path::new(path), &data, &conv, &before)?;
+                repaired.push((conv, before, after));
+            }
+        }
+        self.with(|c| c.repoint_project(id, path, &repaired))
     }
     /// Dismisses the one-time calm home note shown after an unclean exit.
     pub fn dismiss_unclean_exit(&self) {
@@ -5707,7 +5737,7 @@ impl Core {
     }
 
     /// Points an existing project at a new folder after its folder moved, keeping its id and conversations intact.
-    fn repoint_project(&mut self, id: &str, path: &str) -> Result<Project, String> {
+    fn repoint_check(&self, id: &str, path: &str) -> Result<(Vec<Project>, usize, String), String> {
         let p = Path::new(path);
         if crate::permissions::forbidden_folder(p) {
             return Err("error.workingFolder".into());
@@ -5720,7 +5750,7 @@ impl Core {
         let Some(resolved) = crate::recents::resolved(path) else {
             return Err("error.workingFolder".into());
         };
-        let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
+        let projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
         let Some(pos) = projects.iter().position(|p| p.id == id) else {
             return Err("error.project.notFound".into());
         };
@@ -5729,6 +5759,38 @@ impl Core {
         }
         if self.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, self.live.get(&conv.id)).is_some()) {
             return Err("error.project.busy".into());
+        }
+        Ok((projects, pos, resolved))
+    }
+
+    fn repoint_project(
+        &mut self,
+        id: &str,
+        path: &str,
+        repaired: &[(String, crate::project::copy::WorkCopy, crate::project::copy::WorkCopy)],
+    ) -> Result<Project, String> {
+        let (mut projects, pos, resolved) = self.repoint_check(id, path)?;
+        for (conv, before, _) in repaired {
+            let current = self
+                .convs
+                .get(conv)
+                .map(|c| (c.project_id.clone(), c.copy.clone()))
+                .or_else(|| self.store.get(conv).map(|c| (c.project_id, c.copy)));
+            if current.is_none_or(|(project, copy)| project.as_deref() != Some(id) || copy.as_ref() != Some(before)) {
+                return Err("error.project.changed".into());
+            }
+        }
+        // Copies commit first: if the project save fails, its missing folder still blocks sends and a retry is safe.
+        for (conv, before, after) in repaired {
+            let loaded = self.convs.contains_key(conv);
+            self.load(conv).ok_or("error.conversationGone")?.copy = Some(after.clone());
+            if let Err(error) = self.try_save(conv) {
+                self.convs.get_mut(conv).unwrap().copy = Some(before.clone());
+                return Err(error);
+            }
+            if !loaded {
+                self.convs.remove(conv);
+            }
         }
         let old_path = projects[pos].path.clone();
         let name = Path::new(&resolved).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| resolved.clone());
@@ -6415,6 +6477,114 @@ mod tool_in_tests {
         let mut twice = vec![reply("a1", &["t"]), reply("a2", &["t"])];
         tool_in(&mut twice, Some("a1"), "t").unwrap().ok = Some(false);
         assert_eq!(twice[0].tools.as_ref().unwrap()[0].ok, Some(false), "the current reply is looked at first");
+    }
+
+    #[tokio::test]
+    async fn t515a_moved_project_repairs_loaded_and_unloaded_copies_without_touching_edits() {
+        use crate::project::copy::WorkCopy;
+        use crate::project::git::{Executor, GitError, Invocation, Output};
+        #[derive(Clone)]
+        struct Repair {
+            root: PathBuf,
+            copies: Vec<PathBuf>,
+            calls: Arc<Mutex<Vec<Vec<String>>>>,
+            fail: bool,
+        }
+        impl Executor for Repair {
+            fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+                let args = call
+                    .args
+                    .iter()
+                    .skip_while(|a| a.as_str() != "rev-parse" && a.as_str() != "worktree" && a.as_str() != "symbolic-ref")
+                    .cloned()
+                    .collect::<Vec<_>>();
+                self.calls.lock().unwrap().push(args.clone());
+                let text = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                    ["rev-parse", "--show-toplevel", "--show-prefix"] => format!("{}\napp/\n", self.root.display()),
+                    ["rev-parse", "--path-format=absolute", "--git-common-dir"] => self.root.join(".git").to_string_lossy().into_owned(),
+                    ["symbolic-ref", ..] => panic!("recovery must preserve a detached or switched HEAD"),
+                    ["worktree", "list", "--porcelain", "-z"] => {
+                        self.copies.iter().map(|p| format!("worktree {}\0\0", p.display())).collect()
+                    }
+                    ["worktree", "repair", "--", copy] => {
+                        if self.fail {
+                            return Ok(Output { success: false, stdout: vec![] });
+                        }
+                        let name = Path::new(copy).file_name().unwrap();
+                        let admin = self.root.join(".git/worktrees").join(name);
+                        std::fs::create_dir_all(&admin).unwrap();
+                        std::fs::write(Path::new(copy).join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+                        std::fs::write(admin.join("gitdir"), Path::new(copy).join(".git").to_string_lossy().as_bytes()).unwrap();
+                        String::new()
+                    }
+                    other => panic!("unexpected recovery git command: {other:?}"),
+                };
+                Ok(Output { success: true, stdout: text.into_bytes() })
+            }
+        }
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = answer::tests::engine(&dir);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let old = folder.path().join("old");
+        let new = folder.path().join("new");
+        std::fs::create_dir_all(old.join("app")).unwrap();
+        let project = app.add_project(&old.join("app").to_string_lossy()).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id = answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+            let path = crate::project::copy::home(dir.path()).join(&id);
+            std::fs::create_dir_all(path.join("app")).unwrap();
+            std::fs::write(path.join("app/edits.txt"), b"uncommitted work").unwrap();
+            std::fs::write(path.join(".git"), format!("gitdir: {}\n", old.join(".git/worktrees").join(&id).display())).unwrap();
+            app.with_saves(false, |c| {
+                c.live.remove(&id);
+                let conv = c.convs.get_mut(&id).unwrap();
+                conv.area = Area::Project;
+                conv.project_id = Some(project.id.clone());
+                conv.messages.last_mut().unwrap().status = Some(Status::Done);
+                conv.copy = Some(WorkCopy {
+                    path: path.to_string_lossy().into_owned(),
+                    root: old.to_string_lossy().into_owned(),
+                    sub: "app".into(),
+                    branch: "faber/work".into(),
+                    base: None,
+                });
+                c.try_save(&id).unwrap();
+            });
+            ids.push(id);
+        }
+        app.with(|c| {
+            c.convs.remove(&ids[1]);
+        });
+        std::fs::rename(&old, &new).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let repair = Repair {
+            root: new.clone(),
+            copies: ids.iter().map(|id| crate::project::copy::home(dir.path()).join(id)).collect(),
+            calls: calls.clone(),
+            fail: true,
+        };
+        let failing = repair.clone();
+        app.set_git(Arc::new(move || Some(Box::new(failing.clone()))));
+        assert!(app.repoint_project(&project.id, &new.join("app").to_string_lossy()).is_err());
+        assert_eq!(app.project(&project.id).unwrap().path, project.path);
+        for id in &ids {
+            assert_eq!(Path::new(&app.with(|c| c.store.get(id).unwrap()).copy.unwrap().root), old);
+        }
+        calls.lock().unwrap().clear();
+        let repair = Repair { fail: false, ..repair };
+        app.set_git(Arc::new(move || Some(Box::new(repair.clone()))));
+        app.repoint_project(&project.id, &new.join("app").to_string_lossy()).unwrap();
+        assert!(!app.with(|c| c.convs.contains_key(&ids[1])), "recovery must not retain unloaded conversation histories");
+        for id in ids {
+            let copy = app.open(&id).unwrap().copy.unwrap();
+            assert_eq!(Path::new(&copy.root), new, "saved copy root must follow the moved repository");
+            assert_eq!(Path::new(&app.with(|c| c.store.get(&id).unwrap()).copy.unwrap().root), new);
+            assert_eq!(std::fs::read(copy.folder().join("edits.txt")).unwrap(), b"uncommitted work");
+            assert!(std::fs::read_to_string(Path::new(&copy.path).join(".git")).unwrap().contains(&new.to_string_lossy().to_string()));
+        }
+        assert_eq!(calls.lock().unwrap().iter().filter(|a| a.get(1).is_some_and(|a| a == "repair")).count(), 2);
+        app.shutdown();
     }
 
     #[tokio::test]
