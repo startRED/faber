@@ -329,3 +329,32 @@ check('project memory: Keep leaves a long list as long as it was', async () => {
     equal(document.activeElement?.closest('.memory-entry')?.textContent?.includes('Choice 55.'), true, 'focus stays on the row that was kept');
   } finally { dispose(); root.remove(); api.projectMemory = before.read; api.editProjectMemory = before.edit; }
 });
+
+check('project memory: an over-limit file shows one mark with its sizes', async () => {
+  const before = api.projectMemory;
+  const data = sample();
+  data.files[0].overLimit = [9216, 8192];
+  data.files[0].entries.push({ start: 33, end: 40, line: 4, text: 'Another entry.' });
+  api.projectMemory = async () => data;
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    equal(root.textContent!.split(t('memory.overLimit', { size: 9216, target: 8192 })).length - 1, 1);
+  } finally { dispose(); root.remove(); api.projectMemory = before; }
+});
+
+check('project memory: generated rules can be read but not edited', async () => {
+  const before = api.projectMemory;
+  const data = sample();
+  data.files = [{ path: '.faber/rules.md', source: 'faber', revision: 'rules', tooLarge: false, overLimit: [4096, 3072], entries: [{ start: 0, end: 5, line: 1, text: 'Rules' }] }];
+  api.projectMemory = async () => data;
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    ok(root.textContent!.includes('Rules'));
+    ok(root.textContent!.includes(t('memory.overLimit', { size: 4096, target: 3072 })));
+    equal(root.querySelectorAll('.memory-actions button').length, 0);
+  } finally { dispose(); root.remove(); api.projectMemory = before; }
+});

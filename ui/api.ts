@@ -967,6 +967,7 @@ export interface MemoryFile {
   source: 'claude' | 'codex' | 'faber';
   revision: string;
   tooLarge: boolean;
+  overLimit?: [number, number] | null;
   entries: MemoryEntry[];
 }
 export interface MemoryList {

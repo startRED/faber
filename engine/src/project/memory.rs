@@ -61,6 +61,7 @@ pub struct MemoryFile {
     pub source: &'static str,
     pub revision: String,
     pub too_large: bool,
+    pub over_limit: Option<(u64, u64)>,
     pub entries: Vec<Entry>,
 }
 
@@ -109,7 +110,8 @@ fn source(path: &str) -> Option<&'static str> {
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
         let kind = parts.get(i + 1)?;
         return (name.ends_with(".md")
-            && ["decisions", "taste", "plans", "recipes", "learning", "memory"].contains(&kind.trim_end_matches(".md")))
+            && ["decisions", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
+                .contains(&kind.trim_end_matches(".md")))
         .then_some("faber");
     }
     if let Some(i) = parts.iter().position(|p| *p == ".claude") {
@@ -815,14 +817,26 @@ fn entries(text: &str, limit: usize) -> Vec<Entry> {
         .collect()
 }
 
+fn note_target(path: &str) -> Option<u64> {
+    const TARGETS: [(&str, u64); 5] = [("rules.md", 3), ("decisions.md", 8), ("taste.md", 1), ("lessons.md", 2), ("tasks/", 6)];
+    let name = path.strip_prefix(".faber/").or_else(|| path.rfind("/.faber/").map(|at| &path[at + "/.faber/".len()..]))?;
+    TARGETS
+        .iter()
+        .find(|(key, _)| if *key == "tasks/" { name.starts_with(key) && name.ends_with(".md") } else { name == *key })
+        .map(|(_, kb)| kb * 1024)
+}
+
 fn read_file(dir: &Directory, name: &str, path: String, source: &'static str, entry_limit: usize) -> Result<MemoryFile, &'static str> {
     let file = dir.file(name).map_err(|_| REFUSED)?;
     let mut bytes = Vec::new();
-    if file.metadata().map_err(|_| READ)?.len() <= MAX_BYTES as u64 {
+    let size = file.metadata().map_err(|_| READ)?.len();
+    let over_limit = note_target(&path).filter(|target| size > *target).map(|target| (size, target));
+    if size <= MAX_BYTES as u64 {
         file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| READ)?;
     } else {
-        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, entries: vec![] });
+        return Ok(MemoryFile { path, source, revision: String::new(), too_large: true, over_limit, entries: vec![] });
     }
+    let over_limit = note_target(&path).filter(|target| bytes.len() as u64 > *target).map(|target| (bytes.len() as u64, target));
     let too_large = bytes.len() > MAX_BYTES;
     let mut entries = if too_large { vec![] } else { entries(std::str::from_utf8(&bytes).map_err(|_| READ)?, entry_limit) };
     if decisions(&path) {
@@ -832,7 +846,7 @@ fn read_file(dir: &Directory, name: &str, path: String, source: &'static str, en
             }
         }
     }
-    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, entries })
+    Ok(MemoryFile { path, source, revision: revision(&bytes), too_large, over_limit, entries })
 }
 
 pub fn list(project: &Path) -> Result<MemoryList, &'static str> {
@@ -1012,7 +1026,7 @@ fn descend(path: &str) -> bool {
         return i + 1 == parts.len();
     }
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
-        return i + 1 == parts.len() || ["decisions", "taste", "plans", "recipes", "learning", "memory"].contains(&parts[i + 1]);
+        return i + 1 == parts.len() || ["decisions", "taste", "plans", "recipes", "learning", "memory", "tasks"].contains(&parts[i + 1]);
     }
     let name = parts.last().copied().unwrap_or_default();
     !matches!(name, ".git" | ".codex" | "node_modules" | "target" | "dist" | "vendor")
@@ -1068,6 +1082,9 @@ pub fn removes(project: &Path, edit: &Edit) -> Result<Option<KeptDecision>, &'st
 
 fn edit_with_private(project: &Path, edit: &Edit, protected: &[String]) -> Result<Option<KeptDecision>, &'static str> {
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
+    if edit.path == ".faber/rules.md" {
+        return Err(REFUSED);
+    }
     let source = source(&edit.path).ok_or(REFUSED)?;
     let protected = resolved_private(protected);
     let (root, project_dir) = project_directory(project, &protected)?;
@@ -1467,6 +1484,46 @@ mod tests {
 
     fn faber_notes(project: &Path) -> Result<MemoryList, &'static str> {
         scan(project, &[], true)
+    }
+
+    #[test]
+    fn faber_note_targets_mark_only_files_over_their_limit() {
+        let project = folder();
+        std::fs::create_dir(project.path().join(".faber")).unwrap();
+        let path = project.path().join(".faber/decisions.md");
+        for (size, over) in [(7 * 1024, false), (8 * 1024, false), (9 * 1024, true)] {
+            std::fs::write(&path, "x".repeat(size)).unwrap();
+            let file = list_faber(project.path()).unwrap().files.into_iter().find(|file| file.path == ".faber/decisions.md").unwrap();
+            assert_eq!(file.over_limit, over.then_some((size as u64, 8 * 1024)));
+        }
+        assert_eq!(note_target("sub/.faber/decisions.md"), Some(8 * 1024));
+        assert_eq!(note_target("sub/decisions.md"), None);
+    }
+
+    #[test]
+    fn faber_note_targets_cover_existing_files_and_rules_are_read_only() {
+        let project = folder();
+        std::fs::create_dir_all(project.path().join(".faber/tasks")).unwrap();
+        for (name, target) in [("rules.md", 3), ("taste.md", 1), ("lessons.md", 2), ("tasks/next.md", 6)] {
+            std::fs::write(project.path().join(".faber").join(name), "x".repeat(target * 1024 + 1)).unwrap();
+        }
+        let list = list(project.path()).unwrap();
+        for (name, target) in [("rules.md", 3), ("taste.md", 1), ("lessons.md", 2), ("tasks/next.md", 6)] {
+            let file = list.files.iter().find(|file| file.path == format!(".faber/{name}")).unwrap();
+            assert_eq!(file.over_limit, Some(((target * 1024 + 1) as u64, (target * 1024) as u64)));
+            if name == "rules.md" {
+                let entry = &file.entries[0];
+                let edit = Edit {
+                    path: file.path.clone(),
+                    revision: file.revision.clone(),
+                    start: entry.start,
+                    end: entry.end,
+                    text: None,
+                    keep: false,
+                };
+                assert!(apply(project.path(), &edit).is_err());
+            }
+        }
     }
 
     #[test]

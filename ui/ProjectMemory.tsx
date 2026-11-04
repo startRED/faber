@@ -42,8 +42,8 @@ function MemoryList(props: { projectId: string }) {
   });
   const [shown, setShown] = createSignal(50);
   const rows = createMemo(() => files()?.files.flatMap((file) => file.entries.length
-    ? file.entries.map((entry) => ({ file, entry: entry as MemoryEntry | undefined }))
-    : [{ file, entry: undefined }]) ?? []);
+    ? file.entries.map((entry, index) => ({ file, entry: entry as MemoryEntry | undefined, first: index === 0 }))
+    : [{ file, entry: undefined, first: true }]) ?? []);
   const key = (file: MemoryFile, entry: MemoryEntry) => `${file.path}:${entry.start}`;
   const message = (err: unknown) => {
     const key = String(err);
@@ -92,13 +92,14 @@ function MemoryList(props: { projectId: string }) {
       <Show when={files() && !files.loading && !rows().length}><p class="hint">{t('memory.empty')}</p></Show>
       <Show when={files()?.incomplete}><p class="hint" role="status">{t('memory.incomplete')}</p></Show>
       <ul class="memory-entries">
-        <For each={rows().slice(0, shown())}>{({ file, entry }) => (
+        <For each={rows().slice(0, shown())}>{({ file, entry, first }) => (
           <li class="memory-entry" data-entry={entry ? key(file, entry) : undefined}>
             <div class="memory-from">{t(`memory.source.${file.source}`)} · <span>{file.path}{entry ? `:${entry.line}` : ''}</span>{entry?.author && <> · <span class="memory-flag" classList={{ ask: entry.author === 'ai' && !entry.reviewed }}>{t(entry.author === 'person' ? 'memory.author.person' : entry.reviewed ? 'memory.author.aiKept' : 'memory.author.ai')}</span></>}</div>
+            <Show when={first && file.overLimit}><p class="hint">{t('memory.overLimit', { size: file.overLimit![0], target: file.overLimit![1] })}</p></Show>
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>
                 <p class="memory-text">{entry().body || entry().text}</p>
-                <div class="memory-actions">
+                <Show when={file.path !== ".faber/rules.md"}><div class="memory-actions">
                   <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
                   <button type="button" class="btn ghost" data-edit disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
                   <button type="button" class="btn ghost danger" disabled={busy() || files.loading}
@@ -111,7 +112,7 @@ function MemoryList(props: { projectId: string }) {
                     onFocusOut={() => { keyDown = needsRelease = false; if (confirm() === key(file, entry())) setConfirm(undefined); }}
                     onClick={() => remove(file, entry())}>{t(confirm() === key(file, entry()) ? 'memory.confirmDelete' : 'memory.delete')}</button>
                   <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
-                </div>
+                </div></Show>
               </>}>
                 <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !files.loading) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
                   <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || files.loading} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />
