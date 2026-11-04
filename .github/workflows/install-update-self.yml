@@ -1,0 +1,65 @@
+name: install-update-self
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  # Releases published with GITHUB_TOKEN do not emit another workflow's release event.
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: ${{ matrix.scenario }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [tauri, clean, electron]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check the proof contract
+        run: node --test scripts/install-update-self.test.mjs
+      - name: Download original published artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          $artifacts = Join-Path $env:RUNNER_TEMP 'install-update-artifacts'
+          New-Item -ItemType Directory $artifacts | Out-Null
+          $tags = @('v0.3.18-preview.90')
+          if ($env:SCENARIO -eq 'tauri') { $tags += 'v0.3.17-preview.84' }
+          if ($env:SCENARIO -eq 'electron') { $tags += 'v0.3.18-preview.89' }
+          foreach ($tag in $tags) {
+            gh release download $tag --pattern '*x64-setup.exe' --dir $artifacts
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          gh release download v0.3.18-preview.90 --pattern latest.json --dir $artifacts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Run installed applications on a private, never activated desktop
+        shell: pwsh
+        env:
+          FABER_SMOKE_DISPOSABLE: '1'
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          & scripts/install-update-desktop.ps1 -Scenario $env:SCENARIO
+          exit $LASTEXITCODE
+      - name: Keep observations even when a proof fails
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: install-update-${{ matrix.scenario }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/install-update-evidence/
+          if-no-files-found: warn
