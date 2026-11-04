@@ -85,6 +85,7 @@ mod siblings;
 mod silence;
 mod stage;
 mod stuck_watch;
+mod temporary;
 mod title;
 mod toolbox;
 mod toolbox_replace;
@@ -698,7 +699,10 @@ impl Engine {
         if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
             for entry in std::fs::read_dir(scratch).into_iter().flatten().flatten() {
                 let id = entry.file_name().to_string_lossy().into_owned();
-                if Uuid::parse_str(&id).is_ok() && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists() {
+                if Uuid::parse_str(&id).is_ok()
+                    && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists()
+                    && !entry.path().join("attachments").exists()
+                {
                     let _ = std::fs::remove_dir_all(entry.path());
                 }
             }
@@ -836,8 +840,9 @@ impl Engine {
                 _chat_directory: chat_directory.1,
             })
         });
-        let _ = search.start();
         let engine = Engine { core, runtime };
+        engine.with(|c| c.sweep_temporary());
+        let _ = search.start();
         engine.refresh_project_folders();
         engine.recover_rewind();
         engine.with(|c| {
@@ -1137,6 +1142,7 @@ impl Engine {
         // One lock for both: an opening in between must not let this conversation leave memory before it is marked shown.
         self.with(|core| {
             let opened = core.opened(id)?;
+            core.close_other_temporary(id);
             core.shown(id);
             let plan = core.shown_plan(id);
             Some(Conversation { plan, ..opened.for_screen() })
@@ -1163,6 +1169,7 @@ impl Engine {
     pub fn open_for_screen_window(&self, id: &str, newest: usize) -> Option<Conversation> {
         self.with(|core| {
             let opened = core.opened_window(id, newest)?;
+            core.close_other_temporary(id);
             core.shown(id);
             Some(opened.for_screen())
         })
@@ -1717,6 +1724,7 @@ impl Engine {
             for id in failed.into_iter().take_while(|_| started.elapsed() < Duration::from_secs(3)) {
                 c.save_with(&id, true);
             }
+            c.sweep_temporary();
             c.save_ledger(true);
             c.store.release_budget();
             c.store.search().stop();
@@ -3732,7 +3740,7 @@ impl Core {
         }
         let root = if c.area == Area::Chat { self.cwd_of(c)? } else { self.opts.data_dir.clone() };
         let attachments_dir = if c.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(id) };
-        let saved = if req.files.is_empty() { vec![] } else { save_files(&root, &attachments_dir, &req.files) };
+        let saved = self.save_attachments(id, &root, &attachments_dir, &req.files)?;
         if saved.len() != req.files.len() {
             return Err("error.projectSandbox".into());
         }
@@ -4161,7 +4169,7 @@ impl Core {
             None => fallback.clone(),
         };
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
         let history = c.context_messages().to_vec();
         let text = if joining_late {
             with_history(&history, &model_text, &|n| attachment_place(c.area, &data_dir, id, n))
@@ -4519,7 +4527,11 @@ impl Core {
                 &history[..history.len().saturating_sub(2)],
                 &text,
                 &|n| attachment_place(c.area, &self.opts.data_dir, id, n),
-                "Earlier in this conversation, before this session's project context or catalog tool servers changed:",
+                if c.temporary {
+                    "Earlier in this temporary conversation:"
+                } else {
+                    "Earlier in this conversation, before this session's project context or catalog tool servers changed:"
+                },
             )
         } else {
             text
@@ -4596,6 +4608,10 @@ impl Core {
     }
 
     fn launch_session(&mut self, conv: &str, pick: &Pick, mode: kits::SessionStart) -> Result<bool, String> {
+        if mode == kits::SessionStart::Compact && self.convs.get(conv).is_some_and(|c| c.temporary) {
+            // Temporary native sessions cannot be resumed into a new process for compaction.
+            return Err("error.compact.busy".into());
+        }
         if self.rewind_blocked(conv) {
             return Err("error.rewind.busy".into());
         }
@@ -4792,7 +4808,8 @@ impl Core {
             mode,
         );
         project_tools.start_card = start_card.clone();
-        let kit_reset = card_reset
+        let kit_reset = (c.temporary && c.messages.len() > 2)
+            || card_reset
             || (mode != kits::SessionStart::Compact
                 && pick.vendor == Vendor::Codex
                 && (project_tools.catalog_ready || revoked_servers)
@@ -4878,6 +4895,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        temporary: self.convs.get(conv).is_some_and(|c| c.temporary),
                         helper,
                         browse,
                         conversations,
@@ -4906,8 +4924,10 @@ impl Core {
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
                 let title = self.convs.get(conv).map(|c| c.title.clone());
+                let temporary = self.convs.get(conv).is_some_and(|c| c.temporary);
                 self.codex_server(area, user_hooks, permissions, &cli).open_identified(
                     CodexThread {
+                        temporary,
                         title,
                         helper,
                         browse,
@@ -5018,6 +5038,7 @@ impl Core {
             id,
             title: String::new(),
             temporary: false,
+            temporary_attachments: vec![],
             choice: None,
             area,
             project_id,
@@ -5118,6 +5139,7 @@ impl Core {
             },
         };
         self.load(&id).ok_or("error.conversationGone")?;
+        self.close_other_temporary(&id);
         let saved = if req.files.is_empty() {
             vec![]
         } else {
@@ -5127,7 +5149,7 @@ impl Core {
                 self.opts.data_dir.clone()
             };
             let dir = if req.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(&id) };
-            let files = save_files(&root, &dir, &req.files);
+            let files = self.save_attachments(&id, &root, &dir, &req.files)?;
             if files.len() != req.files.len() {
                 return Err("error.projectSandbox".into());
             }
@@ -5153,7 +5175,7 @@ impl Core {
             c.title = title::fallback(&req.text, self.store.settings().language.as_deref().unwrap_or("en"));
         }
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
         let history = c.context_messages().to_vec();
@@ -5408,6 +5430,10 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
+        // A fresh temporary session needs its history at dispatch, not an empty warmed session.
+        if req.conversation_id.as_deref().is_some_and(|id| self.convs.get(id).is_some_and(|c| c.temporary)) {
+            return;
+        }
         if self.installing || !self.project_warm_allowed(&req) {
             return;
         }
@@ -5577,9 +5603,17 @@ impl Core {
             l.session.close();
         }
         let stored = self.store.get(id);
+        let temporary = self.convs.get(id).or(stored.as_ref()).is_some_and(|c| c.temporary);
         let existed = stored.is_some() || self.convs.contains_key(id);
         let heir = self.convs.get(id).map_or_else(|| stored.and_then(|c| c.branch_of), |c| c.branch_of.clone());
-        if self.store.remove_checked(id).is_err() {
+        let removed = if temporary {
+            self.remove_temporary_attachments(id)
+                .map_err(|_| crate::store::Fault::Write)
+                .and_then(|_| self.store.remove_temporary_checked(id))
+        } else {
+            self.store.remove_checked(id)
+        };
+        if removed.is_err() {
             // Best effort: the chat stays, so it goes back to its group; if this write fails too the chat stays outside it.
             if let Some(before) = groups_before {
                 let _ = self.store.save_chat_groups(&before);
@@ -5605,7 +5639,9 @@ impl Core {
         self.follows.remove(id);
         self.goals.at.remove(id);
         if existed {
-            self.keep_family(id, heir);
+            if !temporary {
+                self.keep_family(id, heir);
+            }
             self.rewind_forget(id);
             self.draft_routes.remove(id);
             if self.old_inputs_active.contains(id) {
@@ -5614,8 +5650,10 @@ impl Core {
             self.convs.remove(id);
             self.try_seal_rewind(id);
             // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
-            let _ = std::fs::remove_dir_all(self.scratch_of(id));
-            let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
+            if !temporary {
+                let _ = std::fs::remove_dir_all(self.scratch_of(id));
+                let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
+            }
             let _ = self.store.transcripts.remove_conversation(id);
         }
         self.list_changed();
@@ -5624,6 +5662,9 @@ impl Core {
 
     fn terminal(&mut self, id: &str) -> Option<TerminalCommand> {
         let c = self.load(id)?.clone();
+        if c.temporary {
+            return None;
+        }
         let vendor = c.messages.iter().rev().find_map(|m| m.vendor)?;
         let session = c.sessions.get(&vendor)?.clone();
         // Session ids are UUIDs; anything else must never reach a shell.
@@ -5943,6 +5984,7 @@ mod tool_in_tests {
             Err(std::io::Error::other("test"))
         });
         let launch = ClaudeLaunch {
+            temporary: false,
             area: Area::Chat,
             model: None,
             effort: None,

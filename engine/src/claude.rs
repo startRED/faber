@@ -17,6 +17,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Debug, Clone)]
 pub struct ClaudeLaunch {
+    /// User-requested temporary Chat: the CLI must not persist its session.
+    pub temporary: bool,
     pub area: Area,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -305,6 +307,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     // `--permission-prompts none` did, except a question the agent asks the person (`AskUserQuestion`), a card in every mode.
     args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
     let env = |name: &str| std::env::var(name).ok();
+    if launch.temporary {
+        args.push("--no-session-persistence".into());
+    }
     let aside = launch.helper == crate::helper::Helper::Aside;
     // The caller verifies the used folders once, immediately before this launch.
     let tools = &launch.tools;
@@ -1299,6 +1304,7 @@ mod allow_tests {
         })));
         let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
         let launch = ClaudeLaunch {
+            temporary: false,
             area: Area::Project,
             model: None,
             effort: None,

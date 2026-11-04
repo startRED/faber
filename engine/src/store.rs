@@ -624,6 +624,26 @@ impl Store {
         }
     }
 
+    /// Enumerate records directly: temporary conversations are deliberately absent from list().
+    pub(crate) fn temporary_ids(&self) -> Vec<String> {
+        #[derive(serde::Deserialize)]
+        struct Flag {
+            id: String,
+            #[serde(default)]
+            temporary: bool,
+        }
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter_map(|e| {
+                let flag: Flag = serde_json::from_reader(io::BufReader::new(fs::File::open(e.path()).ok()?)).ok()?;
+                (flag.temporary && e.path().file_stem().is_some_and(|s| s == flag.id.as_str())).then_some(flag.id)
+            })
+            .collect()
+    }
+
     pub fn remove(&self, id: &str) {
         let _ = self.remove_checked(id);
     }
@@ -631,6 +651,14 @@ impl Store {
     /// Deletes the record, or says why it stayed. Only a record that is not there is already removed: one that cannot be
     /// read (locked, damaged) is still a file that stays until it is deleted.
     pub fn remove_checked(&self, id: &str) -> Result<(), Fault> {
+        self.remove_record(id, false)
+    }
+
+    pub(crate) fn remove_temporary_checked(&self, id: &str) -> Result<(), Fault> {
+        self.remove_record(id, true)
+    }
+
+    fn remove_record(&self, id: &str, temporary_only: bool) -> Result<(), Fault> {
         // Ids are UUIDs; anything else could point outside the folder.
         if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Ok(());
@@ -640,6 +668,9 @@ impl Store {
         let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.read_group_move()?.is_some_and(|(pending, _)| pending.conversation_id == id) {
             self.recover_group_move_locked(id)?;
+        }
+        if temporary_only && read_checked::<Conversation>(&self.file(id))?.is_some_and(|c| c.id != id || !c.temporary) {
+            return Err(Fault::Corrupt);
         }
         match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
             Ok(()) => self.search.removed(id),
@@ -1133,6 +1164,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_chat_delete_guard_preserves_ordinary_and_mismatched_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut chat: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "ordinary", "title": "keep", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&chat).unwrap();
+        let before = fs::read(store.file("ordinary")).unwrap();
+        assert_eq!(store.remove_temporary_checked("ordinary"), Err(Fault::Corrupt));
+        assert_eq!(fs::read(store.file("ordinary")).unwrap(), before);
+        chat.id = "temporary".into();
+        chat.temporary = true;
+        store.save_checked(&chat).unwrap();
+        fs::copy(store.file("temporary"), store.file("mismatch")).unwrap();
+        assert_eq!(store.remove_temporary_checked("mismatch"), Err(Fault::Corrupt));
+        assert!(store.file("mismatch").exists());
+        store.remove_temporary_checked("temporary").unwrap();
+        assert!(!store.file("temporary").exists());
+        assert_eq!(fs::read(store.file("ordinary")).unwrap(), before);
+    }
 
     #[test]
     fn temporary_conversations_are_not_listed() {

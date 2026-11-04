@@ -430,6 +430,7 @@ impl Core {
             Vendor::Gemini => return None,
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    temporary: false,
                     title: None,
                     leave_plan: false,
                     helper: Default::default(),
@@ -456,6 +457,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        temporary: false,
                         helper: Default::default(),
                         browse: false,
                         conversations: false,

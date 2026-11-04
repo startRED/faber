@@ -568,6 +568,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
         temporary: false,
+        temporary_attachments: vec![],
         session_kits: Default::default(),
         session_start_cards: Default::default(),
         session_resource_digests: Default::default(),

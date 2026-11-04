@@ -1092,6 +1092,9 @@ pub struct Conversation {
     /// Marks a conversation as temporary; old records are ordinary conversations.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub temporary: bool,
+    /// Files owned by this temporary conversation, recorded before their contents are written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temporary_attachments: Vec<String>,
     /// The choice for the next message, retained independently in each conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choice: Option<crate::router::Choice>,
@@ -1804,6 +1807,9 @@ impl Conversation {
 
     /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.
     pub fn resumable(&self, vendor: Vendor) -> Option<&String> {
+        if self.temporary {
+            return None;
+        }
         self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))
     }
 
@@ -1832,7 +1838,10 @@ mod tests {
         });
         let mut conversation: Conversation = serde_json::from_value(json).unwrap();
         assert!(!conversation.temporary);
+        conversation.sessions.insert(Vendor::Claude, "native-session".into());
+        assert!(conversation.resumable(Vendor::Claude).is_some());
         conversation.temporary = true;
+        assert!(conversation.resumable(Vendor::Claude).is_none());
         let saved = serde_json::to_value(&conversation).unwrap();
         assert_eq!(saved["temporary"], true);
         assert!(serde_json::from_value::<Conversation>(saved).unwrap().temporary);

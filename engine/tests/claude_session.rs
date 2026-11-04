@@ -8,6 +8,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[test]
+fn temporary_chat_cli_session_does_not_persist() {
+    let ordinary = launch(Area::Chat);
+    assert!(!claude_args(&ordinary).iter().any(|a| a == "--no-session-persistence"));
+    let temporary = ClaudeLaunch { temporary: true, ..ordinary };
+    assert!(claude_args(&temporary).iter().any(|a| a == "--no-session-persistence"));
+}
+
 fn visible(event: &EngineEvent) -> bool {
     !matches!(event, EngineEvent::Writers { .. } | EngineEvent::Cursor { .. } | EngineEvent::WriterExit { .. })
 }
@@ -46,6 +54,7 @@ fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
 
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
+        temporary: false,
         helper: Default::default(),
         browse: false,
         conversations: false,
@@ -1200,6 +1209,7 @@ fn ask_the_isolated_mode_and_side_questions_never_change_with_the_new_flags() {
             assert!(new.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !new.contains(&"--permission-prompts".into()));
         }
         let side = claude_args(&ClaudeLaunch {
+            temporary: false,
             permissions: Permissions::FullAccess,
             flags: NEWER,
             instructions: Some("Route.".into()),
@@ -1215,6 +1225,7 @@ fn ask_the_isolated_mode_and_side_questions_never_change_with_the_new_flags() {
 fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_flag() {
     let with = |model: &str, permissions, instructions: Option<&str>, flags| {
         claude_args(&ClaudeLaunch {
+            temporary: false,
             model: Some(model.into()),
             permissions,
             instructions: instructions.map(Into::into),
@@ -1563,6 +1574,7 @@ fn r140_web_search_is_live_in_the_saved_settings_and_off_or_cached_change_the_to
     // Full access and the person's project sessions deny through the settings as well; the credential rules stay.
     for area in [Area::Chat, Area::Project] {
         let off = claude_args(&ClaudeLaunch {
+            temporary: false,
             permissions: Permissions::FullAccess,
             tuning: Tuning { web: WebSearch::Off, ..Default::default() },
             ..launch(area)
@@ -1646,6 +1658,7 @@ fn r250_a_quick_question_forks_the_session_and_only_reads() {
     let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
     for area in [Area::Chat, Area::Project] {
         let forked = claude_args(&ClaudeLaunch {
+            temporary: false,
             helper: Helper::Aside,
             resume: Some("s1".into()),
             browse: true,
