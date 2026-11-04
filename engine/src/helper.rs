@@ -31,10 +31,7 @@ pub enum Helper {
     Aside,
 }
 
-const DESCRIPTION: &str = "Hands one self-contained piece of work, a review of your work, or a second opinion to a helper agent \
-from another AI vendor. It works in the same folder with the same permissions, but it cannot see this conversation and cannot ask \
-anyone questions, so the brief must say everything it needs: the goal, the files involved, and what done looks like. It returns \
-the helper's final report. Use it when an independent look is worth a few minutes, never for trivial steps.";
+const DESCRIPTION: &str = "Hands a self-contained piece of work, a review of your work or a second opinion to a helper agent from another AI vendor, in the same folder with the same permissions. It cannot see this conversation or ask anyone questions, so the brief must give the goal, the files involved and what done looks like. Returns the helper's final report. Use it when an independent look is worth a few minutes, never for trivial steps.";
 
 fn schema() -> Value {
     json!({

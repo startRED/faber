@@ -1,0 +1,64 @@
+{
+  "tools": {
+    "helper": {
+      "description": 106,
+      "schema": 110
+    },
+    "browse": {
+      "description": 407,
+      "schema": 381
+    },
+    "conversation": {
+      "description": 1088,
+      "schema": 539
+    },
+    "verify": {
+      "description": 105,
+      "schema": 72
+    },
+    "map": {
+      "description": 115,
+      "schema": 124
+    },
+    "plan": {
+      "description": 239,
+      "schema": 550
+    },
+    "status": {
+      "description": 66,
+      "schema": 68
+    },
+    "wrap_up": {
+      "description": 271,
+      "schema": 354
+    },
+    "judge_creative": {
+      "description": 123,
+      "schema": 163
+    },
+    "settings": {
+      "description": 72,
+      "schema": 71
+    },
+    "quota": {
+      "description": 52,
+      "schema": 25
+    },
+    "catalog": {
+      "description": 249,
+      "schema": 399
+    },
+    "memory_search": {
+      "description": 105,
+      "schema": 74
+    },
+    "offer_bigger": {
+      "description": 203,
+      "schema": 142
+    }
+  },
+  "persona": {
+    "claude": 741,
+    "codex": 741
+  }
+}

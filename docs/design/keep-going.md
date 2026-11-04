@@ -12,7 +12,7 @@ is not drawn. A reply after which it stopped by itself ends with one calm line t
 When every AI it may use is near its limit, spent faster than its daily line, out, or billed per use (R216), one
 amber line sits right above the composer, at its width, with the loop icon: before it turns on, the chip's first click shows it with
 "Keep going anyway" and "Not now" (turning it off never asks); while it is on, the same line stays without buttons and
-says until when it waits once every AI is out. The sidebar and the running column say "Waiting for quota until …".
+says until when it waits once every AI is out. When recent outside use holds it, the same line and running row say it is waiting for the account. The sidebar and the running column say "Waiting for quota until …".
 It wraps at 720 px and does not move.
 Coming back to it (R224): its row in the running column has, under the title, one quiet line in the data face with
 the turns of work done and how long it has run, and under that the last line the agent wrote on one line with an

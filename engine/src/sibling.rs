@@ -23,40 +23,7 @@ pub const MAX_OPEN: usize = 5;
 /// The most of a conversation's latest answer a read returns.
 const MAX_READ: usize = 4000;
 
-const DESCRIPTION: &str = "Start parallel work only for independent pieces. Start a team only when the person asked for one. Stop a child that went the wrong way; resume it rather than start again. Archive children once their work is read and verified. For a handoff start a child, then call wait with its id and end your turn; wait instead of polling. `stop` and `resume` take an `id`, resume also takes an optional `message`. `wait` takes an `on` list of child ids and/or a `note`. `archive` with an id archives a child.\n\
-The other conversations of this project, each with its own agent, and this conversation itself. \
-`action` says what to do:\n\
-- `start` with `title` and `brief`: a new conversation for a separate piece of work, so it runs in parallel with you. Its \
-agent cannot see this conversation, so the brief must say everything it needs (the goal, the files involved, what done \
-looks like). It answers at once with the new conversation's `id`; the person sees it in the sidebar and may talk to it. \
-When it stops working, its answer is sent to you by itself; call wait if you have no independent work left. Use it for independent work that takes a while; never for small steps, and never for two pieces that change the same files. `step` names the plan step it does: its copy then starts from your latest work, and a step that waits or shares files with a running one is refused. \
-`ai` says which AI runs it: `same` (yours, the default), `auto` (Faber picks by the task and each AI's quota) or an AI by \
-name (`claude`, `codex`); spread work over the AIs that have room (call `quota` first), and have a review done by the AI \
-that did not write the code. `keep_going` true makes it go through an ordered list of tasks in its brief by itself, one \
-after another, and you get one report when the whole list ends.\n\
-- `read` with `id`: whether a conversation of this project is working, waiting for the person or done, and its latest answer.\n\
-- `list`: the project's conversations the person has not archived, which ones are working now and the folder each works \
-in. When a file you work on changed and neither you nor your helpers changed it, list them and ask the one working there.\n\
-- `ask` with `id` and `message`: sends your question to another conversation's agent; it answers in its own reply, which \
-you read later with `read`. Say who you are and what you need in one or two sentences; one cut off when Faber closed \
-goes on when asked \"Continue where you stopped. Check the project's state first.\"\n\
-- `archive` with `id`: archives another conversation of this project that is finished (not working, waiting, queued or \
-pinned), whoever started it; the person can bring it back. `list` first, and archive only what the person asked for.\n\
-- `archive`: archives this conversation. It leaves the sidebar and the person can bring it back. Do it as your very last \
-step once everything the person asked here is done and verified and nothing waits on them; never while work is left.\n\
-- `context`: how many tokens your own context holds, of how many it can, and the share.\n\
-- `compact`: compacts your own context: the CLI replaces what was said so far with a summary, and the details are gone. \
-Faber does it the moment you end your current turn, so end the turn right after this call. Good times: a large phase of work \
-is done and its details are no longer needed, or your context passes about 60%. Never in the middle of a step whose details you \
-still need. Pass `next` with everything you need to continue (the goal, what is done, what is left, the files and decisions that \
-matter): it is not summarized, Faber sends it to you word for word once the compaction ended, and you continue from it by \
-yourself. Without `next` the conversation waits for the person.\n\
-- `clear` with `next`: starts your context fresh, which costs nothing and leaves no summary behind. Faber does it the moment \
-you end your current turn: your next turn starts a new session holding only the person's requests in this conversation, word \
-for word, and your `next`; the person still sees everything. Use it instead of `compact` when the task you take next has \
-nothing to do with what this conversation did so far, or after two failed attempts at the same problem, where a clean start with \
-a better plan beats more of the same. `next` is your handoff note: what is done, what is left, the files and decisions that \
-matter, the commands that check the work, and what you tried that failed. Keep long notes in a file and name it.";
+const DESCRIPTION: &str = "Start parallel work only for independent pieces, a team only when the person asked for one. Stop a child that went the wrong way; resume it rather than restart. Archive children once their work is read and verified. Handoff: `start`, then `wait` on its id and end your turn; call wait when you have no independent work left, never poll. `stop` and `resume` take an `id` (resume: optional `message`); `wait` takes `on` (child ids) and/or a `note`.\nActs on this project's conversations and on this one. `action`:\n- `start` (`title`, `brief`): a parallel conversation whose agent cannot see this one, so the brief must give the goal, the files involved and what done looks like. Returns its `id`; its answer reaches you when it stops. Only for independent work that takes a while, never small steps or pieces that change the same files. `step`: the plan step it does (its copy starts from your latest work; a step that waits on or shares files with a running one is refused). `ai`: `same` (default), `auto` (by task and quota), `claude`, `codex`; spread work over the AIs that have room (`quota` first), and have the other AI review code. `keep_going`: it works through an ordered task list in its brief; you get one report at the end.\n- `read` `id`: working, waiting for the person or done, and its latest answer.\n- `list`: the unarchived conversations, which are working, each folder. When a file you work on changed and neither you nor your helpers changed it, list and ask the one working there.\n- `ask` `id` `message`: your question to another agent; read its reply later with `read`. Say who you are and what you need, briefly. One cut off when Faber closed goes on when asked \"Continue where you stopped. Check the project's state first.\"\n- `archive` `id`: a finished conversation (not working, waiting, queued or pinned), whoever started it; the person can bring it back. `list` first, and only what the person asked for.\n- `archive`: this conversation, as your very last step once all is done, verified and nothing waits on the person.\n- `context`: your context's tokens, limit and share.\n- `compact`: summarizes everything so far (details gone) once you end this turn, so end it right after. Good after a large phase or past about 60%; never mid-step. `next`: all you need to continue (goal, done, left, files, decisions); Faber sends it back word for word and you go on alone. Without it the conversation waits for the person.\n- `clear` with `next`: fresh context, no summary; Faber does it the moment you end this turn, and your next turn starts a new session holding only the person's requests, word for word, and `next` (your handoff: done, left, files, decisions, check commands, what failed; long notes go in a named file). Use it instead of `compact` when the next task is unrelated or after two failed attempts at the same problem.";
 
 fn schema() -> Value {
     json!({

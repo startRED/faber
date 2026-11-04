@@ -198,6 +198,11 @@ pub enum State {
 }
 
 impl Snap {
+    /// Whether recent account use exceeds the work Faber can explain.
+    pub fn someone_else_using(&self) -> bool {
+        self.jumped
+    }
+
     fn wide(&self, now: f64) -> impl Iterator<Item = &Window> {
         self.windows.iter().filter(move |(n, w)| vendor_wide(n) && w.live(now)).map(|(_, w)| w)
     }
@@ -382,4 +387,27 @@ pub fn gate(s: &Snap, family: Option<&str>, purpose: Purpose, approved: bool, no
         return Err(Why::Paid);
     }
     Ok(())
+}
+
+pub fn background_gate(s: &Snap, family: Option<&str>, purpose: Purpose, now: f64) -> Result<(), Why> {
+    if purpose == (Purpose::UserTurn { by_hand: false }) && s.someone_else_using() {
+        return Err(Why::Window);
+    }
+    gate(s, family, purpose, false, now)
+}
+
+#[cfg(test)]
+mod background_account_tests {
+    use super::*;
+
+    #[test]
+    fn background_waits_for_shared_account_but_person_does_not() {
+        let mut snap = Snap { billing: Billing::Subscription, jumped: true, ..Snap::default() };
+        assert!(background_gate(&snap, None, Purpose::UserTurn { by_hand: false }, 0.0).is_err());
+        assert!(gate(&snap, None, Purpose::UserTurn { by_hand: false }, false, 0.0).is_ok());
+        assert!(gate(&snap, None, Purpose::UserTurn { by_hand: true }, false, 0.0).is_ok());
+        assert!(background_gate(&snap, None, Purpose::UserTurn { by_hand: true }, 0.0).is_ok());
+        snap.jumped = false;
+        assert!(background_gate(&snap, None, Purpose::UserTurn { by_hand: false }, 0.0).is_ok());
+    }
 }

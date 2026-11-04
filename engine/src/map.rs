@@ -33,11 +33,7 @@ const MOST_ITEMS: usize = 100_000;
 /// Entries one lookup lists; the rest are counted.
 const SHOWN: usize = 60;
 
-const DESCRIPTION: &str = "Lists what this project has, read from its code: the commands its screen may call, its settings, \
-the texts of its screens, the keys it keeps in browser storage, its screen files, its package scripts and the names its modules \
-export, each with its file and line. Call it with nothing for a short index, then with a kind, words to look for, or both, for \
-the entries. Look here before you add a setting, command, text or screen, so you extend what exists instead of adding a second \
-way to do the same thing.";
+const DESCRIPTION: &str = "Lists what this project has, read from its code, each with file and line: the commands its screen may call, settings, screen texts, browser-storage keys, screen files, package scripts and module exports. Call it with nothing for a short index, then with a kind, words to look for, or both. Look here before you add a setting, command, text or screen, so you extend what exists instead of adding a second way.";
 
 fn schema() -> Value {
     json!({
