@@ -455,3 +455,22 @@ code ran, no prerequisites installed, and no candidate endpoint was contacted be
 | cargo test -q -p faber-engine | 506 unit and 944 integration tests pass, 0 fail. |
 | cargo t --all --filter catalog / plugins | 58 / 24 pass, 0 fail (screen part not run in this sandbox). |
 | Not checked | A real Claude Code or Codex run (the `agents.<name>.config_file` thread override is documented but not run live), memory and processor of the full app. |
+
+## Everyday tool servers: registry preflight (curate-tool-servers)
+
+Registry metadata was checked on 2026-11-04. No candidate below passes R253, which requires an npm package with no dependencies: each version checked declares runtime dependencies. The table records a specific version, not a claim about all versions. None is added to the catalog; no tarball digest or source commit is asserted for an excluded package. Additional review of credentials, containment, telemetry and update behavior would be required before admitting any different version.
+
+| Candidate and intended use | Registry version checked | Decision and evidence |
+| :--- | :--- | :--- |
+| [@playwright/mcp](https://registry.npmjs.org/%40playwright%2fmcp/0.0.84), browser automation | 0.0.84 | Excluded: declares `playwright` and `playwright-core`. |
+| [@executeautomation/playwright-mcp-server](https://registry.npmjs.org/%40executeautomation%2fplaywright-mcp-server/1.0.12), browser automation | 1.0.12 | Excluded: declares dependencies including Playwright, Express and the MCP SDK. |
+| [@upstash/context7-mcp](https://registry.npmjs.org/%40upstash%2fcontext7-mcp/4.5.0), documentation lookup | 4.5.0 | Excluded: declares 13 dependencies including `@modelcontextprotocol/server` and OpenTelemetry packages. |
+| [@modelcontextprotocol/server-github](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-github/2025.4.8), code hosting | 2025.4.8 | Excluded: declares seven dependencies including the MCP SDK and node-fetch. |
+| [@modelcontextprotocol/server-postgres](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-postgres/0.6.2), PostgreSQL | 0.6.2 | Excluded: declares `pg` and the MCP SDK. |
+| [@modelcontextprotocol/server-filesystem](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-filesystem/2.1.0), project files | 2.1.0 | Excluded: declares five dependencies including `@modelcontextprotocol/server` and glob. |
+| [@modelcontextprotocol/server-memory](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-memory/2.0.1), persistent knowledge | 2.0.1 | Excluded: declares `zod` and `@modelcontextprotocol/server`. |
+| [@modelcontextprotocol/server-sequential-thinking](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-sequential-thinking/2.0.0), structured reasoning | 2.0.0 | Excluded: declares four dependencies including `@modelcontextprotocol/server` and yargs. |
+| [mcp-remote](https://registry.npmjs.org/mcp-remote/0.16.0), remote server transport | 0.16.0 | Excluded: declares four dependencies including Express and undici; remote services would also require their own review. |
+| [mcp-debugger](https://registry.npmjs.org/mcp-debugger/1.0.0), debugging | 1.0.0 | Excluded: declares four dependencies and the catalog count check in `engine/tests/tools.rs` also records its lack of project path containment. |
+
+These are the versions examined, not an exhaustive survey of all npm packages. The existing `chrome-devtools` server and catalog counts remain unchanged; no server was approved for Chat under R373.
