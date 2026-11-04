@@ -267,6 +267,8 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 
 ## Other stored state
 
+A rejected closing box keeps the sent follow-up task file. Capacity and replacement writes run first; the conclusion must save successfully before completed task files are removed (`engine::plan::tests::t515a_rejected_conclusion_keeps_the_sent_follow_up_file`).
+
 `save_file` copies to an exclusive temporary sibling, synchronizes it and replaces the chosen destination only after the entire copy succeeds. A failed read, write or publication preserves the previous destination (`table::revoke_tests::t515a_failed_workspace_copy_preserves_existing_destination`).
 
 Recovery after interruption or an update starts its continuation ahead of waiting messages without taking them out of the conversation: every admission snapshot keeps their ids, order and attachment references (`engine::install_gate::tests::t515a_update_admission_snapshots_keep_accepted_queue_and_attachments`, `t515a_interrupted_admission_snapshots_keep_accepted_queue_and_attachments`). Stop and busy admission still hold.

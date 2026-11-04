@@ -74,7 +74,7 @@ impl Core {
         Ok(())
     }
 
-    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value, done: bool) -> Result<&'static str, String> {
+    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value) -> Result<(), String> {
         let tasks: Vec<progress::FollowUp> = match input.get("follow_ups") {
             Some(value) => serde_json::from_value(value.clone()).map_err(|_| "Send follow_ups as task objects with title and done.")?,
             None => vec![],
@@ -86,28 +86,15 @@ impl Core {
             task.task_file()?;
         }
         let Some(project) = self.follow_up_project(conv) else {
-            return if tasks.is_empty() { Ok("") } else { Err("Follow-ups need a project folder.".into()) };
+            return if tasks.is_empty() { Ok(()) } else { Err("Follow-ups need a project folder.".into()) };
         };
         let root = Path::new(&project.path);
         if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
             return if tasks.is_empty() {
-                Ok("")
+                Ok(())
             } else {
                 Err("This project's task folder is read-only in Faber. No new task was written.".into())
             };
-        }
-        let mut notice = "";
-        if done {
-            let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| &m.id);
-            let sent: Vec<_> = self.convs[conv].follow_ups.iter().filter(|t| t.sent && t.message.as_ref() == question).cloned().collect();
-            for task in sent {
-                if crate::project::memory::remove_follow_up(root, &task).is_ok() {
-                    self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != task.file);
-                } else {
-                    self.convs.get_mut(conv).unwrap().follow_ups.iter_mut().find(|t| t.file == task.file).unwrap().sent = false;
-                    notice = "The follow-up file was kept because it changed or could not be removed. The work can still conclude.";
-                }
-            }
         }
         if self.convs[conv].follow_ups.len() + tasks.len() > 256 {
             return Err("Dismiss existing follow-ups before adding more.".into());
@@ -125,7 +112,27 @@ impl Core {
                 return Err(error);
             }
         }
-        Ok(notice)
+        Ok(())
+    }
+
+    fn finish_follow_ups(&mut self, conv: &str) -> &'static str {
+        let Some(project) = self.follow_up_project(conv) else { return "" };
+        let root = Path::new(&project.path);
+        if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
+            return "";
+        }
+        let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| &m.id);
+        let sent: Vec<_> = self.convs[conv].follow_ups.iter().filter(|t| t.sent && t.message.as_ref() == question).cloned().collect();
+        let mut notice = "";
+        for task in sent {
+            if crate::project::memory::remove_follow_up(root, &task).is_ok() {
+                self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != task.file);
+            } else {
+                self.convs.get_mut(conv).unwrap().follow_ups.iter_mut().find(|t| t.file == task.file).unwrap().sent = false;
+                notice = "The follow-up file was kept because it changed or could not be removed. The work can still conclude.";
+            }
+        }
+        notice
     }
     /// Adds what something cost, in US$, to the job's running total (rule 7): the conversation's, and its parent's when an
     /// agent started it. It is called where each cost is written (a turn, a helper, a quick side question), so the spend is
@@ -353,19 +360,31 @@ impl Core {
                 if self.turn(conv).is_none() {
                     return Err("No reply is under way.".into());
                 }
-                let follow_ups_notice = self.close_follow_ups(conv, input, box_.done)?;
+                self.close_follow_ups(conv, input)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
                 let concluded = box_.outcome.is_some();
-                m.wrap_up = Some(box_);
+                let previous_wrap_up = m.wrap_up.replace(box_);
                 let id = m.id.clone();
-                if done {
-                    self.count_close(conv);
-                }
                 // The job is over only when the agent says so: its estimate, and economy mode with it, go; a later list starts
                 // with none. The spend stays, and a new estimate counts from it.
-                let ended = done && self.convs.get_mut(conv).and_then(|c| c.estimate.take()).is_some();
-                self.save(conv);
+                let estimate = if done { self.convs.get_mut(conv).and_then(|c| c.estimate.take()) } else { None };
+                let ended = estimate.is_some();
+                if let Err(error) = self.try_save(conv) {
+                    self.turn(conv).unwrap().wrap_up = previous_wrap_up;
+                    if done {
+                        self.convs.get_mut(conv).unwrap().estimate = estimate;
+                    }
+                    return Err(error);
+                }
+                let follow_ups_notice = if done {
+                    self.count_close(conv);
+                    let notice = self.finish_follow_ups(conv);
+                    self.save(conv);
+                    notice
+                } else {
+                    ""
+                };
                 if ended {
                     let plan = self.shown_plan(conv);
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
@@ -403,6 +422,63 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn t515a_rejected_conclusion_keeps_the_sent_follow_up_file() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let task: progress::FollowUp =
+            serde_json::from_value(serde_json::json!({"title":"Fix export", "done":"Export test passes"})).unwrap();
+        let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+        task.sent = true;
+        task.message = Some("question-0".into());
+        let file = Path::new(&project.path).join(&task.file);
+        let original = std::fs::read(&file).unwrap();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups = (0..256)
+                .map(|i| {
+                    if i == 0 {
+                        task.clone()
+                    } else {
+                        crate::model::FollowUpTask { file: format!("other-{i}.md"), sent: false, ..task.clone() }
+                    }
+                })
+                .collect();
+            c.try_save(&id).unwrap();
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                "follow_ups":[{"title":"First replacement", "done":"First check"}, {"title":"Second replacement", "done":"Second check"}]});
+            assert_eq!(
+                c.write_progress(&id, progress::WRAP_UP_TOOL, &input),
+                Err("Dismiss existing follow-ups before adding more.".into())
+            );
+            assert_eq!(std::fs::read(&file).unwrap(), original, "a rejected conclusion must not delete its input task");
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            assert_eq!(c.convs[&id].follow_ups.len(), 256);
+            c.convs.get_mut(&id).unwrap().follow_ups.truncate(1);
+            c.try_save(&id).unwrap();
+            let saved = dir.path().join("conversations").join(format!("{id}.json"));
+            let held = saved.with_extension("held");
+            std::fs::rename(&saved, &held).unwrap();
+            std::fs::create_dir(&saved).unwrap();
+            let mut input = input;
+            input.as_object_mut().unwrap().remove("follow_ups");
+            assert!(c.write_progress(&id, progress::WRAP_UP_TOOL, &input).is_err(), "a failed conclusion save must be reported");
+            assert_eq!(std::fs::read(&file).unwrap(), original);
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            std::fs::remove_dir(&saved).unwrap();
+            std::fs::rename(&held, &saved).unwrap();
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            assert!(!file.exists());
+            assert!(c.store.get(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
 
     #[tokio::test]
     async fn follow_up_refuses_compaction_and_streaming_admission_without_queueing_duplicates() {
