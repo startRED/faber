@@ -712,12 +712,28 @@ pub struct KeepProgress {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<PlanContract>,
     /// When the agent last sent it, in milliseconds.
     pub at: u64,
     /// The conversation's estimate, copied here for the screen only (`Conversation::shown_plan`): the plan that is stored never
     /// holds one, since the estimate belongs to the job and outlives any list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub estimate: Option<Estimate>,
+}
+
+/// What the agent plans to change and how it will check the work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanContract {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_because: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.

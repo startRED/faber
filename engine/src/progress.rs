@@ -3,7 +3,7 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
-use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanStep, StepState, WrapUp};
+use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanStep, StepState, WrapUp};
 use serde_json::{Value, json};
 
 /// The names both drivers give the calls, whatever the CLI calls them.
@@ -52,7 +52,8 @@ step and starts the next pending one. Every step marked done (in steps or with a
 that shows it is done. You can send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
 conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
 work, you can also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
-spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers.";
+spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers. \
+For a visible or behavior change, include a contract in the person's language with what it extends or why it is new, the proof and a target for speed, size or cost; omit it for questions and small fixes.";
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words, what you are doing now (at most 50 characters), in their \
 language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". You can use it when substantial \
@@ -83,6 +84,16 @@ fn plan_schema() -> Value {
                     "required": ["text", "state"],
                     "additionalProperties": false
                 }
+            },
+            "contract": {
+                "type": "object",
+                "properties": {
+                    "extends": { "type": "string", "description": "The existing thing this extends." },
+                    "new_because": { "type": "string", "description": "The closest existing thing and why it does not fit." },
+                    "proof": { "type": "string", "description": "A project check or a sentence explaining the check." },
+                    "target": { "type": "string", "description": "The target for speed, size or cost work." }
+                },
+                "additionalProperties": false
             },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
             "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at that shows the finished step is done." },
@@ -309,7 +320,17 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             next.state = StepState::Active;
         }
     }
-    Ok(Some(Plan { steps, at, estimate: None }))
+    let contract = if input.get("steps").and_then(Value::as_array).is_some() {
+        input.get("contract").filter(|v| v.is_object()).map(|v| PlanContract {
+            extends: text_of(&v["extends"], PART_CHARS - 1),
+            new_because: text_of(&v["new_because"], PART_CHARS - 1),
+            proof: text_of(&v["proof"], PART_CHARS - 1),
+            target: text_of(&v["target"], PART_CHARS - 1),
+        })
+    } else {
+        before.and_then(|p| p.contract.clone())
+    };
+    Ok(Some(Plan { steps, contract, at, estimate: None }))
 }
 
 /// The strings of an optional list; anything that is not a string becomes "" (so the checks after refuse it), anything that
@@ -1026,5 +1047,49 @@ mod tests {
         assert_eq!(first_sentence("The page works again. It was not seen on a phone."), "The page works again.");
         assert_eq!(first_sentence("Version 1.2 is out"), "Version 1.2 is out");
         assert_eq!(first_sentence("Pronto! Falta ver no celular."), "Pronto!");
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use crate::{model::Plan, progress};
+    use serde_json::json;
+
+    #[test]
+    fn contract_is_bounded_saved_and_replaced_with_the_plan() {
+        let steps = json!([{ "text": "Build", "state": "in_progress" }]);
+        let long = "é".repeat(400);
+        let first = progress::plan(
+            None,
+            &json!({ "steps": steps, "contract": {
+                "extends": long, "proof": "Run checks", "target": "Under 1 second"
+            }}),
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        let contract = first.contract.as_ref().unwrap();
+        assert_eq!(contract.extends.as_ref().unwrap().chars().count(), 300);
+        assert_eq!(contract.proof.as_deref(), Some("Run checks"));
+        let saved = serde_json::to_string(&first).unwrap();
+        assert_eq!(serde_json::from_str::<Plan>(&saved).unwrap(), first);
+        let advanced = progress::plan(Some(&first), &json!({ "advance": true, "evidence": "Checked" }), 2).unwrap().unwrap();
+        assert_eq!(advanced.contract, first.contract);
+        let replaced = progress::plan(
+            Some(&advanced),
+            &json!({ "steps": steps, "contract": {
+                "new_because": "No existing feature fits", "proof": "Inspect it"
+            }}),
+            3,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(replaced.contract.unwrap().new_because.as_deref(), Some("No existing feature fits"));
+        let without = progress::plan(Some(&first), &json!({ "steps": steps }), 4).unwrap().unwrap();
+        assert!(without.contract.is_none());
+        let old = serde_json::json!({ "steps": [], "at": 1 });
+        let loaded: Plan = serde_json::from_value(old.clone()).unwrap();
+        assert!(loaded.contract.is_none());
+        assert_eq!(serde_json::to_value(loaded).unwrap(), old);
     }
 }
