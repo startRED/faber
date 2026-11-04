@@ -74,7 +74,7 @@ impl Core {
         Ok(())
     }
 
-    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value) -> Result<(), String> {
+    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value, done: bool) -> Result<(), String> {
         let tasks: Vec<progress::FollowUp> = match input.get("follow_ups") {
             Some(value) => serde_json::from_value(value.clone()).map_err(|_| "Send follow_ups as task objects with title and done.")?,
             None => vec![],
@@ -99,9 +99,11 @@ impl Core {
         if self.convs[conv].follow_ups.len() + tasks.len() > 256 {
             return Err("Dismiss existing follow-ups before adding more.".into());
         }
+        let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| m.id.clone());
         for task in tasks {
             let revision = crate::project::memory::revision(task.task_file()?.as_bytes());
-            if self.convs[conv].follow_ups.iter().any(|t| t.revision == revision) {
+            // Tasks this conclusion will remove cannot stand in for a new offer.
+            if self.convs[conv].follow_ups.iter().any(|t| t.revision == revision && !(done && t.sent && t.message == question)) {
                 continue;
             }
             let saved = crate::project::memory::write_follow_up(root, &task)?;
@@ -360,7 +362,7 @@ impl Core {
                 if self.turn(conv).is_none() {
                     return Err("No reply is under way.".into());
                 }
-                self.close_follow_ups(conv, input)?;
+                self.close_follow_ups(conv, input, box_.done)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
                 let concluded = box_.outcome.is_some();
@@ -423,6 +425,78 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn t515i_conclusion_recreates_the_current_sent_follow_up() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let brief = serde_json::json!({"title":"Fix export", "done":"Export test passes"});
+        let task: progress::FollowUp = serde_json::from_value(brief.clone()).unwrap();
+        let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+        task.sent = true;
+        task.message = Some("question-0".into());
+        let file = Path::new(&project.path).join(&task.file);
+        let original = std::fs::read(&file).unwrap();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups.push(task.clone());
+            c.try_save(&id).unwrap();
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                "follow_ups":[brief]});
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            let saved = c.store.get(&id).unwrap();
+            assert_eq!(saved.follow_ups.len(), 1, "concluding must leave one replacement for the repeated task");
+            assert_eq!(c.convs[&id].follow_ups, saved.follow_ups);
+            let replacement = &saved.follow_ups[0];
+            assert!(!replacement.sent && replacement.message.is_none());
+            assert_eq!(replacement.title, task.title);
+            assert_eq!(replacement.revision, task.revision);
+            assert_ne!(replacement.file, task.file);
+            assert_eq!(std::fs::read(Path::new(&project.path).join(&replacement.file)).unwrap(), original);
+            assert!(!file.exists());
+            assert_eq!(std::fs::read_dir(Path::new(&project.path).join(".faber/tasks")).unwrap().count(), 1);
+            assert!(saved.messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t515i_dedup_keeps_tasks_that_will_not_be_removed() {
+        for (outcome, sent, message) in [("blocked", true, "question-0"), ("done", true, "older-question"), ("done", false, "question-0")] {
+            let dir = crate::workspace::TestRoot::new();
+            let (app, _) = crate::engine::answer::tests::engine(&dir);
+            let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+            let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+            let brief = serde_json::json!({"title":"Fix export", "done":"Export test passes"});
+            let task: progress::FollowUp = serde_json::from_value(brief.clone()).unwrap();
+            let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+            task.sent = sent;
+            task.message = Some(message.into());
+            let file = Path::new(&project.path).join(&task.file);
+            let original = std::fs::read(&file).unwrap();
+            app.with_saves(false, |c| {
+                let conv = c.convs.get_mut(&id).unwrap();
+                conv.area = Area::Project;
+                conv.project_id = Some(project.id);
+                conv.follow_ups.push(task.clone());
+                c.try_save(&id).unwrap();
+                let input = serde_json::json!({"outcome":outcome, "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                    "follow_ups":[brief.clone(), brief]});
+                c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+                assert_eq!(c.convs[&id].follow_ups, vec![task.clone()]);
+                assert_eq!(c.store.get(&id).unwrap().follow_ups, vec![task]);
+                assert_eq!(std::fs::read(&file).unwrap(), original);
+                assert_eq!(std::fs::read_dir(Path::new(&project.path).join(".faber/tasks")).unwrap().count(), 1);
+            });
+            app.shutdown();
+        }
+    }
 
     #[tokio::test]
     async fn t515g_conclusion_syncs_directory_before_deleting_any_task() {

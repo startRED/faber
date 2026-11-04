@@ -1,11 +1,11 @@
 {
   "notes": {
     "fixed": {
-      "en": "Waiting messages survive a restart, failed saves keep existing files and tasks, and reviews keep different problems apart.",
-      "pt-BR": "Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos e tarefas e revisões separam problemas diferentes.",
-      "es": "Los mensajes pendientes sobreviven al reinicio, los fallos al guardar conservan archivos y tareas y las revisiones distinguen problemas diferentes.",
-      "fr": "Les messages en attente restent après un redémarrage, un enregistrement raté préserve fichiers et tâches et les revues distinguent les problèmes.",
-      "de": "Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien und Aufgaben und Prüfungen halten unterschiedliche Probleme auseinander."
+      "en": "Waiting messages survive a restart, failed saves preserve files, repeated tasks stay available, and reviews keep different problems apart.",
+      "pt-BR": "Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos, tarefas repetidas continuam disponíveis e revisões separam problemas diferentes.",
+      "es": "Los mensajes pendientes sobreviven al reinicio, guardar sin éxito conserva archivos, las tareas repetidas siguen disponibles y las revisiones distinguen problemas diferentes.",
+      "fr": "Les messages en attente restent après un redémarrage, les enregistrements ratés préservent les fichiers, les tâches répétées restent disponibles et les revues distinguent les problèmes.",
+      "de": "Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien, wiederholte Aufgaben bleiben verfügbar und Prüfungen halten unterschiedliche Probleme auseinander."
     }
   }
 }
