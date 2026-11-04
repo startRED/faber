@@ -1,6 +1,8 @@
 import { invoke, listen } from './shell.ts';
 
 // The shapes the engine sends (engine/src/model.rs).
+export interface HookPreview { file: string; event: string; command: string; length: number; unreadable: boolean }
+
 export type Vendor = 'claude' | 'codex' | 'gemini';
 
 /**
@@ -236,6 +238,7 @@ export interface PlanStep {
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
   steps: PlanStep[];
+  contract?: { extends?: string; newBecause?: string; proof?: string; target?: string };
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };
@@ -1090,6 +1093,7 @@ export const api = {
   forgetEnvironment: (id: string) => invoke<void>('forget_environment', { id }),
   startEnvironment: (id: string) => invoke<Project[]>('start_environment', { id }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
+  hookList: () => invoke<HookPreview[]>('hook_list'),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),

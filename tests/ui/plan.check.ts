@@ -16,6 +16,37 @@ const mount = (view: () => unknown) => {
   return { root, done: () => (dispose(), root.remove()) };
 };
 
+check('plan: the contract shows two localized lines and disappears with an older plan', async () => {
+  const [plan, setPlan] = createSignal<Plan>({ at: 1, steps: [{ text: 'Build', state: 'active' }],
+    contract: { extends: 'Existing screen', proof: 'Run checks', target: 'Under 1 second' } });
+  const before = lang();
+  const view = mount(() => createComponent(PlanList, { get plan() { return plan(); } }));
+  try {
+    for (const code of ['en', 'pt-BR', 'es', 'fr', 'de']) {
+      useLanguage(code);
+      await settle();
+      const lines = view.root.querySelectorAll('.plan-contract p');
+      equal(lines.length, 2);
+      equal(lines[0]!.textContent, `${t('plan.extends')}: Existing screen`);
+      equal(lines[1]!.textContent, `${t('plan.proof')}: Run checks · ${t('plan.target')}: Under 1 second`);
+    }
+    setPlan({ at: 2, steps: [{ text: 'Build', state: 'active' }],
+      contract: { newBecause: 'Nothing fits', proof: 'Inspect it' } });
+    await settle();
+    equal(view.root.querySelectorAll('.plan-contract p')[0]!.textContent, `${t('plan.new')}: Nothing fits`);
+    equal(view.root.querySelectorAll('.plan-contract p')[1]!.textContent, `${t('plan.proof')}: Inspect it`);
+    setPlan({ at: 2, steps: [{ text: 'Build', state: 'active' }], contract: {} });
+    await settle();
+    equal(view.root.querySelectorAll('.plan-contract p').length, 0);
+    setPlan({ at: 2, steps: [{ text: 'Build', state: 'active' }] });
+    await settle();
+    equal(view.root.querySelector('.plan-contract'), null);
+  } finally {
+    useLanguage(before);
+    view.done();
+  }
+});
+
 check('plan: done steps are checked, the current one is marked, and the count follows the plan', async () => {
   const plan = (done: number): Plan => ({
     at: 1,

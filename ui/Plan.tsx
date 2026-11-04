@@ -17,6 +17,18 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
         <span>{t('plan.label')}</span>
         <span class="num">{planWords(count())}</span>
       </p>
+      <Show when={props.plan.contract}>
+        {(contract) => (
+          <div class="plan-contract">
+            <Show when={contract().extends || contract().newBecause}>
+              <p class="note">{contract().extends ? t('plan.extends') : t('plan.new')}: {contract().extends || contract().newBecause}</p>
+            </Show>
+            <Show when={contract().proof || contract().target}>
+              <p class="note"><Show when={contract().proof}>{t('plan.proof')}: {contract().proof}</Show><Show when={contract().target}>{contract().proof && ' · '}{t('plan.target')}: {contract().target}</Show></p>
+            </Show>
+          </div>
+        )}
+      </Show>
       <ol>
         <For each={props.plan.steps}>
           {(step) => (

@@ -7147,3 +7147,19 @@ async fn large_tool_input_survives_branch_and_deletion() {
     assert_eq!(engine.tool_detail(&branch, "large").unwrap(), input);
     engine.shutdown();
 }
+
+#[test]
+fn hook_list_limits_output_and_names_unreadable_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("settings.json");
+    let broken = dir.path().join("broken.json");
+    let hooks: Vec<_> = (0..40).map(|_| json!({"type":"command", "command":"check secret-argument"})).collect();
+    std::fs::write(&file, json!({"hooks":{"PreToolUse":[{"hooks":hooks}]},"other":"secret-other-key"}).to_string()).unwrap();
+    std::fs::write(&broken, "{").unwrap();
+    let list = faber_engine::claude::list_hooks(&[file.clone(), broken.clone()]);
+    let output = serde_json::to_string(&list).unwrap();
+    assert_eq!(list.iter().filter(|item| !item.unreadable).count(), 30);
+    assert!(output.contains("PreToolUse") && output.contains("check"));
+    assert!(output.contains(broken.to_string_lossy().replace('\\', "\\\\").as_str()));
+    assert!(!output.contains("secret-argument") && !output.contains("secret-other-key"));
+}

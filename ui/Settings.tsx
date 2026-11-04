@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, type JSX, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
+import { api, type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
 import { AccountsSection } from './Accounts.tsx';
 import { AppearanceSection } from './Appearance.tsx';
 import { Fold, Group, Opt, PickMenu, Segmented, Toggle } from './controls.tsx';
@@ -99,11 +99,28 @@ export const forgetSection = (): void => { lastSection = 'general'; };
 
 export function Settings(props: Props) {
   const [section, setSectionNow] = createSignal<Section>(props.start ?? lastSection);
-  const setSection = (id: Section) => { lastSection = id; setSectionNow(id); };
+  const setSection = (id: Section) => { hookRequest++; setHookLines([]); lastSection = id; setSectionNow(id); };
   if (props.start) lastSection = props.start;
   // The look being worked on in Appearance. It is not on the page until "Use this look" has saved it.
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
   const mode = () => props.saved.permissions ?? 'dontAsk';
+  const [hookLines, setHookLines] = createSignal<string[]>([]);
+  let hookRequest = 0;
+  const hooksClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.id !== 'set-hooks-q') return;
+    const request = ++hookRequest;
+    setHookLines([]);
+    if (target.getAttribute('aria-expanded') !== 'true') return;
+    setHookLines([t('set.hooksLoading')]);
+    void api.hookList().then((items) => {
+      if (request !== hookRequest) return;
+      setHookLines(items.length ? items.map((item) => item.unreadable
+        ? t('set.hooksUnreadable', { file: item.file })
+        : t('set.hooksLine', { event: item.event, command: item.command, length: item.length, file: item.file })) : [t('set.hooksEmpty')]);
+    }).catch(() => { if (request === hookRequest) setHookLines([t('set.hooksFailed')]); });
+  };
+  onCleanup(() => { hookRequest++; setHookLines([]); });
   const title = () => t(SECTIONS.find(([id]) => id === section())![1]);
   let back: HTMLButtonElement | undefined;
   onMount(() => {
@@ -135,7 +152,7 @@ export function Settings(props: Props) {
     if (words !== undefined && words !== (props.saved.replyStyleText ?? '')) void save({ replyStyleText: words });
   });
   return (
-    <div class="settings" data-screen="settings" data-surface="settings">
+    <div class="settings" data-screen="settings" data-surface="settings" onClick={hooksClick}>
       <nav class="s-nav nav" aria-label={t('set.label')}>
         <button class="item" ref={(el) => { back = el; }} onClick={() => props.onClose()}>
           <span>{t('set.back')}</span>
@@ -236,7 +253,7 @@ export function Settings(props: Props) {
                 />
               </Opt>
               {/* In Full access the person's hooks always run (the CLI's own way), so the switch shows that and cannot change it. */}
-              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={t('set.hooksMore')} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
+              <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={[t('set.hooksMore'), t('set.hooksScope'), ...hookLines()]} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
               {/* Guardrail 3: when the agent changes Faber itself it asks; this skips that card and nothing else (never sending, publishing, paying or deleting). */}
               <Toggle id="set-trust" label={t('set.faberTrust')} hint={t('set.faberTrustHint')} more={t('set.faberTrustMore')} checked={props.saved.faberTrust === true} onChange={(on) => save({ faberTrust: on })} />
               <Show when={props.onChatFolder}>
