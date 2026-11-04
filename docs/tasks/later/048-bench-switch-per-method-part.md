@@ -2,7 +2,7 @@
 
 Area: none
 Files: engine/examples/bench.rs, docs/dev/benchmark.md, scripts/bench/
-Depends: none
+Depends: worker-packet-and-short-reports, join-checks-real-changes, independent-review-gate
 Size: about 300 changed lines
 
 Why: slice 6 of `docs/superpowers/specs/2026-10-30-faber-method-2.md`, "Measuring it". A part of the method stays only
