@@ -45,21 +45,11 @@ pub const NO_TEXT: &str = "error.plan.noText";
 pub const RUNNING: &str = "error.plan.running";
 pub const NO_EVIDENCE: &str = "error.plan.noEvidence";
 
-const PLAN_DESCRIPTION: &str = "Shows the person your plan for this request as a short checklist, kept with the conversation \
-across turns. You can send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress \
-while you work). You can send {\"advance\": true, \"evidence\": \"...\"} together with the call that starts the next step: it finishes the current \
-step and starts the next pending one. Every step marked done (in steps or with advance) needs evidence: what you ran or looked at \
-that shows it is done. You can send the whole list again when the plan changes. Never repeat the plan as a list in your text. When a \
-conversation you started does a step, give that step its id in conversation, so the person can open it from the plan. For big \
-work, you can also send estimate: what the whole job will cost in US dollars at API price, your honest guess; Faber then counts the \
-spend and, when the job has cost half as much again, tells you to keep to the plan and use cheaper helpers. \
-For a visible or behavior change, include a contract in the person's language with what it extends or why it is new, the proof and a target for speed, size or cost; omit it for questions and small fixes.";
+const PLAN_DESCRIPTION: &str = "Shows the person your plan as a short checklist, kept with the conversation across turns. You can send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress while you work), and again when the plan changes. You can send {\"advance\": true, \"evidence\": \"...\"} with the call that starts the next step: it finishes the current step and starts the next pending one. Every step marked done (in steps or with advance) needs evidence: what you ran or looked at that shows it is done. Never repeat the plan as a list in your text. When a conversation you started does a step, give that step its id in conversation. For big work you can also send estimate: your honest guess of the whole job's cost in US dollars at API price; Faber counts the spend and, when it has cost half as much again, tells you to keep to the plan and use cheaper helpers. For a visible or behavior change, include a contract in the person's language with what it extends or why it is new, the proof and a target for speed, size or cost; omit it for questions and small fixes.";
 
-const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words, what you are doing now (at most 50 characters), in their \
-language, with no tool, command or file names: \"Fixing the login page\", \"Checking the new layout\". You can use it when substantial \
-work starts or the phase changes.";
+const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words (at most 50 characters) and their language, what you are doing now, with no tool, command or file names: \"Fixing the login page\". You can use it when substantial work starts or the phase changes.";
 
-const WRAP_UP_DESCRIPTION: &str = "You can record the outcome when the task the person asked for ends or stops and write a closing message in your own words. outcome: done when the person's whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: what you did, one or two sentences. result: what is now true. not_done: what is left or not verified (leave it out when nothing is). verified: what you ran or looked at that shows the result (required for done, and it must be something you saw, never something you expect). Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. Some project turns without this call show as ended without a conclusion and may prompt one follow-up. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
+const WRAP_UP_DESCRIPTION: &str = "You can record the outcome and write a closing message, in your own words, when the task the person asked for ends or stops. outcome: done when the whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: one or two sentences. result: what is now true. not_done: what is left or not verified (leave out when nothing). verified: what you ran or looked at that shows the result; required for done, never something you expect. Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. Some project turns without this call show as ended without a conclusion and may prompt one follow-up. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
 
 fn plan_schema() -> Value {
     json!({
@@ -74,12 +64,12 @@ fn plan_schema() -> Value {
                     "properties": {
                         "text": { "type": "string", "description": "A short imperative step." },
                         "state": { "type": "string", "enum": ["pending", "in_progress", "done"] },
-                        "evidence": { "type": "string", "description": "Required when marking the step done: what you ran or looked at that shows it is done." },
+                        "evidence": { "type": "string", "description": "Required when marking done: what you ran or looked at." },
                         "id": { "type": "string", "description": "Short id for waits; default s1, s2 by position." },
                         "files": { "type": "array", "maxItems": MAX_FILES, "items": { "type": "string" }, "description": "Paths or folders it will change, relative to the project." },
                         "waits": { "type": "array", "items": { "type": "string" }, "description": "Ids of steps to finish first." },
                         "read": { "type": "boolean", "description": "True when the step only reads (search, collect, review): a helper does it, with no copy." },
-                        "conversation": { "type": "string", "description": "The id of the conversation you started that does this step, so the person can open it." }
+                        "conversation": { "type": "string", "description": "Id of the conversation you started for this step." }
                     },
                     "required": ["text", "state"],
                     "additionalProperties": false
@@ -96,7 +86,7 @@ fn plan_schema() -> Value {
                 "additionalProperties": false
             },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
-            "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at that shows the finished step is done." },
+            "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at." },
             "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
         },
         "additionalProperties": false
