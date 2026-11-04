@@ -1442,6 +1442,31 @@ check('settings: opening again lands on the section that was open', () => {
   }
 });
 
+check('accounts spend days: details show the total, daily bars and excluded unknown costs at 720 px', () => signedIn(async () => {
+  useLanguage('de');
+  const days = Array.from({ length: 30 }, (_, i) => [20000 + i, i === 29 ? 2.5 : 0, i === 28 ? 3 : 0]);
+  const usage = [{ vendor: 'claude', state: 'ok', ownSpendUsd: 2.5, spendDays: days, unmetered: 0, windows: [] }] as unknown as VendorUsage[];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage, quotas: {},
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const settings = view.host.querySelector<HTMLElement>('.settings')!;
+    settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+    await tick(); await tick();
+    const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
+    card.querySelector<HTMLButtonElement>('#acct-claude-details')!.click();
+    await tick();
+    const fold = card.querySelector<HTMLButtonElement>('#acct-claude-spend')!;
+    ok(fold.textContent!.includes('2,50'), 'the total uses the chosen language');
+    fold.click(); await tick();
+    equal(card.querySelectorAll('#acct-claude-spend-body .urow').length, 30);
+    ok(card.scrollWidth <= card.clientWidth + 1, 'daily values fit within the card');
+    ok(card.textContent!.includes('Unbekannte Kosten'));
+    ok(card.textContent!.includes('3 Anfragen'), 'unknown costs are counted across all 30 days');
+  } finally { view.stop(); useLanguage('en'); }
+}));
+
 check('settings: the hooks fold reads and shows previews only while open', async () => {
   const previous = api.hookList;
   let reads = 0;

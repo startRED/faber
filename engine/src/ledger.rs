@@ -526,6 +526,12 @@ impl VendorLedger {
 }
 
 impl VendorLedger {
+    pub fn spend_days(&self, day: i64) -> Vec<(i64, f64, u32)> {
+        (day - 29..=day)
+            .map(|d| (d, self.own_spend.get(&d).copied().unwrap_or(0.0), self.unmetered.get(&d).copied().unwrap_or(0)))
+            .collect()
+    }
+
     pub fn spend(&mut self, cost: Option<f64>, incomplete: bool, now: f64, offset: i64) {
         let day = ((now + offset as f64) / 86_400.0).floor() as i64;
         if let Some(cost) = cost.filter(|c| c.is_finite() && *c >= 0.0) {
@@ -548,6 +554,20 @@ impl VendorLedger {
 #[cfg(test)]
 mod canonical_reset_tests {
     use super::*;
+
+    #[test]
+    fn spend_over_thirty_days_fills_gaps() {
+        let mut ledger = VendorLedger::default();
+        ledger.own_spend.insert(71, 1.25);
+        ledger.own_spend.insert(100, 2.5);
+        ledger.own_spend.insert(70, 9.0);
+        ledger.unmetered.insert(72, 3);
+        let days = ledger.spend_days(100);
+        assert_eq!(days.len(), 30);
+        assert_eq!(days[0], (71, 1.25, 0));
+        assert_eq!(days[1], (72, 0.0, 3));
+        assert_eq!(days[29], (100, 2.5, 0));
+    }
 
     #[test]
     fn confirmed_reads_share_only_a_current_window_reset() {

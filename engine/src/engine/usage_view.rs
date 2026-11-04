@@ -34,6 +34,7 @@ pub struct VendorUsage {
     pub ask_for_plan: bool,
     pub paid_possible: bool,
     pub own_spend_usd: f64,
+    pub spend_days: Vec<(i64, f64, u32)>,
     pub unmetered: u32,
     /// Faber's own recent work may not be in the readings yet (or is running now): they may still rise.
     pub counting: bool,
@@ -111,6 +112,7 @@ impl Core {
                     billing_unknown: snap.billing == Billing::Unknown,
                     ask_for_plan: snap.billing == Billing::Subscription && v.ask_for_plan(),
                     own_spend_usd: v.own_spend.get(&day).copied().unwrap_or(0.0),
+                    spend_days: v.spend_days(day),
                     unmetered: v.unmetered.get(&day).copied().unwrap_or(0),
                     counting: snap.counting,
                     windows,

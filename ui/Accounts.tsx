@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api, type CheckResult, type Vendor, type VendorUsage } from './api.ts';
 import { Fold, Group, Opt } from './controls.tsx';
 import { VendorMark } from './Glyphs.tsx';
@@ -110,6 +110,10 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
   const line = () => accountLine(props.check);
   const u = () => props.usage?.find((x) => x.vendor === v());
   const rows = () => usageRows(props.quotas, v(), props.now);
+  const days = () => u()?.spendDays ?? [];
+  const unknownSpend = createMemo(() => days().reduce((sum, [, , count]) => sum + count, 0));
+  const maxSpend = createMemo(() => Math.max(0, ...days().map(([, cost]) => cost)) || 1);
+  const dayFormat = createMemo(() => new Intl.DateTimeFormat(lang(), { day: 'numeric', month: 'short', timeZone: 'UTC' }));
   // A sign-in billed per use, or one the CLI has not confirmed, is refused by Auto and reads "out" in the engine, but it has no
   // quota to run out of: say what it is, calmly (C002).
   const billing = () => (u()?.billedPerUse ? 'billed' : u()?.billingUnknown ? 'unconfirmed' : undefined);
@@ -169,6 +173,19 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
             <p class="acct-foot">{t('usage.apiValue')}</p>
             <Fold id={`acct-${v()}-details`} title={t('usage.details')}>
               <div class="acct-details">
+                <Fold id={`acct-${v()}-spend`} title={t('usage.spendDays', { cost: money((x().spendDays ?? []).reduce((sum, [, cost]) => sum + cost, 0)) })}>
+                  <div>
+                    <p class="hint">{t('usage.spendUnknown')}</p>
+                    <Show when={unknownSpend()}>{(n) => <p class="hint">{t('usage.meterIncomplete', { n: n() })}</p>}</Show>
+                    <For each={x().spendDays ?? []}>{([day, cost]) => (
+                      <div class="urow">
+                        <span>{dayFormat().format(new Date(day * 86_400_000))}</span>
+                        <span class="share num">{money(cost)}</span>
+                        <span class="meter" aria-hidden="true"><i style={{ 'clip-path': `inset(0 ${100 - (cost / maxSpend()) * 100}% 0 0)` }} /></span>
+                      </div>
+                    )}</For>
+                  </div>
+                </Fold>
                 <For each={notes(x())}>{(text) => <p class="hint">{text}</p>}</For>
                 <For each={rows().filter((row) => row.window)}>
                   {(row) => {

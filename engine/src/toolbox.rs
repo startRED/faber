@@ -659,6 +659,7 @@ mod tests {
             ask_for_plan: false,
             paid_possible: false,
             own_spend_usd: 0.0,
+            spend_days: vec![],
             unmetered: 0,
             counting: true,
             windows,

@@ -653,7 +653,7 @@ export interface VendorUsage {
   vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'fast' | 'low' | 'out' | 'unknown';
   learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
   overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
-  ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
+  ownSpendUsd: number; spendDays?: [number, number, number][]; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
   gitReason?: 'reason.git_missing';
