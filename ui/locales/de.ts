@@ -2520,6 +2520,7 @@ export const de: Messages = {
   'notes.392.new': 'Im Rechtsklickmenü einer Unterhaltung wählst du mit einem Buchstaben: A archiviert, D löscht (D noch einmal zum Bestätigen), R benennt um, P heftet an.',
   'notes.393.better': 'Die KI eines Projekts archiviert jetzt auf Wunsch jede abgeschlossene Unterhaltung des Projekts, nicht nur die selbst gestarteten. Du kannst sie zurückholen.',
   'notes.394.fixed': 'Der Ring neben „Denkt nach“ und alle anderen Arbeitsmarken drehen sich jetzt, damit du siehst, dass die KI noch arbeitet.',
+  'notes.395.fixed': 'Wenn die Installation einer KI nicht startet, siehst du das Problem und kannst es erneut versuchen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -2520,6 +2520,7 @@ export const es: Messages = {
   'notes.392.new': 'En el menú de clic derecho de una conversación, pulsa una letra para elegir: A archiva, D borra (pulsa D otra vez para confirmar), R cambia el nombre, P fija.',
   'notes.393.better': 'La IA de un proyecto ahora archiva cualquier conversación terminada del proyecto cuando lo pides, no solo las que ella empezó. Puedes recuperarlas.',
   'notes.394.fixed': 'El anillo junto a "Pensando" y las demás marcas de trabajo ahora giran, así ves que la IA sigue trabajando.',
+  'notes.395.fixed': 'Si la instalación de una IA no empieza, puedes ver el problema y volver a intentarlo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

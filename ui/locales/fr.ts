@@ -2520,6 +2520,7 @@ export const fr: Messages = {
   'notes.392.new': 'Dans le menu clic droit d’une conversation, appuyez sur une lettre : A archive, D supprime (appuyez de nouveau sur D pour confirmer), R renomme, P épingle.',
   'notes.393.better': 'L’IA d’un projet archive maintenant toute conversation terminée du projet quand vous le demandez, pas seulement celles qu’elle a lancées. Vous pouvez les rétablir.',
   'notes.394.fixed': 'L’anneau à côté de « Réflexion » et les autres repères de travail tournent maintenant : vous voyez que l’IA travaille encore.',
+  'notes.395.fixed': 'Si l’installation d’une IA ne démarre pas, vous voyez le problème et pouvez réessayer.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

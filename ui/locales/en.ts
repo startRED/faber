@@ -2400,6 +2400,7 @@ export const en = {
   'notes.392.new': "In a conversation's right-click menu, press a letter to choose: A archives, D deletes (press D again to confirm), R renames, P pins.",
   'notes.393.better': "A project's agent can now archive any finished conversation of that project when you ask, not only the ones it started. You can bring them back.",
   'notes.394.fixed': 'The ring beside "Thinking" and every other working mark now turns, so you can tell the agent is still at work.',
+  'notes.395.fixed': 'If an AI installation cannot start, you can see the problem and try again.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

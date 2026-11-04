@@ -2507,6 +2507,7 @@ export const ptBR: Messages = {
   'notes.392.new': 'No menu do botão direito de uma conversa, aperte uma letra para escolher: A arquiva, D apaga (aperte D de novo para confirmar), R muda o nome, P fixa.',
   'notes.393.better': 'A IA de um projeto agora arquiva qualquer conversa concluída do projeto quando você pede, não só as que ela mesma começou. Você pode trazê-las de volta.',
   'notes.394.fixed': 'O anel ao lado de "Pensando" e todas as outras marcas de trabalho agora giram, e dá para ver que a IA ainda está trabalhando.',
+  'notes.395.fixed': 'Se a instalação de uma IA não começar, você vê o problema e pode tentar de novo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

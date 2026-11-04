@@ -76,6 +76,7 @@ impl CleanupGuard {
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
         clean_temp_dir(&self.0);
+        let _ = std::fs::remove_dir(&self.0);
         RUNNING.lock().unwrap_or_else(|e| e.into_inner()).retain(|d| d != &self.0);
     }
 }

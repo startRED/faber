@@ -1143,6 +1143,7 @@ async fn install_failure_reasons_are_specific_and_clean_up() {
         let error = rig.run_with(&download).await.unwrap_err();
         assert_eq!(error["key"], key);
         rig.assert_empty_temporary();
+        assert!(!rig.temporary().exists());
     }
 }
 
@@ -1156,6 +1157,7 @@ async fn refused_connection_and_wrong_checksum_report_reasons_and_clean_up() {
     let error = rig.run_network().await.unwrap_err();
     assert_eq!(error["key"], "reason.setup.connection");
     rig.assert_empty_temporary();
+    assert!(!rig.temporary().exists());
 
     let server = release_host(Arc::default(), |stream| loopback::send(stream, b"wrong"));
     let mut rig = Rig::new("claude");
@@ -1163,4 +1165,51 @@ async fn refused_connection_and_wrong_checksum_report_reasons_and_clean_up() {
     let error = rig.run_network().await.unwrap_err();
     assert_eq!(error["key"], "reason.setup.checksum");
     rig.assert_empty_temporary();
+    assert!(!rig.temporary().exists());
+}
+
+#[tokio::test]
+async fn blocked_stalled_and_full_disk_downloads_report_reasons_and_remove_staging() {
+    for case in ["blocked", "stalled", "full"] {
+        let (hold_tx, hold_rx) = std::sync::mpsc::channel::<()>();
+        let hold_rx = Mutex::new(hold_rx);
+        let server = release_host(Arc::default(), move |stream| match case {
+            "blocked" => loopback::not_found(stream),
+            "stalled" => {
+                loopback::head(stream, Some(3))?;
+                io::Write::write_all(stream, b"a")?;
+                let _ = hold_rx.lock().unwrap().recv();
+                Ok(())
+            }
+            _ => loopback::send(stream, b"abc"),
+        });
+        let mut rig = Rig::new("claude");
+        use_loopback(&mut rig, &server.origin);
+        let origin = server.origin.clone();
+        let fetch = |url: &str| {
+            let (url, origin) = (url.to_string(), origin.clone());
+            on_thread(async move { faber_engine::install::default_fetch(&url, Some(&origin)).await })
+        };
+        let download = |url: &str, dest: &Path| {
+            let (url, dest, origin) = (url.to_string(), dest.to_path_buf(), origin.clone());
+            on_thread(async move {
+                faber_engine::install::download_with(&url, &dest, Some(&origin), std::time::Duration::from_millis(500), |path| {
+                    std::fs::File::create(path).map(|file| FullDisk { file, left: if case == "full" { 1 } else { usize::MAX } })
+                })
+                .await
+            })
+        };
+        let result = rig.run_all(&fetch, &download).await;
+        drop(hold_tx);
+        let error = result.unwrap_err();
+        assert_eq!(
+            error["key"],
+            match case {
+                "blocked" => "reason.setup.blocked",
+                "stalled" => "reason.setup.timeout",
+                _ => "reason.setup.write",
+            }
+        );
+        assert!(!rig.temporary().exists(), "{case}");
+    }
 }

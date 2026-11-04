@@ -65,7 +65,11 @@ export function Setup(props: SetupProps) {
     try {
       await api.setupInstall(v);
     } catch (err) {
-      setErrors((prev) => ({ ...prev, [v]: { key: 'error.setup.install', detail: errorText(err) } }));
+      if (progresses()[v]?.step !== 'failed') {
+        const key = errorText(err);
+        const known = /^(reason|error)\.[\w.]+$/.test(key);
+        noteSetupProgress({ type: 'setup', vendor: v, step: 'failed', error: known ? key : 'error.setup.install', detail: known ? undefined : key });
+      }
     }
   };
 

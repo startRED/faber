@@ -259,3 +259,25 @@ check('setup: each install failure shows its message and retry starts again in b
     }
   } finally { api.setupCheck = oldCheck; api.setupInstall = oldInstall; }
 });
+
+check('setup: a rejected install without a progress event can be retried', async () => {
+  const oldCheck = api.setupCheck, oldInstall = api.setupInstall;
+  api.setupCheck = async (vendor) => ({ vendor, installed: false, account: 'unknown', canInstall: true });
+  api.setupInstall = async () => { throw 'reason.setup.connection'; };
+  try {
+    for (const mode of ['firstRun', 'manage'] as const) {
+      noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'done' });
+      const host = document.createElement('div');
+      document.body.append(host);
+      const dispose = render(() => createComponent(Setup, { mode, onFinish: () => {} }), host);
+      try {
+        host.querySelector<HTMLButtonElement>('.pick')!.click();
+        await Promise.resolve();
+        host.querySelector<HTMLButtonElement>('.setup-card-actions .primary')!.click();
+        await Promise.resolve();
+        equal(host.querySelector('.setup-error-msg')?.textContent, t('reason.setup.connection'));
+        equal(host.querySelector('.setup-card-actions .primary')?.textContent?.trim(), t('setup.retry'));
+      } finally { dispose(); host.remove(); noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'done' }); }
+    }
+  } finally { api.setupCheck = oldCheck; api.setupInstall = oldInstall; }
+});
