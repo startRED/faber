@@ -21,16 +21,23 @@ try {
     if (line === 'READY') {
       child.stdin.write(JSON.stringify({ op: 'eval', value: `(async () => {
         const checks = await window.__faberChecks(undefined, 'thread stall: open and scroll 300 messages');
-        return { checks, ms: window.threadStallMs };
+        return { checks, measurement: window.threadStall };
       })()` }) + '\n');
     } else if (line === 'CLEAN') {
       clean = true;
     } else {
       const reply = JSON.parse(line);
       if (reply.error) throw new Error(reply.error);
-      const { checks, ms } = reply.ok;
-      if (checks.length !== 1 || !checks[0].ok || !Number.isFinite(ms)) throw new Error(JSON.stringify(checks));
-      console.log(`300-message open and scroll longest timer delay: ${ms.toFixed(1)} ms`);
+      const { checks, measurement } = reply.ok;
+      if (checks.length !== 1 || !checks[0].ok) throw new Error(JSON.stringify(checks));
+      for (const phase of ['open', 'scroll']) {
+        const gap = measurement?.[phase];
+        if (!Number.isFinite(gap?.longestMs) || gap.longestMs <= 0 || !Number.isInteger(gap.frames) || gap.frames < 1) {
+          throw new Error(`missing animation frame samples for ${phase}`);
+        }
+        console.log(`300-message ${phase} longest requestAnimationFrame gap: ${gap.longestMs.toFixed(1)} ms (${gap.frames} samples)`);
+      }
+      console.log(`Page visibility: ${measurement.visibility}; hidden test desktop, not a visible display measurement`);
       measured = true;
       child.stdin.write('{"op":"quit"}\n');
     }
