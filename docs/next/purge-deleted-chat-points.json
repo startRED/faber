@@ -1,0 +1,14 @@
+{
+  "notes": {
+    "better": {
+      "en": "Deleting a conversation now removes its saved file history immediately, instead of keeping it for up to 30 days.",
+      "pt-BR": "Excluir uma conversa agora apaga suas cópias de restauração na hora, em vez de guardá-las por até 30 dias.",
+      "de": "Wenn du ein Gespräch löschst, werden seine gespeicherten Dateiversionen jetzt sofort entfernt, statt bis zu 30 Tage aufbewahrt.",
+      "es": "Al borrar una conversación, sus copias de restauración se eliminan al momento, en vez de conservarse hasta 30 días.",
+      "fr": "Supprimer une conversation efface désormais aussitôt ses copies de restauration, au lieu de les conserver jusqu’à 30 jours."
+    }
+  },
+  "decisions": [
+    "| R-next | 2026-11-05 | Deleting a conversation immediately purges its private restore points and completed redo copies. Keep shared versions needed by other conversations, working files and unfinished restore recovery. | Owner |"
+  ]
+}

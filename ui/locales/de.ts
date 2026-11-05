@@ -2099,6 +2099,7 @@ export const de: Messages = {
   "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",
   "error.chat.saveFailed": "Faber konnte diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und Faber versucht es bei deiner nächsten Änderung erneut. Schließe Faber noch nicht.",
   "error.chat.saveFull": "Der Datenträger ist voll, deshalb konnte Faber diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und wird bei deiner nächsten Änderung gespeichert, sobald wieder Platz ist. Schließe Faber noch nicht.",
+  "error.chat.historyKept": "Das Gespräch wurde gelöscht, aber seine gespeicherten Dateiversionen konnten nicht entfernt werden. Starte Faber neu, um es erneut zu versuchen.",
   "error.chat.deleteFailed": "Faber konnte diese Unterhaltung nicht löschen, deshalb bleibt sie, wo sie ist. Versuche es gleich noch einmal.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Am letzten gespeicherten Prüfpunkt pausiert.",

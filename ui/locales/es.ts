@@ -2099,6 +2099,7 @@ export const es: Messages = {
   "error.store.full": "El disco está lleno. No se aprobó nada.",
   "error.chat.saveFailed": "Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto, y Faber lo intenta de nuevo en tu próximo cambio. No cierres Faber todavía.",
   "error.chat.saveFull": "El disco está lleno, así que Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto y se guarda de nuevo en tu próximo cambio, cuando haya espacio. No cierres Faber todavía.",
+  "error.chat.historyKept": "La conversación se borró, pero sus copias de restauración siguen en el disco. Reinicia Faber para intentar eliminarlas.",
   "error.chat.deleteFailed": "Faber no pudo borrar esta conversación, así que sigue donde estaba. Inténtalo de nuevo en un momento.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado en el último punto de control guardado.",

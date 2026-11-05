@@ -2099,6 +2099,7 @@ export const fr: Messages = {
   "error.store.full": "Le disque est plein. Rien n'a été approuvé.",
   "error.chat.saveFailed": "Faber n'a pas pu enregistrer cette conversation. Elle reste en sécurité tant que Faber est ouvert, et Faber réessaie à votre prochaine modification. Ne fermez pas encore Faber.",
   "error.chat.saveFull": "Le disque est plein, donc Faber n'a pas pu enregistrer cette conversation. Elle reste en sécurité tant que Faber est ouvert et sera enregistrée à votre prochaine modification, dès qu'il y a de la place. Ne fermez pas encore Faber.",
+  "error.chat.historyKept": "La conversation a été supprimée, mais ses copies de restauration restent sur le disque. Redémarrez Faber pour réessayer de les effacer.",
   "error.chat.deleteFailed": "Faber n'a pas pu supprimer cette conversation, elle reste donc où elle est. Réessayez dans un instant.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "En pause au dernier point de contrôle sauvegardé.",

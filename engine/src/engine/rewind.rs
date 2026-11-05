@@ -202,7 +202,7 @@ impl Engine {
             if !matches!(&result, Err(error) if error == "error.rewind.busy") {
                 return result;
             }
-            if core.rewind_delete_admitted(id) {
+            if core.rewind_delete_admitted(id) || core.rewind.worker.load(Ordering::Acquire) {
                 let changed = core.rewind.admission_changed.clone();
                 core = changed.wait(core).unwrap_or_else(|e| e.into_inner());
             } else {
@@ -242,6 +242,19 @@ impl Engine {
             for root in history.project_cleanup_roots() {
                 if !c.rewind.admission.iter().any(|folder| overlap(folder, &root)) && c.rewind_running(&root).is_empty() {
                     history.cleanup_empty_project_quarantines(&root)?;
+                }
+            }
+            if requested.is_none() && !c.rewind.worker.load(Ordering::Acquire) {
+                let purged = (|| {
+                    let records = faber_winproc::rewind::Root::open(&c.opts.data_dir.join("conversations"))
+                        .map_err(|_| "error.rewind.storage".to_string())?;
+                    history.purge_unknown(|id| {
+                        c.convs.contains_key(id)
+                            || !records.open_file(&format!("{id}.json")).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                    })
+                })();
+                if purged.is_err() {
+                    (c.emit)(AppEvent::SaveFailed { key: "error.rewind.storage".into() });
                 }
             }
             let ids = history.recovery_conversations();
@@ -530,6 +543,9 @@ impl Engine {
 
 impl Core {
     fn rewind_delete_admitted(&self, id: &str) -> bool {
+        if self.rewind.pending.contains(id) {
+            return true;
+        }
         if self.rewind.admission.is_empty() {
             return false;
         }
@@ -554,6 +570,9 @@ impl Core {
             Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => return Err("error.rewind.busy".into()),
         };
+        if self.rewind.worker.load(Ordering::Acquire) && history.has_conversation(id) {
+            return Err("error.rewind.busy".into());
+        }
         if history.pending_acknowledgements(id).is_empty() { Ok(()) } else { Err("error.rewind.deleteRecovery".into()) }
     }
 
@@ -667,6 +686,17 @@ impl Core {
             }
         }
         running
+    }
+
+    pub(super) fn purge_rewind(&self, conv: &str) {
+        let purged = self
+            .rewind
+            .history
+            .as_ref()
+            .is_some_and(|history| history.lock().unwrap_or_else(|e| e.into_inner()).purge_conversation(conv).is_ok());
+        if !purged {
+            (self.emit)(AppEvent::SaveFailed { key: "error.chat.historyKept".into() });
+        }
     }
 
     pub(super) fn rewind_forget(&mut self, conv: &str) {
@@ -1121,6 +1151,7 @@ impl Core {
 
     pub(super) fn release_rewind_worker(&mut self) {
         self.rewind.worker.store(false, Ordering::Release);
+        self.rewind.admission_changed.notify_all();
         for conv in self.rewind.deleted_folders.keys().cloned().collect::<Vec<_>>() {
             self.rewind_deleted_settled(&conv);
         }

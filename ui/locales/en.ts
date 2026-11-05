@@ -2007,6 +2007,7 @@ export const en = {
   "error.store.full": "The disk is full. Nothing was approved.",
   "error.chat.saveFailed": "Faber could not save this conversation. It stays safe while Faber is open, and Faber tries again at your next change. Do not close Faber yet.",
   "error.chat.saveFull": "The disk is full, so Faber could not save this conversation. It stays safe while Faber is open and saves again at your next change once there is room. Do not close Faber yet.",
+  "error.chat.historyKept": "The conversation was deleted, but its saved file history could not be erased. Restart Faber to retry.",
   "error.chat.deleteFailed": "Faber could not delete this conversation, so it stays where it is. Try again in a moment.",
   "reason.interrupted": "Paused at the last saved checkpoint.",
   "crumb.separator": "\u203a",

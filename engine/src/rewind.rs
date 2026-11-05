@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 mod pack;
+#[cfg(test)]
+mod purge_tests;
 mod review;
 #[cfg(test)]
 mod safety_tests;
@@ -1006,6 +1008,9 @@ impl History {
     /// Memory publication shares the engine's idle/admission check. Disk work runs after releasing that lock.
     pub fn publish_seal(&mut self, publication: &Publication) {
         for point in &publication.updates {
+            if !self.points.contains_key(&point.info.id) {
+                continue;
+            }
             let mut pending = point.clone();
             pending.info.sealed = false;
             self.points.insert(point.info.id.clone(), pending);
@@ -1014,6 +1019,9 @@ impl History {
 
     pub fn persist_seal(&mut self, publication: Publication, at: u64) -> Result<(), String> {
         for (index, point) in publication.updates.iter().enumerate() {
+            if !self.points.contains_key(&point.info.id) {
+                continue;
+            }
             if let Err(error) = self.save_point(point) {
                 for failed in &publication.updates[index..] {
                     if let Some(saved) = self.points.get_mut(&failed.info.id) {
