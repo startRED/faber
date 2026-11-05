@@ -2656,6 +2656,7 @@ export const de: Messages = {
   'notes.428.fixed': 'Außerhalb des Vollzugriffs laufen Befehle nur mit geprüfter Absicherung; automatische Projektaktionen bleiben in Claude Code ausgeschaltet.',
   'notes.429.new': 'Beim Wiederholen oder Abzweigen einer Antwort setzt die KI an diesem Punkt mit ihrer gespeicherten Sitzung fort, sofern unterstützt.',
   'notes.430.better': 'Du kannst die Dateiänderungen jeder Antwort in Chat und Projekten mit den gespeicherten Versionen davor und danach vergleichen.',
+  'notes.431.fixed': 'Das Gesprächsmenü bleibt offen, wenn das Gespräch an einer anderen Stelle im Fenster automatisch weiterscrollt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

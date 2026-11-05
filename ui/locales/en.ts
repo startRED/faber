@@ -2536,6 +2536,7 @@ export const en = {
   'notes.428.fixed': 'Outside Full access, commands run isolated or stop when protection cannot be checked; Claude Code keeps project startup actions off.',
   'notes.429.new': 'When you retry or branch from an answer, the AI continues from that point using its saved session when supported.',
   'notes.430.better': 'You can review the files changed by each answer in Chat and Projects, including their saved before and after versions.',
+  'notes.431.fixed': 'Your conversation menu stays open when the conversation scrolls automatically in another part of the window.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

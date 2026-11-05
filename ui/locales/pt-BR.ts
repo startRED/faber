@@ -2643,6 +2643,7 @@ export const ptBR: Messages = {
   'notes.428.fixed': 'Fora do Acesso total, comandos só rodam com proteção conferida; o Claude Code mantém as ações automáticas do projeto desligadas.',
   'notes.429.new': 'Ao repetir uma resposta ou criar uma conversa a partir dela, a IA continua daquele ponto usando a sessão salva quando possível.',
   'notes.430.better': 'Você pode conferir os arquivos alterados em cada resposta no Chat e nos Projetos, com as versões salvas de antes e depois.',
+  'notes.431.fixed': 'O menu da conversa continua aberto quando a conversa rola sozinha em outra parte da janela.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

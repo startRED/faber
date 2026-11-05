@@ -23,6 +23,8 @@ export interface OpenMenu {
   x: number;
   y: number;
   items: MenuItem[];
+  /** Weak: the exit host caches the last menu even after its source leaves the screen. */
+  origin?: WeakRef<Element>;
   /** Where focus goes back to when the menu closes by itself (Esc, Tab, a chosen item). */
   focus: HTMLElement | null;
   /** Opened from the keyboard: the first item takes focus. */
@@ -51,7 +53,8 @@ export function openMenu(e: MouseEvent, items: MenuItem[], focus: HTMLElement | 
     x = box.left + Math.min(24, box.width / 2);
     y = box.bottom;
   }
-  setMenu({ x, y, items, focus, keyboard });
+  const origin = e.target instanceof Element ? e.target : focus;
+  setMenu({ x, y, items, origin: origin ? new WeakRef(origin) : undefined, focus, keyboard });
 }
 
 /** Whether an item cannot be chosen right now. */
@@ -156,5 +159,9 @@ export function installContextMenu(): void {
   window.addEventListener('pointerdown', (e) => e.target instanceof Element && !e.target.closest('.cmenu') && closeMenu(), true);
   window.addEventListener('blur', () => closeMenu());
   window.addEventListener('resize', () => closeMenu());
-  window.addEventListener('scroll', (e) => { if (!(e.target instanceof Element && e.target.closest('.cmenu'))) closeMenu(); }, true);
+  window.addEventListener('scroll', (e) => {
+    const origin = menu()?.origin?.deref();
+    // Tail following in another area must not dismiss a menu whose source has not moved.
+    if (!(e.target instanceof Element) || (!e.target.closest('.cmenu') && (!origin || e.target.contains(origin)))) closeMenu();
+  }, true);
 }

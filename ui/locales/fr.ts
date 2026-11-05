@@ -2656,6 +2656,7 @@ export const fr: Messages = {
   'notes.428.fixed': 'Hors Accès total, les commandes nécessitent une protection vérifiée ; Claude Code garde les actions automatiques du projet désactivées.',
   'notes.429.new': 'Lorsque vous réessayez ou créez une conversation depuis une réponse, l’IA repart de ce point avec sa session enregistrée si possible.',
   'notes.430.better': 'Vous pouvez consulter les fichiers modifiés par chaque réponse dans Chat et Projets, avec leurs versions enregistrées avant et après.',
+  'notes.431.fixed': 'Le menu de la conversation reste ouvert quand la conversation défile automatiquement ailleurs dans la fenêtre.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

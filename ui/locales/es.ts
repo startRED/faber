@@ -2656,6 +2656,7 @@ export const es: Messages = {
   'notes.428.fixed': 'Fuera del Acceso total, los comandos solo se ejecutan con protección verificada; Claude Code mantiene desactivadas las acciones automáticas del proyecto.',
   'notes.429.new': 'Al repetir una respuesta o abrir una conversación desde ella, la IA continúa desde ese punto con su sesión guardada cuando sea posible.',
   'notes.430.better': 'Puedes revisar los archivos cambiados en cada respuesta de Chat y Proyectos, con sus versiones guardadas de antes y después.',
+  'notes.431.fixed': 'El menú de la conversación sigue abierto cuando la conversación se desplaza sola en otra parte de la ventana.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
