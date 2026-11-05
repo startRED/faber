@@ -19,9 +19,20 @@ relative to each copy: a copy whose sources are older than another copy's last b
 app included. So each cache keeps the copy that last built in it (`.faber-copy`), and when another copy leases it, the
 launcher first removes the workspace crates' fingerprints in every profile, which rebuilds only those crates for it.
 
-Each command gets private `TEMP`, `TMP` and `TMPDIR` under its cache's `.faber-tmp/run-<id>`. Successful and failed
+Each command gets private `TEMP`, `TMP` and `TMPDIR` under the canonical system temporary folder, in
+`faber-cargo-<uid>/<cache-hash>/run-<id>` on POSIX, or `faber-cargo/<cache-hash>/run-<id>` on Windows, whose system temp
+is already per user. POSIX namespaces are created with mode `0700`; before use, including cleanup, the launcher checks
+with `lstat` that the namespace is a real directory owned by the current user without group or other write access.
+It also checks every ancestor up to `/`: each must be a real directory owned by root or the current user, and any
+group- or other-writable directory must have the sticky bit. Unsafe namespaces or ancestors are refused with an error
+and never deleted. Windows keeps the canonical-path and link checks. Successful and failed
 commands remove their temporary tree. Later invocations retry abandoned cleanup only after a day and when both the
-recorded launcher and child are gone. Live processes, incomplete receipts and links are preserved. Unknown system-wide
+recorded launcher and child are gone. Legacy receipts without a recorded path clean only their cache's
+`.faber-tmp/run-<id>` with directory and link checks, without checking ownership or POSIX permissions on that legacy path.
+A missing temporary folder releases its receipt and slot.
+Recorded folders are deleted only at their canonical path under the current system temp's own cache-hash folder or
+the legacy location. Other recorded paths (including a previous system temp) are left with a message, and their
+receipts and slots are released. Live processes, incomplete receipts and links are preserved. Unknown system-wide
 `.tmp*` folders are never deleted: their names do not prove Faber owns them.
 Stopping a command first stops its process tree. If that cannot be confirmed, its cache and temporary files stay
 reserved rather than being reused under potentially live descendants.
