@@ -2662,6 +2662,7 @@ export const fr: Messages = {
   'notes.430.better': 'Vous pouvez consulter les fichiers modifiés par chaque réponse dans Chat et Projets, avec leurs versions enregistrées avant et après.',
   'notes.431.fixed': 'Le menu de la conversation reste ouvert quand la conversation défile automatiquement ailleurs dans la fenêtre.',
   'notes.432.new': 'Vous pouvez voir ce que l’agent a appris sur votre projet dans les détails techniques.',
+  'notes.433.fixed': 'Vos brouillons et pièces jointes suivent dans la nouvelle application Windows ; Faber attend l’enregistrement à la fermeture et reprend après une interruption.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

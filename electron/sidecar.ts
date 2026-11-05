@@ -82,6 +82,7 @@ export class Sidecar {
     const gone = (code: number | null) => {
       if (!sidecar.alive) return;
       sidecar.alive = false;
+      lines.close();
       for (const { reject } of sidecar.pending.values()) reject(new Error('error.host.gone'));
       sidecar.pending.clear();
       ended();
@@ -102,7 +103,7 @@ export class Sidecar {
   }
 
   call(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-    if (!this.alive) return Promise.reject(new Error('error.host.gone'));
+    if (!this.alive || this.stopping) return Promise.reject(new Error('error.host.gone'));
     if (this.pending.size >= MAX_PENDING) return Promise.reject(new Error('error.host.busy'));
     const id = this.next++;
     let line: string;
@@ -140,7 +141,10 @@ export class Sidecar {
     const late = new Promise<'late'>((resolve) => {
       timer = setTimeout(() => resolve('late'), patience);
     });
-    if ((await Promise.race([this.exited, late])) === 'late') this.child.kill();
+    if ((await Promise.race([this.exited, late])) === 'late') {
+      this.child.kill();
+      await this.exited;
+    }
     clearTimeout(timer);
   }
 

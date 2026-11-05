@@ -2662,6 +2662,7 @@ export const de: Messages = {
   'notes.430.better': 'Du kannst die Dateiänderungen jeder Antwort in Chat und Projekten mit den gespeicherten Versionen davor und danach vergleichen.',
   'notes.431.fixed': 'Das Gesprächsmenü bleibt offen, wenn das Gespräch an einer anderen Stelle im Fenster automatisch weiterscrollt.',
   'notes.432.new': 'In den technischen Details sehen Sie, was dem Agenten über Ihr Projekt gesagt wurde.',
+  'notes.433.fixed': 'Deine Entwürfe und Anhänge bleiben in der neuen Windows-App erhalten; Faber wartet beim Beenden auf das Speichern und erholt sich nach Unterbrechungen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

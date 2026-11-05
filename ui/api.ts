@@ -894,6 +894,7 @@ export interface Aside {
 export interface AgentAsk { id: string; conversation: string; label: 'organize' | 'settings' | 'tools' | 'projects' | 'environments' | 'rewind'; state: 'pending' | 'allowed' | 'denied' | 'expired'; }
 
 export type AppEvent =
+  | { type: 'lagged' }
   | { type: 'asks'; asks: AgentAsk[] }
   | { type: 'catalog' }
   | ({ type: 'background' } & BackgroundList)

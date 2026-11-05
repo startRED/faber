@@ -20,6 +20,8 @@ Quota handoff reasons name the exhausted AI and its saved model, then the AI tak
 
 ## Answers
 
+If Electron's engine process exits unexpectedly, it restarts and the live screen refreshes engine state and the open conversation after the replacement answers. The composer stays mounted, retaining newer text whose storage write failed and its existing dirty protection; process-local running/background revisions start over (`electron/recovery.test.mjs`, `electron/migration.test.mjs`). The main process allows at most three restarts per minute; 30 seconds of host uptime resets that count, even when short-lived replacements answer state. An unrequested exit with code 0 or repeated failures closes the app. No message is resent automatically; interrupted replies keep their existing recovery actions. Normal Quit waits for saving to end, up to 60 seconds (`electron/sidecar.test.mjs`).
+
 Go back uses the same file history for non-temporary chats with or without a chosen folder; see
 [the saved-history states](rewind.md). It adds no control or animation to the answer.
 

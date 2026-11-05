@@ -2649,6 +2649,7 @@ export const ptBR: Messages = {
   'notes.430.better': 'Você pode conferir os arquivos alterados em cada resposta no Chat e nos Projetos, com as versões salvas de antes e depois.',
   'notes.431.fixed': 'O menu da conversa continua aberto quando a conversa rola sozinha em outra parte da janela.',
   'notes.432.new': 'Você pode ver o que foi dito ao agente sobre seu projeto em Detalhes técnicos.',
+  'notes.433.fixed': 'Seus rascunhos e anexos continuam no novo app do Windows; o Faber também espera o salvamento ao fechar e se recupera de interrupções.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

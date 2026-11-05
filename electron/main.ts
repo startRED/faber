@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
+import { migrateDrafts } from './migrate.ts';
 import { apply, type Picked, quitNow, release } from './orders.ts';
 import * as startup from './startup.ts';
 import * as testmode from './testmode.ts';
@@ -25,7 +26,7 @@ const FRAME = '#101012';
 /** If the screen never says it painted, the window still shows after this long (as the Tauri shell does). */
 const REVEAL_FAILSAFE_MS = 3000;
 /** How long closing waits for the host to save and stop before it is ended anyway. */
-const HOST_STOP_MS = 5000;
+const HOST_STOP_MS = 60_000;
 
 // Only the instance that owns the data may back it up or count a launch.
 const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
@@ -122,7 +123,7 @@ function serveScreen(): void {
   // Keep internal file reads outside the default session's fail-closed visual-page guard.
   const assets = session.fromPartition('screen-assets');
   protocol.handle(SCHEME, async (request) => {
-    if (testmode.testing && request.url === `${ORIGIN}/__test_blank__`) {
+    if (request.url === `${ORIGIN}/__draft_import__` || (testmode.testing && request.url === `${ORIGIN}/__test_blank__`)) {
       return new Response('', { headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP } });
     }
     const file = screenFile(request.url);
@@ -322,7 +323,7 @@ app.on('second-instance', (_event, argv) => {
 // Faber stays in the tray when its window closes; only Quit, on the tray's menu, ends it.
 app.on('window-all-closed', () => {});
 
-// Quitting waits for the host to save what it holds and stop; one that hangs is ended after a few seconds.
+// Quitting waits for the engine's own shutdown, including slow saves; the minute bound covers a hung host.
 let stopping = false;
 app.on('before-quit', (event) => {
   if (stopping || !host) return;
@@ -333,7 +334,7 @@ app.on('before-quit', (event) => {
   void host.stop(HOST_STOP_MS).finally(() => app.quit());
 });
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   readyWayback(dataDir);
   // The screen asks for nothing a browser grants: no camera, no notifications from the page, no geolocation, no devices.
   // The exceptions are the clipboard, which Copy and the right-click menu's Paste use (Tauri's window allowed it too).
@@ -344,6 +345,9 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => clipboard(permission) && wc === win?.webContents && origin === ORIGIN);
   session.defaultSession.setDevicePermissionHandler(() => false);
   serveScreen();
+  try { await migrateDrafts(dataDir); } catch {
+    console.error('faber: draft import failed; the original profile is intact and the next start will retry.');
+  }
   installVisual(() => host, () => win);
   relay();
   const window = {
@@ -359,7 +363,7 @@ void app.whenReady().then(() => {
   else show();
 });
 
-/** Restarts of the host in the last minute: past `HOST_RESTARTS` a host that keeps failing is left down, not looped. */
+/** Restarts in the last minute, reset after 30 seconds of host uptime; repeated failures close the app. */
 const restarts: number[] = [];
 const HOST_RESTARTS = 3;
 
@@ -369,6 +373,7 @@ const HOST_RESTARTS = 3;
  * a failure starts a new host, and the screen reads everything again from it.
  */
 function startHost(window: Parameters<typeof apply>[1]): Sidecar {
+  const started = Date.now();
   return Sidecar.start({
     ended: (code) => {
       if (stopping) return;
@@ -377,6 +382,7 @@ function startHost(window: Parameters<typeof apply>[1]): Sidecar {
         return;
       }
       const now = Date.now();
+      if (now - started >= 30_000) restarts.length = 0;
       while (restarts.length > 0 && now - restarts[0] > 60_000) restarts.shift();
       // A host that keeps failing is not looped: the app closes rather than stay open with a window that answers nothing.
       if (restarts.length >= HOST_RESTARTS) {
@@ -389,14 +395,16 @@ function startHost(window: Parameters<typeof apply>[1]): Sidecar {
       host = startHost(window);
       host.note({ kind: 'window', visible: win?.isVisible() === true && !win.isMinimized() });
       host.note({ kind: 'focus', focused: win?.isFocused() ?? false });
-      win?.webContents.reload();
+      const replacement = host;
+      // Never replay a request or reload away a draft whose storage write failed.
+      void replacement.call('state', {}).then(() => {
+        if (!stopping && host === replacement) win?.webContents.send('faber:event', { type: 'lagged' });
+      }).catch(() => {});
     },
     event: (event) => {
-      // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
-      // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
+      // Recovery reaches the live screen too: reloading here would lose drafts whose storage writes failed.
       const type = (event as { type?: unknown } | null)?.type;
-      if (type === 'lagged') win?.webContents.reload();
-      else if (type === 'pane') {
+      if (type === 'pane') {
         // What the browser pane tells the screen, on the channel the host names (only the pane's own channels reach it).
         const { channel, payload } = event as { channel?: unknown; payload?: unknown };
         if (typeof channel === 'string' && SCREEN_CHANNELS.has(channel)) win?.webContents.send(channel, payload);

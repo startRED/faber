@@ -795,7 +795,10 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     // reports and not to ask SmartScreen about addresses. WebView2 has no documented switch for crash uploads and Tauri
     // does not expose its crash-reporting setting, so the Chromium switches are the best control there is; they limit
     // what a test sends, they are no firewall (see docs/dev/testing.md).
+    #[cfg(feature = "test-hooks")]
     let port = std::env::var("FABER_CDP_PORT").ok();
+    #[cfg(not(feature = "test-hooks"))]
+    let port: Option<String> = None;
     if hidden || port.is_some() {
         let mut args =
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-breakpad --disable-crash-reporter".to_string();

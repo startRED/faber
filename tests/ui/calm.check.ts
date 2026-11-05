@@ -167,7 +167,7 @@ check('calm: the unsent text is written on every change, so a crash right after 
   const key = 'calm-draft';
   const writes: string[] = [];
   const original = Storage.prototype.setItem;
-  Storage.prototype.setItem = function (name: string, value: string) { if (name.endsWith(key)) writes.push(value); return original.call(this, name, value); };
+  Storage.prototype.setItem = function (name: string, value: string) { if (name === `faber.unsent.${key}`) writes.push(value); return original.call(this, name, value); };
   try {
     for (const text of ['a', 'ab', 'abc']) keep(key, text);
     deepEqual(writes, ['a', 'ab', 'abc'], 'each change is in storage before the next key');
@@ -178,6 +178,7 @@ check('calm: the unsent text is written on every change, so a crash right after 
     Storage.prototype.setItem = original;
     release(key);
     localStorage.removeItem(`faber.unsent.${key}`);
+    localStorage.removeItem(`faber.tauri-drafts-imported.${key}`);
   }
 });
 

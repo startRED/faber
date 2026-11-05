@@ -29,6 +29,14 @@ export function useDraft(unsent: () => boolean): void {
 /** What was typed and not sent, kept per field in the webview's storage, so a restart for an update (or a crash) loses nothing. */
 const KEPT = 'faber.unsent.';
 
+// A failed legacy import may retry after this field's new draft has already been sent or cleared.
+function resolveImport(key: string): void {
+  const imported = 'faber.tauri-drafts-imported';
+  const field = `${imported}.${key}`;
+  if (localStorage.getItem(field) === 'pending') throw new Error('Draft import pending');
+  if (localStorage.getItem(imported) !== '1' && localStorage.getItem(field) !== '1') localStorage.setItem(field, '1');
+}
+
 // The text a failed write could not save, by the same keys: a box that is built again (scrolling that loads earlier messages)
 // reads this before the storage, so stale text never comes back over newer text. Gone on the next successful write.
 const memory = new Map<string, string>();
@@ -39,6 +47,7 @@ export function kept(key: string): string {
   const newer = memory.get(key);
   if (newer !== undefined) return newer;
   try {
+    if (localStorage.getItem(`faber.tauri-drafts-imported.${key}`) === 'pending') return '';
     return localStorage.getItem(KEPT + key) ?? '';
   } catch {
     return '';
@@ -85,6 +94,8 @@ function written(key: string, ok: boolean): void {
 export function keep(key: string, text: string): boolean {
   if (forgotten.has(key) && text.trim()) return false;
   try {
+    // Empty hydration is not consumption; only new text or an existing/failed draft resolves the legacy field.
+    if (text !== '' || memory.has(key) || localStorage.getItem(KEPT + key) !== null) resolveImport(key);
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
     flushStorage();
@@ -237,7 +248,7 @@ export function keepAttachments(key: string, value: DraftAttachments, change: At
   let markerError = false;
   if (needed) {
     attachmentProtection(key, true);
-    try { localStorage.setItem(ATTACHED + key, change.forget ? 'forget' : removing ? 'remove' : '1'); flushStorage(); }
+    try { resolveImport(key); localStorage.setItem(ATTACHED + key, change.forget ? 'forget' : removing ? 'remove' : '1'); flushStorage(); }
     catch { markerError = true; }
   }
   const textRemoved = change.forget ? keep(key, '') : true;
@@ -245,6 +256,7 @@ export function keepAttachments(key: string, value: DraftAttachments, change: At
   if (!needed) { releaseAttachmentCache(key); return Promise.resolve(true); }
   const save = (attachmentWrites.get(key) ?? Promise.resolve(true)).then(async () => {
     try {
+      resolveImport(key);
       if (!removing) {
         if (markerError) throw new Error('draft marker could not be saved');
         const record: StoredAttachments = {

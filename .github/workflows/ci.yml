@@ -355,6 +355,7 @@ jobs:
         with:
           name: electron-test-app
           path: .
+      - run: npm run test:electron
       - id: ui
         continue-on-error: true
         run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt

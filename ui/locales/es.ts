@@ -2662,6 +2662,7 @@ export const es: Messages = {
   'notes.430.better': 'Puedes revisar los archivos cambiados en cada respuesta de Chat y Proyectos, con sus versiones guardadas de antes y después.',
   'notes.431.fixed': 'El menú de la conversación sigue abierto cuando la conversación se desplaza sola en otra parte de la ventana.',
   'notes.432.new': 'Puedes ver qué se le dijo al agente sobre tu proyecto en Detalles técnicos.',
+  'notes.433.fixed': 'Tus borradores y archivos adjuntos siguen en la nueva aplicación de Windows; Faber espera al guardado al cerrar y se recupera de interrupciones.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

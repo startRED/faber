@@ -200,6 +200,10 @@ fn the_project_map_read_from_faber_s_code_finds_what_the_product_map_is_checked_
     assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs" || f == "host/src/table.rs"), set(commands()));
     assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/")), set(settings_keys()));
     assert_eq!(of(Kind::Screen, &|f| f.starts_with("ui/") && !f[3..].contains('/')), set(files));
-    assert_eq!(of(Kind::Stored, &|f| f.starts_with("ui/")), set(keys));
+    // Shared storage keys are listed once, which may be in Electron code before the UI.
+    let stored = of(Kind::Stored, &|_| true);
+    for key in keys {
+        assert!(stored.contains(&key), "browser storage key `{key}` is missing from the project map");
+    }
     assert!(of(Kind::Text, &|f| f == "ui/locales/en.ts").contains("composer.send"));
 }
