@@ -3177,7 +3177,7 @@ async fn open_in_terminal_resumes_the_same_cli_session_in_the_conversation_folde
 }
 
 #[tokio::test]
-async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
+async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_without_reenabling_guarded_hooks() {
     let dir = support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
     let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone());
@@ -3192,7 +3192,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
     engine.send(send()).unwrap();
     finished(&mut rx, |_| {}).await;
-    assert!(!last_args().contains("disableAllHooks"));
+    assert!(last_args().contains("disableAllHooks"), "guarded launches keep hooks off even after opt-in");
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();

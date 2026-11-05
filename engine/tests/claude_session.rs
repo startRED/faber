@@ -544,7 +544,7 @@ async fn resume_a_new_process_continues_the_same_session() {
 }
 
 #[test]
-fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_without_hooks() {
+fn chat_is_lean_and_guarded_projects_keep_only_user_settings_without_hooks() {
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
     let chat = claude_args(&ClaudeLaunch { resume: Some("abc".into()), model: Some("haiku".into()), flags: NEWER, ..launch(Area::Chat) });
     assert!(chat.contains(&"--restricted".into()) && chat.contains(&"--strict-mcp-config".into()));
@@ -559,13 +559,15 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!((window("claude-sonnet-5-5"), window("claude-opus-5-5")), ("300k".into(), "400k".into()));
     let project = claude_args(&launch(Area::Project));
     assert!(!project.contains(&"--autocompact".into()));
-    assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
-    // Hooks stay off until the switch is on; the settings carry the credential denies in every case (R124b).
+    assert!(!project.contains(&"--restricted".into()) && project.contains(&"--strict-mcp-config".into()));
+    assert_eq!(after(&project, "--setting-sources"), "user");
+    // Guarded hooks stay off even after opt-in; Full access keeps the person's integrations.
     let off = settings_of(&project);
     assert_eq!(off["disableAllHooks"], true);
     assert!(deny_rules(&project).contains(&"Read(~/.ssh/**)".to_string()));
     let on = settings_of(&claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }));
-    assert!(on.get("disableAllHooks").is_none() && on["permissions"]["deny"].is_array());
+    assert_eq!(on["disableAllHooks"], true);
+    assert!(on["permissions"]["deny"].is_array());
 }
 
 #[test]
@@ -1121,6 +1123,10 @@ fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edi
             assert!(deny.contains(&"Read(//**/*updater.key*)".to_string()) && deny.contains(&"Edit(//**/*updater.key*)".to_string()));
             assert!(deny.contains(&"Edit(//**/.git/**)".to_string()));
             for rule in &deny {
+                if rule == "Monitor" {
+                    assert!(permissions.guarded(), "only guarded modes deny this whole tool");
+                    continue;
+                }
                 let (tool, rest) = rule.split_once('(').unwrap();
                 assert!(
                     ["Read", "Edit", "Write"].contains(&tool) && rest.ends_with(')') && rest.matches('(').count() == 0,

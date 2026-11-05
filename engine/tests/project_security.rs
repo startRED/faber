@@ -1604,8 +1604,12 @@ async fn data_folder_write_requests_are_refused_before_a_card_for_both_clis() {
         #[cfg(windows)]
         std::path::PathBuf::from(format!("\\\\?\\{}", alias.display().to_string().trim_start_matches("\\\\?\\").to_uppercase())),
     ];
-    let targets: Vec<_> = targets.iter().map(|path| path.join("settings.json")).collect();
-    refuse_write_requests(project.path(), &targets, &[Permissions::Ask]).await;
+    let targets: Vec<_> = targets
+        .iter()
+        .flat_map(|path| ["settings.json", "decisions-kept.json", "faber-trust/learning-kept.json"].map(|name| path.join(name)))
+        .collect();
+    refuse_write_requests(project.path(), &targets, &[Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto, Permissions::Plan])
+        .await;
 }
 
 #[tokio::test]

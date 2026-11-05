@@ -419,7 +419,18 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             // must not open them.
             mode => {
                 args.extend(["--permission-mode".into(), permission_mode(mode).into()]);
-                settings["permissions"] = json!({ "deny": deny() });
+                // Ask rules take precedence over remembered CLI grants and native auto-approval.
+                let mut rules = deny();
+                // Monitor can start commands too, but has no checked replacement protocol here.
+                rules.push("Monitor".into());
+                settings["permissions"] = json!({ "deny": rules, "ask": ["Bash", "PowerShell"] });
+                settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+                // A sandboxed script must not plant project settings, hooks or servers for the next host launch.
+                args.extend(["--setting-sources".into(), "user".into()]);
+                if launch.area == Area::Project {
+                    args.push("--strict-mcp-config".into());
+                }
+                settings["disableAllHooks"] = true.into();
             }
         }
         if launch.permissions != Permissions::FullAccess {
@@ -1033,7 +1044,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
-                                    if crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
+                                    if (opts.launch.permissions.guarded() && tool == "Monitor")
+                                        || crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "deny", "message": "Faber refused a write to its protected notes or data folder." } } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
@@ -1166,7 +1178,12 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
+                                let response = if allow && opts.launch.permissions.guarded() && ["Bash", "PowerShell"].contains(&tool.as_str()) {
+                                    match crate::permissions::guarded_input(&opts.cwd, opts.launch.permissions, tool, input, opts.sandbox.as_ref(), &crate::cli::find_cli) {
+                                        Some(updated) => allow_response(tool, &updated, None),
+                                        None => json!({ "behavior": "deny", "message": "The required data-folder sandbox is unavailable. Never retry unsandboxed." }),
+                                    }
+                                } else if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
