@@ -2543,6 +2543,7 @@ export const en = {
   'notes.431.fixed': 'Your conversation menu stays open when the conversation scrolls automatically in another part of the window.',
   'notes.432.new': 'You can see what the agent was told about your project in Technical details.',
   'notes.433.fixed': 'Your drafts and attachments carry over to the new Windows app; it also waits for saves and recovers after interruptions.',
+  'notes.434.fixed': 'If Quit fails, Faber keeps its window and tray so you can try again; pressing Quit twice no longer interrupts saving.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

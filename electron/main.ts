@@ -326,12 +326,19 @@ app.on('window-all-closed', () => {});
 // Quitting waits for the engine's own shutdown, including slow saves; the minute bound covers a hung host.
 let stopping = false;
 app.on('before-quit', (event) => {
-  if (stopping || !host) return;
-  stopping = true;
+  if (!host) return;
   event.preventDefault();
-  release();
-  pane.closeAll();
-  void host.stop(HOST_STOP_MS).finally(() => app.quit());
+  if (stopping) return;
+  stopping = true;
+  void host.stop(HOST_STOP_MS).then(() => {
+    host = null;
+    release();
+    pane.closeAll();
+    app.quit();
+  }, (failure) => {
+    stopping = false;
+    console.error('faber: the host could not stop; Quit can retry:', failure);
+  });
 });
 
 void app.whenReady().then(async () => {

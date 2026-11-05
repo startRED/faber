@@ -2650,6 +2650,7 @@ export const ptBR: Messages = {
   'notes.431.fixed': 'O menu da conversa continua aberto quando a conversa rola sozinha em outra parte da janela.',
   'notes.432.new': 'Você pode ver o que foi dito ao agente sobre seu projeto em Detalhes técnicos.',
   'notes.433.fixed': 'Seus rascunhos e anexos continuam no novo app do Windows; o Faber também espera o salvamento ao fechar e se recupera de interrupções.',
+  'notes.434.fixed': 'Se falhar ao sair, o Faber continua acessível pelo ícone perto do relógio; repetir Sair não interrompe o salvamento.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

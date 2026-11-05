@@ -2663,6 +2663,7 @@ export const de: Messages = {
   'notes.431.fixed': 'Das Gesprächsmenü bleibt offen, wenn das Gespräch an einer anderen Stelle im Fenster automatisch weiterscrollt.',
   'notes.432.new': 'In den technischen Details sehen Sie, was dem Agenten über Ihr Projekt gesagt wurde.',
   'notes.433.fixed': 'Deine Entwürfe und Anhänge bleiben in der neuen Windows-App erhalten; Faber wartet beim Beenden auf das Speichern und erholt sich nach Unterbrechungen.',
+  'notes.434.fixed': 'Schlägt das Beenden fehl, bleiben Fenster und Infobereich erreichbar; du kannst es erneut versuchen. Mehrfaches Beenden unterbricht das Speichern nicht mehr.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
