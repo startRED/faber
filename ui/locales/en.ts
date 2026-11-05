@@ -2488,6 +2488,7 @@ export const en = {
   'notes.413.fixed': 'Go back restores files in regular chats without a selected folder; unsaved file history no longer appears ready.',
   'notes.414.better': 'Boundary actions now raise the plan’s size and wait for a matching contract; your permissions still apply.',
   'notes.415.fixed': 'Directory searches and folder deletions now always need a risky contract; single-file actions keep their path checks.',
+  'notes.416.fixed': 'Waiting messages survive a restart, failed saves preserve files, repeated tasks stay available, and reviews keep different problems apart.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

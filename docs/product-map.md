@@ -268,7 +268,13 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 
 ## Other stored state
 
-Review rounds live on `Message.review`: scores, reviewers, findings and an optional stop reason, saved with the reply.
+Review rounds live on `Message.review`: scores, reviewers, findings and an optional stop reason, saved with the reply. Only identical rows (category, file, location, problem and remedy) combine reviewers; distinct evidence remains separate notes (`review::tests::t515a_distinct_problems_in_one_file_never_become_consensus`).
+
+Recovery after interruption or an update starts its continuation ahead of waiting messages without taking them out of the conversation: every admission snapshot keeps their ids, order and attachment references (`engine::install_gate::tests::t515a_update_admission_snapshots_keep_accepted_queue_and_attachments`, `t515a_interrupted_admission_snapshots_keep_accepted_queue_and_attachments`). Stop and busy admission still hold.
+
+A rejected closing box keeps the sent follow-up task file. Capacity and replacement writes run first; the conclusion must save successfully, including parent-directory synchronization on Unix, before completed task files are removed (`engine::plan::tests::t515a_rejected_conclusion_keeps_the_sent_follow_up_file`, `t515g_conclusion_syncs_directory_before_deleting_any_task`). A repeated task replaces the current sent task with one unsent offer and its file; tasks pending this cleanup do not count as duplicates (`t515i_conclusion_recreates_the_current_sent_follow_up`).
+
+`save_file` copies to an exclusive temporary sibling, synchronizes it and replaces the chosen destination only after the entire copy succeeds. A failed read, write or publication preserves the previous destination; replacement also preserves other files hard-linked to that destination (`table::revoke_tests::t515a_failed_workspace_copy_preserves_existing_destination`, `tests::t515g_save_file_command_preserves_other_links_to_destination`).
 
 Conversation saves from engine calls and the helper-activity timer collect small requests, serialize each requested conversation once at entry exit under the core lock, and publish after unlocking (R538).
 Coalesced saves, including entries that find older bytes already queued, cover the entry's final state before returning, including a settings failure's stopped Keep going and a moved conversation's quota-recovery intent (`an_entry_replaces_queued_bytes_with_its_final_state_before_any_timer_retry`, `saves_in_one_entry_publish_the_last_requested_state_before_returning`, both `send_admission_*settings_failure_halts_keep_going_without_retrying_or_dropping_human_queue` tests, `move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_for_each_cli`).

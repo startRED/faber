@@ -2608,6 +2608,7 @@ export const de: Messages = {
   'notes.413.fixed': 'Zurückgehen stellt auch Dateien normaler Chats ohne gewählten Ordner wieder her; der Dateiverlauf erscheint erst nach dem Speichern als bereit.',
   'notes.414.better': 'Aktionen über eine Grenze hinaus erhöhen den Planumfang und warten auf eine passende Vereinbarung; deine Berechtigungen gelten weiterhin.',
   'notes.415.fixed': 'Ordnersuchen und das Löschen von Ordnern brauchen jetzt immer eine Vereinbarung für riskante Arbeit; bei einzelnen Dateien bleiben die Pfadprüfungen erhalten.',
+  'notes.416.fixed': 'Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien, wiederholte Aufgaben bleiben verfügbar und Prüfungen halten unterschiedliche Probleme auseinander.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

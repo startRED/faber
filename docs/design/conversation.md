@@ -38,6 +38,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   model select under an answer: a retry (and the right-click Redo, which names the model) uses the composer's current
   choice. Edit and Retry keep earlier generated-file cards usable for Save, Show and previews, including when a Chat
   conversation moved into a project; the new conversation keeps its own copy of the earlier default Chat folder.
+  Save publishes a complete file before replacing an existing destination; an interrupted copy leaves that destination intact.
   Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
   a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
 - That line is a hover bar (R264; the owner, 2026-10-17). It stays in the layout, so nothing moves when it
@@ -145,3 +146,5 @@ Copy/Edit's menu adds Go back, Redo or pending recovery, including after restart
 notice are in [rewind.md](rewind.md). No toolbar action or setting is added.
 
 Faber's decision and automatic-message rows use the actor's mark beside the existing words.
+
+Recovery keeps queued messages and attachments behind its continuation in every saved snapshot. A failed conclusion keeps its follow-up task; completed task files are removed only after the conclusion saves, including parent-directory synchronization on Unix. Repeating the current task in a successful conclusion leaves one unsent offer with its replacement file. Review rows combine votes only for identical evidence; different problems remain separate notes. These corrections add no controls, layout or motion.

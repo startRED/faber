@@ -2608,6 +2608,7 @@ export const fr: Messages = {
   'notes.413.fixed': 'Revenir en arrière restaure aussi les fichiers des chats classiques sans dossier choisi ; l’historique n’apparaît prêt qu’une fois enregistré.',
   'notes.414.better': 'Les actions qui franchissent une limite attendent un contrat adapté au nouveau niveau du plan ; vos permissions restent en vigueur.',
   'notes.415.fixed': 'Les recherches dans les dossiers et leur suppression exigent désormais un contrat de risque ; les actions sur un fichier gardent leurs vérifications de chemin.',
+  'notes.416.fixed': 'Les messages en attente restent après un redémarrage, les enregistrements ratés préservent les fichiers, les tâches répétées restent disponibles et les revues distinguent les problèmes.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -162,6 +162,33 @@ async fn host() -> (Host, tempfile::TempDir) {
     (wiring.host(engine, data, true, Handle::current()), dir)
 }
 
+#[tokio::test]
+async fn t515g_save_file_command_preserves_other_links_to_destination() {
+    struct SaveTo(PathBuf);
+    impl Shell for SaveTo {
+        fn pick_save(&self, _filter: Option<Filter>, _name: String) -> BoxFuture<'_, Picked> {
+            Box::pin(async { Ok(Some(self.0.clone())) })
+        }
+    }
+    let (mut host, _dir) = host().await;
+    let folder = tempfile::tempdir().unwrap();
+    let conversation = host.engine.chat_folder(None, Some(folder.path())).unwrap();
+    let source = folder.path().join("saved.txt");
+    std::fs::write(&source, b"complete workspace contents").unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let other = saved.path().join("other.txt");
+    let target = saved.path().join("saved.txt");
+    std::fs::write(&other, b"unrelated contents").unwrap();
+    std::fs::hard_link(&other, &target).unwrap();
+    host.shell = Arc::new(SaveTo(target.clone()));
+    assert_eq!(host.dispatch("save_file", json!({"id":conversation.id, "path":"saved.txt"})).await.unwrap(), json!(true));
+    assert_eq!(std::fs::read(&source).unwrap(), b"complete workspace contents");
+    assert_eq!(std::fs::read(&target).unwrap(), b"complete workspace contents");
+    assert_eq!(std::fs::read(&other).unwrap(), b"unrelated contents");
+    assert_eq!(std::fs::read_dir(saved.path()).unwrap().count(), 2, "temporary siblings are cleaned up");
+    host.engine.shutdown();
+}
+
 fn key(result: Result<Value, Failure>) -> String {
     result.expect_err("the command should have failed").key
 }

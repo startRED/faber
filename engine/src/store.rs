@@ -35,7 +35,7 @@ enum LegacyVerbosity {
     High,
 }
 
-/// Why a file could not be saved or read, as a key the screen translates. A failed save leaves the old file as it was.
+/// Why a file could not be saved or read, as a key the screen translates. A directory-sync failure may follow replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
     /// The disk or the user's quota is full.
@@ -99,8 +99,8 @@ impl Disk for RealDisk {
     }
 }
 
-/// Writes `bytes` beside `path` and renames the result over it. On failure the temp file is removed and the old file
-/// stays as it was.
+/// Writes and syncs `bytes` beside `path`, renames the result over it and syncs its parent directory on Unix.
+/// On failure the temp file is removed; a directory-sync failure may leave the new file published without durability.
 pub fn replace(disk: &dyn Disk, path: &Path, bytes: &[u8]) -> Result<(), Fault> {
     replace_with(disk, path, bytes, true)
 }
@@ -113,7 +113,8 @@ pub fn replace_with(disk: &dyn Disk, path: &Path, bytes: &[u8], patient: bool) -
     // Windows lets an antivirus or indexer hold a file it has just seen for a few ms: a busy rename tries again before it
     // counts as a failed save.
     let rename = || if patient { crate::tools::retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
-    disk.write(&tmp, bytes).and_then(|()| rename()).map_err(|e| {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    disk.write(&tmp, bytes).and_then(|()| rename()).and_then(|()| disk.flush(parent)).map_err(|e| {
         drop(fs::remove_file(&tmp));
         Fault::of_write(&e)
     })

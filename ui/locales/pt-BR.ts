@@ -2595,6 +2595,7 @@ export const ptBR: Messages = {
   'notes.413.fixed': 'Voltar também recupera arquivos de chats comuns sem pasta escolhida; o histórico de arquivos só fica pronto depois de ser salvo.',
   'notes.414.better': 'Ações que cruzam limites aumentam o tamanho do plano e esperam um combinado à altura; suas permissões continuam valendo.',
   'notes.415.fixed': 'Buscas em pastas e exclusões de pastas agora sempre exigem um combinado de risco; ações em um arquivo mantêm as verificações do caminho.',
+  'notes.416.fixed': 'Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos, tarefas repetidas continuam disponíveis e revisões separam problemas diferentes.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

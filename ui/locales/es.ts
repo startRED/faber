@@ -2608,6 +2608,7 @@ export const es: Messages = {
   'notes.413.fixed': 'Volver también restaura archivos de chats normales sin carpeta elegida; el historial de archivos solo aparece listo después de guardarse.',
   'notes.414.better': 'Las acciones que cruzan límites suben el tamaño del plan y esperan un acuerdo acorde; tus permisos siguen vigentes.',
   'notes.415.fixed': 'Las búsquedas en carpetas y su eliminación ahora siempre requieren un acuerdo de riesgo; las acciones en un archivo conservan sus comprobaciones de ruta.',
+  'notes.416.fixed': 'Los mensajes pendientes sobreviven al reinicio, guardar sin éxito conserva archivos, las tareas repetidas siguen disponibles y las revisiones distinguen problemas diferentes.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
