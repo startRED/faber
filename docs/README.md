@@ -34,6 +34,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/icons.md](design/icons.md) | The drawing of each kind of step and each state, and who is speaking: when a screen needs a picture for one |
 | [design/homes.md](design/homes.md) | Chat and project homes, including recent conversations |
+| [design/answer-line.md](design/answer-line.md) | The line under an answer: its buttons, hover bar, the reply's state and why it stopped |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
