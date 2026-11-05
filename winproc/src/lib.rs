@@ -21,8 +21,8 @@ pub fn background_thread() -> std::io::Result<()> {
 
 #[cfg(windows)]
 pub use imp::{
-    background_thread, full_screen_in_front, job_accounting, job_active_processes, job_cpu_cap, job_memory_cap, job_peak_memory,
-    job_terminate, process_ended, resume_process,
+    background_thread, end_programs, full_screen_in_front, job_accounting, job_active_processes, job_cpu_cap, job_memory_cap,
+    job_peak_memory, job_terminate, process_ended, resume_process,
 };
 
 /// What a job object's processes used together since it was made (`job_accounting`).
@@ -653,6 +653,42 @@ mod imp {
         if unsafe { TerminateJobObject(job as _, 1) } == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
 
+    /// Ends every process started before this one whose program is one of `programs` (full paths, case ignored); a process
+    /// of another user cannot be opened to end it.
+    /// Returns how many were ended. For the self-update only: the old Faber that did not close in time holds the files the
+    /// installer must replace.
+    pub fn end_programs(programs: &[&std::path::Path]) -> io::Result<usize> {
+        use windows_sys::Win32::System::Threading::{PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess};
+        let wanted: Vec<String> = programs.iter().map(|p| p.to_string_lossy().to_lowercase()).collect();
+        let own = std::process::id();
+        let list = super::processes()?;
+        // Only what already ran when this process started: a Faber opened again during the wait is new, and kept.
+        let born = list.iter().find(|p| p.pid == own).map(|p| p.created).ok_or_else(|| io::Error::other("this process is not listed"))?;
+        let mut ended = 0;
+        for process in list {
+            if process.pid == own || process.pid == 0 || process.created >= born {
+                continue;
+            }
+            // SAFETY: plain Win32 calls on a handle opened and closed in this block; `name` is a buffer of `size` u16 units
+            // that the call fills and `size` then holds the written length.
+            unsafe {
+                let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, 0, process.pid);
+                if handle.is_null() {
+                    continue;
+                }
+                let mut name = [0u16; 1024];
+                let mut size = name.len() as u32;
+                let found = QueryFullProcessImageNameW(handle, 0, name.as_mut_ptr(), &mut size) != 0;
+                let path = String::from_utf16_lossy(&name[..size as usize]).to_lowercase();
+                if found && wanted.contains(&path) && TerminateProcess(handle, 1) != 0 {
+                    ended += 1;
+                }
+                CloseHandle(handle);
+            }
+        }
+        Ok(ended)
+    }
+
     /// Whether no process with this pid is running any more. A pid that was reused answers "running", so a caller waiting for
     /// the end only ever waits too long, never too short.
     pub fn process_ended(pid: u32) -> bool {
@@ -805,6 +841,21 @@ mod processes {
             assert!(me.parent != 0 && me.name.to_lowercase().ends_with(".exe") && me.created > 0, "{me:?}");
             assert!(me.private_bytes > 64 * 1024, "{me:?}");
             assert!(list.iter().any(|p| p.pid == 4 && p.name == "System"), "the System process");
+        }
+
+        #[test]
+        fn ending_a_program_spares_one_started_after_the_caller() {
+            // A copy of a harmless program, started after this test: a Faber opened again while the update waits.
+            let dir = tempfile::tempdir().unwrap();
+            let program = dir.path().join("faber.exe");
+            std::fs::copy(r"C:\Windows\System32\PING.EXE", &program).unwrap();
+            let mut child = std::process::Command::new(&program).args(["-n", "30", "127.0.0.1"]).spawn().unwrap();
+            let ended = crate::end_programs(&[program.as_path()]).unwrap();
+            let still_running = child.try_wait().unwrap().is_none();
+            let _ = child.kill();
+            let _ = child.wait();
+            assert_eq!(ended, 0);
+            assert!(still_running, "a newer process is never ended");
         }
 
         #[test]

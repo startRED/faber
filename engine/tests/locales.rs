@@ -69,6 +69,8 @@ fn every_english_text_is_shown_somewhere() {
     code.extend(sources("host/src", &["rs"], ""));
     code.extend(sources("channel/src", &["rs"], ""));
     code.extend(sources("cli/src", &["rs"], ""));
+    // The Electron shell answers some calls itself (`error.host.*` when the host is gone or busy).
+    code.extend(sources("electron", &["ts"], ""));
     let starts = built_starts(&code);
     // "What's new" reads every `notes.<id>.<kind>` from the English file itself (`ui/notes.ts`): its keys are the list. In a
     // branch the id is still the placeholder `next` or `next-2` (R164) until `scripts/numbers.mjs` gives it its number.

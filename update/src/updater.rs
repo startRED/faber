@@ -1,7 +1,7 @@
 //! The updater as an app runs it: the real world behind `flow::Release` (the release reader, the data folder, the process),
 //! the loop that keeps Faber updated, and the few calls the screen reaches through the shell.
 
-use crate::flow::{Idle, Release, fetch, idle_install, update_on_start};
+use crate::flow::{Idle, Release, fetch, idle_install};
 use crate::gate::{Who, admit, gate};
 use crate::{Meter, Phase, Status, install_dir_arg, installer_path, log, may_install, release, tried};
 use std::any::Any;
@@ -17,10 +17,8 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
 /// How often an idle moment is looked for while an update waits.
 const LOOK_EVERY: Duration = Duration::from_secs(30);
-/// The look for a release when Faber opens; an offline start waits this long at most.
+/// How long one look for a release may take before it counts as failed.
 const START_CHECK: Duration = Duration::from_secs(8);
-/// The download at open: past this the line goes away and the update is tried again soon.
-const START_DOWNLOAD: Duration = Duration::from_secs(150);
 /// A download in the background has no one waiting, but a stalled one must not hold the six-hour loop forever.
 const LATER_DOWNLOAD: Duration = Duration::from_secs(600);
 /// The order to end the app is a line on its way to the shell; the process ends only after this, so the line is out.
@@ -300,15 +298,12 @@ fn install_when_idle(inner: &Arc<Inner>) {
     idle_install(idle, || live.reserve(Who::Later), || live.shut_down(), || live.install(), || live.relaunch());
 }
 
+/// Never holds the opening screen: a release found at open is downloaded in the background like any later one, and the
+/// sidebar offers "Update ready, restart" once it is kept (R551, superseding the install at open of R141). Previews come
+/// out about every hour, so holding the screen for each 135 MB download made almost every start take minutes
+/// (2026-11-05 on the owner's PC).
 async fn keep_updated(inner: Arc<Inner>) {
     let mut next_check = Instant::now();
-    // Windows only: elsewhere the installer does not restart the app, so nothing is installed here at all.
-    if cfg!(windows) {
-        let live = Live::new(&inner, Reopen::of(inner.app.window_visible()));
-        let start = update_on_start(&live, START_CHECK, START_DOWNLOAD).await;
-        inner.note("start", &format!("{start:?}"));
-        next_check = Instant::now() + next_check_delay(start.succeeded());
-    }
     loop {
         if Instant::now() >= next_check {
             next_check = Instant::now() + next_check_delay(fetch(&Live::new(&inner, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await);
@@ -367,14 +362,11 @@ impl Updater {
         self.0.draft_dirty.store(dirty, Ordering::SeqCst);
     }
 
-    /// Starts keeping Faber updated on the current runtime: clears what earlier installs left, shows the opening screen at
-    /// once (before the screen asks, so its first paint is already it), and looks for a release.
+    /// Starts keeping Faber updated on the current runtime: clears what earlier installs left and looks for a release in
+    /// the background, with the screen free from the first moment.
     pub fn start(&self) {
         #[cfg(windows)]
         crate::handoff::sweep();
-        if cfg!(windows) {
-            self.0.set_stage(Phase::Checking);
-        }
         tokio::spawn(keep_updated(self.0.clone()));
     }
 

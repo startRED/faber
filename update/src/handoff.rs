@@ -7,10 +7,8 @@
 //! was checked) in a new temporary folder, puts a copy of the running program (the sidecar) beside it, starts that copy with
 //! `--faber-update-install`, and ends. The copy (`finish`) waits until neither the installed `faber.exe` nor its sidecar
 //! runs, then runs the installer into the same folder, and opens Faber again in every case: the new version when the
-//! install worked, the same version when it did not, so the person never has to guess whether to open it. When Faber comes
-//! back with its window the person is looking, so the installer shows its progress with nothing to press (`/P`, passive);
-//! when it comes back in the tray (the idle install, an `--autostart` start) it shows nothing (`/S`), so no window ever
-//! covers a game.
+//! install worked, the same version when it did not, so the person never has to guess whether to open it. The installer is
+//! always silent (`/S`, `installer_line`): it shows no window, so none ever covers a game.
 //!
 //! No shell runs: the installer is started directly. Its `/D=<folder>` must be last and unquoted (NSIS), so the line is
 //! written as is; `install_dir_arg` already refused a folder with a quote in it.
@@ -34,8 +32,12 @@ const APP: &str = "faber.exe";
 const SIDECAR: [&str; 2] = ["resources", "faber-sidecar.exe"];
 /// What the app is opened with to start in the tray (`faber_host::autostart::AUTOSTART_FLAG`).
 const AUTOSTART: &str = "--autostart";
-/// How long the copy waits for Faber to end before it runs the installer anyway (the installer then closes it itself).
-const CLOSE_WAIT: Duration = Duration::from_secs(60);
+/// How long the copy waits for Faber to end by itself. Past it, what is left of the old Faber is ended (`leftovers`): the
+/// installer cannot replace a program that runs, and failed every time it met one (2026-11-04: three `installer exit code 1`
+/// in a row, each after a window that never closed, and the window reopened with no engine behind it).
+const CLOSE_WAIT: Duration = Duration::from_secs(10);
+/// How long the copy waits once more after ending what was left.
+const ENDED_WAIT: Duration = Duration::from_secs(5);
 /// An installer still running after this is left to finish on its own, and Faber opens anyway.
 const INSTALL_WAIT: Duration = Duration::from_secs(300);
 /// Windows: start the process without a console window.
@@ -106,17 +108,19 @@ pub fn finish(args: &[OsString]) -> i32 {
     let [installer, signature, version, exe, data, reopen] = args else { return 1 };
     let (exe, data) = (PathBuf::from(exe), PathBuf::from(data));
     let Some(folder) = exe.parent() else { return 1 };
-    if !wait_until(CLOSE_WAIT, || is_free(&exe) && is_free(&folder.join(SIDECAR[0]).join(SIDECAR[1]))) {
-        crate::log(&data, "install-wait", "Faber was still closing; the installer closes it");
-    }
+    let sidecar = folder.join(SIDECAR[0]).join(SIDECAR[1]);
+    leftovers(
+        &data,
+        [CLOSE_WAIT, ENDED_WAIT],
+        || is_free(&exe) && is_free(&sidecar),
+        || faber_winproc::end_programs(&[&exe, &sidecar]).unwrap_or(0),
+    );
     if !installer.is_empty() {
         // The programs are kept in this copy's own folder, made new for this install.
         match std::env::current_exe().ok().and_then(|copy| copy.parent().map(Path::to_path_buf)) {
             Some(here) => {
                 let sidecar = folder.join(SIDECAR[0]).join(SIDECAR[1]);
-                install_or_put_back(&[&exe, &sidecar], &here, &data, || {
-                    run_installer(installer, signature, version, folder, reopen != "tray", &data)
-                });
+                install_or_put_back(&[&exe, &sidecar], &here, &data, || run_installer(installer, signature, version, folder, &data));
             }
             None => crate::log(&data, "install-failed", "no folder to keep Faber in"),
         }
@@ -131,6 +135,20 @@ pub fn finish(args: &[OsString]) -> i32 {
         return 1;
     }
     0
+}
+
+/// Waits for the old Faber to end; one still running after `CLOSE_WAIT` is ended (`end` returns how many processes), since
+/// both what comes next (the installer, or opening Faber again) need it gone. The person asked for the restart, or nobody
+/// was looking: its work was already saved and stopped before the hand-off.
+fn leftovers(data: &Path, waits: [Duration; 2], mut free: impl FnMut() -> bool, end: impl FnOnce() -> usize) {
+    if wait_until(waits[0], &mut free) {
+        return;
+    }
+    let ended = end();
+    crate::log(data, "install-wait", &format!("Faber was still closing; {ended} of its processes were ended"));
+    if !wait_until(waits[1], free) {
+        crate::log(data, "install-wait", "Faber still runs; the installer is tried anyway");
+    }
 }
 
 /// How the installer ended. Only `Failed` can have left the installed programs broken; one still running is left alone.
@@ -285,7 +303,7 @@ fn same(a: &Path, b: &Path) -> std::io::Result<bool> {
     }
 }
 
-fn run_installer(installer: &OsString, signature: &OsString, version: &OsString, folder: &Path, shown: bool, data: &Path) -> Installed {
+fn run_installer(installer: &OsString, signature: &OsString, version: &OsString, folder: &Path, data: &Path) -> Installed {
     let checked = || -> Result<std::fs::File, String> {
         // Deny write and delete sharing until the verified executable has started.
         let mut file = std::fs::OpenOptions::new().read(true).share_mode(1).open(installer).map_err(|e| e.to_string())?;
@@ -300,7 +318,7 @@ fn run_installer(installer: &OsString, signature: &OsString, version: &OsString,
         }
     };
     let began = Instant::now();
-    let spawned = Command::new(installer).raw_arg(installer_line(folder, shown)).creation_flags(CREATE_NO_WINDOW).spawn();
+    let spawned = Command::new(installer).raw_arg(installer_line(folder)).creation_flags(CREATE_NO_WINDOW).spawn();
     drop(verified);
     match spawned {
         Ok(mut child) => {
@@ -412,10 +430,12 @@ fn install_folder(arg: &OsString) -> Option<PathBuf> {
     arg.to_str()?.strip_prefix("/D=").filter(|dir| !dir.is_empty()).map(PathBuf::from)
 }
 
-/// The installer's command line: passive (its progress, nothing to press) when `shown`, else silent; an update, into
-/// `folder`, with `/D=` last and unquoted, as NSIS wants.
-fn installer_line(folder: &Path, shown: bool) -> String {
-    format!("{} /UPDATE /D={}", if shown { "/P" } else { "/S" }, folder.display())
+/// The installer's command line: always silent; an update, into `folder`, with `/D=` last and unquoted, as NSIS wants.
+/// Electron's one-click installer knows no passive mode: with `/P` it ends with exit code 1 and installs nothing, even with
+/// Faber closed (2026-11-04, tried by hand; every install with the window open had failed that way). It takes a few
+/// seconds, and Faber comes back with its window right after.
+fn installer_line(folder: &Path) -> String {
+    format!("/S /UPDATE /D={}", folder.display())
 }
 
 /// No process runs `exe`: Windows refuses to open a running program for writing. Nothing is written.
@@ -443,7 +463,7 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
 mod tests {
     use super::{
         COPY, Installed, KEPT, copy_new, finish, hold_folders, install_folder, install_or_put_back, installer_line, is_free, is_plain,
-        is_program, relaunch, start, sweep_in, verify_copy, wait_until,
+        is_program, leftovers, relaunch, start, sweep_in, verify_copy, wait_until,
     };
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -453,8 +473,8 @@ mod tests {
     fn the_installer_lands_in_the_same_folder_with_d_last_and_unquoted() {
         let folder = install_folder(&OsString::from(r"/D=E:\Program Files\Faber")).unwrap();
         assert_eq!(folder, PathBuf::from(r"E:\Program Files\Faber"));
-        assert_eq!(installer_line(&folder, false), r"/S /UPDATE /D=E:\Program Files\Faber", "the tray: nothing shows");
-        assert_eq!(installer_line(&folder, true), r"/P /UPDATE /D=E:\Program Files\Faber", "the window: its progress shows");
+        // Always silent: Electron's installer fails with `/P` (exit code 1), which broke every restart with the window open.
+        assert_eq!(installer_line(&folder), r"/S /UPDATE /D=E:\Program Files\Faber");
         assert_eq!(install_folder(&OsString::from("/D=")), None);
         assert_eq!(install_folder(&OsString::from(r"E:\Apps\Faber")), None, "only the installer argument is read");
     }
@@ -721,6 +741,34 @@ mod tests {
         let missing = here.join("no-sidecar.exe");
         assert_eq!(install_or_put_back(&[&exe, &missing], &here, &data, || Installed::Done), Installed::Done);
         assert!(here.join(KEPT[0]).exists() && !here.join(KEPT[1]).exists());
+    }
+
+    #[test]
+    fn an_old_faber_that_does_not_close_is_ended_before_the_installer_runs() {
+        let data = tempfile::tempdir().unwrap();
+        let short = [Duration::from_millis(150), Duration::from_secs(2)];
+        // 2026-11-04: the window never closed, so the installer met it and failed. Now it is ended after the wait.
+        let ended = std::cell::Cell::new(false);
+        leftovers(
+            data.path(),
+            short,
+            || ended.get(),
+            || {
+                ended.set(true);
+                3
+            },
+        );
+        assert!(ended.get());
+        assert!(log(data.path()).contains("3 of its processes were ended"));
+        // A Faber that closes by itself is never ended.
+        let data = tempfile::tempdir().unwrap();
+        leftovers(data.path(), short, || true, || panic!("nothing is ended when Faber closed in time"));
+        assert_eq!(log(data.path()), "");
+    }
+
+    #[test]
+    fn ending_programs_never_ends_one_that_is_not_named() {
+        assert_eq!(faber_winproc::end_programs(&[Path::new(r"C:\no\such\faber.exe")]).unwrap(), 0);
     }
 
     #[test]

@@ -20,6 +20,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "time"] }
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(windows)'.dependencies]
+# Ends an old Faber that did not close in time, so the installer can replace its files (`handoff::finish`).
+faber-winproc = { path = "../winproc" }
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "time"] }

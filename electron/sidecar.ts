@@ -10,7 +10,12 @@ import { LOGIN_ITEM } from './orders.ts';
 import type { PaneNote } from './pane.ts';
 
 /** What the host says on its own: events for the screen, and orders for the shell (`Order` in `host/src/wire.rs`). */
-export type Listeners = { event: (event: unknown) => void; order: (order: unknown) => void };
+export type Listeners = {
+  event: (event: unknown) => void;
+  order: (order: unknown) => void;
+  /** The host ended without being asked to (`stop`): `code` 0 when it chose to (an update took over), else it failed. */
+  ended: (code: number | null) => void;
+};
 
 /** A failure crosses as the host sends it: an error key, or `{key, detail}` for the few that name a field. */
 type Pending = { resolve: (value: unknown) => void; reject: (failure: unknown) => void };
@@ -39,6 +44,8 @@ function startsWithSystem(): boolean {
 export class Sidecar {
   private next = 1;
   private alive = true;
+  /** Set by `stop`: the end that follows was asked for. */
+  private stopping = false;
   private readonly pending = new Map<number, Pending>();
   private readonly child: ChildProcessByStdio<Writable, Readable, null>;
   private readonly exited: Promise<void>;
@@ -72,17 +79,20 @@ export class Sidecar {
         ended = resolve;
       }),
     );
-    const gone = () => {
+    const gone = (code: number | null) => {
+      if (!sidecar.alive) return;
       sidecar.alive = false;
       for (const { reject } of sidecar.pending.values()) reject(new Error('error.host.gone'));
       sidecar.pending.clear();
       ended();
+      // An end nobody asked for is told, so the app never stays open with no engine behind its window.
+      if (!sidecar.stopping) listen.ended(code);
     };
-    child.on('exit', gone);
+    child.on('exit', (code) => gone(code));
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
     child.on('error', (error) => {
       console.error(`faber: the host could not start: ${error.message}`);
-      gone();
+      gone(null);
     });
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
@@ -124,6 +134,7 @@ export class Sidecar {
   /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
   async stop(patience: number): Promise<void> {
     if (!this.alive) return;
+    this.stopping = true;
     this.child.stdin.end();
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<'late'>((resolve) => {

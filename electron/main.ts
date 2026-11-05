@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
-import { apply, type Picked, release } from './orders.ts';
+import { apply, type Picked, quitNow, release } from './orders.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
@@ -345,7 +345,44 @@ void app.whenReady().then(() => {
     answer: (picked: Picked) => host?.note(picked),
     hidden,
   };
-  host = Sidecar.start({
+  host = startHost(window);
+  // A start with the system keeps the window away, and the updater must know that before it decides anything.
+  if (autostart) host.note({ kind: 'window', visible: false });
+  else show();
+});
+
+/** Restarts of the host in the last minute: past `HOST_RESTARTS` a host that keeps failing is left down, not looped. */
+const restarts: number[] = [];
+const HOST_RESTARTS = 3;
+
+/**
+ * Starts the host. One that ends on its own is never left behind a live window (2026-11-04: the window stayed open with no
+ * engine, so every click failed): an end it chose (code 0, an update took over and asked the app to quit) ends the app;
+ * a failure starts a new host, and the screen reads everything again from it.
+ */
+function startHost(window: Parameters<typeof apply>[1]): Sidecar {
+  return Sidecar.start({
+    ended: (code) => {
+      if (stopping) return;
+      if (code === 0) {
+        quitNow();
+        return;
+      }
+      const now = Date.now();
+      while (restarts.length > 0 && now - restarts[0] > 60_000) restarts.shift();
+      // A host that keeps failing is not looped: the app closes rather than stay open with a window that answers nothing.
+      if (restarts.length >= HOST_RESTARTS) {
+        console.error(`faber: the host ended (code ${code}) ${HOST_RESTARTS} times in a minute; closing`);
+        quitNow();
+        return;
+      }
+      restarts.push(now);
+      console.error(`faber: the host ended (code ${code}); starting it again`);
+      host = startHost(window);
+      host.note({ kind: 'window', visible: win?.isVisible() === true && !win.isMinimized() });
+      host.note({ kind: 'focus', focused: win?.isFocused() ?? false });
+      win?.webContents.reload();
+    },
     event: (event) => {
       // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
       // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
@@ -367,7 +404,4 @@ void app.whenReady().then(() => {
       else apply(order, window);
     },
   });
-  // A start with the system keeps the window away, and the updater must know that before it decides anything.
-  if (autostart) host.note({ kind: 'window', visible: false });
-  else show();
-});
+}
