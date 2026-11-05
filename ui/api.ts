@@ -965,6 +965,7 @@ export interface MemoryEntry {
   body?: string;
   author?: 'ai' | 'person';
   reviewed?: boolean;
+  stale?: boolean;
 }
 export interface MemoryFile {
   path: string;

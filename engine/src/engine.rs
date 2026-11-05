@@ -1758,6 +1758,24 @@ impl Engine {
 }
 
 impl Core {
+    fn refresh_project_memory(&self, conv: &str) {
+        let Some(id) = self.convs.get(conv).filter(|c| c.area == Area::Project).and_then(|c| c.project_id.as_deref()) else { return };
+        let Some(project) = self.store.projects().into_iter().find(|p| p.id == id) else { return };
+        // A damaged approval file must never make the person's recorded words look like an agent's proposal.
+        let Ok(kept) = self.store.kept_decisions_now(id) else { return };
+        let me = self.me.clone();
+        self.opts.runtime.spawn_blocking(move || {
+            let mut updated = kept.clone();
+            if crate::project::memory::refresh_stale(Path::new(&project.path), &mut updated).is_err() || updated == kept {
+                return;
+            }
+            if let Some(core) = me.upgrade() {
+                let core = core.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = core.store.migrate_kept_decisions(&project.id, &kept, &updated);
+            }
+        });
+    }
+
     /// Store visible protocol events, never private reasoning. Only the small preview remains in the conversation.
     ///
     /// The page, and the files that place it again after a crash (`TranscriptStore::recover`), are written at once. The

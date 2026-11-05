@@ -504,6 +504,7 @@ impl Core {
                 } else {
                     ""
                 };
+                self.refresh_project_memory(conv);
                 if ended {
                     let plan = self.shown_plan(conv);
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
@@ -803,6 +804,42 @@ mod tests {
         });
         assert_eq!(app.follow_up(&id, &task.file, false), Err("error.memory.changed".into()));
         assert!(app.open(&id).unwrap().queued.is_empty());
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_memory_stale_paths_are_checked_only_after_a_closing_box() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let note = folder.path().join(".faber/memory.md");
+        std::fs::write(&note, "- Use `src/missing.rs`.\n").unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        app.with(|core| {
+            let conv = core.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id.clone());
+        });
+        assert!(!app.project_memory(&project.id).unwrap().files.iter().flat_map(|f| &f.entries).any(|e| e.stale));
+        app.with(|core| {
+            core.write_progress(
+                &id,
+                progress::WRAP_UP_TOOL,
+                &serde_json::json!({
+                    "outcome": "blocked", "did": "Checked the project", "result": "Waiting for a file"
+                }),
+            )
+        })
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !std::fs::read_to_string(&note).unwrap().contains(" (stale?)") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a closing box refreshes stale paths, including a blocked close");
         app.shutdown();
     }
 }

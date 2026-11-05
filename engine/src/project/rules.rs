@@ -709,11 +709,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
         (kept, "\n## Decisions the person kept, newest first\n\n", 2 * 1024, "older decisions"),
         (taste, "\n## Taste the person kept\n\n", 1024, "more taste lines"),
     ] {
-        if bodies.is_empty() {
-            continue;
-        }
         let lines: Vec<_> = bodies
             .iter()
+            .filter(|body| !body.trim_end().ends_with(" (stale?)"))
             .map(|body| {
                 let line = body.lines().next().unwrap_or_default().trim();
                 let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).unwrap_or(line);
@@ -725,7 +723,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
                 }
             })
             .collect();
-        out.push_str(&card_lines(head, &lines, share, omitted));
+        if !lines.is_empty() {
+            out.push_str(&card_lines(head, &lines, share, omitted));
+        }
     }
     out.push_str(CLOSE);
     out
@@ -769,6 +769,12 @@ pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_start_card_omits_stale_items() {
+        let card = super::card(&super::Facts::default(), &["Keep `src/gone.rs` (stale?)", "Keep `src/live.rs`"], &[]);
+        assert!(!card.contains("src/gone.rs"));
+        assert!(card.contains("src/live.rs"));
+    }
     use super::*;
 
     #[test]
