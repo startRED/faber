@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { failures, message, pushedToBase, tipPassed, verdict } from './base.mjs';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { CACHE, failures, message, pushedToBase, tipPassed, verdict } from './base.mjs';
 
 const run = (conclusion, n, status = 'completed') => ({
   status,
@@ -82,4 +84,10 @@ test('only a push that updates phase-1-base counts, never a deletion or another 
   assert.deepEqual(pushedToBase(`refs/heads/x ${a} refs/heads/lane ${zero}\n`), []);
   assert.deepEqual(pushedToBase(`(delete) ${zero} refs/heads/phase-1-base ${a}\n`), []);
   assert.deepEqual(pushedToBase(''), []);
+});
+
+test('the shared answer is kept per version of the checker, so an older checkout never lends its verdict', () => {
+  const own = createHash('sha256').update(readFileSync(new URL('./base.mjs', import.meta.url))).digest('hex').slice(0, 12);
+  assert.equal(CACHE, `faber-base-${own}.json`);
+  assert.notEqual(CACHE, 'faber-base.json');
 });

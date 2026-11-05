@@ -5,17 +5,23 @@
 //   node scripts/base.mjs pre-push    the git hook `cargo t` installs: refuses a push to phase-1-base while it is red,
 //                                     or one that carries a number placeholder (scripts/numbers.mjs)
 //
-// It asks GitHub through `gh` and keeps the answer for three minutes in the shared git folder, so every worktree and every
-// `cargo t` reads it once. Offline, signed out or without `gh` it says nothing and never blocks: it is a warning light,
-// not a gate. `FABER_PUSH_ON_RED=1 git push` pushes anyway, for the commit that fixes the base.
+// It asks GitHub through `gh` and keeps the answer for three minutes in the shared git folder, one file per version of
+// this script, so every worktree and every `cargo t` reads it once. Offline, signed out or without `gh` it says nothing
+// and never blocks: it is a warning light, not a gate. `FABER_PUSH_ON_RED=1 git push` pushes anyway, for the commit
+// that fixes the base.
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 import { GREP, placeholdersIn, SKIP } from './numbers.mjs';
 import { check as owedHere, message as owedMessage, onlyOwed } from './owed.mjs';
 
 const BASE = 'phase-1-base';
+// The shared answer is kept per version of this file: on 2026-11-05 worktrees on older branches judged the base with
+// older rules and kept a red answer for three minutes at a time, so current checkouts warned of a green base for hours.
+export const CACHE = `faber-base-${createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex').slice(0, 12)}.json`;
 const KEEP_MS = 3 * 60 * 1000;
 const RED = new Set(['failure', 'timed_out', 'startup_failure']);
 const IGNORED = new Set(['cancelled', 'skipped', 'neutral', 'stale']);
@@ -95,7 +101,7 @@ const run = (cmd, args, timeout = 10_000) =>
 function status() {
   let cache;
   try {
-    cache = resolve(run('git', ['rev-parse', '--git-common-dir']).trim(), 'faber-base.json');
+    cache = resolve(run('git', ['rev-parse', '--git-common-dir']).trim(), CACHE);
     const kept = JSON.parse(readFileSync(cache, 'utf8'));
     if (Date.now() - kept.at < KEEP_MS) return kept.text;
   } catch {
