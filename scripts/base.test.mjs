@@ -52,6 +52,10 @@ test('only a complete, later queue check of the current tip clears an older red 
   assert.equal(passed(tip, [candidate], jobs.filter((job) => job.name !== 'screen (4/8)')), false);
   assert.equal(passed(tip, [candidate], jobs.map((job) => job.name === 'ui' ? { ...job, conclusion: 'skipped' } : job)), false);
   assert.equal(passed(tip, [{ ...candidate, conclusion: 'failure' }, candidate]), false, 'a newer failed check wins');
+  assert.equal(tipPassed(red, tip, [{ ...candidate, databaseId: 3, conclusion: 'failure' }, candidate], (id) => id === 3 ? [] : jobs), false,
+    'a newer failure without a gate also wins');
+  assert.equal(tipPassed(red, tip, [{ ...candidate, databaseId: 3, conclusion: 'cancelled' }, candidate], () => jobs), true,
+    'a cancelled run says nothing');
   assert.equal(passed(tip, [candidate], [{ name: 'train', status: 'completed', conclusion: 'success' }]), false, 'a waiting train is not a gate');
   assert.equal(tipPassed(red, tip, [{ ...candidate, databaseId: 3 }, candidate], (id) => id === 3 ? [] : jobs), true);
 });
