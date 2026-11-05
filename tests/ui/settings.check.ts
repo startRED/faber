@@ -982,6 +982,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
         look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0, start: 'general',
         onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
       }));
+      let paused: Animation[] = [];
       try {
         const settings = view.host.querySelector<HTMLElement>('.settings')!;
         settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
@@ -1009,12 +1010,17 @@ check('settings: reversing a section switch before its exit ends keeps the lates
               })),
             })),
           })}`}`);
-          ok(departing.getAnimations().some((animation) => animation.playState === 'running'), 'reverse while the first exit is still running');
+          paused = departing.getAnimations().filter((animation) => animation.playState === 'running');
+          ok(paused.length > 0, 'reverse while the first exit is still running');
+          // Keep the exit alive through the assertions even when the test runner is delayed.
+          paused.forEach((animation) => animation.pause());
         }
         const general = navButton(view.host, 'set.general');
         general.focus();
         general.click();
-        await tick();
+        // Outlast the 250 ms exit cap to reproduce a runner delayed after the switch.
+        if (mode === 'full') await new Promise((resolve) => setTimeout(resolve, 350));
+        else await tick();
         ok(main.querySelector('.st-group'), `${mode}: the latest General section is live`);
         equal(main.querySelectorAll('.facts').length, 0, `${mode}: Privacy is no longer live`);
         equal(document.activeElement, general, `${mode}: exit copies do not take focus`);
@@ -1028,6 +1034,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
           equal(layer, null, `${mode}: neither switch makes an exit copy`);
           equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section is immediate`);
         }
+        paused.forEach((animation) => animation.play());
         for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) await frames(1);
         equal(document.querySelector('.motion-exit'), null, `${mode}: interrupted exits release every copy`);
         equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section rests`);
@@ -1035,6 +1042,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
         equal(main.querySelectorAll('.facts').length, 0, `${mode}: no late exit restores Privacy`);
         equal(document.activeElement, general, `${mode}: finishing exits does not move focus`);
       } finally {
+        paused.forEach((animation) => animation.cancel());
         view.stop();
       }
     }
