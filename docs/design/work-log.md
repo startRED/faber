@@ -10,6 +10,8 @@ and a useful file location is allowed when the person needs to find or open an a
 
 - The steps' line counts extend into the project's "Changes" view in the running column: git supplies the conversation's
   whole change, including files changed by commands, so its totals can differ from the tool-input counts below.
+  The answer's Changed files disclosure instead compares that turn's saved versions from the existing restore history,
+  including command edits. It survives a restart and never substitutes the project's current files for those versions.
 
 - Words, thinking and steps appear in the order they happened (`ui/timeline.ts`): the engine records where each top-level
   tool call started in the reply's text (`ToolUse.at`) and where each piece of thinking fell (`Message.thinkingMarks`). The

@@ -26,6 +26,7 @@ import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
+import { AnswerChanges } from './AnswerChanges.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
@@ -418,7 +419,7 @@ interface Shared {
   onOpenConversation?: (id: string) => void;
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; reviewable?: boolean; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // Older automatic messages without acts keep their loop mark in the reply header.
   const woke = () => props.prompt?.acts?.length || props.prompt?.wake?.why === 'wake.conclusion' ? undefined : props.prompt?.wake;
   const m = () => props.m();
@@ -774,6 +775,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </p>
       </Show>
       <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} written={m().text.trim() !== ''} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} />}</Show>
+      <Show when={!streaming() && props.reviewable !== false && props.prompt?.rewind}>{(point) => <AnswerChanges conversationId={props.conversationId} messageId={props.prompt!.id} point={point()} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
             Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}
@@ -1104,6 +1106,8 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
   const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
+  const reviewOwners = createMemo(() => new Map(props.messages.filter((m) => m.role === 'user' && m.rewind).map((m) => [m.rewind!.id, m.id])));
+  const reviewable = (at: number) => { const p = prompt(at); return !p?.rewind || reviewOwners().get(p.rewind.id) === p.id; };
   const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m) && !(at === props.messages.length - 1 && (props.endState === 'unconcluded' || m.closed)));
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header,
   // and if the newest turns had nothing for the person, the last turn of the run with content stays open below the header.
@@ -1123,7 +1127,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
   });
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
-      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at + (props.earlier ?? 0)} />
+      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} reviewable={reviewable(at)} last={false} answered={[]} messageIndex={at + (props.earlier ?? 0)} />
     </Show>
   );
   return (
@@ -1152,6 +1156,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
                     pieceRevision={revision()}
                     m={m}
                     prompt={prompt(at())}
+                    reviewable={reviewable(at())}
                     last={at() === lastShown()}
                     answered={answered(at())}
                     messageIndex={(props.earlier ?? 0) + at()}

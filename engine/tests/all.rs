@@ -213,3 +213,6 @@ fn every_test_file_is_listed() {
     }
     assert!(missing.is_empty(), "add these to engine/tests/all.rs: {missing:?}");
 }
+
+#[path = "native_branch.rs"]
+mod native_branch;

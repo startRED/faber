@@ -35,6 +35,7 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 ## Rules for every screen
 
 The shared message box's lists and earlier messages live in [composer.md](composer.md); replies and plan approval in [conversation.md](conversation.md), the line under an answer in [answer-line.md](answer-line.md). Reading width and scroll position live in [reading.md](reading.md).
+Saved per-answer file comparisons follow [answer-review.md](answer-review.md).
 Native pieces and generated pages have their own [visual-answer rules](visual-answers.md).
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language. A kind of step, a state and who is speaking each

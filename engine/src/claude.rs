@@ -807,8 +807,46 @@ pub struct ClaudeOptions {
     pub sandbox: Option<crate::cli::Cli>,
 }
 
+pub fn supports_fork(help: &str) -> bool {
+    help.lines().any(|line| {
+        line.starts_with([' ', '\t'])
+            && line
+                .trim_start()
+                .strip_prefix("--fork-session")
+                .is_some_and(|tail| tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t'))
+    })
+}
+
+pub fn claude_fork_args(launch: &ClaudeLaunch, point: &crate::engine::NativePoint, supported: bool) -> Result<Vec<String>, String> {
+    if !supported
+        || !point.valid(crate::model::Vendor::Claude)
+        || launch.instructions.is_some()
+        || matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Aside)
+    {
+        return Err("error.sessionLost".into());
+    }
+    let resumed = ClaudeLaunch { resume: Some(point.session.clone()), ..launch.clone() };
+    let mut args = claude_args(&resumed);
+    args.extend(["--fork-session".into(), format!("--resume-session-at={}", point.cursor.entry.as_deref().expect("validated entry"))]);
+    Ok(args)
+}
+
+pub fn start_claude_fork(
+    opts: ClaudeOptions,
+    point: &crate::engine::NativePoint,
+    supported: bool,
+    on_event: EventSink,
+) -> Result<Session, String> {
+    let args = claude_fork_args(&opts.launch, point, supported)?;
+    Ok(start_configured(opts, on_event, args))
+}
+
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     let args = claude_args(&opts.launch);
+    start_configured(opts, on_event, args)
+}
+
+fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
     // A denial in the result only means "nobody could answer" when the CLI ran with no prompts; with the host answering, a denial is

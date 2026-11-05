@@ -36,6 +36,9 @@ impl Engine {
                 moved.sessions.clear();
                 moved.session_kits.clear();
                 moved.tentative.clear();
+                if moved.native_fork.take().is_some() {
+                    moved.rewind_notice = Some("note.rewind.savedMessages".into());
+                }
                 moved.cost_base.clear();
                 moved.commands.clear();
                 moved.context = None;

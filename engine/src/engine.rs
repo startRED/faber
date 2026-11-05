@@ -68,6 +68,8 @@ mod kits;
 mod look;
 mod mcp_servers;
 mod memory_search;
+mod native_fork;
+pub use native_fork::{NativeFork, NativePoint};
 mod move_chat;
 mod overload;
 mod parked;
@@ -608,6 +610,7 @@ struct Core {
     probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
+    claude_fork: bool,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
     /// downgraded since, and what it takes is unknown until the help is read again.
     claude_stamp: Option<String>,
@@ -798,6 +801,7 @@ impl Engine {
                 usage_command_spent: false,
                 probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
+                claude_fork: false,
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
@@ -2742,11 +2746,12 @@ impl Core {
         self.claude_stamp = Some(stamp.clone());
         let (me, spawn, cwd) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone());
         self.opts.runtime.spawn(async move {
-            let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
+            let Some((flags, fork)) = account::claude_launch_support(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
             if let Some(core) = me.upgrade() {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                 if core.claude_stamp.as_ref() == Some(&stamp) {
                     core.claude_flags = flags;
+                    core.claude_fork = fork;
                 }
             }
         });
@@ -2758,6 +2763,7 @@ impl Core {
     fn claude_flags_for(&mut self, cli: &Cli) -> crate::claude::ClaudeFlags {
         if self.claude_stamp.as_ref().is_some_and(|read| *read != cli.stamp()) {
             self.claude_flags = Default::default();
+            self.claude_fork = false;
             self.probe_claude_flags();
         }
         self.claude_flags
@@ -2888,6 +2894,9 @@ impl Core {
             return;
         }
         if !current {
+            return;
+        }
+        if self.native_fork_event(conv, &event) {
             return;
         }
         if self.rewind_event(conv, sid, &event) {
@@ -3561,6 +3570,7 @@ impl Core {
                 // next launch is the old one, and read the new help.
                 if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
                     self.claude_flags = Default::default();
+                    self.claude_fork = false;
                     self.probe_claude_flags();
                 }
                 let limited = fatal && recovery::plan_limit(&message);
@@ -4273,7 +4283,10 @@ impl Core {
             None => fallback.clone(),
         };
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary
+            && c.resumable(pick.vendor).is_none()
+            && !native_fork::available(c, pick.vendor)
+            && !c.context_messages().is_empty();
         let history = c.context_messages().to_vec();
         let text = if joining_late {
             with_history(&history, &model_text, &|n| attachment_place(c.area, &data_dir, id, n))
@@ -4590,6 +4603,7 @@ impl Core {
             return Ok(());
         }
         // The baseline belongs to the final copy folder, not the person's checkout, and startup must wait for it too.
+        let text = self.native_fork_start(id, reply_id, pick, text);
         if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
             return Ok(());
         }
@@ -4639,6 +4653,10 @@ impl Core {
         }
         if let Some(live) = self.live.get_mut(id) {
             live.visual_root = crate::visual::pin(&live.cwd).map(Arc::new);
+        }
+        if kit_reset && let Some(c) = self.convs.get_mut(id) {
+            c.native_fork = None;
+            c.rewind_notice = Some("note.rewind.savedMessages".into());
         }
         let text = if kit_reset {
             let c = self.convs.get(id).ok_or("error.conversationGone")?;
@@ -4888,7 +4906,8 @@ impl Core {
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
         let user_hooks = settings.user_hooks() && permissions.guarded();
-        let mut resume = c.resumable(pick.vendor).cloned();
+        let pending_fork = c.native_fork.as_ref().filter(|fork| fork.vendor == pick.vendor).map(|fork| fork.point.clone());
+        let mut resume = c.resumable(pick.vendor).cloned().or_else(|| pending_fork.as_ref().map(|point| point.session.clone()));
         let previous_kit = match c.session_kits.get(&pick.vendor) {
             Some((id, ids, _)) if Some(id) == resume.as_ref() => {
                 Some(crate::tools::kits::Report { ids: ids.clone(), ..Default::default() })
@@ -4948,6 +4967,10 @@ impl Core {
             resume = None;
         }
         let resumed = resume.is_some();
+        let native_point = pending_fork.filter(|point| resume.as_ref() == Some(&point.session));
+        if native_point.as_ref().is_some_and(|point| !point.valid(pick.vendor) || pick.vendor == Vendor::Claude && !self.claude_fork) {
+            return Err("error.sessionLost".into());
+        }
         let resources = if pick.vendor == Vendor::Claude {
             kits::claude_resources(area, &project_tools)
         } else {
@@ -5016,7 +5039,7 @@ impl Core {
         let session = match pick.vendor {
             // Not yet: no CLI is discovered for it, so the lookup above already refused it.
             Vendor::Gemini => return Err("error.notConnected".into()),
-            Vendor::Claude => start_conversation_claude(
+            Vendor::Claude => start_conversation_claude_native(
                 identity,
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -5047,7 +5070,9 @@ impl Core {
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
-            ),
+                native_point.as_ref(),
+                self.claude_fork,
+            )?,
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
                 let title = self.convs.get(conv).map(|c| c.title.clone());
@@ -5082,9 +5107,9 @@ impl Core {
                     },
                     sink,
                     project_tools,
-                    identity,
-                    command_spawn,
+                    crate::codex::ThreadIdentity { identity, spawn: command_spawn },
                     before_turn,
+                    native_point,
                 )
             }
         };
@@ -5219,6 +5244,7 @@ impl Core {
             rewind_notice: None,
             rewind_summary: None,
             rewind_native: None,
+            native_fork: None,
             reported: (None, None),
             compacting: false,
             stopped: false,
@@ -5315,7 +5341,10 @@ impl Core {
             c.title = title::fallback(&req.text, self.store.settings().language.as_deref().unwrap_or("en"));
         }
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary
+            && c.resumable(pick.vendor).is_none()
+            && !native_fork::available(c, pick.vendor)
+            && !c.context_messages().is_empty();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
         let history = c.context_messages().to_vec();
@@ -5504,6 +5533,14 @@ impl Core {
                 m
             })
             .collect();
+        let native_vendor = match req.choice.vendor.as_str() {
+            "claude" => Some(Vendor::Claude),
+            "codex" => Some(Vendor::Codex),
+            _ => c.messages.last().and_then(|m| m.vendor),
+        };
+        if let Some(vendor) = native_vendor {
+            native_fork::inherit(&source, c, vendor);
+        }
         c.piece_values =
             source.piece_values.iter().filter(|entry| c.messages.iter().any(|message| message.id == entry.message_id)).cloned().collect();
         // A moved project's earlier file cards still belong to its Chat workspace.
@@ -6105,7 +6142,18 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
     Some(&mut messages[at])
 }
 
+#[cfg(test)]
 fn start_conversation_claude(identity: Arc<crate::proc::ConversationIdentity>, opts: ClaudeOptions, sink: EventSink) -> Session {
+    start_conversation_claude_native(identity, opts, sink, None, false).expect("ordinary launch")
+}
+
+fn start_conversation_claude_native(
+    identity: Arc<crate::proc::ConversationIdentity>,
+    opts: ClaudeOptions,
+    sink: EventSink,
+    point: Option<&NativePoint>,
+    supported: bool,
+) -> Result<Session, String> {
     let on_exit = identity.clone();
     let sink: EventSink = Arc::new(move |event| {
         if matches!(&event, EngineEvent::WriterExit { confirmed: true }) {
@@ -6114,7 +6162,11 @@ fn start_conversation_claude(identity: Arc<crate::proc::ConversationIdentity>, o
         sink(event);
     });
     let sink = identity.token.as_ref().map_or_else(|| sink.clone(), |token| crate::codex::redact_sink(sink.clone(), token.clone()));
-    crate::proc::as_conversation(&identity, || start_claude(opts, sink)).with_identity(identity)
+    let session = crate::proc::as_conversation(&identity, || match point {
+        Some(point) => crate::claude::start_claude_fork(opts, point, supported, sink),
+        None => Ok(start_claude(opts, sink)),
+    })?;
+    Ok(session.with_identity(identity))
 }
 
 #[cfg(test)]
