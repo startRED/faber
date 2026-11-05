@@ -14,9 +14,11 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 mod pack;
+mod review;
 #[cfg(test)]
 mod safety_tests;
 mod store;
+pub use review::{AnswerChangePatch, AnswerChanges};
 pub use store::History;
 
 pub const FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -283,6 +285,7 @@ impl SavedConversation {
         c.piece_values.clone_from(&self.piece_values);
         c.sessions.clear();
         c.tentative.clear();
+        c.native_fork = None;
         c.rewind_native.clone_from(&self.native);
         if let Some(native) = &self.native {
             c.sessions.insert(Vendor::Codex, native.thread.clone());
@@ -325,6 +328,10 @@ pub(super) struct Point {
     saved: SavedConversation,
     writers: Vec<String>,
     unknown_author: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_shared: Option<bool>,
+    #[serde(skip)]
+    review_pending: bool,
     #[serde(skip)]
     active: bool,
 }
@@ -904,6 +911,8 @@ impl History {
             saved: source.saved,
             writers: vec![format!("turn:{turn}")],
             unknown_author,
+            review_shared: None,
+            review_pending: false,
             active: true,
         };
         self.save_point(&point)?;
@@ -975,13 +984,16 @@ impl History {
     }
 
     pub fn prepare_seal(&self, seal: Sealing) -> Publication {
+        let shared = seal.ids.len() > 1;
         let snapshot = Arc::new(seal.snapshot);
         let mut updates = Vec::new();
         for id in seal.ids {
             if let Some(mut point) = self.points.get(&id).cloned() {
                 point.after = Some(snapshot.clone());
                 point.info.sealed = true;
+                point.review_pending = true;
                 point.active = false;
+                point.review_shared = Some(shared || point.unknown_author);
                 let after = snapshot.coverage();
                 point.info.coverage.incomplete |= after.incomplete;
                 point.info.coverage.skipped += after.skipped;
@@ -1005,6 +1017,7 @@ impl History {
             if let Err(error) = self.save_point(point) {
                 for failed in &publication.updates[index..] {
                     if let Some(saved) = self.points.get_mut(&failed.info.id) {
+                        saved.review_pending = false;
                         saved.info.sealed = false;
                         saved.info.coverage.unavailable = true;
                         saved.info.coverage.incomplete = true;
@@ -1013,6 +1026,7 @@ impl History {
                 return Err(error);
             }
             if let Some(saved) = self.points.get_mut(&point.info.id) {
+                saved.review_pending = false;
                 saved.info.sealed = true;
                 saved.info.coverage.clone_from(&point.info.coverage);
             }
@@ -2129,5 +2143,18 @@ mod validation_tests {
         assert!(matches!(before.known("cache-other"), Some(None)));
         let log_root = Path::new("project/.faber/verify");
         assert!(!CapturePolicy { root: log_root }.names_allow("output.log"));
+    }
+    #[test]
+    fn rewind_saved_conversation_invalidates_a_pending_native_fork() {
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "3611dcb7-6387-47c6-8b25-1b6f20903171", "title": "Rewind", "area": "chat",
+            "createdAt": 1, "updatedAt": 1, "messages": [],
+            "nativeFork": { "vendor": "codex", "point": { "session": "thread-before", "cursor": { "turn": "turn-before" } } }
+        }))
+        .unwrap();
+        assert!(conversation.native_fork.is_some());
+        let saved = SavedConversation::bindings(&conversation);
+        saved.apply(&mut conversation);
+        assert!(conversation.native_fork.is_none());
     }
 }

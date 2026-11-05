@@ -36,6 +36,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/homes.md](design/homes.md) | Chat and project homes, including recent conversations |
 | [design/answer-line.md](design/answer-line.md) | The line under an answer: its buttons, hover bar, the reply's state and why it stopped |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
+| [design/answer-review.md](design/answer-review.md) | Per-answer saved file comparisons, paging, loading and read failures; shared restore history |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
 | [design/reading.md](design/reading.md) | Reading width, selections, durable scroll position and the latest-message control |

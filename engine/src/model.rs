@@ -428,6 +428,9 @@ pub struct Message {
     /// Coverage of the file baseline immediately before this user message; unavailable history never blocks a turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind: Option<crate::rewind::PointInfo>,
+    /// The CLI's exact native boundary for a later branch or retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_point: Option<crate::engine::NativePoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1035,6 +1038,7 @@ impl Message {
             mode: None,
             note: None,
             rewind: None,
+            native_point: None,
             recovery: None,
             nudge: None,
             look: None,
@@ -1276,6 +1280,8 @@ pub struct Conversation {
     pub rewind_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_native: Option<crate::rewind::NativeRewind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_fork: Option<crate::engine::NativeFork>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]

@@ -1956,6 +1956,90 @@
     "reach": "free"
   },
   {
+    "name": "answer_changes",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "offset",
+        "usize"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "answer_change_patch",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ],
+      [
+        "offset",
+        "usize"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "path",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
     "name": "rewind_points",
     "args": [
       [

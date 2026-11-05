@@ -40,6 +40,7 @@ import './foot.check.ts';
 import './livework.check.ts';
 import './checks.check.ts';
 import './changes.check.ts';
+import './answer-changes.check.ts';
 import './project-memory.check.ts';
 import './goals.check.ts';
 import './visual-answers.check.ts';

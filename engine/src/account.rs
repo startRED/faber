@@ -87,8 +87,17 @@ pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeo
 /// Which newer flags the installed Claude Code lists in `--help` (one short hidden run, output bounded). None when it did not
 /// answer or printed nothing: the caller then keeps passing none of them.
 pub async fn claude_flags(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<crate::claude::ClaudeFlags> {
+    claude_launch_support(cli, spawn, cwd, timeout).await.map(|(flags, _)| flags)
+}
+
+pub(crate) async fn claude_launch_support(
+    cli: &Cli,
+    spawn: &Spawner,
+    cwd: &Path,
+    timeout: Duration,
+) -> Option<(crate::claude::ClaudeFlags, bool)> {
     let ran = run_args(cli, vec!["--help".into()], spawn, cwd, timeout).await?;
-    flags_from_run(ran.code, ran.replayed, &ran.out)
+    flags_from_run(ran.code, ran.replayed, &ran.out).map(|flags| (flags, crate::claude::supports_fork(&ran.out)))
 }
 
 /// The flags a finished `--help` run declares. A help that failed (non-zero exit) is no declaration; a replayed recording has

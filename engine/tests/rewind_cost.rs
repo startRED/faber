@@ -102,6 +102,44 @@ fn report_work(name: &str, history: &History) -> Work {
 }
 
 #[test]
+#[ignore = "isolated saved-answer review measurement; run with --ignored --nocapture --test-threads=1"]
+fn answer_changes_saved_review_cost() {
+    let folder = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let before: String = (0..20_000).map(|line| format!("saved line {line:05}: unchanged content\n")).collect();
+    let after = before.replace("saved line 00002:", "edited row 00002:").replace("saved line 19997:", "edited row 19997:");
+    std::fs::write(folder.path().join("file.txt"), &before).unwrap();
+    let mut git = Git { names: b"file.txt\0".to_vec(), calls: 0 };
+    let conversation: Conversation = serde_json::from_value(json!({
+        "id":CONVERSATION,"title":"Saved answer review cost","area":"chat","workingFolder":folder.path(),
+        "createdAt":1,"updatedAt":1,"messages":[{"id":"question","role":"user","text":"Change two distant lines","at":1}]
+    }))
+    .unwrap();
+    let mut history = History::open(data.path(), 1).unwrap();
+    history.capture(&mut git, folder.path(), &conversation, "question", "turn", 1, false).unwrap();
+    std::fs::write(folder.path().join("file.txt"), after).unwrap();
+    let scan = history.scan_seal(&mut git, folder.path()).unwrap();
+    history.seal(scan, 2).unwrap();
+    // Later edits must never replace the saved answer's versions, even in a cost proof.
+    std::fs::write(folder.path().join("file.txt"), "personal edit\n").unwrap();
+    drop(history);
+    let history = History::open(data.path(), 3).unwrap();
+    let mut peak = reading(&mut System::new(), false).0;
+    history.reset_work();
+    let review = measured("answer_metadata_page", &mut peak, || history.review(CONVERSATION, "question", 0)).0.unwrap();
+    assert_eq!(review.total, 1);
+    assert_eq!(history.work().object_reads, 0, "metadata must not decode saved contents");
+    let (patch, elapsed) = measured("answer_saved_patch_page", &mut peak, || history.review_patch(CONVERSATION, "question", "file.txt", 0));
+    let patch = patch.unwrap();
+    assert!(!patch.too_large && !patch.binary);
+    assert!(patch.lines.len() <= 200);
+    assert!(patch.lines.iter().map(String::len).sum::<usize>() <= 128 * 1024);
+    assert!(patch.lines.iter().any(|line| line.starts_with("+edited row 00002:")));
+    assert!(elapsed <= Duration::from_secs(2), "bounded saved diff exceeded 2 seconds");
+    assert_eq!(std::fs::read_to_string(folder.path().join("file.txt")).unwrap(), "personal edit\n");
+}
+
+#[test]
 #[ignore = "isolated capture, restore and cleanup measurement; run with --ignored --nocapture --test-threads=1"]
 fn rewind_capture_restore_and_cleanup_cost() {
     let temporary = std::env::temp_dir().canonicalize().unwrap();
