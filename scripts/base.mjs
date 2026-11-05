@@ -45,9 +45,11 @@ export function tipPassed(red, tip, runs, jobsFor) {
   for (const candidate of runs) {
     if (candidate.headSha !== tip || candidate.createdAt <= red.run.createdAt || candidate.status !== 'completed' ||
         candidate.event !== 'workflow_dispatch' || !candidate.headBranch?.startsWith('queue/')) continue;
+    if (RED.has(candidate.conclusion)) return false;
+    if (candidate.conclusion !== 'success') continue;
     const jobs = jobsFor(candidate.databaseId);
     if (!jobs.some((job) => job.name === 'gate' && job.conclusion !== 'skipped')) continue;
-    return candidate.conclusion === 'success' && required.every((name) =>
+    return required.every((name) =>
       jobs.some((job) => job.name === name && job.status === 'completed' && job.conclusion === 'success'));
   }
   return false;
