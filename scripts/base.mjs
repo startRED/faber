@@ -34,6 +34,25 @@ export function verdict(runs) {
   return { run: last, since, newer };
 }
 
+/** A later, complete queue check of the current tip supersedes an older failed base run. */
+export function tipPassed(red, tip, runs, jobsFor) {
+  if (!/^[a-f0-9]{40}$/.test(tip) || tip === red.run.headSha) return false;
+  const required = [
+    'changes', 'preflight', 'docs', 'app', 'costs', 'ui', 'gate',
+    'check (windows-latest, lints)', 'check (windows-latest, rust)', 'check (macos-latest, lints rust ui)',
+    ...Array.from({ length: 8 }, (_, i) => `screen (${i + 1}/8)`),
+  ];
+  for (const candidate of runs) {
+    if (candidate.headSha !== tip || candidate.createdAt <= red.run.createdAt || candidate.status !== 'completed' ||
+        candidate.event !== 'workflow_dispatch' || !candidate.headBranch?.startsWith('queue/')) continue;
+    const jobs = jobsFor(candidate.databaseId);
+    if (!jobs.some((job) => job.name === 'gate' && job.conclusion !== 'skipped')) continue;
+    return candidate.conclusion === 'success' && required.every((name) =>
+      jobs.some((job) => job.name === name && job.status === 'completed' && job.conclusion === 'success'));
+  }
+  return false;
+}
+
 /** What failed, from `gh run view --log-failed`: the runner's `FAIL` lines and compiler errors, each once, with its job. */
 export function failures(log) {
   const found = [];
@@ -87,7 +106,19 @@ function status() {
     const list = (event) => JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--branch', BASE, '--event', event, '--limit', '20', '--json', fields]));
     const runs = [...list('push'), ...list('workflow_dispatch')].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
     const red = verdict(runs);
-    if (!red) {
+    let cleared = false;
+    if (red) {
+      try {
+        const tip = () => run('git', ['ls-remote', 'origin', `refs/heads/${BASE}`]).trim().split(/\s+/)[0];
+        const sha = tip();
+        const candidates = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--commit', sha, '--status', 'completed',
+          '--limit', '20', '--json', `${fields},event,headBranch`]));
+        cleared = tipPassed(red, sha, candidates, (id) => JSON.parse(run('gh', ['run', 'view', String(id), '--json', 'jobs'])).jobs) && tip() === sha;
+      } catch {
+        // Without complete evidence, retain the red warning.
+      }
+    }
+    if (!red || cleared) {
       text = '';
     } else {
       let checks = [];

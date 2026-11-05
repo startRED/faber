@@ -96,7 +96,8 @@ free. A run reads about 300 KB of pages, so it costs one long Codex turn of quot
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
 macOS-only check kept it red for three hours while ten commits landed on top. So the red base shows before a push
 (R164). `scripts/base.mjs` asks GitHub through `gh` for the newest finished push or dispatched run of `ci.yml` on `phase-1-base`
-(cancelled runs say nothing) and, when it failed, reads the runner's `FAIL` lines and compiler errors from its failed log,
+(cancelled runs say nothing). A complete, successful queue check on the current base tip also clears an older red run;
+an incomplete check or a failed run on that tip does not. When red, it reads the runner's `FAIL` lines and compiler errors from its failed log,
 each with its job, or the failed jobs and steps when the log names none. It keeps the answer three minutes in the shared
 git folder (`.git/faber-base.json`). Every `cargo t` outside CI prints those lines first, marked `BASE`, and writes the
 `pre-push` hook (`testkit/src/base.rs`) unless the person has a hook of their own. The hook refuses a push to

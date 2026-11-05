@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { failures, message, pushedToBase, verdict } from './base.mjs';
+import { failures, message, pushedToBase, tipPassed, verdict } from './base.mjs';
 
 const run = (conclusion, n, status = 'completed') => ({
   status,
@@ -30,6 +30,30 @@ test('a red base says since when, and which runs still going may be the fix', ()
   assert.match(text, /^phase-1-base is red since 16:14 UTC: commit 8 \(8888888\)/);
   assert.match(text, /projects home: text sits on the veil/);
   assert.match(text, /still running: commit 9/);
+});
+
+test('only a complete, later queue check of the current tip clears an older red base', () => {
+  const red = verdict([run('failure', 1)]);
+  const tip = '2'.repeat(40);
+  const candidate = { ...run('success', 2), event: 'workflow_dispatch', headBranch: 'queue/pr-2' };
+  const names = [
+    'changes', 'preflight', 'docs', 'app', 'costs', 'ui', 'gate',
+    'check (windows-latest, lints)', 'check (windows-latest, rust)', 'check (macos-latest, lints rust ui)',
+    ...Array.from({ length: 8 }, (_, i) => `screen (${i + 1}/8)`),
+  ];
+  const jobs = names.map((name) => ({ name, status: 'completed', conclusion: 'success' }));
+  const passed = (sha, runs, list = jobs) => tipPassed(red, sha, runs, () => list);
+  assert.equal(passed(tip, [candidate]), true);
+  assert.equal(passed(red.run.headSha, [candidate]), false, 'a failed current tip stays red');
+  assert.equal(passed('3'.repeat(40), [candidate]), false, 'an older tip proves nothing about a newer one');
+  assert.equal(passed(tip, [{ ...candidate, createdAt: red.run.createdAt }]), false);
+  assert.equal(passed(tip, [{ ...candidate, headBranch: 'main' }]), false);
+  assert.equal(passed(tip, [{ ...candidate, event: 'pull_request' }]), false);
+  assert.equal(passed(tip, [candidate], jobs.filter((job) => job.name !== 'screen (4/8)')), false);
+  assert.equal(passed(tip, [candidate], jobs.map((job) => job.name === 'ui' ? { ...job, conclusion: 'skipped' } : job)), false);
+  assert.equal(passed(tip, [{ ...candidate, conclusion: 'failure' }, candidate]), false, 'a newer failed check wins');
+  assert.equal(passed(tip, [candidate], [{ name: 'train', status: 'completed', conclusion: 'success' }]), false, 'a waiting train is not a gate');
+  assert.equal(tipPassed(red, tip, [{ ...candidate, databaseId: 3 }, candidate], (id) => id === 3 ? [] : jobs), true);
 });
 
 test('the failing checks are read from the failed log, each once, with their job', () => {
