@@ -13,10 +13,11 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
   const count = () => ({ done: props.plan.steps.filter((s) => s.state === 'done').length, total: props.plan.steps.length });
   return (
     <section class="plan" aria-label={t('plan.label')}>
-      <p class="plan-head">
+      <Show when={props.plan.steps.length}><p class="plan-head">
         <span>{t('plan.label')}</span>
         <span class="num">{planWords(count())}</span>
-      </p>
+      </p></Show>
+      <Show when={props.plan.raisedBecause}>{(reason) => <p class="note" role="status">{t('plan.raised', { size: t(`plan.size.${props.plan.size ?? 'small'}`), reason: t(`plan.boundary.${reason()}`) })}</p>}</Show>
       <Show when={props.plan.contract}>
         {(contract) => (
           <div class="plan-contract">

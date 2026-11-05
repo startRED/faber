@@ -76,7 +76,7 @@ fn open_settings(page: &mut Page) -> Result {
 fn keyboard_traversal(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "de")?;
     super::shell::seed_project(ctx, "Keyboard fixture")?;
-    std::fs::write(ctx.sb.data.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+    std::fs::write(ctx.sb.sandbox.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
         .map_err(|e| e.to_string())?;
     let launch = chat_with_cli(ctx, true)?;
     let mut app = ctx.launch(launch)?;
@@ -544,7 +544,7 @@ fn system_toggles_persist(ctx: &mut Ctx) -> Result {
 fn project_preferences(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     super::shell::seed_project(ctx, "Preferences fixture")?;
-    std::fs::write(ctx.sb.data.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+    std::fs::write(ctx.sb.sandbox.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
         .map_err(|e| e.to_string())?;
     let mut app = ctx.launch(super::no_cli())?;
     let settings = app.page.named("button", "settings.open")?.exact();

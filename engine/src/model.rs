@@ -720,6 +720,10 @@ pub struct KeepProgress {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_because: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<PlanContract>,
     /// When the agent last sent it, in milliseconds.
@@ -734,6 +738,8 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanContract {
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -742,6 +748,31 @@ pub struct PlanContract {
     pub proof: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSize {
+    #[default]
+    Small,
+    Normal,
+    Risky,
+}
+
+impl PlanSize {
+    fn is_small(&self) -> bool {
+        *self == Self::Small
+    }
+}
+
+impl Plan {
+    pub fn covers(&self, size: PlanSize) -> bool {
+        size == PlanSize::Small
+            || self
+                .contract
+                .as_ref()
+                .is_some_and(|c| c.size >= size && (c.extends.is_some() || c.new_because.is_some()) && c.proof.is_some())
+    }
 }
 
 /// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.

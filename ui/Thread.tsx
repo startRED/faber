@@ -712,7 +712,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <StallNote conversationId={props.conversationId} m={m()} />
       <Show when={props.last && props.area === 'project'}><ResultsNote conversationId={props.conversationId} message={m()} /></Show>
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
-      <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
+      <Show when={props.last && (props.plan?.steps.length || props.plan?.raisedBecause) && (working() || props.plan?.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
         {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
       </Show>
       <Show when={m().files?.length}>

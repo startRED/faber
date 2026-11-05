@@ -101,6 +101,21 @@ pub fn fixture(vendor: &str, name: &str) -> Vec<Entry> {
         .collect()
 }
 
+/// Synthetic single-file approvals keep engine tests independent of the recording's opaque shell commands.
+pub fn codex_file_tools() -> Vec<Entry> {
+    let mut entries = fixture("codex", "tools");
+    for entry in &mut entries {
+        if entry.msg["method"] == "item/commandExecution/requestApproval" {
+            let path = if entry.msg["id"] == 0 { "a.txt" } else { "b.txt" };
+            entry.msg["method"] = "item/fileChange/requestApproval".into();
+            let params = &entry.msg["params"];
+            entry.msg["params"] = json!({"kind":"file", "threadId":params["threadId"], "turnId":params["turnId"],
+                "itemId":params["itemId"], "changes":[{"path":path,"kind":{"type":"add"}}]});
+        }
+    }
+    entries
+}
+
 pub fn text_of(events: &[EngineEvent]) -> String {
     events.iter().filter_map(|e| if let EngineEvent::Text(t) = e { Some(t.as_str()) } else { None }).collect()
 }

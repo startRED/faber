@@ -1162,7 +1162,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { DECLINED[0] } }) };
+                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {

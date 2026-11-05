@@ -11,6 +11,121 @@ impl Engine {
 }
 
 impl Core {
+    fn boundary_demand(&self, conv: &str, tool: &str, input: &serde_json::Value) -> (crate::model::PlanSize, Option<&'static str>) {
+        use crate::model::PlanSize;
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return (PlanSize::Small, None) };
+        let Ok(cwd) = self.cwd_of(c) else {
+            return (PlanSize::Risky, Some("unknown"));
+        };
+        let Some(cwd) = cwd.to_str() else {
+            return (PlanSize::Risky, Some("unknown"));
+        };
+        let roots = Store::data_roots().iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let credentials =
+            crate::permissions::relocated_credentials(&|key| std::env::var(key).ok()).into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        let classify = |tool: &str, input: &serde_json::Value| {
+            crate::permissions::plan_boundary(cwd, cwd, &roots, &credentials, c.copy.is_some(), tool, input, false)
+        };
+        let demand = classify(tool, input);
+        if matches!(demand, (PlanSize::Risky, Some("credentials" | "data" | "unknown"))) {
+            return demand;
+        }
+        let probed = crate::permissions::plan_probe(cwd, tool, input, |prefix| {
+            let metadata = prefix.symlink_metadata()?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Ok(PlanSize::Risky);
+                }
+            }
+            Ok(if metadata.file_type().is_symlink() { PlanSize::Risky } else { PlanSize::Small })
+        });
+        if probed.0 >= demand.0 { probed } else { demand }
+    }
+
+    pub(super) fn plan_allows(&self, conv: &str, tool: &str, input: &serde_json::Value) -> bool {
+        let demand = self.boundary_demand(conv, tool, input).0;
+        demand == crate::model::PlanSize::Small || self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.covers(demand))
+    }
+
+    pub(super) fn hold_plan_boundary(&mut self, conv: &str, request: &str, tool: &str, input: &serde_json::Value) -> bool {
+        use crate::model::PlanSize;
+        if ["AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+            return false;
+        }
+        if self.turn(conv).is_none() {
+            if let Some(live) = self.live.get(conv) {
+                drop(live.session.answer(request, false));
+            }
+            return true;
+        }
+        let (size, reason) = self.boundary_demand(conv, tool, input);
+        if size == PlanSize::Small {
+            return false;
+        }
+        let Some(c) = self.convs.get_mut(conv) else { return false };
+        let plan = c.plan.get_or_insert_with(|| Plan {
+            steps: vec![],
+            size: PlanSize::Small,
+            raised_because: None,
+            contract: None,
+            at: now(),
+            estimate: None,
+        });
+        if size > plan.size {
+            plan.size = size;
+            plan.raised_because = reason.map(str::to_string);
+            self.save(conv);
+            (self.emit)(AppEvent::Plan { conversation_id: conv.into(), plan: self.shown_plan(conv) });
+        }
+        if self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.covers(size)) {
+            return false;
+        }
+        let card = serde_json::json!({
+            "planBoundary": {"tool": tool, "input": input},
+            "questions": [{"question": "plan.contractQuestion", "header": "plan.label", "multiSelect": false,
+                "options": [{"label": "plan.stateContract", "description": "plan.contractDefault"}]}]
+        });
+        let turn = if let Some(m) = self.turn(conv) {
+            let list = m.permissions.get_or_insert_default();
+            list.retain(|p| p.request_id != request);
+            list.push(Permission { request_id: request.into(), tool: "AskUserQuestion".into(), input: card, epoch: None });
+            Some(m.id.clone())
+        } else {
+            None
+        };
+        self.save(conv);
+        if let Some(turn) = turn {
+            self.weigh(conv);
+            self.watch_question(conv, &turn, request);
+            self.push(conv, Some(&turn), true);
+        }
+        true
+    }
+
+    fn resume_plan_permissions(&mut self, conv: &str) {
+        if self.convs.get(conv).is_some_and(|c| c.stopped) {
+            return;
+        }
+        let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
+        let asks = self.turn(conv).and_then(|m| m.permissions.take()).unwrap_or_default();
+        for p in asks {
+            let boundary = &p.input["planBoundary"];
+            let (tool, input) = if let Some(tool) = boundary["tool"].as_str() {
+                (tool.to_string(), boundary["input"].clone())
+            } else if ["AskUserQuestion", "ExitPlanMode"].contains(&p.tool.as_str()) {
+                if let Some(m) = self.turn(conv) {
+                    m.permissions.get_or_insert_default().push(p);
+                }
+                continue;
+            } else {
+                (p.tool, p.input)
+            };
+            self.handle(conv, sid, EngineEvent::Permission { request_id: p.request_id, tool, input });
+        }
+    }
+
     fn follow_up_project(&self, id: &str) -> Option<crate::model::Project> {
         let c = self.convs.get(id)?;
         if c.area != Area::Project {
@@ -334,6 +449,7 @@ impl Core {
                 }
                 (c.plan, c.estimate) = (plan, estimate);
                 self.save(conv);
+                self.resume_plan_permissions(conv);
                 let plan = self.shown_plan(conv);
                 (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 self.refresh_running();
@@ -403,6 +519,30 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn size_boundary_engine_call_including_existing_parent_probes_is_measured() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        app.with(|core| {
+            let conv = core.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            let input = serde_json::json!({"file_path":"src/new.txt"});
+            let started = std::time::Instant::now();
+            for _ in 0..1_000 {
+                assert_eq!(core.boundary_demand(&id, "Read", &input).0, crate::model::PlanSize::Small);
+            }
+            eprintln!(
+                "size_boundary_engine: {:.0} ns/call including existing-parent probes over 1000 approvals (debug)",
+                started.elapsed().as_nanos() as f64 / 1_000.0
+            );
+        });
+        app.shutdown();
+    }
 
     #[tokio::test]
     async fn follow_up_refuses_compaction_and_streaming_admission_without_queueing_duplicates() {

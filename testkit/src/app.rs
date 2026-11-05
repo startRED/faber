@@ -796,7 +796,10 @@ mod tests {
 
     #[test]
     fn repository_root_rejects_an_unrelated_or_incomplete_workspace() {
-        let dir = tempfile::tempdir().unwrap();
+        // The build wrapper can place temporary files inside a complete workspace.
+        let temp = std::env::temp_dir();
+        let parent = temp.ancestors().find(|p| repository_root(p).is_err()).unwrap();
+        let dir = tempfile::tempdir_in(parent).unwrap();
         std::fs::write(dir.path().join("Cargo.toml"), "").unwrap();
         let error = repository_root(dir.path()).unwrap_err();
         assert!(error.contains("cannot find the Faber repository"));

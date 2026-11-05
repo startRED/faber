@@ -100,6 +100,8 @@ mod persona;
 mod plain_words;
 #[path = "plan.rs"]
 mod plan;
+#[path = "plan_boundary_qualification.rs"]
+mod plan_boundary_qualification;
 #[path = "plugins.rs"]
 mod plugins;
 #[path = "pr_watch.rs"]

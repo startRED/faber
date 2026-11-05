@@ -240,8 +240,10 @@ export interface PlanStep {
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
+  size?: 'small' | 'normal' | 'risky';
+  raisedBecause?: 'credentials' | 'data' | 'outside' | 'publish' | 'delete' | 'unknown';
   steps: PlanStep[];
-  contract?: { extends?: string; newBecause?: string; proof?: string; target?: string };
+  contract?: { size?: 'small' | 'normal' | 'risky'; extends?: string; newBecause?: string; proof?: string; target?: string };
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };

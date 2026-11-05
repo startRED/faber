@@ -430,11 +430,12 @@ fn asks(rows: &[RunningItem], conversation: &str, request_id: &str) -> bool {
 #[tokio::test]
 async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
     let dir = crate::support::DataFolder::new();
+    let folder = support::work_folder();
     // A chat and a project use two Codex processes, and each numbers its approvals from 0.
-    let f = fake(fixture("codex", "tools"));
+    let f = fake(support::codex_file_tools());
     let (engine, mut rx) = engine(&dir, &[Vendor::Codex], f.spawn.clone(), None);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let chat = engine.send(request(Area::Chat, None, TWO_FILES, "codex")).unwrap();
     let work = engine.send(request(Area::Project, Some(&project.id), TWO_FILES, "codex")).unwrap();
 

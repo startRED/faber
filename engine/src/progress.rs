@@ -3,7 +3,7 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
-use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanStep, StepState, WrapUp};
+use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanSize, PlanStep, StepState, WrapUp};
 use serde_json::{Value, json};
 
 /// A task found while closing a project conversation. Its complete text is kept, never shortened.
@@ -147,6 +147,7 @@ fn plan_schema() -> Value {
                 },
                 "additionalProperties": false
             },
+            "size": { "type": "string", "enum": ["small", "normal", "risky"], "description": "Work size, default small. Never lowered. A supplied contract covers this size, including an engine raise. After a boundary hold, state what it extends or why new and its proof in contract before retrying the action." },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
             "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at." },
             "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
@@ -285,6 +286,11 @@ fn no_evidence(id: &str, text: &str) -> String {
 /// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix: a
 /// list whose ids, files, waits or evidence are wrong is refused whole with an `error.plan.*` key, never trimmed to something else.
 pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan>, String> {
+    let size = match input.get("size") {
+        None => PlanSize::Small,
+        Some(value) => serde_json::from_value::<PlanSize>(value.clone()).map_err(|_| "Send size as small, normal or risky.")?,
+    }
+    .max(before.map_or(PlanSize::Small, |p| p.size));
     let mut steps = match input.get("steps").and_then(Value::as_array) {
         Some(list) => {
             let mut active = false;
@@ -356,14 +362,14 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                     member: None,
                 });
             }
-            if steps.is_empty() {
-                return Ok(None);
-            }
             check_waits(&steps)?;
             steps
         }
         None => before.map(|p| p.steps.clone()).ok_or("There is no plan yet: send the whole list in steps first.")?,
     };
+    if steps.is_empty() && size == PlanSize::Small {
+        return Ok(None);
+    }
     if input.get("advance").and_then(Value::as_bool) == Some(true) {
         let current = steps.iter_mut().find(|s| s.state == StepState::Active);
         let Some(evidence) = text_of(&input["evidence"], EVIDENCE_CHARS - 1) else {
@@ -378,8 +384,9 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             next.state = StepState::Active;
         }
     }
-    let contract = if input.get("steps").and_then(Value::as_array).is_some() {
+    let contract = if input.get("contract").is_some() || input.get("steps").and_then(Value::as_array).is_some() {
         input.get("contract").filter(|v| v.is_object()).map(|v| PlanContract {
+            size,
             extends: text_of(&v["extends"], PART_CHARS - 1),
             new_because: text_of(&v["new_because"], PART_CHARS - 1),
             proof: text_of(&v["proof"], PART_CHARS - 1),
@@ -388,7 +395,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
     } else {
         before.and_then(|p| p.contract.clone())
     };
-    Ok(Some(Plan { steps, contract, at, estimate: None }))
+    Ok(Some(Plan { steps, size, raised_because: before.and_then(|p| p.raised_because.clone()), contract, at, estimate: None }))
 }
 
 /// The strings of an optional list; anything that is not a string becomes "" (so the checks after refuse it), anything that

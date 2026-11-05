@@ -3204,6 +3204,7 @@ impl Core {
                 // `bigger` marks the card of `offer_bigger`, which only Faber makes: a CLI's request never carries it.
                 if let Some(fields) = input.as_object_mut() {
                     fields.remove("bigger");
+                    fields.remove("planBoundary");
                 }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
                 if crate::toolbox::is_self_change(&tool) {
@@ -3212,7 +3213,7 @@ impl Core {
                     }
                     return;
                 }
-                if self.turn(conv).is_some_and(|m| m.status != Some(Status::Streaming)) {
+                if self.turn(conv).is_none_or(|m| m.status != Some(Status::Streaming)) {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
                     }
@@ -3264,6 +3265,9 @@ impl Core {
                     })
                 {
                     drop(l.session.answer(&request_id, false));
+                    return;
+                }
+                if !question && self.hold_plan_boundary(conv, &request_id, &tool, &input) {
                     return;
                 }
                 if !question && self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {

@@ -2125,6 +2125,12 @@ async fn serve(
                                     let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
                                     continue;
                                 }
+                                let input = if let Some(cwd) = params["cwd"].as_str().filter(|cwd| Some(Path::new(cwd)) != Some(t.params.cwd.as_path())) {
+                                    if input.is_string() { json!({"command": input, "cwd": cwd}) }
+                                    else if let Some(mut fields) = input.as_object().cloned() { fields.insert("cwd".into(), cwd.into()); Value::Object(fields) }
+                                    else if input.is_array() { json!({"changes": input, "cwd": cwd}) }
+                                    else { input }
+                                } else { input };
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // A question to the person is a card in every mode, like Claude Code's `AskUserQuestion`; the

@@ -3015,12 +3015,13 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
 #[tokio::test]
 async fn text_blocks_around_a_tool_are_kept_apart() {
     let dir = support::DataFolder::new();
-    let mut entries = fixture("codex", "tools");
+    let folder = support::work_folder();
+    let mut entries = support::codex_file_tools();
     let first = entries.iter_mut().find(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
     first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(entries).spawn);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
     let mut asked: HashMap<String, bool> = HashMap::new();
