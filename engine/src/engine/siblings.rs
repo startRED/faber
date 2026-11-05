@@ -69,10 +69,13 @@ impl Core {
     /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
     /// before is not sent again (its id). With them, from the same pass, each leader none of whose members will wake it (none
     /// owes a report, is on Keep going or has a turn waiting) and its members' ids, for `resume_cut_leaders`.
-    pub(super) fn restore_parent_reports(store: &Store) -> (HashMap<String, HashSet<String>>, HashMap<String, Vec<String>>) {
+    pub(super) fn restore_parent_reports(
+        store: &Store,
+        scan: &StartScan,
+    ) -> (HashMap<String, HashSet<String>>, HashMap<String, Vec<String>>) {
         let mut pending: HashMap<String, HashSet<String>> = HashMap::new();
         let mut teams: HashMap<String, (bool, Vec<String>)> = HashMap::new();
-        for id in store.mentioning("\"startedBy\"") {
+        for id in scan.started_by.iter().cloned() {
             let Some(c) = store.get(&id) else { continue };
             let Some(parent) = c.started_by.clone() else { continue };
             let cut_off = c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming));
@@ -84,8 +87,8 @@ impl Core {
                 pending.entry(parent).or_default().insert(id);
             }
         }
-        for parent in store.mentioning("\"waitingOn\"") {
-            let Some(waiting) = store.get(&parent).and_then(|c| c.waiting_on) else { continue };
+        for parent in &scan.waiting_on {
+            let Some(waiting) = store.get(parent).and_then(|c| c.waiting_on) else { continue };
             for id in waiting.ids {
                 let Some(mut child) = store.get(&id) else { continue };
                 child.messages.iter_mut().for_each(settle);

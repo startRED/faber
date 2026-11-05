@@ -17,7 +17,7 @@ use crate::project::FolderState;
 use crate::recents::RecentsView;
 use crate::router::{Choice, Pick, pick_model};
 use crate::signals::Signals;
-use crate::store::Store;
+use crate::store::{StartScan, Store};
 use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
 use base64::Engine as _;
@@ -672,7 +672,18 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Opens the engine and settles its start at once ([`Engine::begin`], then [`Engine::settle_start`]).
     pub fn new(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
+        let engine = Engine::begin(opts, emit)?;
+        let _ = engine.settle();
+        Ok(engine)
+    }
+
+    /// Builds the engine with only what its first answer needs, so the screen lists the conversations at once. What reads
+    /// every conversation file waits for [`Engine::settle_start`], which the shell runs right after, off the screen's path.
+    /// The temporary conversations the last run left go here, before any answer, so the screen never reopens one: which
+    /// files are temporary comes from the rows the list keeps (`Store::temporary_ids`), and only changed files are read.
+    pub fn begin(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
         let data_directory = crate::workspace::DataDirectory::open(&opts.data_dir)?;
         #[cfg(windows)]
         let chat_directory = crate::workspace::relocation::open(&opts.data_dir, &opts.chat_dir)?;
@@ -686,7 +697,9 @@ impl Engine {
         catalog_store.set_runtime(opts.runtime.clone());
         let catalog_emit = emit.clone();
         catalog_store.set_on_ready(Arc::new(move || catalog_emit(AppEvent::Catalog)));
+        crate::startup::mark("catalog");
         let mut store = Store::new(&opts.data_dir);
+        crate::startup::mark("store");
         let catalog_prepare = catalog_store.clone();
         let permissions = store.settings().permissions();
         opts.runtime.spawn_blocking(move || {
@@ -711,11 +724,12 @@ impl Engine {
                 Err(_) => true,
             };
         let quotas = remembered(&ledger, unix_secs());
+        crate::startup::mark("ledger");
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
+        crate::startup::mark("rewind");
         let unclean_exit = crate::crash::take_unclean(&opts.data_dir);
-        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -741,9 +755,9 @@ impl Engine {
                 old_inputs_checked: HashSet::new(),
                 old_inputs_deleted: HashSet::new(),
                 transcript_timer: false,
-                parent_reports,
+                parent_reports: HashMap::new(),
                 stage_told: HashMap::new(),
-                quiet_teams,
+                quiet_teams: HashMap::new(),
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
@@ -838,15 +852,39 @@ impl Engine {
         });
         let engine = Engine { core, runtime };
         engine.with(|c| c.sweep_temporary());
+        crate::startup::mark("temporary");
         let _ = search.start();
         engine.refresh_project_folders();
         engine.recover_rewind();
-        engine.with(|c| {
+        crate::startup::mark("rewind-recovery");
+        Ok(engine)
+    }
+
+    /// The rest of a start, which reads every conversation file once (`Store::start_scan`) with the engine free: the
+    /// reports owed to team leaders are queued, and each conversation Keep going was on in goes on (`resume_keep_going`).
+    pub fn settle_start(&self) {
+        let keep_going = self.settle();
+        self.resume_keep_going_from(keep_going);
+    }
+
+    /// Settles the start and gives the conversations saved with Keep going on.
+    fn settle(&self) -> Vec<String> {
+        let store = self.with(|c| c.store.clone());
+        let scan = store.start_scan();
+        crate::startup::mark("scan");
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store, &scan);
+        crate::startup::mark("reports");
+        self.with(|c| {
+            for (parent, children) in parent_reports {
+                c.parent_reports.entry(parent).or_default().extend(children);
+            }
+            c.quiet_teams = quiet_teams;
             for parent in c.parent_reports.keys().cloned().collect::<Vec<_>>() {
                 c.refill_parent_reports(&parent);
             }
         });
-        Ok(engine)
+        crate::startup::mark("refill");
+        scan.keep_going
     }
 
     /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
@@ -1691,7 +1729,12 @@ impl Engine {
     }
 
     pub fn resume_keep_going(&self) {
-        self.with(|c| c.resume_keep_going())
+        let ids = self.with(|c| c.store.clone()).keep_going_ids();
+        self.resume_keep_going_from(ids);
+    }
+
+    fn resume_keep_going_from(&self, ids: Vec<String>) {
+        self.with(|c| c.resume_keep_going(ids))
     }
     /// How many conversation records were written since Faber started; only tests count them.
     #[doc(hidden)]
@@ -1752,6 +1795,7 @@ impl Engine {
             c.sweep_temporary();
             c.save_ledger(true);
             c.store.release_budget();
+            c.store.keep_list(true);
             c.store.search().stop();
         })
     }

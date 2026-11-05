@@ -11,6 +11,7 @@ import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
 import { apply, type Picked, quitNow, release } from './orders.ts';
+import * as startup from './startup.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
@@ -30,6 +31,7 @@ const HOST_STOP_MS = 5000;
 const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
 app.setPath('userData', path.join(dataDir, 'webview'));
 if (!app.requestSingleInstanceLock()) app.exit(0);
+startup.begin(dataDir);
 void startWayback(dataDir);
 
 // Compiled into out/electron/, two folders below the repository.
@@ -184,7 +186,8 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   guardVisualFrames(window.webContents);
   pane.watch(window);
-  const failsafe = setTimeout(() => reveal(window), REVEAL_FAILSAFE_MS);
+  startup.windowBuilt();
+  const failsafe = setTimeout(() => reveal(window, 'failsafe'), REVEAL_FAILSAFE_MS);
   window.once('show', () => clearTimeout(failsafe));
   const resized = () => window.webContents.send('faber:window-resized');
   window.on('maximize', resized);
@@ -233,8 +236,11 @@ function releaseGpu(): void {
   }
 }
 
-function reveal(window: BrowserWindow): void {
-  if (!hidden && !window.isDestroyed() && !window.isVisible()) window.show();
+function reveal(window: BrowserWindow, by: 'paint' | 'failsafe'): void {
+  if (window.isDestroyed()) return;
+  // Timed even when the window is already on screen (a test run shows it at once) or never shows (a hidden run).
+  startup.shown(by);
+  if (!hidden && !window.isVisible()) window.show();
 }
 
 function show(): void {
@@ -269,7 +275,7 @@ const windowCommands = new Map<string, (args: Record<string, unknown>) => unknow
   [
     'screen_ready',
     () => {
-      if (win) reveal(win);
+      if (win) reveal(win, 'paint');
     },
   ],
   ['open_link', openLink],
@@ -291,7 +297,9 @@ function relay(): void {
       const own = windowCommands.get(command);
       if (own) return { ok: (await own(given)) ?? null };
       if (!host) throw new Error('error.host.notReady');
-      return { ok: await host.call(command, given) };
+      const ok = await host.call(command, given);
+      startup.hostAnswered();
+      return { ok };
     } catch (failure) {
       return { err: failure instanceof Error ? failure.message : failure };
     }

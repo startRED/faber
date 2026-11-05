@@ -2633,6 +2633,7 @@ export const es: Messages = {
   'notes.422.fixed': 'Reiniciar para actualizar vuelve a funcionar: Faber se cierra al momento, instala y se abre en la versión nueva, sin quedarse abierto sin responder.',
   'notes.423.better': 'Memoria señala los archivos que faltan y excluye esas notas de la ficha inicial; tu texto sigue guardado.',
   'notes.424.new': 'Puedes añadir herramientas para probar sitios, consultar documentación de bibliotecas y razonar paso a paso desde el catálogo, sin cuenta.',
+  'notes.425.better': 'Faber se abre y muestra tus conversaciones en medio segundo más o menos, en lugar de 3 segundos, y responde a tus clics al instante mientras termina de arrancar.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

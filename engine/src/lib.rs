@@ -54,6 +54,7 @@ pub mod screens;
 pub mod search;
 pub mod sibling;
 pub mod signals;
+pub mod startup;
 pub mod store;
 pub mod stuck;
 pub mod tls;

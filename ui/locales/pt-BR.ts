@@ -2620,6 +2620,7 @@ export const ptBR: Messages = {
   'notes.422.fixed': 'Reiniciar para atualizar volta a funcionar: o Faber fecha na hora, instala e abre na versão nova, sem ficar aberto sem responder a nada.',
   'notes.423.better': 'A Memória avisa quando um arquivo sumiu e tira a nota do cartão inicial; seu texto continua salvo.',
   'notes.424.new': 'Você pode adicionar ferramentas pra testar sites, consultar documentação de bibliotecas e pensar passo a passo pelo catálogo, sem criar conta.',
+  'notes.425.better': 'O Faber abre e mostra suas conversas em cerca de meio segundo, em vez de 3 segundos, e responde aos seus cliques na hora enquanto termina de iniciar.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -2633,6 +2633,7 @@ export const de: Messages = {
   'notes.422.fixed': 'Neustart zum Aktualisieren klappt wieder: Faber schließt sofort, installiert und öffnet die neue Version, statt offen zu bleiben, ohne zu reagieren.',
   'notes.423.better': 'Der Projektspeicher kennzeichnet fehlende Dateien und lässt diese Notizen in der Startkarte weg; dein Text bleibt gespeichert.',
   'notes.424.new': 'Im Katalog können Sie Werkzeuge für Browsertests, Bibliotheksdokumentation und schrittweise Überlegungen hinzufügen, ohne Konto.',
+  'notes.425.better': 'Faber öffnet sich und zeigt deine Unterhaltungen in etwa einer halben Sekunde statt 3 Sekunden und reagiert sofort auf Klicks, während es fertig startet.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

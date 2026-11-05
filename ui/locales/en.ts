@@ -2513,6 +2513,7 @@ export const en = {
   'notes.422.fixed': 'Restart to update works again: Faber closes at once, installs and opens on the new version, and no longer stays open with nothing responding.',
   'notes.423.better': 'Memory flags missing files and leaves those notes out of the start card; your words stay saved.',
   'notes.424.new': 'You can add tools for browser tests, library docs and step-by-step thinking from the catalog, without an account.',
+  'notes.425.better': 'Faber opens and lists your conversations in about half a second instead of 3 seconds, and answers your clicks right away while it finishes starting.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

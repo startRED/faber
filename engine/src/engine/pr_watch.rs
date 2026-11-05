@@ -311,17 +311,20 @@ impl Engine {
 
     /// At start: the project conversations of the past week that still follow an open pull request go on following it.
     pub fn follow_open_prs(&self) {
+        // The files are read with the engine free, so the screen's calls never wait behind them.
+        let (store, week_ago) = self.with(|c| (c.store.clone(), c.now_ms().saturating_sub(7 * 24 * 3600 * 1000)));
+        let open: Vec<String> = store
+            .list()
+            .into_iter()
+            .filter(|s| s.area == Area::Project && s.updated_at >= week_ago)
+            .map(|s| s.id)
+            .filter(|id| {
+                store.get(id).and_then(|conv| conv.messages.iter().rev().find_map(|m| m.follow.clone())).is_some_and(|f| f.state.watched())
+            })
+            .collect();
         self.with(|c| {
-            let week_ago = c.now_ms().saturating_sub(7 * 24 * 3600 * 1000);
-            let ids: Vec<String> =
-                c.store.list().into_iter().filter(|s| s.area == Area::Project && s.updated_at >= week_ago).map(|s| s.id).collect();
-            for id in ids {
-                let open = c
-                    .store
-                    .get(&id)
-                    .and_then(|conv| conv.messages.iter().rev().find_map(|m| m.follow.clone()))
-                    .is_some_and(|f| f.state.watched());
-                if open && c.load(&id).is_some() {
+            for id in open {
+                if c.load(&id).is_some() {
                     c.look_later(&id, follow::FIRST);
                 }
             }

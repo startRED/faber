@@ -4,6 +4,8 @@ use super::*;
 impl Engine {
     /// Finds interrupted conversations at startup and resumes eligible work after accounts are ready.
     pub fn resume_interrupted(&self) {
+        // The list reads every file it has not read yet; read first with the engine free, it is only looked up below.
+        let _ = self.with(|c| c.store.clone()).list();
         let (cut, wait, runtime) = self.with_saves(false, |c| {
             let rows = c.store.list();
             let mut cut = Vec::new();
