@@ -3,7 +3,7 @@ import { batch, createEffect, createMemo, createSignal, createUniqueId, For, on,
 import { DEFAULT_EFFORT, type Choice, type Command, type Mention, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { failureText, t } from './i18n.ts';
 import { type Option, vendorName } from './models.ts';
 import { ModelMenu } from './ModelMenu.tsx';
 import { caretOnFirstLine, resizeComposer } from './composer-size.ts';
@@ -90,6 +90,7 @@ export function mentionText(path: string, dir: boolean): string {
 
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
 const INLINE_TEXT = 50_000;
+const MAX_ATTACHMENTS_BYTES = 8 * 1024 * 1024;
 const TEXT = /\.(txt|md|csv|json|ya?ml|toml|xml|html?|css|[cm]?[jt]sx?|py|rb|go|rs|java|kt|c|h|cpp|cs|php|sh|ps1|sql|log|ini)$/i;
 
 // A small text file written into the message: its name, and the exact words it added, so taking it away takes those words out.
@@ -163,6 +164,9 @@ export function Composer(props: Props) {
   const [inlined, setInlined] = createSignal<Inlined[]>([]);
   const [attachmentsReady, setAttachmentsReady] = createSignal(true);
   const [attachmentLoadFailed, setAttachmentLoadFailed] = createSignal(false);
+  const [attachmentReadError, setAttachmentReadError] = createSignal<string>();
+  const attachmentReadNotice = createUniqueId();
+  let readingBytes = 0;
   const draftNoticeId = createUniqueId();
   const attachmentError = () => attachmentLoadFailed() || !!(props.draftKey && attachmentSaveFailed(props.draftKey));
   let alive = true;
@@ -197,6 +201,7 @@ export function Composer(props: Props) {
   createEffect(on(() => props.draftKey, (key, previous) => {
     const turn = ++attachmentTurn;
     activeKey = key;
+    setAttachmentReadError(undefined);
     setAttachmentsReady(false);
     if (previous !== undefined) {
       additions++;
@@ -493,13 +498,32 @@ export function Composer(props: Props) {
       field.dispatchEvent(new InputEvent('input', { bubbles: true }));
     }
   };
+  const attachmentSizes = () => [
+    ...[...draft().images, ...draft().files].map((file) => ({
+      name: 'name' in file ? file.name : called.get(file) ?? t('composer.image'),
+      size: file.base64.length / 4 * 3 - (file.base64.endsWith('==') ? 2 : file.base64.endsWith('=') ? 1 : 0),
+    })),
+    ...inlined().map((file) => ({ name: file.name, size: new TextEncoder().encode(file.block).length })),
+  ];
+  const refusedAttachment = (files: Iterable<{ name: string; size: number }>, held = 0) => {
+    for (const file of files) {
+      held += file.size;
+      if (held > MAX_ATTACHMENTS_BYTES) return file.name || t('thumb.file');
+    }
+  };
   const send = () => {
     if (!canSend() || historyMode() === 'search') return;
+    const refused = refusedAttachment(attachmentSizes());
+    if (refused !== undefined) {
+      setAttachmentReadError(failureText({ key: 'error.attachmentTooLarge', detail: refused }));
+      return;
+    }
     leaveHistory(false);
     cancelHistoryRead();
     closeMentions();
     clearTimeout(pause);
     additions++;
+    setAttachmentReadError(undefined);
     const sending = draft();
     sentWith.set(sending, inlined());
     props.onSend(sending);
@@ -531,9 +555,18 @@ export function Composer(props: Props) {
     const discarded = key ? attachmentDiscardVersion(key) : 0;
     const reading = {};
     const releaseRead = key ? retainAttachments(key) : () => {};
+    let reserved = 0;
     setDirty(reading, true);
     try {
       if (!await hydration) return;
+      const held = attachmentSizes().reduce((n, file) => n + file.size, 0);
+      // Pending reads count too: two simultaneous drops must not each claim the whole message budget.
+      const refused = refusedAttachment(files, held + readingBytes);
+      if (refused !== undefined) throw { key: 'error.attachmentTooLarge', detail: refused };
+      const bytes = files.reduce((n, file) => n + file.size, 0);
+      readingBytes += bytes;
+      reserved = bytes;
+      if (alive && key === activeKey) setAttachmentReadError(undefined);
       const result = await attach(files, EMPTY);
       if (generation !== additions || (key && attachmentDiscardVersion(key) !== discarded)) return;
       if (!alive || key !== activeKey) {
@@ -555,21 +588,31 @@ export function Composer(props: Props) {
         });
         setInlined((all) => [...all, ...added]);
       });
-    } finally { releaseRead(); setDirty(reading, false); }
+    } catch (err) {
+      if (alive && key === activeKey && generation === additions) setAttachmentReadError(failureText(err));
+    } finally { readingBytes -= reserved; releaseRead(); setDirty(reading, false); }
   };
   // The attachments, each its own. A memo per kind, so typing (which makes a new draft) never builds the thumbnails again.
   const images = createMemo(() => draft().images);
   const files = createMemo(() => draft().files);
   const count = () => images().length + files().length + inlined().length;
   const shown = keepForExit(() => count() > 0);
-  const dropImage = (image: Draft['images'][number]) => editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
-  const dropFile = (file: Draft['files'][number]) => editDraft((d) => ({ ...d, files: d.files.filter((f) => f !== file) }));
+  const dropImage = (image: Draft['images'][number]) => batch(() => {
+    editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
+    setAttachmentReadError(undefined);
+  });
+  const dropFile = (file: Draft['files'][number]) => batch(() => {
+    editDraft((d) => ({ ...d, files: d.files.filter((f) => f !== file) }));
+    setAttachmentReadError(undefined);
+  });
   const dropText = (item: Inlined) => batch(() => {
+    setAttachmentReadError(undefined);
     setInlined((all) => all.filter((i) => i !== item));
     editDraft((d) => ({ ...d, text: d.text.replace(item.block, '') }));
   });
   const dropAll = () => batch(() => {
     additions++;
+    setAttachmentReadError(undefined);
     editDraft((d) => ({ ...d, images: [], files: [], text: inlined().reduce((text, i) => text.replace(i.block, ''), d.text) }));
     setInlined([]);
   });
@@ -596,6 +639,9 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
+      <Show when={attachmentReadError()}>
+        {(message) => <p class="note err composer-attachment-error" id={attachmentReadNotice} role="alert">{message()}</p>}
+      </Show>
       <Show when={attachmentError()}>
         <p class="hint" id={draftNoticeId} role="status">{t(attachmentLoadFailed() ? 'composer.draftLoadFailed' : 'composer.draftSaveFailed')}
           <Show when={attachmentLoadFailed()}>
@@ -641,7 +687,7 @@ export function Composer(props: Props) {
       <textarea
         data-restore="composer"
         aria-label={t('composer.message')}
-        aria-describedby={[attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
+        aria-describedby={[attachmentReadError() && attachmentReadNotice, attachmentError() && draftNoticeId, props.about && 'composer-about'].filter(Boolean).join(' ') || undefined}
         rows={1}
         placeholder={historyMode() === 'search' ? t('composer.history') : props.placeholder}
         value={draft().text}

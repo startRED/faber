@@ -17,6 +17,27 @@ use std::time::Duration;
 const A: &str = "https://example.org/a";
 const B: &str = "https://example.org/b";
 
+#[tokio::test]
+async fn blocked_sites_refuse_cards_app_panes_and_agent_loads_before_tabs_or_driver_changes() {
+    let (pane, fake, home) = world();
+    *crate::lock(&home.blocked_hosts) = vec!["bank.example".into()];
+    for url in ["https://BANK.example./", "https://login.bank.example:8443/"] {
+        assert_eq!(pane.site_open("c".into(), url.into()).await, Err("error.browser.blockedHost".into()));
+        assert_eq!(pane.site_go("c".into(), url.into()).await, Err("error.browser.blockedHost".into()));
+        assert_eq!(pane.load(url, "c", None).await, Err("error.browser.blockedHost".into()));
+    }
+    assert!(fake.log().is_empty());
+    assert!(crate::lock(&home.tabs).is_empty());
+    assert!(pane.site_open("c".into(), "https://evil-bank.example/".into()).await.unwrap());
+    let before = fake.log();
+    *crate::lock(&home.blocked_hosts) = vec!["evil-bank.example".into()];
+    assert!(!pane.show_page("d", "https://evil-bank.example/").await);
+    assert!(!pane.go("c", "https://evil-bank.example/").await);
+    assert_eq!(fake.log(), before, "updated settings apply before any driver action");
+    assert!(!crate::lock(&home.tabs).contains_key("d"));
+    pane.close();
+}
+
 #[derive(Default)]
 struct Fake {
     log: Mutex<Vec<String>>,
@@ -148,6 +169,7 @@ type SeenPage = (String, Option<String>, String, Option<String>);
 
 #[derive(Default)]
 struct FakeHome {
+    blocked_hosts: Mutex<Vec<String>>,
     events: Mutex<Vec<PaneEvent>>,
     tabs: Mutex<HashMap<String, Tabs>>,
     seen: Mutex<Vec<SeenPage>>,
@@ -160,6 +182,9 @@ impl FakeHome {
 }
 
 impl Home for FakeHome {
+    fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move { faber_engine::browser::check_blocked_url(&url, &crate::lock(&self.blocked_hosts)).map_err(str::to_string) })
+    }
     fn tabs(&self, conversation: String) -> BoxFuture<'_, Option<Tabs>> {
         Box::pin(async move { crate::lock(&self.tabs).get(&conversation).cloned() })
     }

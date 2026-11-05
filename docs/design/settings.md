@@ -24,7 +24,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
   `.field`. Under 960 px the control slot moves under the name.
 - Settings uses plain names in all five languages: automatic actions (with "hooks" explained beside the switch),
-  Stored copy for saved web results, and named limit periods. Incomplete readings say "at least" instead of a symbol.
+  Stored copy for saved web results, and named limit periods. The hook hint and help explain that Claude Code keeps automatic actions off outside Full access to protect saved approvals; the stored switch still applies to other backends. Incomplete readings say "at least" instead of a symbol.
   The account total keeps the shared "in API value" wording and immediately explains the estimate and that it is not a bill.
   Both access menus show every choice's description, with Ask's existing approvals and Full access's file, command and
   internet access stated in plain words. Long security warnings and all five existing modes, including Plan, remain. The Full access explanation also says in every language that the AI can bypass approval of project preferences and lessons.
@@ -86,4 +86,8 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   with Faber's own spend today in API value, written the language's way with two decimals. Every note about how the
   figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
   projection and age) is behind one "Details" fold per card. Inside it, a second fold shows the last 30 days of Faber’s API value as daily bars and explains that replies of unknown cost are excluded. "Manage accounts" appears once in the section. After the cards comes one more card titled "Auto", with one row, "What Auto learned": a Forget button (it reads "Forgotten" for 2.5 s and cannot be pressed twice in that time; an error shows under the row in the existing `.note.err` line). It sits here because Auto's picks follow these limits and Auto has no section of its own.
-- Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
+- Privacy starts with one Blocked sites row: one short line, details behind its ?, a field limited to 253 characters and Add, then the saved hosts with a named Remove button each (at most 50). It uses the existing field, button and option grammar, wraps long hosts, and stacks at the shared narrow breakpoint. Add and Remove wait for saving; a failed save retains the draft/list. Successful removal returns focus to the add field. The list blocks host names and their subdomains only in Faber’s browser. No new motion, process or timer. Privacy then has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
+
+## Known incoherences
+
+- The Electron pane enforces Blocked sites for direct opens through the Rust host only. Page links, history and redirects need the Electron move’s per-hop navigation hook. Tauri applies the same check to every navigation callback the platform reports; unreported redirect hops cannot be checked.

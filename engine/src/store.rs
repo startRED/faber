@@ -35,7 +35,7 @@ enum LegacyVerbosity {
     High,
 }
 
-/// Why a file could not be saved or read, as a key the screen translates. A failed save leaves the old file as it was.
+/// Why a file could not be saved or read, as a key the screen translates. A directory-sync failure may follow replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
     /// The disk or the user's quota is full.
@@ -99,8 +99,8 @@ impl Disk for RealDisk {
     }
 }
 
-/// Writes `bytes` beside `path` and renames the result over it. On failure the temp file is removed and the old file
-/// stays as it was.
+/// Writes and syncs `bytes` beside `path`, renames the result over it and syncs its parent directory on Unix.
+/// On failure the temp file is removed; a directory-sync failure may leave the new file published without durability.
 pub fn replace(disk: &dyn Disk, path: &Path, bytes: &[u8]) -> Result<(), Fault> {
     replace_with(disk, path, bytes, true)
 }
@@ -113,7 +113,8 @@ pub fn replace_with(disk: &dyn Disk, path: &Path, bytes: &[u8], patient: bool) -
     // Windows lets an antivirus or indexer hold a file it has just seen for a few ms: a busy rename tries again before it
     // counts as a failed save.
     let rename = || if patient { crate::tools::retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
-    disk.write(&tmp, bytes).and_then(|()| rename()).map_err(|e| {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    disk.write(&tmp, bytes).and_then(|()| rename()).and_then(|()| disk.flush(parent)).map_err(|e| {
         drop(fs::remove_file(&tmp));
         Fault::of_write(&e)
     })
@@ -167,6 +168,10 @@ pub struct Store {
     /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
     /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
     summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
+    /// The rows above kept on disk (`conversation-list.json`), so a start lists the conversations from one small file and
+    /// reads only the conversation files that changed since: with 257 MB of conversations the first list took 1.1 s, and
+    /// 7.6 s from a cold disk (2026-11-04).
+    kept_list: KeptList,
     /// Failed reads, and whether the person dismissed this exact file for this app run.
     unreadable: Mutex<HashMap<PathBuf, (Stamp, bool)>>,
     /// How many times a conversation record was written, so a test can tell one write from a hundred.
@@ -190,6 +195,49 @@ struct SnapshotWrites {
 
 /// A file's length and last change: the same pair means the file was not written since.
 type Stamp = (u64, Option<SystemTime>);
+
+/// How often a busy list writes `conversation-list.json` again at most; closing writes it too.
+const KEEP_LIST_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `Store::summaries` on disk: read at the first list, written when rows changed.
+struct KeptList {
+    file: PathBuf,
+    /// The rows changed since they were last written.
+    dirty: std::sync::atomic::AtomicBool,
+    /// Read yet, and when last written; held while writing, so two writes never share the temporary file.
+    state: Mutex<(bool, Option<std::time::Instant>)>,
+}
+
+/// The file as written. A row counts only for the program that wrote it (`build`): another may make rows differently.
+#[derive(Serialize, Deserialize)]
+struct ListFile {
+    build: String,
+    rows: Vec<ListRow>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ListRow {
+    file: String,
+    len: u64,
+    /// The file's last change, in seconds and nanoseconds since 1970.
+    modified: Option<(u64, u32)>,
+    temporary: bool,
+    row: Summary,
+}
+
+/// This program, by its own file's length and time: rows written by any other build are read again from the files.
+fn build_id() -> &'static str {
+    static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUILD.get_or_init(|| {
+        std::env::current_exe()
+            .and_then(fs::metadata)
+            .map(|m| {
+                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).unwrap_or_default();
+                format!("{}-{}-{}", env!("CARGO_PKG_VERSION"), m.len(), at.as_nanos())
+            })
+            .unwrap_or_default()
+    })
+}
 
 fn stamp(path: &Path) -> Option<Stamp> {
     fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()))
@@ -247,6 +295,28 @@ impl Drop for Store {
     }
 }
 
+/// What a start found in the conversation files (`Store::start_scan`), by id.
+#[derive(Default)]
+pub struct StartScan {
+    /// Saved with Keep going on.
+    pub keep_going: Vec<String>,
+    /// Started by another conversation's agent.
+    pub started_by: Vec<String>,
+    /// Waiting on conversations it started.
+    pub waiting_on: Vec<String>,
+}
+
+/// The id of a conversation record marked temporary, or None for an ordinary or unreadable one.
+fn temporary_flag(text: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Flag {
+        id: String,
+        #[serde(default)]
+        temporary: bool,
+    }
+    serde_json::from_str::<Flag>(text).ok().filter(|flag| flag.temporary).map(|flag| flag.id)
+}
+
 impl Store {
     pub(crate) fn data_roots() -> Vec<PathBuf> {
         let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -292,6 +362,11 @@ impl Store {
             recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
             summaries: Mutex::default(),
+            kept_list: KeptList {
+                file: data_dir.join("conversation-list.json"),
+                dirty: std::sync::atomic::AtomicBool::new(false),
+                state: Mutex::new((false, None)),
+            },
             unreadable: Mutex::default(),
             writes: std::sync::atomic::AtomicU64::new(0),
             group_move: Mutex::default(),
@@ -358,7 +433,75 @@ impl Store {
         known.is_some() && stamp(&path) == known
     }
 
+    /// Reads `conversation-list.json` into the rows, once: a row already known in memory is newer and stays.
+    fn read_kept_list(&self) {
+        let mut state = self.kept_list.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if std::mem::replace(&mut state.0, true) {
+            return;
+        }
+        let Some(kept) = read::<ListFile>(&self.kept_list.file).filter(|kept| !build_id().is_empty() && kept.build == build_id()) else {
+            return;
+        };
+        let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for ListRow { file, len, modified, temporary, mut row } in kept.rows {
+            // Only a plain name inside the conversations folder.
+            if file.contains(['/', '\\']) || !file.ends_with(".json") {
+                continue;
+            }
+            // A time no file can have (a damaged list) leaves that file to be read.
+            let modified = match modified {
+                None => None,
+                Some((secs, nanos)) if nanos < 1_000_000_000 => {
+                    match std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs, nanos)) {
+                        Some(at) => Some(at),
+                        None => continue,
+                    }
+                }
+                Some(_) => continue,
+            };
+            row.temporary = temporary;
+            cache.entry(self.conversations.join(file)).or_insert(((len, modified), row));
+        }
+    }
+
+    /// Writes the rows to `conversation-list.json` when they changed, at most every `KEEP_LIST_EVERY` unless `now`.
+    pub fn keep_list(&self, now: bool) {
+        let mut state = self.kept_list.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.0 || build_id().is_empty() || (!now && state.1.is_some_and(|at| at.elapsed() < KEEP_LIST_EVERY)) {
+            return;
+        }
+        if !self.kept_list.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let rows = {
+            let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            cache
+                .iter()
+                .filter_map(|(path, ((len, modified), row))| {
+                    let modified =
+                        modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| (d.as_secs(), d.subsec_nanos()));
+                    let file = path.file_name()?.to_str()?.to_string();
+                    Some(ListRow { file, len: *len, modified, temporary: row.temporary, row: row.clone() })
+                })
+                .collect()
+        };
+        state.1 = Some(std::time::Instant::now());
+        let Ok(bytes) = serde_json::to_vec(&ListFile { build: build_id().to_string(), rows }) else { return };
+        // Only a help for the next start: a write that fails leaves that start to read the files.
+        let temporary = self.kept_list.file.with_extension("json.tmp");
+        if fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, &self.kept_list.file)).is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+    }
+
     pub fn list(&self) -> Vec<Summary> {
+        self.read_kept_list();
+        let list = self.listed();
+        self.keep_list(false);
+        list
+    }
+
+    fn listed(&self) -> Vec<Summary> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         let paths: Vec<PathBuf> = fs::read_dir(&self.conversations)
             .into_iter()
@@ -369,7 +512,11 @@ impl Store {
             .collect();
         let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut unreadable = self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let known = cache.len();
         cache.retain(|path, _| paths.contains(path));
+        if cache.len() != known {
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
+        }
         unreadable.retain(|path, _| paths.contains(path));
         let mut list: Vec<Summary> = paths
             .into_iter()
@@ -386,6 +533,7 @@ impl Store {
                         if let Some(row) = &row {
                             unreadable.remove(&path);
                             cache.insert(path, (now_stamp, row.clone()));
+                            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
                             return Some(row.clone());
                         }
                         let previous = unreadable.insert(path.clone(), (now_stamp, false));
@@ -504,6 +652,30 @@ impl Store {
             .collect()
     }
 
+    /// What a start looks for in every conversation file, read once, by searching the text of each.
+    pub fn start_scan(&self) -> StartScan {
+        let mut scan = StartScan::default();
+        for entry in fs::read_dir(&self.conversations).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|x| x != "json") {
+                continue;
+            }
+            let (Some(id), Ok(text)) = (path.file_stem().map(|id| id.to_string_lossy().into_owned()), fs::read_to_string(&path)) else {
+                continue;
+            };
+            if text.contains("\"keepGoing\"") {
+                scan.keep_going.push(id.clone());
+            }
+            if text.contains("\"startedBy\"") {
+                scan.started_by.push(id.clone());
+            }
+            if text.contains("\"waitingOn\"") {
+                scan.waiting_on.push(id);
+            }
+        }
+        scan
+    }
+
     /// The ids of conversations whose file mentions `text`, read without parsing.
     pub fn mentioning(&self, text: &str) -> Vec<String> {
         fs::read_dir(&self.conversations)
@@ -530,6 +702,7 @@ impl Store {
         // Known as read, unless it changed while it was being read: `unchanged` then says so.
         if let Some(read_stamp) = before.filter(|b| stamp(&path).as_ref() == Some(b)) {
             self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, summary(&c)));
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
         Some(c)
     }
@@ -625,25 +798,32 @@ impl Store {
         self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
         if let Some(now_stamp) = stamp(&path) {
             self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, row));
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
     }
 
     /// Enumerate records directly: temporary conversations are deliberately absent from list().
+    /// A file whose row the list keeps for its current length and time is not read again: its row says whether it is
+    /// temporary. Every other file is read, and parsed only when it mentions `temporary`.
     pub(crate) fn temporary_ids(&self) -> Vec<String> {
-        #[derive(serde::Deserialize)]
-        struct Flag {
-            id: String,
-            #[serde(default)]
-            temporary: bool,
-        }
+        self.read_kept_list();
         fs::read_dir(&self.conversations)
             .into_iter()
             .flatten()
             .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-            .filter_map(|e| {
-                let flag: Flag = serde_json::from_reader(io::BufReader::new(fs::File::open(e.path()).ok()?)).ok()?;
-                (flag.temporary && e.path().file_stem().is_some_and(|s| s == flag.id.as_str())).then_some(flag.id)
+            .map(|e| e.path())
+            .filter(|path| path.extension().is_some_and(|x| x == "json"))
+            .filter_map(|path| {
+                let known = {
+                    let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    cache.get(&path).filter(|(kept, _)| stamp(&path).as_ref() == Some(kept)).map(|(_, row)| row.temporary)
+                };
+                if known == Some(false) {
+                    return None;
+                }
+                let text = fs::read_to_string(&path).ok()?;
+                let id = text.contains("\"temporary\"").then(|| temporary_flag(&text)).flatten()?;
+                path.file_stem().is_some_and(|s| s == id.as_str()).then_some(id)
             })
             .collect()
     }
@@ -992,14 +1172,14 @@ impl Store {
     }
 
     /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
-    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<(), &'static str> {
+    pub(crate) fn refresh_rules(&self, project: &str, folder: &Path) -> Result<crate::project::rules::Facts, &'static str> {
         let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
-        let record = crate::project::rules::refresh_cached(folder, all.get(project))?;
+        let (record, facts) = crate::project::rules::refresh_cached(folder, all.get(project))?;
         if all.get(project) != Some(&record) {
             all.insert(project.into(), record);
             self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
         }
-        Ok(())
+        Ok(facts)
     }
 
     fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
@@ -1247,6 +1427,52 @@ mod tests {
         assert_eq!(reopened.get("ordinary").unwrap(), chat);
         assert_eq!(fs::read(ordinary_file).unwrap(), ordinary_bytes, "listing and reopening never rewrite ordinary conversations");
         assert!(reopened.get("private").unwrap().temporary, "this slice filters without deleting any conversation");
+    }
+
+    #[test]
+    fn a_reopened_store_lists_from_the_kept_list_and_reads_only_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = |id: &str, title: &str, temporary: bool| -> Conversation {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "title": title, "area": "chat", "createdAt": 0, "updatedAt": 1, "messages": [], "temporary": temporary
+            }))
+            .unwrap()
+        };
+        let store = Store::new(dir.path());
+        for conversation in [chat("kept", "Kept", false), chat("changed", "Before", false), chat("private", "Private", true)] {
+            store.save_checked(&conversation).unwrap();
+        }
+        let titles = |store: &Store| store.list().into_iter().map(|row| (row.id, row.title)).collect::<BTreeMap<_, _>>();
+        assert_eq!(titles(&store).len(), 2);
+        store.keep_list(true);
+        drop(store);
+        // The same length and time as before, with nothing readable in it: only a row kept on disk can still name it.
+        let kept = dir.path().join("conversations/kept.json");
+        let (len, modified) = (fs::metadata(&kept).unwrap().len(), fs::metadata(&kept).unwrap().modified().unwrap());
+        fs::write(&kept, vec![b' '; len as usize]).unwrap();
+        fs::OpenOptions::new().write(true).open(&kept).unwrap().set_modified(modified).unwrap();
+        // A file changed since is read again.
+        Store::new(dir.path()).save_checked(&chat("changed", "After", false)).unwrap();
+        let reopened = Store::new(dir.path());
+        assert_eq!(
+            titles(&reopened),
+            BTreeMap::from([("changed".to_string(), "After".to_string()), ("kept".to_string(), "Kept".to_string())]),
+            "the temporary conversation stays out of the list after a restart too"
+        );
+        // A list file written by another build is not trusted: every file is read.
+        let file = dir.path().join("conversation-list.json");
+        let mut written: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        written["build"] = "another".into();
+        fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
+        let rows = Store::new(dir.path()).list();
+        assert!(rows.iter().all(|row| row.title != "Kept"), "the unreadable file is never listed from the old rows");
+        // A time no file can have is not trusted either, and never stops the list.
+        written["build"] = build_id().into();
+        for row in written["rows"].as_array_mut().unwrap() {
+            row["modified"] = serde_json::json!([u64::MAX, 999_999_999]);
+        }
+        fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
+        assert!(Store::new(dir.path()).list().iter().all(|row| row.title != "Kept"));
     }
 
     #[test]

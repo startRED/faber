@@ -2,7 +2,7 @@
 // notices, keeping the PC awake, starting with the system, the file dialogs and showing a file in the file manager. Every order says what is true now, so applying one twice
 // does no harm; the decisions (the setting, a game in front, one notice per question) were all made in Rust.
 
-import { app, type BrowserWindow, dialog, Menu, Notification, nativeImage, powerSaveBlocker, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, Menu, Notification, nativeImage, powerSaveBlocker, shell, Tray } from 'electron';
 
 type TrayOrder = {
   kind: 'tray';
@@ -166,9 +166,26 @@ export function apply(value: unknown, window: Window): void {
     case 'quit':
       // The self-update is about to replace this program: it ends now, not after the usual wait for the host to stop
       // (the host sent this order itself, and a copy of it finishes the install).
-      release();
-      app.exit(0);
+      quitNow();
       break;
+  }
+}
+
+/** How long `quitNow` gives Electron's own exit before the process ends itself. */
+const EXIT_FAILSAFE_MS = 1500;
+
+/**
+ * Ends the app at once, for the self-update: the window goes away first, so the restart is felt the moment it is pressed,
+ * and the process is gone even if Electron's exit hangs or `release` fails (2026-11-04: the window outlived the order, the
+ * installer met it and failed, and Faber stayed open with no engine).
+ */
+export function quitNow(): void {
+  for (const open of BrowserWindow.getAllWindows()) open.hide();
+  setTimeout(() => process.exit(0), EXIT_FAILSAFE_MS);
+  try {
+    release();
+  } finally {
+    app.exit(0);
   }
 }
 

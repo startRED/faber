@@ -67,6 +67,30 @@ async fn the_last_page_of_a_conversation_comes_back_after_a_restart_and_never_in
     assert_eq!(again.browser_tabs(&id), None, "the tabs leave with the conversation");
 }
 
+#[tokio::test]
+async fn blocked_hosts_are_validated_atomically_merged_and_kept_after_restart() {
+    use faber_engine::model::Settings;
+    let dir = support::DataFolder::new();
+    let app = engine(&dir);
+    app.save_settings(Settings { blocked_hosts: Some(vec!["BANK.Example.".into(), "bank.example".into()]), ..Default::default() }).unwrap();
+    app.save_settings(Settings { language: Some("en".into()), ..Default::default() }).unwrap();
+    let before = app.settings();
+    for hosts in [vec!["bank.example/path".into()], vec!["a.example".into(); 51]] {
+        assert!(
+            app.save_settings(Settings { blocked_hosts: Some(hosts), language: Some("de".into()), ..Default::default() })
+                .unwrap_err()
+                .starts_with("error.browser.")
+        );
+        assert_eq!(app.settings(), before, "a rejected list changes no setting");
+    }
+    app.shutdown();
+    let app = engine(&dir);
+    assert_eq!(app.settings().blocked_hosts, Some(vec!["bank.example".into()]));
+    app.save_settings(Settings { blocked_hosts: Some(vec![]), ..Default::default() }).unwrap();
+    assert_eq!(app.settings().blocked_hosts, Some(vec![]));
+    app.shutdown();
+}
+
 /// Records which tab each of the agent's calls acted in, and answers every one with the page it asked for.
 #[derive(Default)]
 struct Tabbed(std::sync::Mutex<Vec<(String, String)>>);
@@ -132,7 +156,12 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
     .unwrap();
     let browser = Arc::new(Tabbed::default());
     app.set_browser(browser.clone());
-    app.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
+    app.save_settings(Settings {
+        permissions: Some(Permissions::FullAccess),
+        blocked_hosts: Some(vec!["BANK.Example.".into()]),
+        ..Settings::default()
+    })
+    .unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app
         .send(faber_engine::SendRequest {
@@ -152,6 +181,13 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
     pipe.say(serde_json::json!({"id":start["id"],"result":{"thread":{"id":"main"}}})).await;
     let turn = wire(&pipe, |m| m["method"] == "turn/start").await;
     pipe.say(serde_json::json!({"id":turn["id"],"result":{"turn":{"id":"turn-main"}}})).await;
+
+    for (n, url) in ["https://bank.example/", "https://login.BANK.example.:8443/"].into_iter().enumerate() {
+        let (said, ok) = browse(&mut pipe, 800 + n as u64, serde_json::json!({ "url": url })).await;
+        assert!(!ok && said == "error.browser.blockedHost", "{said}");
+        assert!(browser.0.lock().unwrap().is_empty(), "a blocked address never reaches the pane");
+        assert_eq!(app.browser_tabs(&id), None, "a blocked address never creates a tab");
+    }
 
     // Nothing of the agent's is open: an action has no page to act on, and never reaches the browser.
     let (said, ok) = browse(&mut pipe, 900, serde_json::json!({ "action": "read" })).await;

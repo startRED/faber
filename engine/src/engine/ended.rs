@@ -182,44 +182,136 @@ const CONCLUDE: &str = "Your last turn ended without concluding the task. Check 
 the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
 move is the person's. Say what is not done or not verified. Then write your closing message to the person.";
 
+fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> String {
+    let files: Vec<_> =
+        memory.files.iter().filter(|file| file.over_limit.is_some()).map(|file| file.path.escape_debug().to_string()).collect();
+    if files.is_empty() {
+        return base.to_string();
+    }
+    format!(
+        "{base}\nFold {}: merge duplicates and drop what a later line overrides; keep decisions the person kept and move other overridden decisions to .faber/decisions-old.md. If the target cannot be reached without losing a live item, drop nothing.",
+        files.join(", ")
+    )
+}
+
 impl Core {
-    /// One bounded wake, through the ordinary metered continuation path. A refusal is not retried.
+    /// One bounded wake, through the ordinary metered continuation path. All project-note reads run off the lock.
     pub(super) fn request_conclusion(&mut self, conv: &str) {
-        // A compaction coming carries the agent on with its own next step: that turn is the follow-up.
-        if self.live.get(conv).is_some_and(|l| l.turn.is_some()) || self.compacts.contains_key(conv) || self.compactions.contains_key(conv)
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return };
+        let pending = c.messages.iter().any(|m| !m.fold_kept.is_empty());
+        if !pending && !self.can_request_conclusion(conv) {
+            return;
+        }
+        let Some(reply) = c.messages.last().map(|m| m.id.clone()) else { return };
+        let Ok(folder) = self.folder_of(c) else { return };
+        let Some(project) = c.project_id.as_deref() else { return };
+        let kept = self.store.kept_decisions_reader(project);
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        self.opts.runtime.spawn_blocking(move || {
+            let memory = crate::project::memory::list_faber(&folder).ok();
+            let kept = kept();
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // Stop, a new message, a different working copy or a removed project cancels this admission.
+            if core
+                .convs
+                .get(&conv)
+                .is_none_or(|c| c.messages.last().is_none_or(|m| m.id != reply) || core.folder_of(c).ok().as_ref() != Some(&folder))
+                || core.live.get(&conv).is_some_and(|live| live.turn.is_some())
+            {
+                return;
+            }
+            core.conclusion_memory_ready(&conv, memory, &kept);
+        });
+    }
+
+    fn can_request_conclusion(&self, conv: &str) -> bool {
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
+            || self.room_refusal(conv).is_some()
         {
+            return false;
+        }
+        self.convs.get(conv).is_some_and(|c| {
+            !c.stopped
+                && c.archived_at.is_none()
+                && c.keep_going.is_none()
+                && c.queued.is_empty()
+                && !c.compacting
+                && matches!(result_kind(c), Some(EndKind::Done | EndKind::Unconcluded))
+                && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))
+                && !c
+                    .messages
+                    .iter()
+                    .rev()
+                    .take_while(|m| m.role != Role::User || m.wake.is_some())
+                    .any(|m| m.conclusion_requested || m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion"))
+        })
+    }
+
+    fn conclusion_memory_ready(
+        &mut self,
+        conv: &str,
+        memory: Option<crate::project::memory::MemoryList>,
+        kept: &[crate::project::memory::KeptDecision],
+    ) {
+        use crate::project::memory::present_kept;
+        if let Some(memory) = &memory {
+            let c = self.convs.get_mut(conv).unwrap();
+            let mut lost = false;
+            let mut checked = false;
+            for message in &mut c.messages {
+                if !message.fold_kept.is_empty()
+                    && let Some(present) = present_kept(memory, &message.fold_kept)
+                {
+                    lost |= present.len() != message.fold_kept.len();
+                    message.fold_kept.clear();
+                    checked = true;
+                }
+            }
+            if lost && let Some(reply) = c.messages.last_mut() {
+                reply.fold_lost = true;
+            }
+            if checked {
+                self.save(conv);
+            }
+        }
+        if !self.can_request_conclusion(conv) {
             return;
         }
-        // Faber spends only on a subscription it knows, as Keep going does: an account not read yet, billed per use or out of
-        // quota gets no request (it would only start a turn that fails), and the conversation stays honestly unconcluded.
-        if self.room_refusal(conv).is_some() {
+        let c = &self.convs[conv];
+        let conclude = result_kind(c) == Some(EndKind::Unconcluded) && needs_conclusion(c);
+        let base = if conclude {
+            CONCLUDE
+        } else {
+            "Before closing, tidy the project notes, then call wrap_up restating the task's outcome and verification."
+        };
+        let text = memory.as_ref().map_or_else(|| base.into(), |memory| closing_input(base, memory));
+        let fold = text != base;
+        if !conclude && !fold {
             return;
         }
-        let Some(c) = self.convs.get_mut(conv) else { return };
-        if c.stopped
-            || c.archived_at.is_some()
-            || c.keep_going.is_some()
-            || !c.queued.is_empty()
-            || c.compacting
-            || result_kind(c) != Some(EndKind::Unconcluded)
-            || !needs_conclusion(c)
-        {
-            return;
-        }
-        // Once per request: any earlier ask since the person's last message counts, whatever Faber wrote in between.
-        let asked = c
-            .messages
-            .iter()
-            .rev()
-            .take_while(|m| m.role != Role::User || m.wake.is_some())
-            .any(|m| m.conclusion_requested || m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion"));
-        let Some(reply) = c.messages.last_mut() else { return };
-        if asked || reply.status != Some(Status::Done) {
-            return;
-        }
+        let reply = self.convs.get_mut(conv).unwrap().messages.last_mut().unwrap();
         reply.conclusion_requested = true;
+        if fold {
+            reply.fold_kept = memory.as_ref().and_then(|memory| present_kept(memory, kept)).unwrap_or_default();
+        }
         self.save(conv);
-        let _ = self.send_by_itself(conv, CONCLUDE.into(), Wake::of("wake.conclusion"));
+        let _ = self.send_by_itself(conv, text, Wake::of("wake.conclusion"));
+    }
+
+    pub(super) fn fold_notice_input(&mut self, conv: &str, text: String) -> String {
+        let Some(c) = self.convs.get_mut(conv) else { return text };
+        let mut lost = false;
+        for message in &mut c.messages {
+            lost |= std::mem::take(&mut message.fold_lost);
+        }
+        if !lost {
+            return text;
+        }
+        self.save(conv);
+        format!("{text}\nNotice: A decision kept by the person is missing after folding .faber/decisions.md; check and restore it.")
     }
 }
 
@@ -227,6 +319,152 @@ impl Core {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn t495_fold_kept_loss_is_a_notice_in_the_next_input() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let path = folder.path().join(".faber/decisions.md");
+        std::fs::write(&path, "- Keep exports local. [by person]\n- Proposal. [by person]\n").unwrap();
+        let kept = vec![KeptDecision::of("- Keep exports local.")];
+        let before = memory::list_faber(folder.path()).unwrap();
+        let snapshot = memory::present_kept(&before, &kept).unwrap();
+        assert_eq!(snapshot, kept, "a forged person mark is not an approval");
+        engine.with(|core| {
+            let reply = core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+            reply.fold_kept = snapshot;
+            reply.conclusion_requested = true;
+            // The pending hashes survive saving and reopening a conversation.
+            let saved = serde_json::to_value(&*reply).unwrap();
+            *reply = serde_json::from_value(saved).unwrap();
+            core.conclusion_memory_ready(&id, Some(before), &kept);
+            assert!(!core.convs[&id].messages.last().unwrap().fold_lost);
+            core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().fold_kept = kept.clone();
+        });
+        std::fs::write(&path, "- Keep exports remote. [by person]\n").unwrap();
+        let mut after = memory::list_faber(folder.path()).unwrap();
+        after.incomplete = true;
+        engine.with(|core| {
+            core.conclusion_memory_ready(&id, Some(after.clone()), &kept);
+            let reply = core.convs[&id].messages.last().unwrap();
+            assert!(!reply.fold_lost && !reply.fold_kept.is_empty(), "an incomplete scan cannot prove loss");
+            after.incomplete = false;
+            core.conclusion_memory_ready(&id, Some(after), &kept);
+            let reply = core.convs[&id].messages.last().unwrap();
+            assert!(reply.fold_lost && reply.error.is_none());
+            assert!(reply.fold_kept.is_empty());
+            let input = core.fold_notice_input(&id, "Next task".into());
+            assert!(input.starts_with("Next task\nNotice:"));
+            assert!(input.contains("kept by the person is missing"));
+            assert_eq!(core.fold_notice_input(&id, "Another task".into()), "Another task", "notice is consumed once");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t495_normal_close_folds_once_for_both_vendors() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+            let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            std::fs::create_dir(folder.path().join(".faber")).unwrap();
+            let notes = folder.path().join(".faber/decisions.md");
+            let kept = crate::project::memory::KeptDecision::of("- Keep exports local.");
+            std::fs::write(&notes, format!("- Keep exports local. [by person]\n\n{}", "x".repeat(8193))).unwrap();
+            let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+            let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+            let id = super::super::answer::tests::seed(
+                &engine,
+                Session::from_fn(move |command| {
+                    if let crate::events::SessionCommand::Send(turn) = command {
+                        let _ = send.send(turn.text);
+                    }
+                }),
+                &[("reply", &[])],
+            );
+            engine.with(|core| {
+                core.store.keep_decision(&project.id, kept.clone(), std::slice::from_ref(&project.id)).unwrap();
+                let name = if vendor == Vendor::Claude { "claude" } else { "codex" };
+                core.opts.clis.insert(vendor, Cli { command: name.into(), prefix: vec![] });
+                core.ledger.of_mut(vendor).billing = Billing::Subscription;
+                let c = core.convs.get_mut(&id).unwrap();
+                c.area = Area::Project;
+                c.project_id = Some(project.id);
+                c.sessions.insert(vendor, "synthetic-session".into());
+                let cwd = core.cwd_of(&core.convs[&id]).unwrap();
+                let live = core.live.get_mut(&id).unwrap();
+                live.vendor = vendor;
+                live.cli = core.opts.clis[&vendor].clone();
+                live.cwd = cwd;
+                live.model = Some(crate::router::default_model(vendor, None, &[]));
+                live.tuning = core.store.settings().tuning();
+                let c = core.convs.get_mut(&id).unwrap();
+                c.choice = Some(Choice { vendor: name.into(), model: None, effort: None });
+                let reply = c.messages.last_mut().unwrap();
+                reply.vendor = Some(vendor);
+                reply.text = "Finished and checked.".into();
+                reply.status = Some(Status::Done);
+                reply.wrap_up = Some(concluded("done"));
+                core.end_turn(&id, Some("reply".into()), None);
+            });
+            let input = tokio::time::timeout(Duration::from_secs(10), receive.recv())
+                .await
+                .expect("a normal conclusion must fold")
+                .unwrap_or_else(|| panic!("{vendor:?} session retired: {:?}", engine.open(&id).unwrap().messages.last()));
+            assert!(input.contains("Fold .faber/decisions.md"), "{input}");
+            // The fold changes approved words but copies their person mark, and leaves the file over target.
+            std::fs::write(&notes, format!("- Keep exports remote. [by person]\n\n{}", "x".repeat(8193))).unwrap();
+            engine.with(|core| {
+                assert_eq!(core.convs[&id].messages.iter().find(|m| m.id == "reply").unwrap().fold_kept, [kept]);
+                let reply = core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+                reply.status = Some(Status::Done);
+                reply.wrap_up = Some(concluded("done"));
+                core.live.get_mut(&id).unwrap().turn = None;
+                core.request_conclusion(&id);
+            });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), receive.recv()).await.is_err(),
+                "one fold per request, even if still over target"
+            );
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !engine.with(|core| core.convs[&id].messages.last().unwrap().fold_lost) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("fold comparison must record loss");
+            engine.with(|core| core.send_by_itself(&id, "Next task".into(), Wake::of("wake.keepGoing")).unwrap());
+            let next = tokio::time::timeout(Duration::from_secs(10), receive.recv()).await.unwrap().unwrap();
+            assert!(next.contains("Notice: A decision kept by the person is missing"), "{next}");
+            assert!(!next.contains("Fold .faber/decisions.md"), "ordinary turns get no fold instruction");
+            engine.shutdown();
+        }
+    }
+
+    #[test]
+    fn t495_closing_input_names_only_notes_over_target() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".faber")).unwrap();
+        let file = dir.path().join(".faber/decisions.md");
+        std::fs::write(dir.path().join(".faber/lessons.md"), "- Small note\n").unwrap();
+        std::fs::write(&file, "x".repeat(8192)).unwrap();
+        let list = crate::project::memory::list_faber(dir.path()).unwrap();
+        assert_eq!(closing_input("close", &list), "close");
+        std::fs::write(&file, "x".repeat(8193)).unwrap();
+        let list = crate::project::memory::list_faber(dir.path()).unwrap();
+        let input = closing_input("close", &list);
+        assert!(input.contains(".faber/decisions.md"));
+        assert!(!input.contains(".faber/lessons.md"));
+        assert!(input.contains("drop nothing"));
+        let mut list = list;
+        list.files.iter_mut().find(|file| file.over_limit.is_some()).unwrap().path = ".faber/tasks/line\nbreak.md".into();
+        assert_eq!(closing_input("close", &list).lines().count(), 2, "a filename cannot add an instruction line");
+    }
 
     #[tokio::test]
     async fn turn_end_drains_queue_without_checks_once() {

@@ -94,18 +94,10 @@ impl Core {
         if v.keep_going.is_some() || v.messages.last().map_or("", |m| m.id.as_str()) != last {
             return;
         }
-        let waiting = std::mem::take(&mut v.queued);
         if self.live.get(id).is_some_and(|l| l.turn.is_some()) {
-            if let Some(v) = self.convs.get_mut(id) {
-                v.queued = waiting;
-            }
             return;
         }
         let _ = self.send_by_itself(id, RESUME.into(), crate::model::Wake::of("wake.updated"));
-        if let Some(v) = self.convs.get_mut(id) {
-            let added = std::mem::replace(&mut v.queued, waiting);
-            v.queued.extend(added);
-        }
         self.save(id);
         self.emit_queue(id);
     }
@@ -121,6 +113,87 @@ and finish what you were doing; do not start over.";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn t515a_update_admission_snapshots_keep_accepted_queue_and_attachments() {
+        recovery_snapshots(false).await;
+    }
+
+    #[tokio::test]
+    async fn t515a_interrupted_admission_snapshots_keep_accepted_queue_and_attachments() {
+        recovery_snapshots(true).await;
+    }
+
+    async fn recovery_snapshots(interrupted: bool) {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("cut", &[])]);
+        let snapshots = Arc::new(Mutex::new(Vec::new()));
+        let seen = snapshots.clone();
+        let admitted = Arc::new(tokio::sync::Notify::new());
+        let arrived = admitted.clone();
+        let why = if interrupted { "wake.resumed" } else { "wake.updated" };
+        let (data, conv_id) = (dir.path().to_path_buf(), id.clone());
+        app.with_saves(false, |c| {
+            c.live.clear();
+            c.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.choice = Some(Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None });
+            let reply = conv.messages.last_mut().unwrap();
+            reply.status = Some(Status::Stopped);
+            reply.closed = true;
+            conv.queued.push(QueuedTurn {
+                id: "accepted".into(),
+                text: "My next request".into(),
+                images: None,
+                attachments: Some(vec!["notes.txt".into()]),
+                choice: conv.choice.clone().unwrap(),
+                at: now(),
+                sending: false,
+                wake: None,
+            });
+            c.try_save(&id).unwrap();
+            c.emit = Arc::new(move |_| {
+                if let Some(saved) = crate::store::Store::new(&data).get(&conv_id) {
+                    if saved.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == why)) {
+                        arrived.notify_one();
+                    }
+                    seen.lock().unwrap().push(saved);
+                }
+            });
+        });
+        app.note_account_events(
+            Vendor::Claude,
+            vec![EngineEvent::Signals(crate::signals::Signals {
+                billing: Some(crate::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+        if interrupted {
+            app.with(|c| {
+                c.convs.remove(&id);
+                c.running.items.clear();
+            });
+            app.set_keep_going_pace(0.0001);
+            app.resume_interrupted();
+            tokio::time::timeout(Duration::from_secs(5), admitted.notified()).await.expect("interrupted recovery admission");
+        } else {
+            app.with(|c| c.resume_one(&id, "cut"));
+        }
+        let snapshots = snapshots.lock().unwrap();
+        assert!(
+            snapshots.iter().any(|s| s.messages.iter().any(|m| m.wake.as_ref().is_some_and(|w| w.why == why))),
+            "recovery must reach admission: {why}"
+        );
+        for saved in snapshots.iter() {
+            assert_eq!(saved.queued.len(), 1, "recovery snapshot dropped accepted work: {why}");
+            assert_eq!(saved.queued[0].id, "accepted");
+            assert_eq!(saved.queued[0].attachments.as_deref(), Some(["notes.txt".to_string()].as_slice()));
+        }
+        drop(snapshots);
+        app.shutdown();
+    }
+
     #[tokio::test]
     async fn install_reserves_chat_admission_and_releases_on_unwind() {
         let data = crate::workspace::TestRoot::new();

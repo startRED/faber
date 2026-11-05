@@ -49,6 +49,8 @@ interface AskedQuestion {
 
 /** The questions the assistant put to the person (the `AskUserQuestion` tool), read defensively: anything malformed is dropped. */
 export function askedQuestions(input: unknown): AskedQuestion[] {
+  const boundary = input && typeof input === 'object' && 'planBoundary' in input;
+  const words = (text: string) => boundary && text in en ? t(text as Key) : text;
   const list = (input && typeof input === 'object' ? (input as { questions?: unknown }).questions : undefined) as unknown;
   if (!Array.isArray(list)) return [];
   return list.flatMap((q) => {
@@ -57,9 +59,9 @@ export function askedQuestions(input: unknown): AskedQuestion[] {
       const option = o as { label?: unknown; description?: unknown; preview?: unknown };
       if (typeof option?.label !== 'string') return [];
       const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
-      return [{ label: option.label, description: text(option.description), preview: text(option.preview) }];
+      return [{ label: words(option.label), description: text(option.description) ? words(text(option.description)!) : undefined, preview: text(option.preview) }];
     });
-    return [{ question: q.question, header: typeof q.header === 'string' ? q.header : undefined, multiSelect: q.multiSelect === true, options }];
+    return [{ question: words(q.question), header: typeof q.header === 'string' ? words(q.header) : undefined, multiSelect: q.multiSelect === true, options }];
   });
 }
 

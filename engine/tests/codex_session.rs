@@ -3244,7 +3244,7 @@ async fn the_catalog_s_skill_root_is_set_once_before_the_first_thread_opens_and_
     let start = &messages[at("thread/start")]["params"]["config"];
     assert_eq!(
         start["mcp_servers.measure"],
-        json!({"command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"},"enabled":true}),
+        json!({"command":"C:/node/node.exe","args":["C:/data/tools/servers/measure/run.js","--headless"],"env":{"NO_STATS":"1"},"env_vars":[],"enabled":true}),
         "{start}"
     );
     assert!(start.get("mcp_servers").is_none(), "the person's own servers are left as they are: {start}");

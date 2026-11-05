@@ -9,6 +9,7 @@ type Unlisten = () => void;
 
 /** What Electron's preload exposes: the same command list, the same events, the window's buttons. */
 interface ElectronShell {
+  flushStorage(): void;
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
   listen(event: string, listener: (payload: unknown) => void): Unlisten;
   window: {
@@ -21,6 +22,11 @@ interface ElectronShell {
 }
 
 const electron = (globalThis as { faberShell?: ElectronShell }).faberShell;
+
+/** Electron buffers DOMStorage writes; do not leave drafts and the last thread waiting for its commit timer. */
+export function flushStorage(): void {
+  electron?.flushStorage();
+}
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return electron ? (electron.invoke(command, args) as Promise<T>) : tauriInvoke<T>(command, args);

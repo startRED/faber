@@ -202,6 +202,7 @@ fn push_unique(list: &mut Vec<String>, items: impl IntoIterator<Item = String>) 
 
 fn dependency_stack(manifest: &str, name: &str) -> Option<&'static str> {
     match (manifest, name) {
+        ("pyproject.toml", name) => crate::tools::kits::known_stack(name),
         ("Cargo.toml", "bevy") => Some("bevy"),
         ("package.json", "expo" | "expo-router") => Some("expo"),
         ("package.json", "react-native") => Some("react-native"),
@@ -327,7 +328,7 @@ fn package_names(raw: Option<&RawValue>, dependencies: bool) -> std::collections
     serde_json::Deserializer::from_str(raw.get()).deserialize_map(Names(dependencies)).unwrap_or_default()
 }
 
-// Facts never inspect array elements. Keep the first value, including its containers, for depth/declaration validation.
+// Cargo facts never inspect array elements. Keep the first value for depth/declaration validation.
 // shortcut: only supported scalars and one level of scalar child arrays are compacted; other values keep full validation.
 fn scalar_array(content: &str, start: usize, allow_nested: bool) -> Option<(usize, std::ops::Range<usize>)> {
     let bytes = content.as_bytes();
@@ -545,9 +546,32 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
                 }
                 t.get("package").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)
             }),
-            "pyproject.toml" => toml::from_str::<toml::Value>(&compact_scalar_arrays(content))
-                .ok()
-                .map(|t| t.get("project").and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)),
+            "pyproject.toml" => toml::from_str::<toml::Value>(content).ok().map(|t| {
+                let project = t.get("project");
+                let dependencies = project.and_then(|p| p.get("dependencies")).and_then(toml::Value::as_array);
+                let optional = project.and_then(|p| p.get("optional-dependencies")).and_then(toml::Value::as_table);
+                for dependency in dependencies
+                    .into_iter()
+                    .flatten()
+                    .chain(optional.into_iter().flat_map(|groups| groups.values().filter_map(toml::Value::as_array).flatten()))
+                {
+                    let Some(requirement) = dependency.as_str() else { continue };
+                    let requirement = requirement.trim();
+                    let end = requirement
+                        .find(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.'))
+                        .unwrap_or(requirement.len());
+                    let (name, suffix) = requirement.split_at(end);
+                    if !suffix.is_empty() && !suffix.starts_with([' ', '\t', '[', '(', '<', '>', '=', '!', '~', ';', '@']) {
+                        continue;
+                    }
+                    if let Some(stack) = dependency_stack(manifest, name)
+                        && !facts.stacks.contains(&stack)
+                    {
+                        facts.stacks.push(stack);
+                    }
+                }
+                project.and_then(|p| p.get("description")).and_then(|d| d.as_str()).map(String::from)
+            }),
             _ => None,
         };
         if facts.description.is_none() {
@@ -559,7 +583,7 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
 
 /// Selection needs manifest identities, not instruction prose or workflow bodies.
 pub(crate) fn kit_facts(project: &Path) -> Result<Facts, &'static str> {
-    let files = super::memory::read_sources(project, &["package.json", "Cargo.toml"], "", &|_| false, 0)?;
+    let files = super::memory::read_sources(project, &["package.json", "Cargo.toml", "pyproject.toml"], "", &|_| false, 0)?;
     Ok(manifest_facts(&files).0)
 }
 
@@ -685,11 +709,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
         (kept, "\n## Decisions the person kept, newest first\n\n", 2 * 1024, "older decisions"),
         (taste, "\n## Taste the person kept\n\n", 1024, "more taste lines"),
     ] {
-        if bodies.is_empty() {
-            continue;
-        }
         let lines: Vec<_> = bodies
             .iter()
+            .filter(|body| !body.trim_end().ends_with(" (stale?)"))
             .map(|body| {
                 let line = body.lines().next().unwrap_or_default().trim();
                 let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).unwrap_or(line);
@@ -701,7 +723,9 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
                 }
             })
             .collect();
-        out.push_str(&card_lines(head, &lines, share, omitted));
+        if !lines.is_empty() {
+            out.push_str(&card_lines(head, &lines, share, omitted));
+        }
     }
     out.push_str(CLOSE);
     out
@@ -729,21 +753,28 @@ fn hash(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Result<Record, &'static str> {
+pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Result<(Record, Facts), &'static str> {
     let files = sources(project)?;
+    let facts = facts_from_sources(&files);
     let sources = files.iter().map(|(name, text)| (name.clone(), hash(text.as_bytes()))).collect();
     if let Some(record) = previous.filter(|r| r.version == RULES_VERSION && r.sources == sources)
         && super::memory::faber_file_hash(project, "rules.md").is_ok_and(|current| current == record.hash)
     {
-        return Ok(record.clone());
+        return Ok((record.clone(), facts));
     }
-    let text = render(&facts_from_sources(&files));
+    let text = render(&facts);
     super::memory::write_faber_file(project, "rules.md", text.as_bytes())?;
-    Ok(Record { version: RULES_VERSION, sources, hash: hash(text.as_bytes()) })
+    Ok((Record { version: RULES_VERSION, sources, hash: hash(text.as_bytes()) }, facts))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_start_card_omits_stale_items() {
+        let card = super::card(&super::Facts::default(), &["Keep `src/gone.rs` (stale?)", "Keep `src/live.rs`"], &[]);
+        assert!(!card.contains("src/gone.rs"));
+        assert!(card.contains("src/live.rs"));
+    }
     use super::*;
 
     #[test]

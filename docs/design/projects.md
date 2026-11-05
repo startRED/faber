@@ -65,6 +65,13 @@ watches. The shared Collapse follows the look’s normal/reduced/no-motion rules
 Each row shows the source, relative file and original line, then literal Markdown text. Paths and paragraphs wrap at
 720 px; only 50 rows mount first, with Show more. A file over 256 KiB shows its path and a short reason without entries.
 A Faber note over its target shows one quiet line with its size and target, once per file. The generated rules file is read-only. An empty list and a failed read are distinct, and Refresh retries. A partial scan says it is partial.
+At a conversation's closing box, Faber checks at most 200 backticked relative file references in its notes, through the
+existing no-follow handles. Missing or refused references add ` (stale?)` before the author mark through a normal
+revision-guarded edit. A matching person-authored decision stays byte-for-byte unchanged; its status lives with its
+approval outside the project. Memory shows one quiet localized line, "File may no longer exist; left out of the start
+card.", instead of the raw suffix. The editor keeps the exact source text. A later close clears the status when all
+references exist again. Commands, URLs, setting names and prose are not evaluated. No timer, watcher or new control.
+Generated rules and follow-up task files are excluded; tasks may name files that future work will create.
 Memory refuses Gemini's default private folder for reads and edits, alongside the other CLI private folders.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 

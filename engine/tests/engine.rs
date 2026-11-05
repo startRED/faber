@@ -2120,17 +2120,51 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     let (dir, source) = research_plan_edit_approve_report(vendor, Area::Chat).await;
     let prompt = &source.messages[4];
     let text = faber_engine::engine::with_history(&source.messages[..4], &prompt.text, &str::to_owned);
+    let forked = "research-retry-thread";
+    let point = (vendor == Vendor::Codex).then(|| source.messages[3].native_point.as_ref().expect("recorded completed planning boundary"));
+    let remap_thread = |message: &mut serde_json::Value| {
+        for path in ["/result/thread/id", "/params/thread/id", "/params/threadId"] {
+            if let Some(id) = message.pointer_mut(path).filter(|id| id.is_string()) {
+                *id = forked.into();
+            }
+        }
+    };
     let mut recording = fixture(vendor.name(), "research-report");
     for entry in &mut recording {
+        if point.is_some() {
+            remap_thread(&mut entry.msg);
+            if entry.msg["id"] == 3 {
+                entry.msg["id"] = 4.into();
+            }
+        }
         if entry.msg["method"] == "thread/resume" {
-            entry.msg["method"] = "thread/start".into();
+            if let Some(point) = point {
+                entry.msg["method"] = "thread/fork".into();
+                entry.msg["params"]["threadId"] = point.session.clone().into();
+                entry.msg["params"]["lastTurnId"] = point.cursor.turn.clone().unwrap().into();
+                entry.msg["params"]["excludeTurns"] = true.into();
+            } else {
+                entry.msg["method"] = "thread/start".into();
+            }
         }
         if entry.input && entry.msg["type"] == "user" {
             entry.msg["message"]["content"] = text.clone().into();
         }
         if entry.msg["method"] == "turn/start" {
-            entry.msg["params"]["input"][0]["text"] = text.clone().into();
+            entry.msg["params"]["input"][0]["text"] = if point.is_some() { prompt.text.clone() } else { text.clone() }.into();
         }
+    }
+    if let Some(point) = point {
+        recording.splice(
+            5..5,
+            [
+                Entry {
+                    input: true,
+                    msg: json!({"id":3,"method":"thread/turns/list","params":{"threadId":forked,"limit":1,"itemsView":"summary"}}),
+                },
+                Entry { input: false, msg: json!({"id":3,"result":{"data":[{"id":point.cursor.turn,"status":"completed"}]}}) },
+            ],
+        );
     }
     let f = fake(recording);
     let (engine, _) = engine(&dir, vendor, f.spawn.clone());
@@ -2142,14 +2176,25 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
             choice: choice(vendor.name(), None),
         })
         .unwrap();
-    let retried = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    let retried = until(&engine, &id, |c| {
+        assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+        c.messages.last().is_some_and(|m| m.status == Some(Status::Done))
+    })
+    .await;
     let persona = if vendor == Vendor::Claude {
         f.args.lock().unwrap()[0].windows(2).find(|a| a[0] == "--append-system-prompt").unwrap()[1].clone()
     } else {
-        f.wire.messages().iter().find(|m| m["method"] == "thread/start").unwrap()["params"]["developerInstructions"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        let wire = f.wire.messages();
+        let request = wire.iter().find(|m| m["method"] == "thread/fork").unwrap();
+        let point = point.unwrap();
+        assert_eq!(request["params"]["threadId"], point.session);
+        assert_eq!(request["params"]["lastTurnId"], point.cursor.turn.as_deref().unwrap());
+        assert_eq!(request["params"]["excludeTurns"], true);
+        assert_eq!(retried.sessions.get(&Vendor::Codex).map(String::as_str), Some(forked));
+        assert!(retried.native_fork.is_none());
+        let turn = wire.iter().find(|m| m["method"] == "turn/start").unwrap();
+        assert_eq!(turn["params"]["input"][0]["text"], prompt.text, "native history is not replayed as text");
+        request["params"]["developerInstructions"].as_str().unwrap().to_string()
     };
     assert!(persona.contains("Search the web over many steps"), "Retry must keep the research instruction for {vendor:?}");
     assert!(persona.contains("Sources list"), "Retry must keep the citation instruction for {vendor:?}");
@@ -2162,6 +2207,9 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     // A restart must retain the retry's context, without making a later ordinary message another research turn.
     let mut recording = fixture(vendor.name(), "chat");
     for entry in &mut recording {
+        if point.is_some() {
+            remap_thread(&mut entry.msg);
+        }
         if entry.msg["method"] == "thread/start" {
             entry.msg["method"] = "thread/resume".into();
         }
@@ -2182,6 +2230,10 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     assert!(!persona.contains("Search the web over many steps"));
     assert!(!persona.contains("Do not search yet."));
     assert!(ordinary.messages[6].wake.is_none());
+    if point.is_some() {
+        let wire = f.wire.messages();
+        assert_eq!(wire.iter().find(|m| m["method"] == "thread/resume").unwrap()["params"]["threadId"], forked);
+    }
     assert_eq!(engine.open(&source.id).unwrap().messages, source.messages, "Retry leaves the original report untouched");
     assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
     engine.shutdown();
@@ -3015,12 +3067,13 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
 #[tokio::test]
 async fn text_blocks_around_a_tool_are_kept_apart() {
     let dir = support::DataFolder::new();
-    let mut entries = fixture("codex", "tools");
+    let folder = support::work_folder();
+    let mut entries = support::codex_file_tools();
     let first = entries.iter_mut().find(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
     first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(entries).spawn);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
     let mut asked: HashMap<String, bool> = HashMap::new();
@@ -3176,7 +3229,7 @@ async fn open_in_terminal_resumes_the_same_cli_session_in_the_conversation_folde
 }
 
 #[tokio::test]
-async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
+async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_without_reenabling_guarded_hooks() {
     let dir = support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
     let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone());
@@ -3191,7 +3244,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
     engine.send(send()).unwrap();
     finished(&mut rx, |_| {}).await;
-    assert!(!last_args().contains("disableAllHooks"));
+    assert!(last_args().contains("disableAllHooks"), "guarded launches keep hooks off even after opt-in");
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
@@ -6102,7 +6155,12 @@ const TOLD: &str = "Also say whether retries above 5 would be risky.";
 /// R161 step 5: a project's agent on `main` calls a helper; once the helper's recording stops for the person's message (it
 /// waits for that line), the person writes to the helper. Returns the helper's call, the report Faber gave the agent, and
 /// what each recording saw differently from what Faber sent.
-async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber_engine::model::ToolUse, String, Vec<String>, Vec<String>) {
+async fn tell_a_helper(
+    main: &str,
+    prompt: &str,
+    helper: (&str, &str),
+    eager: bool,
+) -> (faber_engine::model::ToolUse, String, Vec<String>, Vec<String>) {
     let dir = support::DataFolder::new();
     let (agent, other) = (fake(fixture(main, "helper-call")), fake(fixture(helper.0, helper.1)));
     let (to_agent, to_other, main_bin) = (agent.spawn.clone(), other.spawn.clone(), main.to_string());
@@ -6117,10 +6175,11 @@ async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber
     let call = helper_call(&until(&engine, &id, |c| helper_call(c).is_some()).await).unwrap();
     assert_eq!(engine.tell_helper(&id, &call, "  "), Err("error.helperEmpty".into()), "an empty message is not sent");
     assert_eq!(engine.tell_helper(&id, "other", TOLD), Err("error.helperDone".into()), "only a helper at work is written to");
-    // The helper's CLI starts a moment after its call shows; it is written to only once it is at work.
+    // The helper's CLI starts a moment after its call shows. The screen offers the box from the call on, so a message written
+    // before the helper is at work is kept and reaches it once it is (`eager`); the other path waits until it is.
     for _ in 0..300 {
         match engine.tell_helper(&id, &call, TOLD) {
-            Err(e) if e == "error.helperDone" => tokio::time::sleep(Duration::from_millis(10)).await,
+            Err(e) if e == "error.helperDone" && !eager => tokio::time::sleep(Duration::from_millis(10)).await,
             sent => {
                 sent.unwrap();
                 break;
@@ -6160,7 +6219,7 @@ fn told_was_taken(tool: &faber_engine::model::ToolUse, report: &str) {
 #[tokio::test]
 async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_message_into_its_turn() {
     let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
-    let (tool, report, agent, helper) = tell_a_helper("claude", text, ("codex", "helper-told")).await;
+    let (tool, report, agent, helper) = tell_a_helper("claude", text, ("codex", "helper-told"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new(), "the message is steered into the helper's turn, in the helper's own words");
     told_was_taken(&tool, &report);
@@ -6172,13 +6231,28 @@ async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_messa
     );
 }
 
+/// R161 step 5: the box is offered from the helper's call on, before its CLI is at work (the screen test `helper_both` wrote
+/// into that window and was told "finished"): the message is kept and reaches the helper once its turn is on, for either AI.
+#[tokio::test]
+async fn r161_a_message_written_before_the_helper_is_at_work_reaches_it_once_it_is() {
+    let claude =
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+    let (tool, report, agent, helper) = tell_a_helper("codex", claude, ("claude", "helper-told"), true).await;
+    assert_eq!((agent, helper), (Vec::<String>::new(), Vec::<String>::new()));
+    told_was_taken(&tool, &report);
+    let codex = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let (tool, report, agent, helper) = tell_a_helper("claude", codex, ("codex", "helper-told"), true).await;
+    assert_eq!((agent, helper), (Vec::<String>::new(), Vec::<String>::new()));
+    told_was_taken(&tool, &report);
+}
+
 /// R161 step 5: Claude Code reads a line written during a tool step at its next step, with one result for both, and echoes
 /// it then: the helper ends at that result, its last words the report.
 #[tokio::test]
 async fn r161_the_person_writes_to_a_claude_helper_during_a_tool_step_and_it_reads_it_at_its_next_step() {
     let text =
         "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
-    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told")).await;
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new());
     told_was_taken(&tool, &report);
@@ -6191,7 +6265,7 @@ async fn r161_the_person_writes_to_a_claude_helper_during_a_tool_step_and_it_rea
 async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_turn_and_that_is_its_report() {
     let text =
         "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
-    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told-later")).await;
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told-later"), false).await;
     assert_eq!(agent, Vec::<String>::new());
     assert_eq!(helper, Vec::<String>::new());
     told_was_taken(&tool, &report);

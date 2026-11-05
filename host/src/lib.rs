@@ -609,11 +609,14 @@ pub struct StartOptions {
 }
 
 /// Builds the engine and everything around it, in the order Faber has always started it, and answers the host every front
-/// end calls. `shell` hears the engine's events from the first one.
+/// end calls. `shell` hears the engine's events from the first one. It returns as soon as the engine can answer: what reads
+/// every conversation file (the owed reports, last run's temporary conversations, the pull requests followed, the work that
+/// goes on by itself) runs right after on a thread of its own, with the engine free between its steps.
 pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Arc<Host>> {
     let StartOptions { data_dir, hidden, runtime, installed_data_dir, game_guard, browser } = options;
     let _data_directory = faber_engine::workspace::DataDirectory::open(&data_dir)?;
     let clis = setup::detect_clis();
+    faber_engine::startup::mark("clis");
     let wiring = Wiring::new(shell);
     let opts = EngineOptions {
         data_dir: data_dir.clone(),
@@ -633,7 +636,8 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         runtime: runtime.clone(),
         ask: None,
     };
-    let engine = Engine::new(opts, wiring.emitter())?;
+    let engine = Engine::begin(opts, wiring.emitter())?;
+    faber_engine::startup::mark("engine");
     engine.measure_unix_worker_memory();
     if let Some(dir) = installed_data_dir {
         engine.set_installed_data(dir);
@@ -657,21 +661,32 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         runtime.spawn_blocking(move || engine.sweep_copies());
     }
     let host = Arc::new(wiring.host(engine, data_dir.clone(), hidden, runtime));
+    faber_engine::startup::mark("host");
     // R161 step 7: Faber's own browser, for a project's agent, set before any turn can resume.
     if let Some(browser) = browser {
         host.engine.set_browser(browser);
     }
     host.engine.watch_accounts();
-    host.engine.follow_open_prs();
     host.engine.watch_archive();
     host.engine.detect_claude_flags();
-    // Work that went on by itself when Faber last closed goes on again, once the accounts have had a moment to be read.
-    host.engine.resume_keep_going();
-    // And what the restart for an update cut, from a conversation not on Keep going.
-    host.engine.resume_after_update();
-    host.engine.resume_interrupted();
-    // And a team leader the close cut off with no member left to wake it.
-    host.engine.resume_cut_leaders();
+    let (settling, log_dir) = (host.engine.clone(), data_dir.clone());
+    host.runtime.spawn_blocking(move || {
+        // Work that went on by itself when Faber last closed goes on again (Keep going), once the accounts have had a
+        // moment to be read; the temporary conversations it left go and the reports owed to leaders are queued first.
+        settling.settle_start();
+        settling.follow_open_prs();
+        // And what the restart for an update cut, from a conversation not on Keep going.
+        settling.resume_after_update();
+        settling.resume_interrupted();
+        // And a team leader the close cut off with no member left to wake it.
+        settling.resume_cut_leaders();
+        faber_engine::startup::mark("settled");
+        // Only a start that measures itself (the sidecar's) has marks to write.
+        let marks = faber_engine::startup::line();
+        if !marks.is_empty() {
+            faber_update::log_to(&log_dir, faber_update::STARTUP_LOG, "settled", &marks);
+        }
+    });
     if let Some(codex) = clis.get(&Vendor::Codex) {
         host.load_models(codex.clone(), data_dir);
     }

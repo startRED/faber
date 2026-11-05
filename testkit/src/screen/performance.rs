@@ -59,7 +59,8 @@ fn baseline(ctx: &mut Ctx) -> Result {
     })?;
     // Exercise the real older-message loader once before measuring a stable scrollable slice.
     page.eval_on(&css(".thread"), "el.scrollTop=0; return {};")?;
-    page.wait_for("older answers", &format!("document.querySelectorAll('article.ai').length>{drawn}"))?;
+    // A forty-message page arrives over several frames; measure only after all twenty answers are mounted.
+    page.wait_for("complete older-message page", &format!("document.querySelectorAll('article.ai').length==={}", drawn + 20))?;
     super::shell::set_size(page, 1028, 779)?;
     frames(page)?;
     let mounted = page.count(&css("article.ai"))?;

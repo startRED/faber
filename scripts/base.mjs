@@ -5,17 +5,23 @@
 //   node scripts/base.mjs pre-push    the git hook `cargo t` installs: refuses a push to phase-1-base while it is red,
 //                                     or one that carries a number placeholder (scripts/numbers.mjs)
 //
-// It asks GitHub through `gh` and keeps the answer for three minutes in the shared git folder, so every worktree and every
-// `cargo t` reads it once. Offline, signed out or without `gh` it says nothing and never blocks: it is a warning light,
-// not a gate. `FABER_PUSH_ON_RED=1 git push` pushes anyway, for the commit that fixes the base.
+// It asks GitHub through `gh` and keeps the answer for three minutes in the shared git folder, one file per version of
+// this script, so every worktree and every `cargo t` reads it once. Offline, signed out or without `gh` it says nothing
+// and never blocks: it is a warning light, not a gate. `FABER_PUSH_ON_RED=1 git push` pushes anyway, for the commit
+// that fixes the base.
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 import { GREP, placeholdersIn, SKIP } from './numbers.mjs';
 import { check as owedHere, message as owedMessage, onlyOwed } from './owed.mjs';
 
 const BASE = 'phase-1-base';
+// The shared answer is kept per version of this file: on 2026-11-05 worktrees on older branches judged the base with
+// older rules and kept a red answer for three minutes at a time, so current checkouts warned of a green base for hours.
+export const CACHE = `faber-base-${createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex').slice(0, 12)}.json`;
 const KEEP_MS = 3 * 60 * 1000;
 const RED = new Set(['failure', 'timed_out', 'startup_failure']);
 const IGNORED = new Set(['cancelled', 'skipped', 'neutral', 'stale']);
@@ -32,6 +38,27 @@ export function verdict(runs) {
   const since = finished[(streak === -1 ? finished.length : streak) - 1];
   const newer = runs.slice(0, runs.indexOf(last)).filter((r) => r.status !== 'completed');
   return { run: last, since, newer };
+}
+
+/** A later, complete queue check of the current tip supersedes an older failed base run. */
+export function tipPassed(red, tip, runs, jobsFor) {
+  if (!/^[a-f0-9]{40}$/.test(tip) || tip === red.run.headSha) return false;
+  const required = [
+    'changes', 'preflight', 'docs', 'app', 'costs', 'ui', 'gate',
+    'check (windows-latest, lints)', 'check (windows-latest, rust)', 'check (macos-latest, lints rust ui)',
+    ...Array.from({ length: 8 }, (_, i) => `screen (${i + 1}/8)`),
+  ];
+  for (const candidate of runs) {
+    if (candidate.headSha !== tip || candidate.createdAt <= red.run.createdAt || candidate.status !== 'completed' ||
+        candidate.event !== 'workflow_dispatch' || !candidate.headBranch?.startsWith('queue/')) continue;
+    if (RED.has(candidate.conclusion)) return false;
+    if (candidate.conclusion !== 'success') continue;
+    const jobs = jobsFor(candidate.databaseId);
+    if (!jobs.some((job) => job.name === 'gate' && job.conclusion !== 'skipped')) continue;
+    return required.every((name) =>
+      jobs.some((job) => job.name === name && job.status === 'completed' && job.conclusion === 'success'));
+  }
+  return false;
 }
 
 /** What failed, from `gh run view --log-failed`: the runner's `FAIL` lines and compiler errors, each once, with its job. */
@@ -74,7 +101,7 @@ const run = (cmd, args, timeout = 10_000) =>
 function status() {
   let cache;
   try {
-    cache = resolve(run('git', ['rev-parse', '--git-common-dir']).trim(), 'faber-base.json');
+    cache = resolve(run('git', ['rev-parse', '--git-common-dir']).trim(), CACHE);
     const kept = JSON.parse(readFileSync(cache, 'utf8'));
     if (Date.now() - kept.at < KEEP_MS) return kept.text;
   } catch {
@@ -87,7 +114,19 @@ function status() {
     const list = (event) => JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--branch', BASE, '--event', event, '--limit', '20', '--json', fields]));
     const runs = [...list('push'), ...list('workflow_dispatch')].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
     const red = verdict(runs);
-    if (!red) {
+    let cleared = false;
+    if (red) {
+      try {
+        const tip = () => run('git', ['ls-remote', 'origin', `refs/heads/${BASE}`]).trim().split(/\s+/)[0];
+        const sha = tip();
+        const candidates = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--commit', sha, '--status', 'completed',
+          '--limit', '20', '--json', `${fields},event,headBranch`]));
+        cleared = tipPassed(red, sha, candidates, (id) => JSON.parse(run('gh', ['run', 'view', String(id), '--json', 'jobs'])).jobs) && tip() === sha;
+      } catch {
+        // Without complete evidence, retain the red warning.
+      }
+    }
+    if (!red || cleared) {
       text = '';
     } else {
       let checks = [];

@@ -250,6 +250,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_start_sweeps_last_runs_temporary_chat_before_its_first_answer_and_settling_keeps_one_made_meanwhile() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let left = engine.start_temporary_chat().unwrap();
+        engine.shutdown();
+        drop(engine);
+        // As the shell starts it: the engine answers first, and the screen may open a temporary chat before the rest settles.
+        // The list kept on disk says which file was temporary, so the sweep needs no read of the others.
+        let opts = EngineOptions {
+            data_dir: dir.path().into(),
+            #[cfg(windows)]
+            chat_dir: dir.work().into(),
+            clis: BTreeMap::new(),
+            spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 1,
+            idle: Duration::from_secs(60),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        };
+        let restarted = Engine::begin(opts, Arc::new(|_| {})).unwrap();
+        restarted.with(|core| assert!(core.store.get(&left).is_none(), "swept before the screen can reopen it"));
+        let new = restarted.start_temporary_chat().unwrap();
+        restarted.settle_start();
+        restarted.with(|core| {
+            assert!(core.store.get(&left).is_none(), "last run's temporary chat goes");
+            assert!(core.store.get(&new).is_some_and(|c| c.temporary), "this run's own stays");
+        });
+        restarted.shutdown();
+    }
+
+    #[tokio::test]
     async fn temporary_chat_transcript_cleanup_failure_keeps_a_record_for_the_next_startup() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);

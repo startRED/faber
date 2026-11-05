@@ -1185,6 +1185,8 @@ mod tests {
             queued: Vec::new(),
         };
         let point = Point {
+            review_shared: None,
+            review_pending: false,
             info: PointInfo {
                 id: id.clone(),
                 message_id: Uuid::new_v4().to_string(),

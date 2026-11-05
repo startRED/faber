@@ -6,6 +6,20 @@ import { api, type AppEvent, type AppState, type ToolInventoryList, type ToolRow
 import { App } from '../../ui/App.tsx';
 import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { catalogName, LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
+
+check('catalog: shipped servers carry licences, pinned trees and explicit Chat declarations', () => {
+  equal(catalog.servers.length, 4);
+  for (const row of catalog.servers) {
+    ok(row.license.length > 0, `${row.id}: licence is shown by the existing card and detail`);
+    equal(typeof row.chatSafe, 'boolean');
+    ok(row.server.tree.length > 0);
+    for (const pin of row.server.tree) {
+      ok(pin.integrity.startsWith('sha512-'));
+      ok(pin.url.startsWith('https://registry.npmjs.org/'));
+    }
+  }
+  equal(catalog.servers.filter(row => row.chatSafe).map(row => row.id).sort().join(','), 'context7,sequential-thinking');
+});
 import type { Key } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
 
@@ -312,7 +326,8 @@ check('catalog: the full curated list pages without duplicates and searches beyo
     search(view.root, ''); await tap(button(view.root, 'catalog.skills'));
     equal(cards(view.root).length, 48);
     await tap(button(view.root, 'catalog.servers'));
-    equal(cards(view.root).length, 1); equal(cards(view.root)[0].dataset.catalogCard, 'chrome-devtools');
+    equal(cards(view.root).length, catalog.servers.length);
+    deepEqual(cards(view.root).map((card) => card.dataset.catalogCard).sort(), catalog.servers.map((server) => server.id).sort(), 'the Servers filter lists every curated server');
     await tap(button(view.root, 'catalog.all'));
     search(view.root, target.id); await tick(); await tap(cards(view.root)[0]);
     ok(view.root.textContent?.includes(t(`tools.${target.id}.needs` as Key)), 'prerequisites are readable before installation');
@@ -360,6 +375,11 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         // WebKit reveals the newly focused heading in a later rendering step; reading starts once it has (on macOS
         // CI the reveal undid the scroll below on 2026-10-28, failing queues that never touched the catalog).
         await frames();
+        const heading = view.root.querySelector<HTMLElement>('.catalog-detail h1')!;
+        const headingBounds = heading.getBoundingClientRect();
+        const returnBounds = view.root.querySelector('.catalog-return')!.getBoundingClientRect();
+        equal(document.activeElement, heading);
+        ok(headingBounds.top >= returnBounds.bottom && headingBounds.bottom <= 480, 'the focused heading is visible below the sticky return control');
         const surface = view.root.querySelector<HTMLElement>('[data-catalog]')!;
         surface.scrollTop = surface.scrollHeight;
         const afterSet = { at: performance.now() - passStarted, scrollTop: surface.scrollTop, active: describe(document.activeElement), connected: surface.isConnected };

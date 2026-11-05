@@ -319,7 +319,7 @@ impl Store {
             self.validate_plugin_aliases(plugin)?;
             plugins::extract(plugin, zip, packages, staging)?;
         } else if plan.item.server.is_some() {
-            extract_package(zip, staging)?;
+            npm::extract_tree(plan.item.server.as_ref().ok_or("error.tools.tree")?, zip, packages, staging)?;
         } else {
             extract_skill(zip, &plan.item.path, staging)?;
             let text = std::fs::read_to_string(staging.join("SKILL.md")).map_err(|e| e.to_string())?;
@@ -664,6 +664,7 @@ mod transaction_tests {
     fn replacement_uses_checked_package_extraction_for_servers() {
         let tmp = tempfile::tempdir().unwrap();
         let mut item = catalog().iter().find(|item| item.server.is_some()).unwrap().clone();
+        item.server.as_mut().unwrap().tree.clear();
         item.server.as_mut().unwrap().entry = "run.js".into();
         let source = tmp.path().join("source");
         std::fs::create_dir(&source).unwrap();

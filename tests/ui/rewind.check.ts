@@ -8,7 +8,7 @@ import { installContextMenu, menu } from '../../ui/contextmenu.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { Rewind } from '../../ui/Rewind.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { check, deepEqual, equal, ok } from './check.ts';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 const key = (element: Element, value: string, shiftKey = false) => element.dispatchEvent(new KeyboardEvent('keydown', { key: value, shiftKey, bubbles: true, cancelable: true }));
@@ -328,7 +328,10 @@ check('rewind: restore waits for the conversation reload before releasing contro
   }), createComponent(ContextMenuHost, {})], root);
   try {
     const mine = root.querySelector<HTMLElement>('.mine')!;
-    mine.focus(); key(mine, 'ContextMenu'); await settle();
+    mine.focus({ preventScroll: true });
+    // A pending native scroll from the previous fixture must not dismiss the menu we are about to open.
+    await frames();
+    key(mine, 'ContextMenu'); await settle();
     const entry = [...document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role=menuitem]')].find((item) => item.textContent === t('rewind.title'))!;
     entry.click(); await settle(); go(root).click(); await settle();
     ok(reloading, 'restoring asks the caller to reload saved messages');
@@ -439,6 +442,8 @@ check('rewind: the app reloads after undoing the first message and keeps the sav
       for (const type of dismissals) window.addEventListener(type, record, true);
       try {
         root.querySelector('.crow')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }));
+        // Tail following can deliver another scroll after the menu opens, regardless of the first scroll's timing.
+        root.querySelector('.thread')!.dispatchEvent(new Event('scroll'));
         await settle();
       } finally {
         for (const type of dismissals) window.removeEventListener(type, record, true);

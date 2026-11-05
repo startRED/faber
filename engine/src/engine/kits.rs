@@ -565,6 +565,7 @@ mod tests {
             cli_name: None,
             tier: Default::default(),
             server: Some(crate::tools::Server {
+                tree: vec![],
                 package: "browser-fixture".into(),
                 version: "1.0.0".into(),
                 entry: "server.js".into(),
@@ -1117,11 +1118,47 @@ mod tests {
                 core.handle("kit", sid, EngineEvent::TurnStarted);
                 assert_eq!(core.convs["kit"].session_start_cards.get(&vendor), Some(&("native-history".into(), sent.clone())));
             });
+            assert_eq!(engine.start_card("kit"), Some(sent.clone()), "the screen receives the exact card captured by the fake CLI");
+            assert!(engine.open_for_screen("kit").unwrap().session_start_cards.is_empty(), "ordinary screen snapshots omit card text");
             engine.shutdown();
             if state == "fresh" {
                 previous_card = Some(sent);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_details_rejects_missing_and_other_sessions_and_measures_reads() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        assert_eq!(engine.start_card("missing"), None);
+        engine.with(|core| {
+            conversation(core, Area::Project, None, &folder, "Read the card");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.messages[1].vendor = Some(Vendor::Claude);
+            c.sessions.insert(Vendor::Claude, "current".into());
+        });
+        assert_eq!(engine.start_card("kit"), None);
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().session_start_cards.insert(Vendor::Claude, ("old".into(), "old text".into()));
+        });
+        assert_eq!(engine.start_card("kit"), None, "a previous native session's card is not the current card");
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().session_start_cards.insert(Vendor::Claude, ("current".into(), "x".repeat(6144)));
+        });
+        let started = std::time::Instant::now();
+        for _ in 0..1000 {
+            assert_eq!(engine.start_card("kit").unwrap().len(), 6144);
+        }
+        eprintln!(
+            "project_start_card_details_cost: 1000 in-memory reads of a 6144-byte card in {:.3} ms; one 6144-byte response allocation at a time; no additional retained card",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+        engine.with(|core| core.convs.get_mut("kit").unwrap().area = Area::Chat);
+        assert_eq!(engine.start_card("kit"), None, "Chat never exposes a project card");
+        engine.shutdown();
     }
 
     #[tokio::test]
@@ -1138,6 +1175,55 @@ mod tests {
     #[tokio::test]
     async fn project_start_card_codex_actual_start_and_resume() {
         project_start_card_captured(Vendor::Codex).await;
+    }
+
+    #[tokio::test]
+    async fn project_facts_snapshot_shared_with_rules_and_start_card() {
+        let dir = crate::workspace::TestRoot::new();
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        std::fs::write(folder.join("package.json"), r#"{"scripts":{"test":"node --test"}}"#).unwrap();
+        std::fs::write(folder.join("pyproject.toml"), "[project]\ndependencies=['unknown', 'stripe>=1']\n").unwrap();
+        let (spawn, args, messages) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&work.path().to_string_lossy()).unwrap();
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, ended) = std::sync::mpsc::channel();
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let permit = engine.with(|core| core.kit_check_gate.clone()).acquire_owned().await.unwrap();
+        let refresh = engine.with(|core| {
+            core.catalog_store = Some(catalog_items(dir.path(), "", &[("stripe-best-practices", "payments")]));
+            conversation(core, Area::Project, Some(&project.id), &folder, "Fix the checkout payment bug");
+            core.synchronous_kit_checks = false;
+            assert!(matches!(core.launch_session("kit", &pick(Vendor::Claude), SessionStart::Prepare), Err(error) if error == mcp_servers::CHECK_PENDING));
+            core.kit_check_hook = Some((started, gate.clone(), finished));
+            core.rewind.captured_for_test("reply");
+            let started = std::time::Instant::now();
+            core.start("kit", "reply", &pick(Vendor::Claude), "SHARED_FACTS_TURN".into(), vec![], true).unwrap();
+            started.elapsed()
+        });
+        drop(permit);
+        checked_signal(&entered).await;
+        let rules = std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap();
+        assert!(rules.contains("npm run test"));
+        std::fs::write(folder.join("package.json"), r#"{"scripts":{"lint":"eslint ."}}"#).unwrap();
+        std::fs::write(folder.join("pyproject.toml"), "[project]\ndependencies=[]\n").unwrap();
+        gate.wait();
+        let worker = checked_signal(&ended).await;
+        input_with(&messages, "SHARED_FACTS_TURN").await;
+        engine.with(|core| assert_eq!(core.live["kit"].tool_kit.ids, ["stripe-best-practices"]));
+        let seen = args.lock().unwrap();
+        let prompt = &seen.iter().flat_map(|(_, argv)| argv.windows(2)).find(|pair| pair[0] == "--append-system-prompt").unwrap()[1];
+        assert!(prompt.contains("npm run test") && !prompt.contains("npm run lint"), "the start card uses the rules snapshot");
+        drop(seen);
+        assert_eq!(std::fs::read_to_string(folder.join(".faber/rules.md")).unwrap(), rules, "launch retry does not rebuild twice");
+        eprintln!(
+            "project_facts_shared_start: rules_and_admission_ms={:.3} worker_ms={:.3} combined_ms={:.3} (warm fixture; excludes scheduling and provider latency)",
+            refresh.as_secs_f64() * 1000.0,
+            worker.as_secs_f64() * 1000.0,
+            (refresh + worker).as_secs_f64() * 1000.0
+        );
+        engine.shutdown();
     }
 
     #[tokio::test]
@@ -1190,7 +1276,7 @@ mod tests {
             conversation(core, Area::Project, Some(&project.id), &folder, "What is two plus two?");
             core.catalog_store = Some(ToolStore::with_catalog(&folder, vec![]));
             core.synchronous_kit_checks = false;
-            let result = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder);
+            let result = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder, None);
             assert!(
                 matches!(result, Err(ref error) if error == mcp_servers::CHECK_PENDING),
                 "even an empty selection needs the off-lock project facts check"
@@ -3117,7 +3203,7 @@ mod tests {
                 let c = core.convs.get_mut("kit").unwrap();
                 c.sessions.insert(Vendor::Codex, "saved-native-thread".into());
                 c.session_kits.insert(Vendor::Codex, ("saved-native-thread".into(), report.ids, Some(identity.clone())));
-                let (delivery, _) = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder).unwrap();
+                let (delivery, _) = core.checked_session_tools("kit", Vendor::Codex, Permissions::FullAccess, &folder, None).unwrap();
                 let digest = resource_digest(codex_resources(Area::Chat, &delivery).as_deref());
                 core.convs.get_mut("kit").unwrap().session_resource_digests.insert(Vendor::Codex, digest);
                 told_of_guide(core, Vendor::Codex, Area::Chat);
@@ -3303,6 +3389,13 @@ mod tests {
                     std::fs::rename(Path::new(&script).parent().unwrap(), folder.join("hidden-server")).unwrap();
                 } else {
                     std::fs::write(script, "changed server code").unwrap();
+                    if damage == "source" {
+                        // Server snapshots are independent copies, so damage the store separately.
+                        let source = folder.join("tools/servers/browser/server.js");
+                        assert_eq!(std::fs::read_to_string(&source).unwrap(), "console.log('one');");
+                        std::fs::write(&source, "changed server code").unwrap();
+                        assert_eq!(std::fs::read_to_string(&source).unwrap(), "changed server code");
+                    }
                 }
                 core.launch("kit", &pick(Vendor::Codex)).unwrap();
                 assert!(!core.live["kit"].resumed, "a retained server discovered damaged at this launch revokes the saved configuration");

@@ -3,6 +3,333 @@
 use serde_json::{Map, Value, json};
 use std::path::{Component, Path, PathBuf};
 
+/// Pure risk classification using link facts from admission, not a sandbox or an execution hook.
+#[expect(clippy::too_many_arguments, reason = "Admission supplies filesystem facts to keep classification free of I/O.")]
+pub fn plan_boundary(
+    root: &str,
+    cwd: &str,
+    data: &[String],
+    credentials: &[String],
+    in_copy: bool,
+    tool: &str,
+    input: &Value,
+    through_link: bool,
+) -> (crate::model::PlanSize, Option<&'static str>) {
+    use crate::model::PlanSize::{Normal, Risky, Small};
+    if through_link {
+        return (Risky, Some("outside"));
+    }
+    let windows = cfg!(windows) || root.as_bytes().get(1) == Some(&b':') || cwd.as_bytes().get(1) == Some(&b':');
+    if !windows && [root, cwd, input["cwd"].as_str().unwrap_or(cwd)].iter().any(|raw| raw.contains('\\')) {
+        return (Risky, Some("outside"));
+    }
+    let normalize = |raw: &str| {
+        let text = raw.replace('\\', "/");
+        let text = match text.strip_prefix("//?/").or_else(|| text.strip_prefix("//./")) {
+            Some(rest) if rest.get(..4).is_some_and(|head| head.eq_ignore_ascii_case("unc/")) => format!("//{}", &rest[4..]),
+            Some(rest) => rest.to_string(),
+            None => text,
+        };
+        let mut text = if cfg!(windows) { text.to_lowercase() } else { text };
+        while text.ends_with('/') && text.len() > 1 && !(text.len() == 3 && text.as_bytes()[1] == b':') {
+            text.pop();
+        }
+        text
+    };
+    let root = normalize(root);
+    let cwd = normalize(input["cwd"].as_str().unwrap_or(cwd));
+    let path = |raw: &str| {
+        let text = normalize(raw);
+        let resolved = if absolute(&text) {
+            let (base, tail) = text.split_once('/').unwrap_or((&text, ""));
+            let p = resolve(base, tail);
+            if p.is_empty() {
+                "/".to_string()
+            } else if p.ends_with(':') {
+                format!("{p}/")
+            } else if text.starts_with("//") {
+                format!("/{p}")
+            } else {
+                p
+            }
+        } else {
+            resolve(&cwd, &text)
+        };
+        normalize(&resolved)
+    };
+    let boundary = |raw: &str| {
+        // On Unix a backslash is a filename character, not a separator the native probe can resolve.
+        if !windows && raw.contains('\\') {
+            return (Risky, Some("outside"));
+        }
+        let p = path(raw);
+        let relative = if inside(&p, &root) { p[root.trim_end_matches('/').len()..].trim_start_matches('/') } else { &p };
+        if !relative.is_empty() && (secret(Path::new(relative), true) || relative.split('/').any(credential_piece))
+            || credentials.iter().any(|r| inside(&p, &normalize(r)))
+        {
+            (Risky, Some("credentials"))
+        } else if data.iter().any(|r| inside(&p, &normalize(r))) && !(in_copy && inside(&p, &root)) {
+            (Risky, Some("data"))
+        } else if raw.contains("::")
+            || raw.starts_with('\\')
+            || raw.starts_with("//")
+            || root.as_bytes().get(1) == Some(&b':') && raw.starts_with('/')
+            || windows && raw.replace('\\', "/").split('/').any(|s| ![".", ".."].contains(&s) && s != s.trim_end_matches(['.', ' ']))
+            || raw.contains(':')
+                && !(raw.as_bytes().get(1) == Some(&b':')
+                    && raw.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                    && raw.as_bytes().get(2).is_some_and(|b| b"/\\".contains(b))
+                    && !raw[2..].contains(':'))
+            || p.split('/').any(|s| s.contains('~'))
+            || raw.starts_with("/cygdrive/")
+            || raw.as_bytes().first() == Some(&b'/')
+                && raw.as_bytes().get(1).is_some_and(u8::is_ascii_alphabetic)
+                && raw.as_bytes().get(2) == Some(&b'/')
+        {
+            (Risky, Some("outside"))
+        } else if !inside(&p, &root) || raw.starts_with(['~', '$', '%']) {
+            (Normal, Some("outside"))
+        } else {
+            (Small, None)
+        }
+    };
+    let mut demand = boundary(&cwd);
+    let mut check = |raw: &str| {
+        let found = boundary(raw);
+        if found.0 > demand.0 {
+            demand = found;
+        }
+    };
+    let shell = ["Bash", "PowerShell", "command", "item/commandExecution/requestApproval"].contains(&tool);
+    if shell {
+        let Some(args) = input.as_str().or_else(|| input["command"].as_str()).filter(|s| !s.contains('\\')).and_then(|s| words(s, true))
+        else {
+            return (Risky, Some("unknown"));
+        };
+        let program = args[0].to_ascii_lowercase();
+        if (["git", "gh"].contains(&program.as_str())
+            && args.iter().any(|a| ["push", "release", "publish", "reset", "clean", "rebase"].contains(&a.as_str())))
+            || (["npm", "pnpm", "yarn", "cargo", "dotnet"].contains(&program.as_str()) && args.iter().any(|a| a == "publish"))
+            || ["curl", "wget", "scp", "rsync"].contains(&program.as_str())
+        {
+            return (Risky, Some("publish"));
+        }
+        let delete = ["rm", "rmdir", "unlink", "remove-item", "del"].contains(&program.as_str());
+        let read = ["cat", "type", "get-content", "ls", "pwd", "rg", "grep", "head", "tail"].contains(&program.as_str());
+        // Repository configuration can run helpers even for status or diff. No overrides are forced by this layer.
+        // shortcut: only literal operands of known commands; scripts, wrappers and unknown flags require a risky contract.
+        if !(read || delete) {
+            return (Risky, Some("unknown"));
+        }
+        let flags: &[&str] = match program.as_str() {
+            "grep" => &["-n", "-l", "-a", "-r", "--recursive"],
+            "rg" => &["-n", "-l", "-a"],
+            "ls" if tool == "PowerShell" || windows && tool != "Bash" => &[],
+            "ls" => &["-n", "-l", "-a", "-r", "-f", "--recursive"],
+            _ => &[
+                "-n",
+                "-l",
+                "-a",
+                "-r",
+                "-f",
+                "-rf",
+                "-fr",
+                "--recursive",
+                "--force",
+                "-Recurse",
+                "-Force",
+                "-LiteralPath",
+                "-Path",
+                "--no-pager",
+                "--no-ext-diff",
+            ],
+        };
+        let mut options = true;
+        for arg in args.iter().skip(1) {
+            if options && arg == "--" {
+                options = false;
+            } else if options && arg.starts_with('-') {
+                if !flags.contains(&arg.as_str()) {
+                    return (Risky, Some("unknown"));
+                }
+            } else {
+                if delete && (path(arg) == root || path(arg).split('/').any(|p| p.eq_ignore_ascii_case(".git"))) {
+                    return (Risky, Some("delete"));
+                }
+                check(arg);
+            }
+        }
+        if delete {
+            if !in_copy || demand.0 > Small {
+                return (Risky, Some("delete"));
+            }
+            return (Small, None);
+        }
+    } else if ["file", "fileChange", "item/fileChange/requestApproval"].contains(&tool) {
+        let changes = input.get("changes").unwrap_or(input);
+        let Some(list) = changes.as_array() else {
+            return (Risky, Some("unknown"));
+        };
+        if list.is_empty() {
+            return (Risky, Some("unknown"));
+        }
+        for change in list {
+            let Some(raw) = change["path"].as_str() else {
+                return (Risky, Some("unknown"));
+            };
+            let kind = change["kind"].as_str().or_else(|| change["kind"]["type"].as_str());
+            if !matches!(kind, Some("add" | "update" | "delete")) {
+                return (Risky, Some("unknown"));
+            }
+            let found = boundary(raw);
+            if path(raw).split('/').any(|p| p.eq_ignore_ascii_case(".git")) {
+                return (Risky, Some("unknown"));
+            }
+            if kind == Some("delete") && (!in_copy || found.0 > Small || path(raw) == root) {
+                return (Risky, Some("delete"));
+            }
+            if change["kind"].get("movePath").is_some() || change["kind"].get("move_path").is_some() {
+                return (Risky, Some("unknown"));
+            }
+            if found.0 > demand.0 {
+                demand = found;
+            }
+        }
+    } else if ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "NotebookEdit"].contains(&tool) {
+        let raw = ["file_path", "path", "notebook_path"].iter().find_map(|k| input[*k].as_str());
+        let Some(raw) = raw.or_else(|| ["Glob", "Grep", "LS"].contains(&tool).then_some(".")) else {
+            return (Risky, Some("unknown"));
+        };
+        check(raw);
+        if tool == "Glob" {
+            return (Risky, Some("unknown"));
+        }
+        if ["Write", "Edit", "MultiEdit", "NotebookEdit"].contains(&tool) && path(raw).split('/').any(|p| p.eq_ignore_ascii_case(".git")) {
+            return (Risky, Some("unknown"));
+        }
+    } else {
+        return (Risky, Some("unknown"));
+    }
+    demand
+}
+
+/// Literal path candidates shared with the engine's existing-link probe; never includes file contents.
+pub(crate) fn plan_paths(cwd: &str, tool: &str, input: &Value) -> Vec<String> {
+    let cwd = input["cwd"].as_str().unwrap_or(cwd);
+    let mut paths = vec![cwd.to_string()];
+    if ["Bash", "PowerShell", "command", "item/commandExecution/requestApproval"].contains(&tool) {
+        if let Some(args) = input.as_str().or_else(|| input["command"].as_str()).and_then(|s| words(s, true)) {
+            let mut options = true;
+            paths.extend(
+                args.iter()
+                    .skip(1)
+                    .filter(|s| {
+                        if options && *s == "--" {
+                            options = false;
+                            false
+                        } else {
+                            !options || !s.starts_with('-')
+                        }
+                    })
+                    .cloned(),
+            );
+            let program = args[0].to_ascii_lowercase();
+            if program == "ls" && paths.len() == 1 || ["rg", "grep"].contains(&program.as_str()) && paths.len() < 3 {
+                paths.push(".".into());
+            }
+        }
+    } else if ["file", "fileChange", "item/fileChange/requestApproval"].contains(&tool) {
+        if let Some(changes) = input.get("changes").unwrap_or(input).as_array() {
+            paths.extend(changes.iter().filter_map(|c| c["path"].as_str()).map(str::to_string));
+        }
+    } else {
+        let base = ["file_path", "path", "notebook_path"].iter().find_map(|k| input[*k].as_str()).unwrap_or(".");
+        paths.push(base.to_string());
+    }
+    paths
+}
+
+/// Reject network names before I/O; inspect literal path prefixes, never directory contents.
+pub(crate) fn plan_probe(
+    cwd: &str,
+    tool: &str,
+    input: &Value,
+    mut linked: impl FnMut(&Path) -> std::io::Result<crate::model::PlanSize>,
+) -> (crate::model::PlanSize, Option<&'static str>) {
+    use crate::model::PlanSize::{Normal, Risky, Small};
+    let candidates = plan_paths(cwd, tool, input);
+    let cwd = Path::new(input["cwd"].as_str().unwrap_or(cwd));
+    if candidates.len() > 64
+        || candidates.iter().any(|raw| {
+            let path = cwd.join(raw);
+            raw.starts_with("//")
+                || raw.starts_with('\\')
+                || path.components().count() > 64
+                || matches!(path.components().next(), Some(Component::Prefix(p))
+                    if !matches!(p.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)))
+        })
+    {
+        return (Risky, Some("outside"));
+    }
+    let shell_args = if ["Bash", "PowerShell", "command", "item/commandExecution/requestApproval"].contains(&tool) {
+        input.as_str().or_else(|| input["command"].as_str()).and_then(|s| words(s, true))
+    } else {
+        None
+    };
+    let program = shell_args.as_ref().map(|args| args[0].to_ascii_lowercase()).unwrap_or_default();
+    let search = ["Grep", "Glob", "LS"].contains(&tool) || ["rg", "grep", "ls", "find", "get-childitem"].contains(&program.as_str());
+    let delete = ["rm", "rmdir", "unlink", "remove-item", "del"].contains(&program.as_str());
+    let mut probes = 0;
+    let mut demand = (Small, None);
+    for raw in &candidates {
+        let path = cwd.join(raw);
+        let mut prefix = PathBuf::new();
+        for component in path.components() {
+            if component == Component::ParentDir {
+                prefix.pop();
+                continue;
+            }
+            prefix.push(component);
+            if matches!(component, Component::Prefix(_)) {
+                continue;
+            }
+            if probes == 64 {
+                return (Risky, Some("outside"));
+            }
+            probes += 1;
+            let found = match linked(&prefix) {
+                Ok(Risky) => return (Risky, Some("outside")),
+                Ok(Normal) => (Normal, Some("unknown")),
+                Ok(Small) => (Small, None),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (Small, None),
+                Err(_) => return (Risky, Some("unknown")),
+            };
+            if found.0 > demand.0 {
+                demand = found;
+            }
+        }
+    }
+    // shortcut: directory searches/deletes are unclassifiable (read many files); defer scanning to task 952.
+    if search || delete {
+        let start = if ["rg", "grep"].contains(&program.as_str()) { 2 } else { 1 };
+        let targets = &candidates[start.min(candidates.len())..];
+        if targets.len() != 1 || !cwd.join(&targets[0]).is_file() {
+            return (Risky, Some("unknown"));
+        }
+    }
+    if ["file", "fileChange", "item/fileChange/requestApproval"].contains(&tool)
+        && input.get("changes").unwrap_or(input).as_array().is_some_and(|changes| {
+            changes.iter().any(|change| {
+                let kind = change["kind"].as_str().or_else(|| change["kind"]["type"].as_str());
+                kind == Some("delete") && !change["path"].as_str().is_some_and(|raw| cwd.join(raw).is_file())
+            })
+        })
+    {
+        return (Risky, Some("unknown"));
+    }
+    demand
+}
+
 /// A fresh name prevents a project's lower-priority settings from adding grants to the host profile.
 pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
@@ -259,6 +586,147 @@ fn literal(value: &str) -> String {
 
 fn quoted(value: &str, powershell: bool) -> String {
     format!("'{}'", if powershell { value.replace('\'', "''") } else { value.replace('\'', "'\\''") })
+}
+
+// Path rules cannot protect a preexisting hardlink outside the Store. An incomplete scan grants nothing.
+fn unlinked_store(data: &Path) -> Option<()> {
+    let held = faber_winproc::rewind::Root::open(data).ok()?;
+    let mut pending = vec![data.to_path_buf()];
+    let mut left = 10_000usize;
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(dir).ok()? {
+            left = left.checked_sub(1)?;
+            let entry = entry.ok()?;
+            let kind = entry.file_type().ok()?;
+            if kind.is_symlink() {
+                return None;
+            }
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file() {
+                held.open_file(entry.path().strip_prefix(data).ok()?.to_str()?).ok()?;
+            } else {
+                return None;
+            }
+        }
+    }
+    Some(())
+}
+
+/// A guarded command can read normal files and write its project, but cannot read or write any Store root.
+pub fn guarded_command_argv(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Vec<String>> {
+    let cli = sandbox?;
+    if !mode.guarded() || !["Bash", "PowerShell"].contains(&tool) || !cli.prefix.is_empty() || !Path::new(&cli.command).is_absolute() {
+        return None;
+    }
+    let root = working_root(root)?.canonicalize().ok()?;
+    let root_text = unified(root.to_str()?);
+    let roots = crate::store::Store::data_roots();
+    if roots.is_empty() {
+        return None;
+    }
+    let writable = mode != crate::model::Permissions::Plan;
+    let mut config = data_sandbox_config(&root, writable);
+    let id = config["default_permissions"].as_str()?.to_owned();
+    let profile = config.get_mut(&format!("permissions.{id}"))?;
+    profile["network"] = json!({"enabled": true});
+    for metadata in [".claude", ".codex", ".mcp.json", ".git", ".faber/verify.local.json"] {
+        profile["filesystem"][":workspace_roots"][metadata] = "read".into();
+    }
+    for data in roots {
+        // A missing, replaced or unresolvable Store never authorizes an unprotected command.
+        let data = data.canonicalize().ok()?;
+        unlinked_store(&data)?;
+        let data_text = unified(data.to_str()?);
+        profile["filesystem"][&data_text] = "deny".into();
+        if inside(&normal(&root_text), &normal(&data_text)) {
+            return None;
+        } else if let Ok(relative) = data.strip_prefix(&root) {
+            // Deny its first workspace ancestor too: renaming an allowed parent bypasses a deeper path rule.
+            profile["filesystem"][":workspace_roots"][unified(relative.components().next()?.as_os_str().to_str()?)] = "deny".into();
+        }
+    }
+    if cfg!(windows) {
+        config.insert("windows.sandbox".into(), "mxc".into());
+    }
+    let mut command = vec![cli.command.clone()];
+    for (key, value) in config {
+        command.extend(["-c".into(), format!("{key}={}", inline(&value))]);
+    }
+    command.extend([
+        "sandbox".into(),
+        "--permission-profile".into(),
+        id,
+        "--include-managed-config".into(),
+        "-C".into(),
+        root_text,
+        "--".into(),
+    ]);
+    let powershell = tool == "PowerShell";
+    // Literal project entrypoints need no shell runtime; npm's fixed launcher prefix stays inside the sandbox.
+    if !powershell
+        && let Some(args) = words(input["command"].as_str()?, false)
+        && ["node", "python", "python3", "cargo", "npm", "pnpm", "yarn", "bun", "dotnet", "go", "git", "rg"]
+            .contains(&args[0].to_ascii_lowercase().trim_end_matches(".exe"))
+        && let Some(native) = resolve(&args[0])
+    {
+        if !Path::new(&native.command).is_absolute() {
+            return None;
+        }
+        command.extend(std::iter::once(native.command).chain(native.prefix).chain(args.into_iter().skip(1)));
+        return Some(command);
+    }
+    let shells = if powershell { [resolve("pwsh"), resolve("powershell")] } else { [resolve("bash"), None] };
+    let shell = shells.into_iter().flatten().find_map(|shell| {
+        if !shell.prefix.is_empty() || !Path::new(&shell.command).is_absolute() {
+            return None;
+        }
+        plain(Path::new(&shell.command).canonicalize().ok()?).to_str().map(str::to_owned)
+    })?;
+    // The Windows bash in System32 is a WSL launcher, not the native shell whose filesystem is sandboxed.
+    if cfg!(windows) && !powershell && normal(&shell).contains("/system32/") {
+        return None;
+    }
+    command.push(shell);
+    if powershell {
+        command.extend(["-NoProfile".into(), "-NonInteractive".into()]);
+        if cfg!(windows) {
+            command.extend(["-WindowStyle".into(), "Hidden".into()]);
+        }
+        use base64::Engine as _;
+        let script: Vec<_> = input["command"].as_str()?.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        command.extend(["-EncodedCommand".into(), base64::engine::general_purpose::STANDARD.encode(script)]);
+    } else {
+        command.extend(["--noprofile".into(), "--norc".into(), "-c".into()]);
+        command.push(input["command"].as_str()?.into());
+    }
+    Some(command)
+}
+
+pub fn guarded_input(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Value> {
+    let command = guarded_command_argv(root, mode, tool, input, sandbox, resolve)?;
+    let powershell = tool == "PowerShell";
+    let command = command.iter().map(|arg| quoted(arg, powershell)).collect::<Vec<_>>().join(" ");
+    let mut updated = input.clone();
+    updated["command"] = format!("{}{command}", if powershell { "& " } else { "" }).into();
+    if updated.get("run_in_background").is_some() {
+        updated["run_in_background"] = false.into();
+    }
+    Some(updated)
 }
 
 /// Build tools execute project code only inside an OS sandbox; never approve the original command as a fallback.
@@ -682,6 +1150,7 @@ pub(crate) fn secret(path: &Path, reading: bool) -> bool {
     if name.contains("updater.key")
         || [".claude.json", ".credentials.json", "credentials.json", "auth.json", ".git-credentials", ".npmrc", "hosts.yml"]
             .contains(&name.as_str())
+        || names.windows(2).any(|parts| parts[0] == ".git" && parts[1] == "config")
         || names
             .iter()
             .any(|p| [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube", "no-gh-auth"].contains(&p.as_str()))
@@ -1049,6 +1518,300 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn size_boundary_round3_filesystem_roots_remain_absolute() {
+        use crate::model::PlanSize::{Normal, Small};
+        for (root, outside) in [("/project", "/"), ("C:/project", "C:/"), ("C:/project", "C:/sub/..")] {
+            for (tool, input) in [("Read", json!({"file_path":outside})), ("Bash", json!({"command":format!("ls {outside}")}))] {
+                let size = super::plan_boundary(root, root, &[], &[], false, tool, &input, false).0;
+                assert!(size >= Normal, "{root}: {tool} {input} was {size:?}");
+            }
+        }
+        for root in ["/", "C:/"] {
+            assert_eq!(super::plan_boundary(root, root, &[], &[], false, "Read", &json!({"file_path":"file.txt"}), false).0, Small);
+        }
+    }
+
+    #[test]
+    fn size_boundary_round3_double_dash_keeps_option_shaped_operands() {
+        use crate::model::PlanSize::{Risky, Small};
+        let input = json!({"command":"cat -- -n"});
+        assert_eq!(super::plan_boundary("C:/project", "C:/project", &[], &["C:/project/-n".into()], false, "Bash", &input, false).0, Risky);
+        assert_eq!(
+            super::plan_probe("C:/project", "Bash", &input, |p| Ok(if p.file_name().is_some_and(|s| s == "-n") { Risky } else { Small }),)
+                .0,
+            Risky
+        );
+        assert_eq!(
+            super::plan_paths("C:/project", "Bash", &json!({"command":"cat -n -- -n --force --"})),
+            ["C:/project", "-n", "--force", "--"]
+        );
+    }
+
+    #[test]
+    fn size_boundary_round5_worktree_ancestors_are_not_project_credentials() {
+        use crate::model::PlanSize::{Risky, Small};
+        let ancestor = tempfile::tempdir().unwrap();
+        let root = ancestor.path().join(".claude/worktrees/project");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = super::unified(&root.canonicalize().unwrap().to_string_lossy());
+        let cwd = root.as_str();
+        for file in ["src/plain.rs", ".env.example"] {
+            assert_eq!(super::plan_boundary(cwd, cwd, &[], &[], false, "Read", &json!({"file_path":file}), false), (Small, None));
+        }
+        for file in [".claude/settings.json", ".env", "nested/auth.json"] {
+            assert_eq!(
+                super::plan_boundary(cwd, cwd, &[], &[], false, "Read", &json!({"file_path":file}), false),
+                (Risky, Some("credentials"))
+            );
+        }
+    }
+
+    #[test]
+    fn size_boundary_directory_deletes_are_risky_and_single_file_deletes_keep_path_rules() {
+        use crate::model::PlanSize::{Risky, Small};
+        let folder = tempfile::tempdir().unwrap();
+        let root = super::unified(&folder.path().canonicalize().unwrap().to_string_lossy());
+        let cwd = root.as_str();
+        std::fs::create_dir(folder.path().join("src")).unwrap();
+        std::fs::create_dir(folder.path().join("src/.git")).unwrap();
+        std::fs::write(folder.path().join("src/.env"), "synthetic").unwrap();
+        std::fs::write(folder.path().join("plain.txt"), "synthetic").unwrap();
+        for (tool, input, expected) in [
+            ("Bash", json!({"command":"rm -r src"}), Risky),
+            ("Bash", json!({"command":"rm -rf src"}), Risky),
+            ("Bash", json!({"command":"rm -- src"}), Risky),
+            ("Bash", json!({"command":"rmdir src"}), Risky),
+            ("PowerShell", json!({"command":"Remove-Item -Recurse src"}), Risky),
+            ("PowerShell", json!({"command":"Remove-Item -LiteralPath src"}), Risky),
+            ("file", json!([{"path":"src","kind":"delete"}]), Risky),
+            ("fileChange", json!({"changes":[{"path":"src","kind":{"type":"delete"}}]}), Risky),
+            ("Bash", json!({"command":"rm -- plain.txt"}), Small),
+            ("file", json!([{"path":"plain.txt","kind":"delete"}]), Small),
+        ] {
+            let pure = super::plan_boundary(cwd, cwd, &[], &[], true, tool, &input, false);
+            let probe = super::plan_probe(cwd, tool, &input, |path| {
+                assert!(!path.ends_with("src/.git") && !path.ends_with("src/.env"), "directory contents were probed");
+                Ok(Small)
+            });
+            assert_eq!(pure.0.max(probe.0), expected, "{tool}: {input}");
+            if expected == Risky {
+                assert_eq!(probe, (Risky, Some("unknown")), "{tool}: {input}");
+            }
+        }
+    }
+
+    #[test]
+    fn size_boundary_probe_rejects_network_and_excess_work_before_io() {
+        use crate::model::PlanSize::{Risky, Small};
+        for input in [
+            json!({"file_path":"//attacker/share/x"}),
+            json!({"file_path":r"\attacker\s"}),
+            json!({"cwd":"//attacker/share","file_path":"x"}),
+            json!({"cwd":r"\attacker\s","file_path":"x"}),
+            json!({"file_path":r"\\.\pipe\remote"}),
+            json!({"file_path":"a/".repeat(65)}),
+        ] {
+            assert_eq!(super::plan_probe("C:/project", "Read", &input, |_| panic!("I/O before rejection: {input}")).0, Risky);
+        }
+        for tool in ["Bash", "command"] {
+            let input = json!({"command":format!("cat {}", "x ".repeat(8_000))});
+            assert_eq!(super::plan_probe("C:/project", tool, &input, |_| panic!("oversized request probed")).0, Risky);
+        }
+        let mut probes = 0;
+        assert_eq!(
+            super::plan_probe("/project", "Bash", &json!({"command":format!("cat {}", "x ".repeat(63))}), |_| {
+                probes += 1;
+                Ok(Small)
+            },)
+            .0,
+            Risky
+        );
+        assert_eq!(probes, 64);
+        assert_eq!(super::plan_probe("/project", "Read", &json!({"file_path":"new.txt"}), |_| Ok(Small)), (Small, None));
+    }
+
+    #[test]
+    fn size_boundary_copy_root_and_git_deletes_are_risky() {
+        use crate::model::PlanSize::{Risky, Small};
+        for command in ["rm -rf .", "rm -rf /project", "rm -rf sub/..", "rm -rf .git", "rm .git/config"] {
+            assert_eq!(
+                super::plan_boundary("/project", "/project", &[], &[], true, "Bash", &json!({"command":command}), false).0,
+                Risky,
+                "{command}"
+            );
+        }
+        for path in [".", "/project", "sub/..", ".git", ".git/config"] {
+            assert_eq!(
+                super::plan_boundary("/project", "/project", &[], &[], true, "file", &json!([{"path":path,"kind":"delete"}]), false).0,
+                Risky,
+                "{path}"
+            );
+        }
+        assert_eq!(super::plan_boundary("/project", "/project", &[], &[], true, "Bash", &json!({"command":"rm -rf src"}), false).0, Small);
+    }
+
+    #[test]
+    fn size_boundary_git_metadata_and_reads_are_risky() {
+        use crate::model::PlanSize::Risky;
+        for name in ["config", "hooks/pre-commit", "info/attributes"] {
+            assert_eq!(
+                super::plan_boundary(
+                    "/project",
+                    "/project",
+                    &[],
+                    &[],
+                    true,
+                    "Write",
+                    &serde_json::json!({"file_path":format!(".git/{name}")}),
+                    false
+                )
+                .0,
+                Risky
+            );
+        }
+        for key in ["core.fsmonitor", "diff.external", "core.pager", "diff.test.textconv"] {
+            assert_eq!(
+                super::plan_boundary(
+                    "/project",
+                    "/project",
+                    &[],
+                    &[],
+                    true,
+                    "file",
+                    &serde_json::json!([{"path":".git/config","kind":"update","content":key}]),
+                    false
+                )
+                .0,
+                Risky
+            );
+        }
+        for command in ["git status", "git diff", "git log", "git show", "git ls-files", "git --no-pager diff --no-ext-diff"] {
+            assert_eq!(
+                super::plan_boundary("/project", "/project", &[], &[], false, "Bash", &serde_json::json!({"command":command}), false),
+                (Risky, Some("unknown")),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn size_boundary_windows_aliases_fail_closed_on_every_platform() {
+        use crate::model::PlanSize::Risky;
+        for path in [
+            "D:secret.txt",
+            "env:GH_TOKEN",
+            "temp:/x",
+            "HKCU:/Software",
+            "C:/project/file:stream",
+            r"\\localhost\C$\data\x",
+            "/data/x",
+            "local/.. /outside",
+            "C:Users/../notes",
+            "FileSystem::C:/outside/x",
+            "Microsoft.PowerShell.Core\\FileSystem::C:/outside/x",
+            "/c/outside/x",
+            "/cygdrive/c/outside/x",
+            "FABER~1/x",
+            "CLAUDE~1/x",
+            "C:/data. /x",
+            "C:/data./x",
+            "C:/data /x",
+            "C:/data./../data /x",
+            ".CLAUDE./x",
+        ] {
+            assert_eq!(
+                super::plan_boundary(
+                    "C:/project",
+                    "C:/project",
+                    &["C:/data".into()],
+                    &[],
+                    false,
+                    "Read",
+                    &serde_json::json!({"file_path":path}),
+                    false
+                )
+                .0,
+                Risky,
+                "{path}"
+            );
+        }
+        for (data, path) in [(r"\\?\C:\data", "C:/data/x"), ("C:/data", r"\\?\C:\data\x")] {
+            assert_eq!(
+                super::plan_boundary("C:/project", "C:/project", &[data.into()], &[], false, "Read", &json!({"file_path":path}), false),
+                (Risky, Some("data"))
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn size_boundary_posix_names_remain_distinct() {
+        assert_eq!(
+            super::plan_boundary(
+                "/tmp/project",
+                "/tmp/project",
+                &[],
+                &[],
+                false,
+                "command",
+                &json!({"cwd":r"/tmp/outside\../project","command":"cat report.txt"}),
+                false
+            )
+            .0,
+            crate::model::PlanSize::Risky
+        );
+        assert_eq!(
+            super::plan_boundary(
+                "/tmp/project",
+                "/tmp/project",
+                &[],
+                &[],
+                false,
+                "Write",
+                &json!({"file_path":r"../outside\../project/report.txt"}),
+                false
+            )
+            .0,
+            crate::model::PlanSize::Risky
+        );
+        assert_eq!(
+            super::plan_boundary(
+                "/project/work.",
+                "/project/work.",
+                &[],
+                &[],
+                false,
+                "Read",
+                &json!({"file_path":"/project/work/x"}),
+                false
+            )
+            .0,
+            crate::model::PlanSize::Normal
+        );
+    }
+
+    #[test]
+    fn size_boundary_link_facts_and_glob_patterns_cannot_stay_small() {
+        use crate::model::PlanSize::{Normal, Risky, Small};
+        for (tool, input) in
+            [("Write", serde_json::json!({"file_path":"link/new.txt"})), ("Bash", serde_json::json!({"command":"rm -rf link/victim"}))]
+        {
+            assert_eq!(super::plan_boundary("/project", "/project", &[], &[], true, tool, &input, true), (Risky, Some("outside")));
+            assert_eq!(super::plan_boundary("/project", "/project", &[], &[], true, tool, &input, false).0, Small);
+        }
+        for input in [
+            serde_json::json!({"path":".","pattern":"../../**"}),
+            serde_json::json!({"pattern":"../../**"}),
+            serde_json::json!({"path":"..","pattern":"**"}),
+        ] {
+            assert!(super::plan_boundary("/project", "/project", &[], &[], false, "Glob", &input, false).0 >= Normal);
+        }
+        assert_eq!(
+            super::plan_boundary("/project", "/project", &[], &[], false, "Glob", &json!({"path":"src*","pattern":"*.rs"}), false).0,
+            Risky
+        );
+    }
     use super::*;
 
     #[test]

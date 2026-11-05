@@ -89,14 +89,16 @@ fn round(ctx: &mut Ctx, leader: &str) -> Result {
     ask(page, prompt)?;
     let row = css("article .agents .agent").has_text("Check config");
     page.wait_visible(&row)?;
-    page.click(&row)?;
     let box_ = css("#running .side-write textarea");
+    // Streamed steps move both the row and Send between coordinate lookup and mouse dispatch; keyboard actions keep their target.
+    page.press_on(&row, "Enter")?;
     page.wait_visible(&box_)?;
     let (running_mb, webview) = ctx.memory_mb(app.id)?;
     ensure(webview && running_mb <= 400.0, || format!("helper round uses {running_mb:.1} MB while running"))?;
     page.fill(&box_, TOLD)?;
-    page.click(&css("#running .side-write button[type=submit]"))?;
+    page.press_on(&box_, "Enter")?;
     page.wait_visible(&css("#running .side-told .you").has_text(TOLD))?;
+    ensure(page.count(&css("#running .side-told"))? == 1, || "the helper must receive the person's message exactly once".into())?;
     page.wait_visible(&css("#running .side-body .tools"))?;
     page.wait_visible(&css("article .agents .agent[data-state=done]").has_text("Check config"))?;
     page.wait_visible(&css("#running .agent-report").has_text("retries"))?;

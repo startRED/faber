@@ -28,7 +28,7 @@ if ($desktop -eq [IntPtr]::Zero) { throw "CreateDesktop: $([Runtime.InteropServi
 $env:FABER_PROOF_DESKTOP = $desktopName
 $startup = New-Object ProofDesktop+Startup
 $startup.cb = [Runtime.InteropServices.Marshal]::SizeOf($startup)
-$startup.desktop = "winsta0\$desktopName"
+$startup.desktop = $desktopName
 $startup.flags = 1
 $startup.show = 0
 $info = New-Object ProofDesktop+ProcessInfo

@@ -24,11 +24,13 @@ impl Core {
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
+        // Recovery picks up the cut reply before waiting messages, keeping those messages in every admission save.
+        let recovery = matches!(wake.why.as_str(), "wake.updated" | "wake.resumed");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
         // Compaction owns the session until its continuation can start.
         if busy
             || c.stopped
-            || !c.queued.is_empty()
+            || (!c.queued.is_empty() && !recovery)
             || c.compacting
             || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
         {

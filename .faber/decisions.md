@@ -1,4 +1,5 @@
 - Deliver original frontend-craft and frontend-proof instructions lazily through the existing first-party guide path; retain external catalog skills and each project's own visual system. [by AI]
+- Per-answer file review reads the existing private rewind before/after objects in bounded pages; retain one snapshot system and the existing restore confirmation, conflict choices, retention and recovery. [by AI]
 - Extend the existing composer draft keys with native IndexedDB Blob attachments, preserving synchronous text writes and explicit storage-failure recovery; a draft save does not establish delivery to the engine. [by AI]
 
 - Admit human sends only after their current intent is saved, restoring draft, archive, follow-up and routing state on refusal. A later research-mode write failure leaves that durable message accepted with a failed reply and ends Keep going without dropping human queued messages or starting the AI. [by AI]
@@ -36,3 +37,4 @@
 - The CLI, the AI's faber tools and the screen call one shared command list in Rust, over a local channel that needs a per-run secret; signing in to an AI, granting folder access and money stay with the person. [by AI]
 - A conversation counts as done only when its AI concluded it (wrap_up with done); a turn that ends without that shows as ended without a conclusion, and Faber asks the AI once for its closing summary. [by AI]
 - Conversations speak in the AI's own voice: Faber's added instructions keep the language, safety and evidence rules but no longer make the AI talk as Faber. [by AI]
+- Composer attachments are limited to 8 MiB total per message before browser file reads and sending, including restored drafts and pending reads; this fits the existing 16 MiB Electron/host transport without widening it. [by AI]

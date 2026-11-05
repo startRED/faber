@@ -4,6 +4,8 @@ use super::*;
 impl Engine {
     /// Finds interrupted conversations at startup and resumes eligible work after accounts are ready.
     pub fn resume_interrupted(&self) {
+        // The list reads every file it has not read yet; read first with the engine free, it is only looked up below.
+        let _ = self.with(|c| c.store.clone()).list();
         let (cut, wait, runtime) = self.with_saves(false, |c| {
             let rows = c.store.list();
             let mut cut = Vec::new();
@@ -68,12 +70,7 @@ impl Engine {
                     if times.len() >= closed::CONTINUES {
                         continue;
                     }
-                    let waiting = std::mem::take(&mut c.convs.get_mut(&id).unwrap().queued);
                     let sent = c.send_by_itself(&id, closed::CONTINUE.into(), Wake::of("wake.resumed")).is_ok();
-                    if let Some(conv) = c.convs.get_mut(&id) {
-                        let added = std::mem::replace(&mut conv.queued, waiting);
-                        conv.queued.extend(added);
-                    }
                     if sent {
                         c.closed_continues.entry(id.clone()).or_default().push(at);
                     }

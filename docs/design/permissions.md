@@ -22,9 +22,28 @@ Mode details distinguish requested CLI policy from machine isolation, which rema
   Sandboxed file tools deny writes to the actual Store root, including `FABER_DATA_DIR`. Codex profiles keep it and
   nested workspaces read-only, preserving allowed reads and approval policies. Both drivers refuse recognized writes
   before a card, resolving existing ancestors so Windows short names and junction aliases cannot hide new files.
-  Quoted read commands keep working with Windows short names and verbatim prefixes. Guarded Claude commands use
-  best-effort text checks: opaque scripts can hide a path; Isolated
-  commands use the native sandbox. Full access is unchanged; its five warnings now name conversations and settings.
+  Quoted read commands keep working with Windows short names and verbatim prefixes. Guarded Claude commands add
+  OS enforcement: Bash and PowerShell always ask the host before executing, even with a native remembered grant.
+  The original input stays on the permission card and remains the key for Faber's remembered grants. Every allowed
+  response replaces it with the installed native sandbox invocation, using a fresh permission profile that denies
+  reads and writes to every Store root, including aliases and paths computed inside a script. Plan uses read-only
+  project access; the other guarded modes permit project writes. Network remains enabled. PowerShell scripts use
+  UTF-16LE encoded input so native argument forwarding preserves quotes. Windows requires MXC; a WSL bash launcher,
+  missing or prefixed runner, missing shell or unresolved root is refused. A failed native start never retries the
+  original command. Monitor is denied because it has no checked replacement protocol. Isolated keeps its existing
+  command policy. Full access is unchanged; its five warnings name conversations and settings.
+  This is the owner-authorized fail-closed fallback (R554), with limits: native Auto classification and automatic
+  plain-read approvals now reach Faber's cards unless a host grant matches; approval choices and mode flags remain.
+  Literal native project entrypoints (Node, npm, Cargo and the existing build tools) run directly inside the sandbox. Shell syntax requires a supported native shell; a shell that cannot start is refused. Read-only sandbox rules cover CLI configuration, Git metadata and check settings. Native missing-path rules do not prevent every directory rename, so guarded launches additionally disable hooks even after opt-in, load only user settings and use strict Faber MCP configuration; project/local settings and servers cannot plant a host startup command. The existing hook hint and help disclose this in all five languages. A working folder inside a Store is refused. Commands start in the project folder, so a change of directory does not persist across calls, and background
+  execution stays off. An installed native Codex sandbox is required; shell syntax additionally needs a native shell. None is downloaded or bundled.
+  Before every guarded approval, including a remembered one, a metadata-only scan of every Store refuses symbolic
+  links, multiply linked files, unknown or unreadable entries, and more than 10,000 entries. No file contents are read.
+  This conservative fallback also refuses commands when catalog snapshots legitimately contain hardlinks; it does
+  not silently exempt those files. A Store nested in the workspace denies its entire first workspace child, so
+  renaming an allowed ancestor cannot reopen it; other files under that child become unavailable too. A separate
+  unsandboxed process mutating links after preflight is outside this boundary. Full access is unchanged.
+  Fake-process checks prove replacement and refusal, not OS enforcement. Native qualification must separately show
+  a successful project command and denied computed-path reads/writes of both approval records through real aliases.
   No control, layout or motion changes.
 
   Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode

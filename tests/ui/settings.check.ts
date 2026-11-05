@@ -309,6 +309,77 @@ const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLB
 // What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
 const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, resumeInterrupted: true, autostart: false };
 
+check('blocked sites: Settings adds and removes saved hosts, retains failed edits and fits at 720 px in every language', async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      const [saved, setSaved] = createSignal<Saved>({});
+      let accept = false;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0, start: 'privacy',
+        onClose: () => {}, onOpenSetup: () => {},
+        onSave: async (patch) => { if (accept) setSaved({ ...saved(), ...patch }); return accept; },
+      }));
+      try {
+        view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const input = view.host.querySelector<HTMLInputElement>('#blocked-host')!;
+        ok(input, 'Privacy exposes the blocked-sites field');
+        const form = input.closest('form')!;
+        const add = form.querySelector<HTMLButtonElement>('button')!;
+        const remove = () => view.host.querySelector<HTMLButtonElement>('.blocked-hosts button')!;
+        equal(input.maxLength, 253);
+        equal(add.disabled, true);
+        input.value = 'bank.example';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        equal(input.value, 'bank.example', 'a failed save retains the edit');
+        equal(saved().blockedHosts, undefined);
+        accept = true;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        deepEqual(saved().blockedHosts, ['bank.example']);
+        equal(input.value, '');
+        equal(document.activeElement, input);
+        ok(remove().getAttribute('aria-label')?.includes('bank.example'));
+        const button = remove().getBoundingClientRect();
+        const card = remove().closest('.st-card')!.getBoundingClientRect();
+        const option = view.host.querySelector('[data-opt="set-blocked-hosts"]')!.getBoundingClientRect();
+        ok(Math.abs((button.top - option.bottom) - (card.bottom - button.bottom)) <= 2, `${language}: the saved-host row has balanced vertical space`);
+        remove().focus();
+        accept = false;
+        remove().click();
+        await tick();
+        deepEqual(saved().blockedHosts, ['bank.example'], 'a refused removal keeps the host');
+        equal(document.activeElement, remove(), 'a refused removal restores keyboard focus');
+        accept = true;
+        remove().click();
+        await tick();
+        deepEqual(saved().blockedHosts, []);
+        equal(document.activeElement, input, 'focus survives removal of its button');
+        setSaved({ blockedHosts: Array.from({ length: 50 }, (_, n) => `${n}.${'a'.repeat(63)}.example`) });
+        await tick();
+        equal(input.disabled, true);
+        equal(add.disabled, true);
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        ok(main.scrollWidth <= main.clientWidth + 1, `${language}: names and actions do not overflow at 720 px`);
+        for (const button of view.host.querySelectorAll<HTMLButtonElement>('.blocked-hosts button')) {
+          const rect = button.getBoundingClientRect();
+          ok(rect.right <= 721 && rect.left >= 0, `${language}: Remove stays inside the window`);
+        }
+      } finally { view.stop(); }
+    }
+  } finally {
+    useLanguage('en');
+    forgetSection();
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+  }
+});
+
 check('settings: notification switches show what the engine sends, save separately and restore a refused change without playing anything', async () => {
   const [saved, setSaved] = createSignal<Saved>(SHOWN);
   const patches: Saved[] = [];
@@ -771,7 +842,7 @@ check('settings: an exit copy preserves the language selected on the live native
     privacy.click();
     await tick();
     equal(view.host.querySelectorAll('.facts').length, 1, 'Privacy is the new live section');
-    equal(view.host.querySelectorAll('.st-group').length, 0, 'General is only an exit copy');
+    equal(view.host.querySelectorAll('select[aria-label="Idioma"]').length, 0, 'General is only an exit copy');
     equal(saves, 0, 'switching sections saved no setting');
     const copy = [...document.querySelectorAll<HTMLElement>('.motion-exit')]
       .flatMap((host) => [...(host.shadowRoot?.querySelectorAll<HTMLSelectElement>('select[aria-label="Idioma"]') ?? [])])[0];
@@ -837,7 +908,7 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     phase = 'after tick';
     equal(main.scrollTop, 0, 'a section opens at its top');
     equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
-    equal(view.host.querySelectorAll('.st-group').length, 0, 'and none of General');
+    equal(view.host.querySelectorAll('.st-group').length, 1, 'and none of General: only the Blocked sites group of Privacy is live');
     const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group');
     ok(departing, `the old section leaves as an inert copy${departing ? '' : `; diagnostic ${JSON.stringify({
       motion: document.documentElement.dataset.motion, effectiveLevel: level(main),
@@ -911,6 +982,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
         look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0, start: 'general',
         onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
       }));
+      let paused: Animation[] = [];
       try {
         const settings = view.host.querySelector<HTMLElement>('.settings')!;
         settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
@@ -938,12 +1010,17 @@ check('settings: reversing a section switch before its exit ends keeps the lates
               })),
             })),
           })}`}`);
-          ok(departing.getAnimations().some((animation) => animation.playState === 'running'), 'reverse while the first exit is still running');
+          paused = departing.getAnimations().filter((animation) => animation.playState === 'running');
+          ok(paused.length > 0, 'reverse while the first exit is still running');
+          // Keep the exit alive through the assertions even when the test runner is delayed.
+          paused.forEach((animation) => animation.pause());
         }
         const general = navButton(view.host, 'set.general');
         general.focus();
         general.click();
-        await tick();
+        // Outlast the 250 ms exit cap to reproduce a runner delayed after the switch.
+        if (mode === 'full') await new Promise((resolve) => setTimeout(resolve, 350));
+        else await tick();
         ok(main.querySelector('.st-group'), `${mode}: the latest General section is live`);
         equal(main.querySelectorAll('.facts').length, 0, `${mode}: Privacy is no longer live`);
         equal(document.activeElement, general, `${mode}: exit copies do not take focus`);
@@ -957,6 +1034,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
           equal(layer, null, `${mode}: neither switch makes an exit copy`);
           equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section is immediate`);
         }
+        paused.forEach((animation) => animation.play());
         for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) await frames(1);
         equal(document.querySelector('.motion-exit'), null, `${mode}: interrupted exits release every copy`);
         equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section rests`);
@@ -964,6 +1042,7 @@ check('settings: reversing a section switch before its exit ends keeps the lates
         equal(main.querySelectorAll('.facts').length, 0, `${mode}: no late exit restores Privacy`);
         equal(document.activeElement, general, `${mode}: finishing exits does not move focus`);
       } finally {
+        paused.forEach((animation) => animation.cancel());
         view.stop();
       }
     }

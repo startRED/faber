@@ -34,7 +34,9 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
 | [design/icons.md](design/icons.md) | The drawing of each kind of step and each state, and who is speaking: when a screen needs a picture for one |
 | [design/homes.md](design/homes.md) | Chat and project homes, including recent conversations |
+| [design/answer-line.md](design/answer-line.md) | The line under an answer: its buttons, hover bar, the reply's state and why it stopped |
 | [design/conversation.md](design/conversation.md) | An open conversation: the answers and their bar, your messages, the viewer and linked research reports |
+| [design/answer-review.md](design/answer-review.md) | Per-answer saved file comparisons, paging, loading and read failures; shared restore history |
 | [design/chat-workspace.md](design/chat-workspace.md) | Private Chat files, Windows startup recovery and ownership of selected folders |
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
 | [design/reading.md](design/reading.md) | Reading width, selections, durable scroll position and the latest-message control |
@@ -59,6 +61,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
 | [dev/evals.md](dev/evals.md) | Opt-in evaluations of what the AI writes with the real CLIs: the router, the persona |
 | [dev/cli-qualification.md](dev/cli-qualification.md) | Nightly unauthenticated CLI candidate contracts, bounded metadata receipts and missing compatibility evidence |
+| [dev/plan-boundary-qualification.md](dev/plan-boundary-qualification.md) | Task 500 approval-layer size admission, recorded coverage and ungated observations |
 | [dev/antigravity-cli.md](dev/antigravity-cli.md) | How the Antigravity CLI (Gemini) behaves, recorded: output events, approval, resume, isolation, MCP, quota |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |

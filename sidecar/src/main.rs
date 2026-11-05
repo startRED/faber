@@ -70,6 +70,7 @@ fn main() -> ExitCode {
             faber_engine::proc::set_cli(cli);
         }
     }
+    faber_engine::startup::begin();
     // Before any HTTPS client: reqwest is built without a crypto provider of its own.
     faber_engine::tls::install();
     match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
@@ -150,6 +151,8 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    faber_engine::startup::mark("started");
+    faber_update::log_to(&channel_data, faber_update::STARTUP_LOG, "host", &faber_engine::startup::line());
     // The command line reaches the same table over the local channel, for as long as the sidecar runs.
     let channel_host = host.clone();
     tokio::spawn(async move {

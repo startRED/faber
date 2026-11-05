@@ -38,6 +38,8 @@ impl PaneEvent {
 /// Faber around the pane. The methods that touch the conversation's file are asynchronous so an implementation can leave the
 /// pane's thread for them.
 pub trait Home: Send + Sync + 'static {
+    /// Checks a destination against the latest browser settings before the pane changes tabs or loads it.
+    fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>>;
     /// A conversation's tabs; none for one that is gone or never had a page.
     fn tabs(&self, conversation: String) -> BoxFuture<'_, Option<Tabs>>;
     /// Does `step` to a conversation's tabs and answers them with the tab it concerns.
@@ -89,6 +91,19 @@ impl EngineHome {
 }
 
 impl Home for EngineHome {
+    fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            self.with(move |engine| {
+                Some(
+                    faber_engine::browser::check_blocked_url(&url, engine.settings().blocked_hosts.as_deref().unwrap_or_default())
+                        .map_err(str::to_string),
+                )
+            })
+            .await
+            .unwrap_or_else(|| Err("error.browser.invalidHost".into()))
+        })
+    }
+
     fn tabs(&self, conversation: String) -> BoxFuture<'_, Option<Tabs>> {
         self.with(move |engine| engine.browser_tabs(&conversation))
     }

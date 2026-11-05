@@ -41,6 +41,27 @@ pub struct ShellTexts {
     /// `{title}` and `{ai}`: "{title}: kept going until nothing was left".
     #[serde(default = "default_stopped")]
     stopped: BTreeMap<String, String>,
+    /// Asked before Quit while something runs: it stops with Faber.
+    #[serde(default = "default_quit_ask")]
+    pub quit_ask: String,
+    /// The button that cancels that question and lets the work go on.
+    #[serde(default = "default_quit_keep")]
+    pub quit_keep: String,
+    /// The note after the window closes while something runs: Faber stays in the tray.
+    #[serde(default = "default_closed_note")]
+    pub closed_note: String,
+}
+
+fn default_quit_ask() -> String {
+    "Work is still running, and it stops if you quit. Quit anyway?".into()
+}
+
+fn default_quit_keep() -> String {
+    "Keep working".into()
+}
+
+fn default_closed_note() -> String {
+    "Faber keeps working in the tray".into()
 }
 
 fn default_notify_many() -> String {
@@ -78,6 +99,9 @@ impl Default for ShellTexts {
             notify: "{title} needs you".into(),
             notify_many: default_notify_many(),
             stopped: default_stopped(),
+            quit_ask: default_quit_ask(),
+            quit_keep: default_quit_keep(),
+            closed_note: default_closed_note(),
         }
     }
 }
@@ -89,7 +113,7 @@ fn fill(template: &str, name: &str, value: &str) -> String {
 /// What the tray reports: every item of the running list, and those that wait for the user.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
-    running: usize,
+    pub running: usize,
     pub needs_you: usize,
 }
 

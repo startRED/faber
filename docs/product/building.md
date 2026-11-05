@@ -6,6 +6,11 @@ Phase 4's [nightly CLI candidate checks](../dev/cli-qualification.md) detect lau
 without sign-in. Their metadata receipts always remain unqualified; authenticated turns, cancellation and cleanup
 evidence are still needed before a candidate can authorize installation.
 
+Plans carry a small, normal or risky size that never drops automatically. The engine classifies received permission
+requests before approving them, raises the size at a boundary and holds the request for a contract covering that size.
+The question defaults to stating the contract; the original permission decision still applies afterwards. This layer
+sees approval requests only, as described in [recording qualification](../dev/plan-boundary-qualification.md).
+
 ## Building software: one voice, a team behind it
 
 For frontend work, the existing guide delivery provides Faber's original `frontend-craft` and `frontend-proof`

@@ -240,8 +240,10 @@ export interface PlanStep {
 }
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
+  size?: 'small' | 'normal' | 'risky';
+  raisedBecause?: 'credentials' | 'data' | 'outside' | 'publish' | 'delete' | 'unknown';
   steps: PlanStep[];
-  contract?: { extends?: string; newBecause?: string; proof?: string; target?: string };
+  contract?: { size?: 'small' | 'normal' | 'risky'; extends?: string; newBecause?: string; proof?: string; target?: string };
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
   estimate?: { cents: number; base: number; economy: boolean };
@@ -564,6 +566,7 @@ export type WebSearch = 'off' | 'cached' | 'live';
 export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
 export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
 export interface Settings {
+  blockedHosts?: string[];
   appearance?: Appearance;
   userHooks?: boolean;
   permissions?: PermissionMode;
@@ -808,6 +811,22 @@ export interface RewindCoverage {
   unavailable: boolean;
   incomplete: boolean;
 }
+/** A single turn's saved before/after versions; at most 50 file names per page. */
+export interface AnswerChanges {
+  files: FileChange[];
+  total: number;
+  coverage: RewindCoverage;
+  sealed: boolean;
+  shared: boolean;
+}
+/** One saved file's unified diff, loaded only while open; at most 200 lines / 128 KiB. */
+export interface AnswerChangePatch {
+  lines: string[];
+  total: number;
+  binary: boolean;
+  tooLarge: boolean;
+  notice?: 'answerChanges.properties' | 'answerChanges.emptyAdded' | 'answerChanges.emptyDeleted';
+}
 export interface RewindCursor {
   entry: string | null;
   turn: string | null;
@@ -928,6 +947,9 @@ export interface ShellTexts {
   needsYou: Plural;
   notify: string;
   notifyMany: string;
+  quitAsk: string;
+  quitKeep: string;
+  closedNote: string;
   /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
   stopped: Record<string, string>;
 }
@@ -962,6 +984,7 @@ export interface MemoryEntry {
   body?: string;
   author?: 'ai' | 'person';
   reviewed?: boolean;
+  stale?: boolean;
 }
 export interface MemoryFile {
   path: string;
@@ -1008,6 +1031,7 @@ export const api = {
   backgroundCommands: () => invoke<BackgroundList>('background_commands'),
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
+  startCard: (id: string) => invoke<string | null>('start_card', { id }),
   messagesBefore: (id: string, messageId: string) => invoke<Message[] | null>('messages_before', { id, messageId }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
@@ -1073,6 +1097,8 @@ export const api = {
   contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
   rewindPoints: (id: string) => invoke<RewindPoint[]>('rewind_points', { id }),
+  answerChanges: (id: string, messageId: string, offset = 0) => invoke<AnswerChanges>('answer_changes', { id, messageId, offset }),
+  answerChangePatch: (id: string, messageId: string, path: string, offset = 0) => invoke<AnswerChangePatch>('answer_change_patch', { id, messageId, path, offset }),
   rewindRedos: (id: string) => invoke<RewindRedoInfo[]>('rewind_redos', { id }),
   rewindRedoPreview: (request: RewindRedoRequest) => invoke<RewindPreview>('rewind_redo_preview', { request }),
   rewindRecover: (id: string) => invoke<void>('rewind_recover', { id }),

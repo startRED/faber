@@ -5,7 +5,7 @@ pub mod relocation;
 #[cfg(unix)]
 pub mod unix_chat;
 
-use crate::model::FileInfo;
+use crate::model::{FileInfo, Image};
 use base64::Engine as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -38,8 +38,30 @@ pub struct Attachment {
     pub base64: String,
 }
 
+const MAX_ATTACHMENTS_BYTES: usize = 8 * 1024 * 1024;
+
+/// Reject oversized input before decoding or copying its base64 bytes.
+pub(crate) fn validate_attachments(images: &[Image], files: &[Attachment]) -> Result<(), &'static str> {
+    let mut total = 0;
+    for encoded in images.iter().map(|image| &image.base64).chain(files.iter().map(|file| &file.base64)) {
+        if encoded.len() > MAX_ATTACHMENTS_BYTES.div_ceil(3) * 4 {
+            return Err("error.attachmentsTooLarge");
+        }
+        let padding = usize::from(encoded.ends_with('=')) + usize::from(encoded.ends_with("=="));
+        let bytes = encoded.len().div_ceil(4) * 3 - padding;
+        total += bytes;
+        if total > MAX_ATTACHMENTS_BYTES {
+            return Err("error.attachmentsTooLarge");
+        }
+    }
+    Ok(())
+}
+
 /// Writes attached files into `dir` under safe, unique names and returns the full paths.
 pub fn save_files(root: &Path, dir: &Path, files: &[Attachment]) -> Vec<PathBuf> {
+    if validate_attachments(&[], files).is_err() {
+        return vec![];
+    }
     // Host-generated paths may have a trusted Windows 8.3 root (RUNNER~1). Check only the relative
     // operand, preserving the shared policy's traversal, junction and protected-file guards.
     let writable = |path: &Path| {
@@ -168,5 +190,38 @@ impl TestRoot {
     #[allow(dead_code)]
     pub(crate) fn work(&self) -> &Path {
         &self.work
+    }
+}
+
+#[cfg(test)]
+mod attachment_limits {
+    use super::*;
+
+    fn encoded(bytes: usize) -> String {
+        let mut value = "A".repeat(bytes.div_ceil(3) * 4);
+        for pad in 0..(3 - bytes % 3) % 3 {
+            let last = value.len() - 1 - pad;
+            value.replace_range(last..last + 1, "=");
+        }
+        value
+    }
+
+    #[test]
+    fn exact_byte_limits_count_padding_and_share_images_and_files() {
+        let file = |bytes| Attachment { name: "example.pdf".into(), base64: encoded(bytes) };
+        for bytes in [0, 1, 2, 3, MAX_ATTACHMENTS_BYTES] {
+            assert_eq!(validate_attachments(&[], &[file(bytes)]), Ok(()));
+        }
+        for bytes in [MAX_ATTACHMENTS_BYTES + 1, MAX_ATTACHMENTS_BYTES + 2] {
+            assert_eq!(validate_attachments(&[], &[file(bytes)]), Err("error.attachmentsTooLarge"));
+        }
+        let image = Image { media_type: "image/png".into(), base64: encoded(MAX_ATTACHMENTS_BYTES / 2) };
+        let files = [file(MAX_ATTACHMENTS_BYTES / 2), file(1)];
+        assert_eq!(validate_attachments(std::slice::from_ref(&image), &files[..1]), Ok(()));
+        assert_eq!(validate_attachments(&[image], &files), Err("error.attachmentsTooLarge"));
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("attachments");
+        assert!(save_files(dir.path(), &target, &[file(MAX_ATTACHMENTS_BYTES + 1)]).is_empty());
+        assert!(!target.exists(), "an oversized file is rejected before creating its directory");
     }
 }

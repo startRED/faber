@@ -131,6 +131,14 @@ mod tests {
     use crate::project::git::{GitError, Output};
 
     struct Git(Option<&'static str>, Vec<Vec<String>>);
+
+    fn outside_repository() -> tempfile::TempDir {
+        // The build wrapper can place temporary files inside the checkout.
+        let temp = std::env::temp_dir();
+        let parent = temp.ancestors().find(|p| !p.ancestors().any(|a| a.join(".git").exists())).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
     impl Executor for Git {
         fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
             self.1.push(call.args.clone());
@@ -160,7 +168,7 @@ mod tests {
 
     #[test]
     fn outside_a_repository_a_walk_leaves_out_git_dependencies_and_build_output() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = outside_repository();
         for file in ["notes.md", "src/app.ts", "node_modules/x/app.ts", "target/debug/app.exe", "dist/app.js"] {
             let path = dir.path().join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -209,7 +217,7 @@ mod tests {
 
     #[test]
     fn a_name_that_starts_with_the_query_comes_first_and_the_list_stays_small() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = outside_repository();
         let mut files: Vec<String> = (0..80).map(|i| format!("deep/tests/case_{i}_main.rs")).collect();
         files.push("main.rs".into());
         files.push("src/lexer.rs".into());

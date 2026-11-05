@@ -457,7 +457,34 @@ export function Sidebar(props: Props) {
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
       {/* Each keystroke of a search filters the list: rows change at once instead of sliding on every letter. */}
-      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => { list = el; animateList(el, true); }}>
+      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onKeyDown={(e) => {
+        if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        const row = e.target instanceof HTMLButtonElement && e.target.matches('.item') ? e.target : undefined;
+        if (!row) return;
+        const rows = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button.item')]
+          .filter((button) => !button.disabled && !button.closest('[inert], [aria-hidden="true"]') && button.getClientRects().length > 0);
+        const index = rows.indexOf(row);
+        if (index < 0) return;
+        let next: HTMLButtonElement | undefined;
+        if (e.key === 'ArrowDown') next = rows[Math.min(index + 1, rows.length - 1)];
+        else if (e.key === 'ArrowUp') next = rows[Math.max(index - 1, 0)];
+        else if (e.key === 'Home') next = rows[0];
+        else if (e.key === 'End') next = rows.at(-1);
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const parent = row.closest<HTMLElement>('.proj');
+          const head = parent?.querySelector<HTMLButtonElement>(':scope > .prow > .item');
+          const id = parent?.dataset.projectId ?? parent?.dataset.chatGroupId;
+          if (!head || !id) return;
+          if (row !== head) {
+            if (e.key !== 'ArrowLeft') return;
+            next = head;
+          } else if (e.key === 'ArrowLeft') toggle(id, false);
+          else if (head.getAttribute('aria-expanded') !== 'true') toggle(id, true);
+          else next = rows[index + 1]?.closest('.proj') === parent ? rows[index + 1] : head;
+        } else return;
+        e.preventDefault();
+        if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: 'nearest', behavior: 'instant' }); }
+      }} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => { list = el; animateList(el, true); }}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">

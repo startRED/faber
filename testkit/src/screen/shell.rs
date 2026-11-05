@@ -648,7 +648,7 @@ pub(super) fn seed(ctx: &Ctx, id: &str, title: &str, project: Option<&str>, at: 
 
 /// Writes `projects.json` with one project, `demo`, and its folder.
 pub(super) fn seed_project(ctx: &Ctx, name: &str) -> Result {
-    let folder = ctx.sb.data.join("demo");
+    let folder = ctx.sb.sandbox.join("demo");
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let projects = json!([{ "id": "demo", "name": name, "path": folder.to_string_lossy() }]);
     std::fs::write(ctx.sb.data.join("projects.json"), projects.to_string()).map_err(|e| e.to_string())

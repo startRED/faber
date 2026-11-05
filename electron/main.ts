@@ -10,7 +10,8 @@ import { pathToFileURL } from 'node:url';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
-import { apply, type Picked, release } from './orders.ts';
+import { apply, type Picked, quitNow, release } from './orders.ts';
+import * as startup from './startup.ts';
 import * as testmode from './testmode.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
@@ -30,6 +31,7 @@ const HOST_STOP_MS = 5000;
 const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
 app.setPath('userData', path.join(dataDir, 'webview'));
 if (!app.requestSingleInstanceLock()) app.exit(0);
+startup.begin(dataDir);
 void startWayback(dataDir);
 
 // Compiled into out/electron/, two folders below the repository.
@@ -184,7 +186,8 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   guardVisualFrames(window.webContents);
   pane.watch(window);
-  const failsafe = setTimeout(() => reveal(window), REVEAL_FAILSAFE_MS);
+  startup.windowBuilt();
+  const failsafe = setTimeout(() => reveal(window, 'failsafe'), REVEAL_FAILSAFE_MS);
   window.once('show', () => clearTimeout(failsafe));
   const resized = () => window.webContents.send('faber:window-resized');
   window.on('maximize', resized);
@@ -233,8 +236,11 @@ function releaseGpu(): void {
   }
 }
 
-function reveal(window: BrowserWindow): void {
-  if (!hidden && !window.isDestroyed() && !window.isVisible()) window.show();
+function reveal(window: BrowserWindow, by: 'paint' | 'failsafe'): void {
+  if (window.isDestroyed()) return;
+  // Timed even when the window is already on screen (a test run shows it at once) or never shows (a hidden run).
+  startup.shown(by);
+  if (!hidden && !window.isVisible()) window.show();
 }
 
 function show(): void {
@@ -269,13 +275,16 @@ const windowCommands = new Map<string, (args: Record<string, unknown>) => unknow
   [
     'screen_ready',
     () => {
-      if (win) reveal(win);
+      if (win) reveal(win, 'paint');
     },
   ],
   ['open_link', openLink],
 ]);
 
 function relay(): void {
+  ipcMain.on('faber:flush-storage', (event) => {
+    if (fromScreen(event)) event.sender.session.flushStorageData();
+  });
   ipcMain.handle('faber:invoke', async (event, command: unknown, args: unknown) => {
     // Any other page (a future browser pane, a frame) is refused before a command runs.
     if (!fromScreen(event)) return { err: 'error.host.notScreen' };
@@ -288,7 +297,9 @@ function relay(): void {
       const own = windowCommands.get(command);
       if (own) return { ok: (await own(given)) ?? null };
       if (!host) throw new Error('error.host.notReady');
-      return { ok: await host.call(command, given) };
+      const ok = await host.call(command, given);
+      startup.hostAnswered();
+      return { ok };
     } catch (failure) {
       return { err: failure instanceof Error ? failure.message : failure };
     }
@@ -342,7 +353,44 @@ void app.whenReady().then(() => {
     answer: (picked: Picked) => host?.note(picked),
     hidden,
   };
-  host = Sidecar.start({
+  host = startHost(window);
+  // A start with the system keeps the window away, and the updater must know that before it decides anything.
+  if (autostart) host.note({ kind: 'window', visible: false });
+  else show();
+});
+
+/** Restarts of the host in the last minute: past `HOST_RESTARTS` a host that keeps failing is left down, not looped. */
+const restarts: number[] = [];
+const HOST_RESTARTS = 3;
+
+/**
+ * Starts the host. One that ends on its own is never left behind a live window (2026-11-04: the window stayed open with no
+ * engine, so every click failed): an end it chose (code 0, an update took over and asked the app to quit) ends the app;
+ * a failure starts a new host, and the screen reads everything again from it.
+ */
+function startHost(window: Parameters<typeof apply>[1]): Sidecar {
+  return Sidecar.start({
+    ended: (code) => {
+      if (stopping) return;
+      if (code === 0) {
+        quitNow();
+        return;
+      }
+      const now = Date.now();
+      while (restarts.length > 0 && now - restarts[0] > 60_000) restarts.shift();
+      // A host that keeps failing is not looped: the app closes rather than stay open with a window that answers nothing.
+      if (restarts.length >= HOST_RESTARTS) {
+        console.error(`faber: the host ended (code ${code}) ${HOST_RESTARTS} times in a minute; closing`);
+        quitNow();
+        return;
+      }
+      restarts.push(now);
+      console.error(`faber: the host ended (code ${code}); starting it again`);
+      host = startHost(window);
+      host.note({ kind: 'window', visible: win?.isVisible() === true && !win.isMinimized() });
+      host.note({ kind: 'focus', focused: win?.isFocused() ?? false });
+      win?.webContents.reload();
+    },
     event: (event) => {
       // The host dropped events this screen never heard (it fell too far behind): the screen starts over from a fresh
       // reading instead of drawing from a partial one. Rare; Tauri's direct events never lag.
@@ -364,7 +412,4 @@ void app.whenReady().then(() => {
       else apply(order, window);
     },
   });
-  // A start with the system keeps the window away, and the updater must know that before it decides anything.
-  if (autostart) host.note({ kind: 'window', visible: false });
-  else show();
-});
+}

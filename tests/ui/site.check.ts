@@ -10,7 +10,7 @@ import recorded from '../fixtures/conversation-changes.json';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { quietTabs } from './site-tabs.check.ts';
-import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
+import { addressOf, appsOf, awaySites, cornersOf, covered, looksOf, openedSite, showSite, SiteCard, siteOf, sitesOf, stepsOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { Cookies } from '../../ui/Cookies.tsx';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
@@ -21,6 +21,23 @@ import act from '../../src-tauri/src/pane/act.js';
 
 const OPENED = "Opened https://docs.example.org/guide in Faber's browser; the person can see it there.\nTitle: The guide\n\nThe page's visible text follows.\n---\nOpened https://evil.example/ in Faber's browser";
 const BROWSE: ToolUse = { id: 'w1', name: 'Browser', input: { url: 'https://example.org/start' }, ok: true, output: OPENED };
+
+check('blocked sites: page and app cards explain a blocked host without opening the pane', async () => {
+  useLanguage('en');
+  const original = { siteOpen: api.siteOpen, sitePicture: api.sitePicture };
+  api.siteOpen = async () => { throw 'error.browser.blockedHost'; };
+  api.sitePicture = async () => null;
+  const root = document.createElement('div');
+  document.body.append(root);
+  const stop = render(() => createComponent(SiteCard, { conversationId: 'c', tool: BROWSE, site: { url: 'http://localhost:3000/', title: t('site.app') } }), root);
+  try {
+    showSite(undefined);
+    root.querySelector<HTMLButtonElement>('button')!.click();
+    await frames();
+    equal(root.querySelector('[role="alert"]')?.textContent, t('error.browser.blockedHost'));
+    equal(openedSite(), undefined);
+  } finally { stop(); root.remove(); Object.assign(api, original); }
+});
 
 check('page in the browser: the card reads the address and title from Faber’s own lines, never from the page’s words', () => {
   deepEqual(siteOf(BROWSE), { url: 'https://docs.example.org/guide', title: 'The guide' });
@@ -834,8 +851,12 @@ check('page in the browser: with no page yet the pane shows only its address fie
   const stepped: string[][] = [];
   api.siteStep = async (id, step) => (stepped.push([id, step]), true);
   let placed = 0;
-  let refuse = false;
-  api.siteGo = async (id, url) => (opened.push([id, url]), !refuse);
+  let refuse: boolean | 'error.browser.blockedHost' = false;
+  api.siteGo = async (id, url) => {
+    opened.push([id, url]);
+    if (typeof refuse === 'string') throw refuse;
+    return !refuse;
+  };
   api.siteHistory = async () => [true, true];
   api.sitePlace = async () => (placed++, true);
   api.sitePark = async () => {};
@@ -901,6 +922,11 @@ check('page in the browser: with no page yet the pane shows only its address fie
     equal(root.querySelector('[role="alert"]')!.textContent, 'The page couldn’t open. Try again.', 'a valid address that failed to open is not reported as a forbidden address');
     equal(field.value, 'example.org', 'an opening failure preserves the typed address');
     equal(field.getAttribute('aria-invalid'), null, 'a native opening failure does not mark a valid address invalid');
+    refuse = 'error.browser.blockedHost';
+    type('bank.example');
+    await frames();
+    equal(root.querySelector('[role="alert"]')!.textContent, t('error.browser.blockedHost'), 'the browser explains a settings block in the chosen language');
+    equal(field.value, 'bank.example', 'a blocked address remains editable');
     refuse = false;
     type('example.org');
     await frames();

@@ -26,6 +26,7 @@ import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
 import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
+import { AnswerChanges } from './AnswerChanges.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
 import { openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
@@ -113,13 +114,31 @@ function CopyButton(props: { text: () => string }) {
 
 // When a message was sent (the short time; the whole date is the tooltip) and, on an answer, how long it took. Old replies carry
 // no duration, and then the time stands alone.
+let whenFormats: { language: string; zone: string; date: Intl.DateTimeFormat; time: Intl.DateTimeFormat } | undefined;
+let whenZone: string | undefined;
+function whenAt(at: number) {
+  const language = lang();
+  // A page shares one zone lookup; the next task still sees a system time-zone change.
+  if (whenZone === undefined) {
+    whenZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    queueMicrotask(() => { whenZone = undefined; });
+  }
+  const zone = whenZone;
+  if (whenFormats?.language !== language || whenFormats.zone !== zone) {
+    whenFormats = { language, zone,
+      date: new Intl.DateTimeFormat(language, { dateStyle: 'full', timeStyle: 'medium', timeZone: zone }),
+      time: new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit', timeZone: zone }) };
+  }
+  const value = new Date(at);
+  return { iso: value.toISOString(), date: whenFormats.date.format(value), time: whenFormats.time.format(value) };
+}
 function When(props: { at: number; took?: number }) {
   const took = () => (props.took && props.took >= 500 ? duration(Math.max(1, Math.round(props.took / 1000))) : '');
-  const date = () => new Date(props.at).toLocaleString(lang(), { dateStyle: 'full', timeStyle: 'medium' });
+  const sent = createMemo(() => props.at > 0 ? whenAt(props.at) : undefined);
   return (
     <Show when={props.at > 0}>
-      <span class="when num" title={took() ? `${date()} · ${t('answer.took', { time: took() })}` : date()}>
-        <time datetime={new Date(props.at).toISOString()}>{new Date(props.at).toLocaleTimeString(lang(), { hour: 'numeric', minute: '2-digit' })}</time>
+      <span class="when num" title={took() ? `${sent()!.date} · ${t('answer.took', { time: took() })}` : sent()!.date}>
+        <time datetime={sent()!.iso}>{sent()!.time}</time>
         <Show when={took()}>
           <span class="took"> · {took()}</span>
         </Show>
@@ -400,7 +419,7 @@ interface Shared {
   onOpenConversation?: (id: string) => void;
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
+function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; reviewable?: boolean; last?: boolean; answered?: Answered[]; messageIndex?: number }) {
   // Older automatic messages without acts keep their loop mark in the reply header.
   const woke = () => props.prompt?.acts?.length || props.prompt?.wake?.why === 'wake.conclusion' ? undefined : props.prompt?.wake;
   const m = () => props.m();
@@ -712,7 +731,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <StallNote conversationId={props.conversationId} m={m()} />
       <Show when={props.last && props.area === 'project'}><ResultsNote conversationId={props.conversationId} message={m()} /></Show>
       {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
-      <Show when={props.last && props.plan?.steps.length && (working() || props.plan.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
+      <Show when={props.last && (props.plan?.steps.length || props.plan?.raisedBecause) && (working() || props.plan?.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
         {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
       </Show>
       <Show when={m().files?.length}>
@@ -756,6 +775,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </p>
       </Show>
       <Show when={m().wrapUp}>{(box) => <WrapUpBox box={box()} written={m().text.trim() !== ''} open={!!props.last && !working() && !m().permissions?.some((p) => p.tool === 'ExitPlanMode')} onReply={props.onReply} />}</Show>
+      <Show when={!streaming() && props.reviewable !== false && props.prompt?.rewind}>{(point) => <AnswerChanges conversationId={props.conversationId} messageId={props.prompt!.id} point={point()} />}</Show>
       <Show when={!working() || foot()}>
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
             Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}
@@ -1053,8 +1073,6 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
   );
 }
 
-// Messages only grow at the end, so each position keeps its component while the answer streams into it.
-// Only the messages from `from` on are drawn.
 /** What "keep going" did while the person was away, in one calm line (C001): how long, turns of work, and only the parts that happened. */
 function AwayLine(props: { away: NonNullable<Message['away']> }) {
   const time = () => {
@@ -1081,13 +1099,15 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
   const shown = keepForExit(open);
   const [revision, setRevision] = createSignal(0);
   // A completed turn refreshes discovery; text streaming never asks the disk for history.
-  const [redos] = createResource(() => `${props.conversationId}:${props.messages.length}:${props.messages.at(-1)?.status}:${revision()}`, () => api.rewindRedos(props.conversationId).catch(() => []));
+  const [redos] = createResource(() => `${props.conversationId}:${(props.earlier ?? 0) + props.messages.length}:${props.messages.at(-1)?.status}:${revision()}`, () => api.rewindRedos(props.conversationId).catch(() => []));
   const redo = () => redos()?.[0];
   const lastMine = createMemo(() => props.messages.findLast((m) => m.role === 'user' && !m.wake)?.id);
   const redoAt = createMemo(() => props.messages.some((m) => m.id === redo()?.messageId && m.role === 'user' && !m.wake) ? redo()?.messageId : lastMine());
   const showRestore = (message: Message, redo?: RewindRedoInfo) => { setRestore({ message, redo }); setOpen(true); };
   const queuedIds = createMemo(() => (props.queued ?? []).map((q) => q.id));
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
+  const reviewOwners = createMemo(() => new Map(props.messages.filter((m) => m.role === 'user' && m.rewind).map((m) => [m.rewind!.id, m.id])));
+  const reviewable = (at: number) => { const p = prompt(at); return !p?.rewind || reviewOwners().get(p.rewind.id) === p.id; };
   const drawn = (m: Message, at: number) => !(prompt(at)?.wake && m.status !== 'streaming' && empty(m) && !(at === props.messages.length - 1 && (props.endState === 'unconcluded' || m.closed)));
   // Turns Faber sent by itself, one after another, read as one run (task 018): its earlier turns fold under one header,
   // and if the newest turns had nothing for the person, the last turn of the run with content stays open below the header.
@@ -1107,7 +1127,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
   });
   const earlier = (at: number) => (
     <Show when={drawn(props.messages[at]!, at)}>
-      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} last={false} answered={[]} messageIndex={at + (props.earlier ?? 0)} />
+      <Answer {...props} pieceRevision={revision()} m={() => props.messages[at]!} prompt={prompt(at)} reviewable={reviewable(at)} last={false} answered={[]} messageIndex={at + (props.earlier ?? 0)} />
     </Show>
   );
   return (
@@ -1117,25 +1137,29 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
           {fromEngine(props.rewindNotice)}
         </p>
       </Show>
-      <Index each={props.messages.slice(props.from, props.until)}>
-        {(m, i) => (
-          <Show
+      {/* Keep rows by message id so paging preserves their text, selection and local state. */}
+      <For each={props.messages.slice(props.from, props.until).map((m) => m.id)}>
+        {(_id, i) => {
+          const at = createMemo(() => props.from + i());
+          const m = createMemo(() => props.messages[at()]!);
+          return <Show
             when={m().role === 'user'}
             fallback={
-              <Show when={!hidden().has(props.from + i)}>
-                <Show when={runs().get(props.from + i)}>
-                  {(run) => <RunBlock messages={props.messages} run={run()} shown={props.from + i} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} offset={props.earlier} />}
+              <Show when={!hidden().has(at())}>
+                <Show when={runs().get(at())}>
+                  {(run) => <RunBlock messages={props.messages} run={run()} shown={at()} plan={props.plan} earlier={earlier} reveal={props.searchIndex} from={props.from} offset={props.earlier} />}
                 </Show>
                 {/* The newest turn of a run is drawn even with nothing of its own when it holds the run's answers. */}
-                <Show when={drawn(m(), props.from + i) || answered(props.from + i)?.length}>
+                <Show when={drawn(m(), at()) || answered(at())?.length}>
                   <Answer
                     {...props}
                     pieceRevision={revision()}
                     m={m}
-                    prompt={prompt(props.from + i)}
-                    last={props.from + i === lastShown()}
-                    answered={answered(props.from + i)}
-                    messageIndex={(props.earlier ?? 0) + props.from + i}
+                    prompt={prompt(at())}
+                    reviewable={reviewable(at())}
+                    last={at() === lastShown()}
+                    answered={answered(at())}
+                    messageIndex={(props.earlier ?? 0) + at()}
                   />
                 </Show>
               </Show>
@@ -1150,7 +1174,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
                     editKey={editKey}
                     m={m}
                     onBranch={props.onBranch}
-                    messageIndex={(props.earlier ?? 0) + props.from + i}
+                    messageIndex={(props.earlier ?? 0) + at()}
                     onRewind={() => showRestore(m())}
                     onRedo={m().id === redoAt() && redo() ? () => showRestore(m(), redo()) : undefined}
                     recovery={redo()?.recovery}
@@ -1160,9 +1184,9 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
                 )}
               </Show>
             </Show>
-          </Show>
-        )}
-      </Index>
+          </Show>;
+        }}
+      </For>
       <Show when={props.area === 'project' && props.until === undefined}>
         <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} background={props.background} />
       </Show>

@@ -2,7 +2,9 @@
 
 use super::{Result, Scenario, ask, claude_chat, ensure, no_cli, start_settings};
 use crate::app::Ctx;
+use crate::page::css;
 use crate::sandbox::{CliSlot, Launch};
+use serde_json::json;
 
 /// Uses only the existing sandbox and recordings; the marker is a synthetic sign-in, never a credential.
 pub fn launch(ctx: &Ctx, codex: bool, no_ai: bool) -> Result<Launch> {
@@ -22,8 +24,28 @@ pub fn launch(ctx: &Ctx, codex: bool, no_ai: bool) -> Result<Launch> {
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "ux audit: both fake AIs answer through the walkthrough launch", run: both_ais },
+        Scenario { name: "catalog compact: a focused heading stays below Back and Escape returns to its card", run: compact_catalog },
         Scenario { name: EXTERNAL_LINKS, run: external_links },
     ]
+}
+
+fn compact_catalog(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "fr")?;
+    let mut app = ctx.launch(no_cli())?;
+    app.page.click(&css("[data-catalog-tab]"))?;
+    for (width, height) in [(1920, 1080), (1280, 800), (720, 480)] {
+        super::shell::set_size(&mut app.page, width, height)?;
+        app.page.wait_for("the catalog cards", "!!document.querySelector('[data-catalog-card]')")?;
+        let card = app.page.eval("document.querySelector('[data-catalog-card]')?.dataset.catalogCard")?;
+        app.page.click(&css(&format!("[data-catalog-card={card}]")))?;
+        app.page.wait_visible(&css(".catalog-detail h1"))?;
+        ctx.shot(&mut app, &format!("catalog-focused-heading-{width}x{height}"))?;
+        ensure(app.page.eval("(() => { const h = document.querySelector('.catalog-detail h1'), b = document.querySelector('.catalog-return'); const r = h.getBoundingClientRect(); return document.activeElement === h && r.top >= b.getBoundingClientRect().bottom && r.bottom <= innerHeight; })()")? == json!(true), || "the focused heading is obscured by Back or outside the compact viewport".into())?;
+        app.page.press("Escape")?;
+        super::same(app.page.eval("document.activeElement?.dataset.catalogCard")?, card, "Escape returns focus to the original card")?;
+    }
+    ctx.shot(&mut app, "catalog-compact-returned-card")?;
+    Ok(())
 }
 
 pub const EXTERNAL_LINKS: &str = "ux audit: open-link records URLs in the hidden sandbox without starting a browser";
@@ -65,12 +87,12 @@ fn external_links(ctx: &mut Ctx) -> Result {
 
 fn both_ais(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    for (codex, vendor, model, words) in [(false, "claude", "Haiku 5.5", "Rayleigh"), (true, "codex", "GPT-6 Luna", "scatter")] {
+    for (codex, vendor, model, words) in [(true, "codex", "GPT-6 Luna", "scatter"), (false, "claude", "Haiku 5.5", "Rayleigh")] {
         let mut app = ctx.launch(launch(ctx, codex, false)?)?;
         let page = &mut app.page;
         page.wait_for(
             "the fake AI subscription",
-            &format!("window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='{vendor}' && !u.billingUnknown && !u.billedPerUse))"),
+            &format!("(window.faberShell ?? window.__TAURI_INTERNALS__).invoke('state').then(s=>s.usage?.some(u=>u.vendor==='{vendor}' && !u.billingUnknown && !u.billedPerUse))"),
         )?;
         let new = page.named("button", "side.new")?;
         page.click(&new)?;

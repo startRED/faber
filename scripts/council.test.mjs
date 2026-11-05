@@ -30,12 +30,21 @@ test('a fair answer scores every photo on eight lines of 0 to 5 with a row per l
   assert.deepEqual(ok.photos[P].lines, [5, 5, 4, 5, 5, 5, 5, 5]);
 });
 
-test('an answer that skips a photo, breaks the scale or loses a point with no row is no answer', () => {
+test('an answer that skips a photo or breaks the scale is no answer', () => {
   assert.match(parseVerdict(answer([{ photo: P, lines: full, rows: [] }]), [P, Q]).error, /settings/);
   assert.match(parseVerdict(answer([{ photo: P, lines: [6, 5, 5, 5, 5, 5, 5, 5] }]), [P]).error, /fair/);
   assert.match(parseVerdict(answer([{ photo: P, lines: [5, 5, 5] }]), [P]).error, /fair/);
-  assert.match(parseVerdict(answer([{ photo: P, lines: [5, 5, 5, 5, 3, 5, 5, 5], rows: [row(2)] }]), [P]).error, /line 5/);
   assert.match(parseVerdict('I think it looks great!', [P]).error, /JSON/);
+});
+
+test('a point lost with no row counts as 5 and is named, and the rest of the answer still counts', () => {
+  const v = parseVerdict(answer([{ photo: P, lines: [5, 4, 5, 5, 3, 5, 5, 5], rows: [row(2)] }]), [P]);
+  assert.equal(v.error, undefined);
+  assert.deepEqual(v.photos[P].lines, [5, 4, 5, 5, 5, 5, 5, 5]);
+  assert.deepEqual(v.unexplained, [`${P} line 5`]);
+  const r = aggregate({ codex: v, claude: parseVerdict(answer([{ photo: P, lines: full }]), [P]) }, [P]);
+  assert.deepEqual(r.unexplained, { codex: [`${P} line 5`] });
+  assert.match(report('after', r, [P], null), /counted as 5: codex/);
 });
 
 test('the median takes the lower middle when the count is even', () => {

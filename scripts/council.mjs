@@ -99,21 +99,27 @@ export function firstJson(text) {
 
 const fair = (lines) => Array.isArray(lines) && lines.length === LINES.length && lines.every((n) => Number.isInteger(n) && n >= 0 && n <= 5);
 
-/** A judge's answer, checked: every photo scored on eight lines of 0-5, and a row for each line that lost points. A
- * score with no rows is not a score (the skill's rule), so such an answer counts as no answer. */
+/** A judge's answer, checked: every photo scored on eight lines of 0-5. A point lost with no row saying why is not a
+ * point lost (the skill's rule: a score with no rows is not a score), so that line counts as 5 and is named in
+ * `unexplained`; the rest of the judge's answer still counts. Dropping the whole answer for one missing row left a
+ * council of two with one judge on 2026-11-04. */
 export function parseVerdict(text, photos, refs = []) {
   const json = firstJson(text ?? '');
   if (!json || !Array.isArray(json.photos)) return { error: 'no JSON answer' };
   const scored = {};
+  const unexplained = [];
   for (const photo of photos) {
     const entry = json.photos.find((p) => p?.photo === photo);
     if (!entry || !fair(entry.lines)) return { error: `no fair score for ${photo}` };
     const rows = (Array.isArray(entry.rows) ? entry.rows : [])
       .filter((r) => Number.isInteger(r?.line) && r.line >= 1 && r.line <= LINES.length)
       .map((r) => ({ line: r.line, what: String(r.what ?? ''), should: String(r.should ?? '') }));
-    const unexplained = entry.lines.findIndex((n, i) => n < 5 && !rows.some((r) => r.line === i + 1));
-    if (unexplained >= 0) return { error: `${photo} lost points on line ${unexplained + 1} with no row` };
-    scored[photo] = { lines: entry.lines, rows };
+    const lines = entry.lines.map((n, i) => {
+      if (n === 5 || rows.some((r) => r.line === i + 1)) return n;
+      unexplained.push(`${photo} line ${i + 1}`);
+      return 5;
+    });
+    scored[photo] = { lines, rows };
   }
   const refScores = {};
   for (const photo of refs) {
@@ -121,7 +127,7 @@ export function parseVerdict(text, photos, refs = []) {
     if (entry && fair(entry.lines)) refScores[photo] = { lines: entry.lines };
   }
   const better = (Array.isArray(json.better) ? json.better : []).map(String).slice(0, 3);
-  return { photos: scored, refs: refScores, better };
+  return { photos: scored, refs: refScores, better, unexplained };
 }
 
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
@@ -168,7 +174,8 @@ export function aggregate(verdicts, photos, refs = []) {
     if (totals.length) refTotals[r] = median(totals);
   }
   const better = refs.length ? answered.flatMap((j) => verdicts[j].better.map((text) => ({ judge: j, text }))) : [];
-  return { judges: answered, failed, scores, refTotals, better };
+  const unexplained = Object.fromEntries(answered.filter((j) => verdicts[j].unexplained?.length).map((j) => [j, verdicts[j].unexplained]));
+  return { judges: answered, failed, scores, refTotals, better, unexplained };
 }
 
 /** What a climb does after a round, comparing it with the best round so far, photo by photo. A drop past the noise is
@@ -196,6 +203,8 @@ export function climb(best, round, target) {
 export function report(label, result, photos, verdict) {
   const out = [`# Council: ${label}`, ''];
   out.push(`Judges: ${result.judges.join(', ')}.${Object.keys(result.failed).length ? ` No fair answer: ${Object.entries(result.failed).map(([j, e]) => `${j} (${e})`).join(', ')}.` : ''}`, '');
+  const noRow = Object.entries(result.unexplained ?? {});
+  if (noRow.length) out.push(`Points lost with no row, counted as 5: ${noRow.map(([j, ls]) => `${j} (${ls.join(', ')})`).join('; ')}.`, '');
   out.push(`| Photo | Score | ${result.judges.join(' | ')} | Jester |`, `| :--- | ---: | ${result.judges.map(() => '---:').join(' | ')} | :--- |`);
   for (const p of photos) {
     const s = result.scores[p];

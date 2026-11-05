@@ -17,7 +17,7 @@ use crate::project::FolderState;
 use crate::recents::RecentsView;
 use crate::router::{Choice, Pick, pick_model};
 use crate::signals::Signals;
-use crate::store::Store;
+use crate::store::{StartScan, Store};
 use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
 use base64::Engine as _;
@@ -68,6 +68,8 @@ mod kits;
 mod look;
 mod mcp_servers;
 mod memory_search;
+mod native_fork;
+pub use native_fork::{NativeFork, NativePoint};
 mod move_chat;
 mod overload;
 mod parked;
@@ -608,6 +610,7 @@ struct Core {
     probe_unfinished_at: f64,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
+    claude_fork: bool,
     /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
     /// downgraded since, and what it takes is unknown until the help is read again.
     claude_stamp: Option<String>,
@@ -625,6 +628,10 @@ struct Core {
     copying: HashMap<String, copies::Held>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    /// What the person wrote to a helper before its CLI was at work (call id, then message id and words), and the calls that
+    /// started or failed to start, so a message after their end is refused rather than kept.
+    helper_early: HashMap<String, Vec<(String, String)>>,
+    helper_seen: HashSet<String>,
     reviews: HashMap<String, review::Run>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
@@ -668,7 +675,18 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Opens the engine and settles its start at once ([`Engine::begin`], then [`Engine::settle_start`]).
     pub fn new(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
+        let engine = Engine::begin(opts, emit)?;
+        let _ = engine.settle();
+        Ok(engine)
+    }
+
+    /// Builds the engine with only what its first answer needs, so the screen lists the conversations at once. What reads
+    /// every conversation file waits for [`Engine::settle_start`], which the shell runs right after, off the screen's path.
+    /// The temporary conversations the last run left go here, before any answer, so the screen never reopens one: which
+    /// files are temporary comes from the rows the list keeps (`Store::temporary_ids`), and only changed files are read.
+    pub fn begin(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
         let data_directory = crate::workspace::DataDirectory::open(&opts.data_dir)?;
         #[cfg(windows)]
         let chat_directory = crate::workspace::relocation::open(&opts.data_dir, &opts.chat_dir)?;
@@ -682,7 +700,9 @@ impl Engine {
         catalog_store.set_runtime(opts.runtime.clone());
         let catalog_emit = emit.clone();
         catalog_store.set_on_ready(Arc::new(move || catalog_emit(AppEvent::Catalog)));
+        crate::startup::mark("catalog");
         let mut store = Store::new(&opts.data_dir);
+        crate::startup::mark("store");
         let catalog_prepare = catalog_store.clone();
         let permissions = store.settings().permissions();
         opts.runtime.spawn_blocking(move || {
@@ -707,11 +727,12 @@ impl Engine {
                 Err(_) => true,
             };
         let quotas = remembered(&ledger, unix_secs());
+        crate::startup::mark("ledger");
         let runtime = opts.runtime.clone();
         let pr_reader = gh_reader(&opts.data_dir);
         let rewind = rewind::State::new(&opts.data_dir);
+        crate::startup::mark("rewind");
         let unclean_exit = crate::crash::take_unclean(&opts.data_dir);
-        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 catalog_store: Some(catalog_store),
@@ -737,9 +758,9 @@ impl Engine {
                 old_inputs_checked: HashSet::new(),
                 old_inputs_deleted: HashSet::new(),
                 transcript_timer: false,
-                parent_reports,
+                parent_reports: HashMap::new(),
                 stage_told: HashMap::new(),
-                quiet_teams,
+                quiet_teams: HashMap::new(),
                 sibling_reads: HashMap::new(),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
@@ -780,6 +801,7 @@ impl Engine {
                 usage_command_spent: false,
                 probe_unfinished_at: f64::MIN,
                 claude_flags: Default::default(),
+                claude_fork: false,
                 claude_stamp: None,
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
@@ -790,6 +812,8 @@ impl Engine {
                 transfers: HashMap::new(),
                 copying: HashMap::new(),
                 helpers: HashMap::new(),
+                helper_early: HashMap::new(),
+                helper_seen: HashSet::new(),
                 reviews: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
@@ -832,15 +856,39 @@ impl Engine {
         });
         let engine = Engine { core, runtime };
         engine.with(|c| c.sweep_temporary());
+        crate::startup::mark("temporary");
         let _ = search.start();
         engine.refresh_project_folders();
         engine.recover_rewind();
-        engine.with(|c| {
+        crate::startup::mark("rewind-recovery");
+        Ok(engine)
+    }
+
+    /// The rest of a start, which reads every conversation file once (`Store::start_scan`) with the engine free: the
+    /// reports owed to team leaders are queued, and each conversation Keep going was on in goes on (`resume_keep_going`).
+    pub fn settle_start(&self) {
+        let keep_going = self.settle();
+        self.resume_keep_going_from(keep_going);
+    }
+
+    /// Settles the start and gives the conversations saved with Keep going on.
+    fn settle(&self) -> Vec<String> {
+        let store = self.with(|c| c.store.clone());
+        let scan = store.start_scan();
+        crate::startup::mark("scan");
+        let (parent_reports, quiet_teams) = Core::restore_parent_reports(&store, &scan);
+        crate::startup::mark("reports");
+        self.with(|c| {
+            for (parent, children) in parent_reports {
+                c.parent_reports.entry(parent).or_default().extend(children);
+            }
+            c.quiet_teams = quiet_teams;
             for parent in c.parent_reports.keys().cloned().collect::<Vec<_>>() {
                 c.refill_parent_reports(&parent);
             }
         });
-        Ok(engine)
+        crate::startup::mark("refill");
+        scan.keep_going
     }
 
     /// Clones the index handle under the lock, then does the search outside it, on a blocking worker.
@@ -1072,6 +1120,19 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|core| core.opened(id))
     }
+    /// The exact card bound to the current native session, only when the screen asks for it.
+    pub fn start_card(&self, id: &str) -> Option<String> {
+        self.with(|core| {
+            let live = core.live.get(id).map(|l| l.vendor);
+            let c = core.load(id)?;
+            if c.area != Area::Project {
+                return None;
+            }
+            let vendor = live.or_else(|| c.messages.iter().rev().filter(|m| m.role == Role::Assistant).find_map(|m| m.vendor))?;
+            let (native, card) = c.session_start_cards.get(&vendor)?;
+            (c.resumable(vendor) == Some(native)).then(|| card.clone())
+        })
+    }
     /// The catalog tools the conversation's agent has now, each with its job group (why it was picked): the kit saved for the
     /// session of the AI at work, else of the newest reply's AI. Read on request from what is in memory; nothing is prepared.
     pub fn tools_in_use(&self, id: &str) -> Vec<(String, String)> {
@@ -1275,6 +1336,13 @@ impl Engine {
     /// A folder is chosen by the person, before any messages or files belong to the conversation.
     pub fn chat_folder(&self, id: Option<&str>, folder: Option<&Path>) -> Result<Conversation, String> {
         self.with(|c| {
+            // A conversation that already has history is locked whatever folder is asked for.
+            if let Some(id) = id {
+                let conv = c.load(id).ok_or("error.conversationGone")?;
+                if conv.area != Area::Chat || !conv.messages.is_empty() {
+                    return Err("error.chatFolderLocked".into());
+                }
+            }
             let folder = folder
                 .map(|p| {
                     // Any folder can be the working folder in both modes (R121), except the system folders and the ones that hold
@@ -1287,13 +1355,7 @@ impl Engine {
                 .transpose()?
                 .map(|p| p.to_string_lossy().into_owned());
             let id = match id {
-                Some(id) => {
-                    let conv = c.load(id).ok_or("error.conversationGone")?;
-                    if conv.area != Area::Chat || !conv.messages.is_empty() {
-                        return Err("error.chatFolderLocked".into());
-                    }
-                    id.to_string()
-                }
+                Some(id) => id.to_string(),
                 None => {
                     c.drop_draft();
                     c.blank(Area::Chat, None)
@@ -1685,7 +1747,12 @@ impl Engine {
     }
 
     pub fn resume_keep_going(&self) {
-        self.with(|c| c.resume_keep_going())
+        let ids = self.with(|c| c.store.clone()).keep_going_ids();
+        self.resume_keep_going_from(ids);
+    }
+
+    fn resume_keep_going_from(&self, ids: Vec<String>) {
+        self.with(|c| c.resume_keep_going(ids))
     }
     /// How many conversation records were written since Faber started; only tests count them.
     #[doc(hidden)]
@@ -1746,12 +1813,31 @@ impl Engine {
             c.sweep_temporary();
             c.save_ledger(true);
             c.store.release_budget();
+            c.store.keep_list(true);
             c.store.search().stop();
         })
     }
 }
 
 impl Core {
+    fn refresh_project_memory(&self, conv: &str) {
+        let Some(id) = self.convs.get(conv).filter(|c| c.area == Area::Project).and_then(|c| c.project_id.as_deref()) else { return };
+        let Some(project) = self.store.projects().into_iter().find(|p| p.id == id) else { return };
+        // A damaged approval file must never make the person's recorded words look like an agent's proposal.
+        let Ok(kept) = self.store.kept_decisions_now(id) else { return };
+        let me = self.me.clone();
+        self.opts.runtime.spawn_blocking(move || {
+            let mut updated = kept.clone();
+            if crate::project::memory::refresh_stale(Path::new(&project.path), &mut updated).is_err() || updated == kept {
+                return;
+            }
+            if let Some(core) = me.upgrade() {
+                let core = core.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = core.store.migrate_kept_decisions(&project.id, &kept, &updated);
+            }
+        });
+    }
+
     /// Store visible protocol events, never private reasoning. Only the small preview remains in the conversation.
     ///
     /// The page, and the files that place it again after a crash (`TranscriptStore::recover`), are written at once. The
@@ -2228,11 +2314,14 @@ impl Core {
     /// A project's `.faber/rules.md` follows its sources: rebuilt in the project folder (where Memory reads) at each turn start
     /// of one of its conversations, and written only when it differs. A project that refuses it (a link, a read-only file)
     /// keeps its turn: the rules are an addition, never a condition.
-    fn refresh_rules(&self, id: &str) {
-        let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project) else { return };
-        if let Some(project) = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()) {
-            let _ = self.store.refresh_rules(&project.id, Path::new(&project.path));
-        }
+    fn refresh_rules(&self, id: &str) -> Option<(PathBuf, crate::project::rules::Facts)> {
+        let c = self.convs.get(id).filter(|c| c.area == Area::Project)?;
+        let project = self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref())?;
+        let folder = PathBuf::from(project.path);
+        self.store
+            .refresh_rules(&project.id, &folder)
+            .ok()
+            .and_then(|facts| crate::permissions::checked_folder(&folder).map(|folder| (folder, facts)))
     }
 
     fn folder_of(&self, c: &Conversation) -> Result<PathBuf, String> {
@@ -2535,6 +2624,13 @@ impl Core {
         let before = self.store.settings();
         let before_tuning = before.tuning();
         let mut settings = Settings {
+            blocked_hosts: patch
+                .blocked_hosts
+                .as_ref()
+                .map(|hosts| crate::browser::blocked_hosts(hosts))
+                .transpose()
+                .map_err(str::to_string)?
+                .or(before.blocked_hosts),
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),
@@ -2664,11 +2760,12 @@ impl Core {
         self.claude_stamp = Some(stamp.clone());
         let (me, spawn, cwd) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone());
         self.opts.runtime.spawn(async move {
-            let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
+            let Some((flags, fork)) = account::claude_launch_support(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
             if let Some(core) = me.upgrade() {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                 if core.claude_stamp.as_ref() == Some(&stamp) {
                     core.claude_flags = flags;
+                    core.claude_fork = fork;
                 }
             }
         });
@@ -2680,6 +2777,7 @@ impl Core {
     fn claude_flags_for(&mut self, cli: &Cli) -> crate::claude::ClaudeFlags {
         if self.claude_stamp.as_ref().is_some_and(|read| *read != cli.stamp()) {
             self.claude_flags = Default::default();
+            self.claude_fork = false;
             self.probe_claude_flags();
         }
         self.claude_flags
@@ -2810,6 +2908,9 @@ impl Core {
             return;
         }
         if !current {
+            return;
+        }
+        if self.native_fork_event(conv, &event) {
             return;
         }
         if self.rewind_event(conv, sid, &event) {
@@ -3188,6 +3289,7 @@ impl Core {
                 // `bigger` marks the card of `offer_bigger`, which only Faber makes: a CLI's request never carries it.
                 if let Some(fields) = input.as_object_mut() {
                     fields.remove("bigger");
+                    fields.remove("planBoundary");
                 }
                 // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
                 if crate::toolbox::is_self_change(&tool) {
@@ -3196,7 +3298,7 @@ impl Core {
                     }
                     return;
                 }
-                if self.turn(conv).is_some_and(|m| m.status != Some(Status::Streaming)) {
+                if self.turn(conv).is_none_or(|m| m.status != Some(Status::Streaming)) {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
                     }
@@ -3248,6 +3350,9 @@ impl Core {
                     })
                 {
                     drop(l.session.answer(&request_id, false));
+                    return;
+                }
+                if !question && self.hold_plan_boundary(conv, &request_id, &tool, &input) {
                     return;
                 }
                 if !question && self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
@@ -3479,6 +3584,7 @@ impl Core {
                 // next launch is the old one, and read the new help.
                 if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
                     self.claude_flags = Default::default();
+                    self.claude_fork = false;
                     self.probe_claude_flags();
                 }
                 let limited = fatal && recovery::plan_limit(&message);
@@ -4191,7 +4297,10 @@ impl Core {
             None => fallback.clone(),
         };
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary
+            && c.resumable(pick.vendor).is_none()
+            && !native_fork::available(c, pick.vendor)
+            && !c.context_messages().is_empty();
         let history = c.context_messages().to_vec();
         let text = if joining_late {
             with_history(&history, &model_text, &|n| attachment_place(c.area, &data_dir, id, n))
@@ -4508,6 +4617,7 @@ impl Core {
             return Ok(());
         }
         // The baseline belongs to the final copy folder, not the person's checkout, and startup must wait for it too.
+        let text = self.native_fork_start(id, reply_id, pick, text);
         if self.capture_rewind(id, reply_id, pick, text.clone(), images.clone(), by_hand) {
             return Ok(());
         }
@@ -4525,7 +4635,6 @@ impl Core {
         {
             live.session.close();
         }
-        self.refresh_rules(id);
         let kit_reset = match self.launch(id, pick) {
             Err(error) if error == mcp_servers::CHECK_PENDING => {
                 let (id, reply, pick) = (id.to_string(), reply_id.to_string(), pick.clone());
@@ -4558,6 +4667,10 @@ impl Core {
         }
         if let Some(live) = self.live.get_mut(id) {
             live.visual_root = crate::visual::pin(&live.cwd).map(Arc::new);
+        }
+        if kit_reset && let Some(c) = self.convs.get_mut(id) {
+            c.native_fork = None;
+            c.rewind_notice = Some("note.rewind.savedMessages".into());
         }
         let text = if kit_reset {
             let c = self.convs.get(id).ok_or("error.conversationGone")?;
@@ -4610,6 +4723,7 @@ impl Core {
             t.approved = None;
         }
         self.rewind.bump(id);
+        let text = self.fold_notice_input(id, text);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -4680,6 +4794,12 @@ impl Core {
                 }
                 return Err(error);
             }
+        };
+        // The asynchronous check retries launch; keep its original snapshot instead of reading again.
+        let facts = if mode == kits::SessionStart::Turn && !self.kit_checks.get(conv).is_some_and(|check| check.rules_refreshed) {
+            self.refresh_rules(conv)
+        } else {
+            None
         };
         let group = if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) { self.group_for(conv)? } else { None };
         let group_context = group.as_ref().map(|g| (g.instructions.clone(), g.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>()));
@@ -4756,7 +4876,7 @@ impl Core {
                 self.retire_codex_server((area, user_hooks, permissions));
             }
         }
-        let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd)?;
+        let (mut project_tools, mut tool_kit) = self.checked_session_tools(conv, pick.vendor, permissions, &cwd, facts)?;
         if pick.vendor == Vendor::Claude && !flags.plugin_dir {
             project_tools.without_plugin();
         }
@@ -4800,7 +4920,8 @@ impl Core {
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
         let user_hooks = settings.user_hooks() && permissions.guarded();
-        let mut resume = c.resumable(pick.vendor).cloned();
+        let pending_fork = c.native_fork.as_ref().filter(|fork| fork.vendor == pick.vendor).map(|fork| fork.point.clone());
+        let mut resume = c.resumable(pick.vendor).cloned().or_else(|| pending_fork.as_ref().map(|point| point.session.clone()));
         let previous_kit = match c.session_kits.get(&pick.vendor) {
             Some((id, ids, _)) if Some(id) == resume.as_ref() => {
                 Some(crate::tools::kits::Report { ids: ids.clone(), ..Default::default() })
@@ -4860,6 +4981,10 @@ impl Core {
             resume = None;
         }
         let resumed = resume.is_some();
+        let native_point = pending_fork.filter(|point| resume.as_ref() == Some(&point.session));
+        if native_point.as_ref().is_some_and(|point| !point.valid(pick.vendor) || pick.vendor == Vendor::Claude && !self.claude_fork) {
+            return Err("error.sessionLost".into());
+        }
         let resources = if pick.vendor == Vendor::Claude {
             kits::claude_resources(area, &project_tools)
         } else {
@@ -4928,7 +5053,7 @@ impl Core {
         let session = match pick.vendor {
             // Not yet: no CLI is discovered for it, so the lookup above already refused it.
             Vendor::Gemini => return Err("error.notConnected".into()),
-            Vendor::Claude => start_conversation_claude(
+            Vendor::Claude => start_conversation_claude_native(
                 identity,
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -4959,7 +5084,9 @@ impl Core {
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
-            ),
+                native_point.as_ref(),
+                self.claude_fork,
+            )?,
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
                 let title = self.convs.get(conv).map(|c| c.title.clone());
@@ -4994,9 +5121,9 @@ impl Core {
                     },
                     sink,
                     project_tools,
-                    identity,
-                    command_spawn,
+                    crate::codex::ThreadIdentity { identity, spawn: command_spawn },
                     before_turn,
+                    native_point,
                 )
             }
         };
@@ -5131,6 +5258,7 @@ impl Core {
             rewind_notice: None,
             rewind_summary: None,
             rewind_native: None,
+            native_fork: None,
             reported: (None, None),
             compacting: false,
             stopped: false,
@@ -5227,7 +5355,10 @@ impl Core {
             c.title = title::fallback(&req.text, self.store.settings().language.as_deref().unwrap_or("en"));
         }
         let data_dir = self.opts.data_dir.clone();
-        let joining_late = !c.temporary && c.resumable(pick.vendor).is_none() && !c.context_messages().is_empty();
+        let joining_late = !c.temporary
+            && c.resumable(pick.vendor).is_none()
+            && !native_fork::available(c, pick.vendor)
+            && !c.context_messages().is_empty();
         let resent = joining_late && session_was_lost(c, pick.vendor);
         let area = c.area;
         let history = c.context_messages().to_vec();
@@ -5416,6 +5547,14 @@ impl Core {
                 m
             })
             .collect();
+        let native_vendor = match req.choice.vendor.as_str() {
+            "claude" => Some(Vendor::Claude),
+            "codex" => Some(Vendor::Codex),
+            _ => c.messages.last().and_then(|m| m.vendor),
+        };
+        if let Some(vendor) = native_vendor {
+            native_fork::inherit(&source, c, vendor);
+        }
         c.piece_values =
             source.piece_values.iter().filter(|entry| c.messages.iter().any(|message| message.id == entry.message_id)).cloned().collect();
         // A moved project's earlier file cards still belong to its Chat workspace.
@@ -6017,7 +6156,18 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
     Some(&mut messages[at])
 }
 
+#[cfg(test)]
 fn start_conversation_claude(identity: Arc<crate::proc::ConversationIdentity>, opts: ClaudeOptions, sink: EventSink) -> Session {
+    start_conversation_claude_native(identity, opts, sink, None, false).expect("ordinary launch")
+}
+
+fn start_conversation_claude_native(
+    identity: Arc<crate::proc::ConversationIdentity>,
+    opts: ClaudeOptions,
+    sink: EventSink,
+    point: Option<&NativePoint>,
+    supported: bool,
+) -> Result<Session, String> {
     let on_exit = identity.clone();
     let sink: EventSink = Arc::new(move |event| {
         if matches!(&event, EngineEvent::WriterExit { confirmed: true }) {
@@ -6026,7 +6176,11 @@ fn start_conversation_claude(identity: Arc<crate::proc::ConversationIdentity>, o
         sink(event);
     });
     let sink = identity.token.as_ref().map_or_else(|| sink.clone(), |token| crate::codex::redact_sink(sink.clone(), token.clone()));
-    crate::proc::as_conversation(&identity, || start_claude(opts, sink)).with_identity(identity)
+    let session = crate::proc::as_conversation(&identity, || match point {
+        Some(point) => crate::claude::start_claude_fork(opts, point, supported, sink),
+        None => Ok(start_claude(opts, sink)),
+    })?;
+    Ok(session.with_identity(identity))
 }
 
 #[cfg(test)]

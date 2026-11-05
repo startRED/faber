@@ -53,7 +53,7 @@ export interface Answered {
 /** The questions Faber answered in these replies: the agent's questions (`autoAnswers`) and its closing boxes. */
 export function answeredIn(replies: Message[]): Answered[] {
   return replies.flatMap((m) => [
-    ...(m.autoAnswers ?? []).map((a) => ({ question: a.question, answer: a.answer, others: a.others ?? [] })),
+    ...(m.autoAnswers ?? []).map((a) => ({ question: a.question === 'plan.contractQuestion' ? t('plan.contractQuestion') : a.question, answer: a.answer === 'plan.stateContract' ? t('plan.stateContract') : a.answer, others: a.others ?? [] })),
     ...(m.wrapUp?.ask && m.wrapUp.answered
       ? [{ question: m.wrapUp.ask, answer: m.wrapUp.answered, others: (m.wrapUp.actions ?? []).filter((a) => a !== m.wrapUp!.answered) }]
       : []),

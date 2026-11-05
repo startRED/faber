@@ -5,6 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 mod retire_tests;
+mod review;
+#[cfg(test)]
+mod safety_tests;
 mod steer;
 
 pub(super) struct State {
@@ -354,7 +357,11 @@ impl Engine {
             let stored = history.lock().unwrap_or_else(|e| e.into_inner()).list(id);
             for info in &mut infos {
                 if let Some(current) = stored.iter().find(|p| p.id == info.id) {
+                    let unavailable = info.coverage.unavailable;
+                    let incomplete = info.coverage.incomplete;
                     *info = current.clone();
+                    info.coverage.unavailable |= unavailable;
+                    info.coverage.incomplete |= incomplete;
                 } else {
                     info.coverage.unavailable = true;
                     info.coverage.incomplete = true;
@@ -894,7 +901,7 @@ impl Core {
             return self.rewind.pending.contains(id);
         }
         self.rewind.attempted.insert(reply_id.into());
-        let Some(c) = self.convs.get(id).filter(|c| c.area == Area::Project || c.working_folder.is_some()) else {
+        let Some(c) = self.convs.get(id).filter(|c| !c.temporary) else {
             return false;
         };
         let source = crate::rewind::Capture::new(c);
@@ -959,9 +966,7 @@ impl Core {
         if self.rewind_deleted_settled(conv) {
             return;
         }
-        let Some(root) =
-            self.convs.get(conv).filter(|c| c.area == Area::Project || c.working_folder.is_some()).and_then(|c| self.cwd_of(c).ok())
-        else {
+        let Some(root) = self.convs.get(conv).filter(|c| !c.temporary).and_then(|c| self.cwd_of(c).ok()) else {
             return;
         };
         if self.rewind.admission.iter().any(|p| overlap(p, &root)) {
@@ -983,46 +988,68 @@ impl Core {
         let cursors = self.rewind.cursors.clone();
         let writers = self.rewind.seen_writers.clone();
         let history_copy = history.clone();
+        let failed_history = history.clone();
+        let failed_root = root.clone();
         let scan = runtime.spawn_blocking(move || {
             let mut history = history_copy.lock().unwrap_or_else(|e| e.into_inner());
-            if !history.has_open(&root_copy) {
-                // Even an unavailable capture needs budget/expiry maintenance, after this turn's writers drain.
-                history.cleanup_known(now())?;
-                return Ok(None);
-            }
-            let mut exec = git().ok_or("error.rewind.git")?;
-            for ((conv, turn), (cursor, thread)) in cursors {
-                history.turn_cursor(&conv, &turn, cursor, thread.as_deref());
-            }
-            for (conv, writers) in writers {
-                history.record_writers(&conv, &writers.into_iter().collect::<Vec<_>>());
-            }
-            let seal = history.scan_seal(&mut *exec, &root_copy)?;
-            Ok::<_, String>(Some(history.prepare_seal(seal)))
+            let infos = history.open_infos(&root_copy);
+            let result = (|| {
+                if infos.is_empty() {
+                    // Even an unavailable capture needs maintenance, without invalidating old durable points.
+                    history.cleanup_known(now())?;
+                    return Ok(None);
+                }
+                let mut exec = git().ok_or("error.rewind.git")?;
+                for ((conv, turn), (cursor, thread)) in cursors {
+                    history.turn_cursor(&conv, &turn, cursor, thread.as_deref());
+                }
+                for (conv, writers) in writers {
+                    history.record_writers(&conv, &writers.into_iter().collect::<Vec<_>>());
+                }
+                let seal = history.scan_seal(&mut *exec, &root_copy)?;
+                Ok::<_, String>(Some(history.prepare_seal(seal)))
+            })();
+            (infos, result)
         });
         runtime.spawn(async move {
-            let result = scan.await.unwrap_or_else(|_| Err("error.rewind.storage".into()));
+            let (pending_infos, result) = match scan.await {
+                Ok(result) => result,
+                Err(_) => {
+                    let infos = tokio::task::spawn_blocking(move || {
+                        failed_history.lock().unwrap_or_else(|e| e.into_inner()).open_infos(&failed_root)
+                    })
+                    .await
+                    .unwrap_or_default();
+                    (infos, Err("error.rewind.storage".into()))
+                }
+            };
             let Some(core) = me.upgrade() else {
                 return;
             };
             let publish = if let Ok(Some(publication)) = &result {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                core.rewind.sealing.remove(&root);
                 if core.rewind_revision(&root) != revision
                     || !core.rewind_running(&root).is_empty()
                     || core.rewind.admission.iter().any(|p| overlap(p, &root))
                 {
+                    core.rewind.sealing.remove(&root);
                     core.rewind.deferred_seals.insert(conv.clone());
                     false
                 } else if let Ok(mut history) = history.try_lock() {
                     history.publish_seal(publication);
                     true
                 } else {
+                    core.rewind.sealing.remove(&root);
                     core.rewind.deferred_seals.insert(conv.clone());
                     false
                 }
             } else {
-                core.lock().unwrap_or_else(|e| e.into_inner()).rewind.sealing.remove(&root);
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                if let Err(error) = &result {
+                    eprintln!("rewind: final scan or maintenance failed: {error}");
+                    core.publish_rewind_markers(pending_infos);
+                }
+                core.rewind.sealing.remove(&root);
                 false
             };
             if !publish {
@@ -1030,12 +1057,66 @@ impl Core {
                 return;
             }
             if let Ok(Some(publication)) = result {
-                let _ =
-                    tokio::task::spawn_blocking(move || history.lock().unwrap_or_else(|e| e.into_inner()).persist_seal(publication, now()))
-                        .await;
+                let mut infos = publication.infos();
+                let mut fallback = infos.clone();
+                let persisted = tokio::task::spawn_blocking(move || {
+                    let mut history = history.lock().unwrap_or_else(|e| e.into_inner());
+                    let result = history.persist_seal(publication, now());
+                    history.refresh_infos(&mut infos);
+                    (infos, result)
+                })
+                .await;
+                let infos = match persisted {
+                    Ok((infos, result)) => {
+                        if let Err(error) = result {
+                            eprintln!("rewind: final save or maintenance failed: {error}");
+                        }
+                        infos
+                    }
+                    Err(_) => {
+                        eprintln!("rewind: final save worker failed");
+                        for (_, info) in &mut fallback {
+                            info.sealed = false;
+                        }
+                        fallback
+                    }
+                };
+                core.lock().unwrap_or_else(|e| e.into_inner()).publish_rewind_markers(infos);
             }
-            core.lock().unwrap_or_else(|e| e.into_inner()).release_rewind_worker();
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.rewind.sealing.remove(&root);
+            core.release_rewind_worker();
         });
+    }
+
+    fn publish_rewind_markers(&mut self, infos: Vec<(String, PointInfo)>) {
+        for (id, mut info) in infos {
+            if !info.sealed {
+                info.coverage.unavailable = true;
+                info.coverage.incomplete = true;
+            }
+            let unloaded = !self.convs.contains_key(&id);
+            if unloaded {
+                let Some(conversation) = self.store.get(&id) else { continue };
+                self.convs.insert(id.clone(), conversation);
+            }
+            let changed = self.convs.get_mut(&id).and_then(|conversation| {
+                let message =
+                    conversation.messages.iter_mut().find(|message| message.rewind.as_ref().is_some_and(|point| point.id == info.id))?;
+                if message.rewind.as_ref() == Some(&info) {
+                    return None;
+                }
+                message.rewind = Some(info);
+                Some(message.id.clone())
+            });
+            let saved = changed.as_ref().is_none_or(|_| self.try_save(&id).is_ok());
+            if let Some(message) = changed {
+                self.emit_message(&id, &message);
+            }
+            if unloaded && saved {
+                self.convs.remove(&id);
+            }
+        }
     }
 
     pub(super) fn release_rewind_worker(&mut self) {

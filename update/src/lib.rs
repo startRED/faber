@@ -214,10 +214,20 @@ pub const STARTUP_LOG: &str = "startup.log";
 
 /// `log` into another small file of the data folder.
 pub fn log_to(data_dir: &Path, name: &str, stage: &str, detail: &str) {
-    let at = now_secs();
+    let line = format!("{} {stage} {}", now_secs(), clean(detail));
     let file = data_dir.join(name);
+    // Added at the end while it fits, so two processes writing one log (the window and its host write `startup.log`) never
+    // drop each other's line; only the rare write that trims it rewrites the file.
+    let size = std::fs::metadata(&file).map_or(0, |m| m.len());
+    if (size as usize).saturating_add(line.len()) < LOG_MAX {
+        use std::io::Write;
+        if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+            let _ = log.write_all(format!("{line}\n").as_bytes());
+        }
+        return;
+    }
     let before = std::fs::read_to_string(&file).unwrap_or_default();
-    let _ = std::fs::write(file, with_line(&before, &format!("{at} {stage} {}", clean(detail))));
+    let _ = std::fs::write(file, with_line(&before, &line));
 }
 
 fn now_secs() -> u64 {

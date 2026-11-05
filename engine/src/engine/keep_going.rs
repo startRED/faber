@@ -369,10 +369,10 @@ impl Core {
 
     /// Faber just opened: each conversation "keep going" was on in goes on after a short wait for the accounts to be read.
     /// Whatever it waited for before (a reset, a rest) is looked at again then, by the same door as any other turn.
-    pub(super) fn resume_keep_going(&mut self) {
+    pub(super) fn resume_keep_going(&mut self, ids: Vec<String>) {
         // A rest it was in goes on for what is left of it; the start wait is only the least.
         let (start, now) = (START_WAIT * self.keep_pace, self.secs());
-        for id in self.store.keep_going_ids() {
+        for id in ids {
             let Some(c) = self.load(&id) else { continue };
             if c.keep_going.is_none() {
                 continue;

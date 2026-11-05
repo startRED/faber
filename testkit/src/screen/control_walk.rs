@@ -32,7 +32,20 @@ fn running(ctx: &mut Ctx) -> Result {
     let saved = json!({"id":ACTIVE, "title":"Active control proof", "area":"project", "projectId":"demo",
         "sessions":{}, "createdAt":1_790_000_000_000u64, "updatedAt":1_790_000_000_000u64, "messages":[]});
     std::fs::write(conversations.join(format!("{ACTIVE}.json")), saved.to_string()).map_err(|e| e.to_string())?;
-    let launch = super::shell::two_writes(ctx)?;
+    let mut launch = super::shell::two_writes(ctx)?;
+    // This project asks about its own files, not the recorder's absolute Windows folder.
+    let source = std::fs::read_to_string(ctx.paths.fixtures.join("claude/tools.jsonl")).map_err(|e| e.to_string())?;
+    let mut lines = Vec::new();
+    for line in source.lines() {
+        let mut entry: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        if let Some(path) = entry["msg"]["request"]["input"]["file_path"].as_str() {
+            entry["msg"]["request"]["input"]["file_path"] = path.rsplit(['/', '\\']).next().unwrap().into();
+        }
+        lines.push(entry.to_string());
+    }
+    let recording = ctx.sb.sandbox.join("control-writes.jsonl");
+    std::fs::write(&recording, lines.join("\n")).map_err(|e| e.to_string())?;
+    launch.recording = Some(recording);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let projects = page.named("button", "area.projects")?;

@@ -11,6 +11,121 @@ impl Engine {
 }
 
 impl Core {
+    fn boundary_demand(&self, conv: &str, tool: &str, input: &serde_json::Value) -> (crate::model::PlanSize, Option<&'static str>) {
+        use crate::model::PlanSize;
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return (PlanSize::Small, None) };
+        let Ok(cwd) = self.cwd_of(c) else {
+            return (PlanSize::Risky, Some("unknown"));
+        };
+        let Some(cwd) = cwd.to_str() else {
+            return (PlanSize::Risky, Some("unknown"));
+        };
+        let roots = Store::data_roots().iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let credentials =
+            crate::permissions::relocated_credentials(&|key| std::env::var(key).ok()).into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        let classify = |tool: &str, input: &serde_json::Value| {
+            crate::permissions::plan_boundary(cwd, cwd, &roots, &credentials, c.copy.is_some(), tool, input, false)
+        };
+        let demand = classify(tool, input);
+        if matches!(demand, (PlanSize::Risky, Some("credentials" | "data" | "unknown"))) {
+            return demand;
+        }
+        let probed = crate::permissions::plan_probe(cwd, tool, input, |prefix| {
+            let metadata = prefix.symlink_metadata()?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Ok(PlanSize::Risky);
+                }
+            }
+            Ok(if metadata.file_type().is_symlink() { PlanSize::Risky } else { PlanSize::Small })
+        });
+        if probed.0 >= demand.0 { probed } else { demand }
+    }
+
+    pub(super) fn plan_allows(&self, conv: &str, tool: &str, input: &serde_json::Value) -> bool {
+        let demand = self.boundary_demand(conv, tool, input).0;
+        demand == crate::model::PlanSize::Small || self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.covers(demand))
+    }
+
+    pub(super) fn hold_plan_boundary(&mut self, conv: &str, request: &str, tool: &str, input: &serde_json::Value) -> bool {
+        use crate::model::PlanSize;
+        if ["AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+            return false;
+        }
+        if self.turn(conv).is_none() {
+            if let Some(live) = self.live.get(conv) {
+                drop(live.session.answer(request, false));
+            }
+            return true;
+        }
+        let (size, reason) = self.boundary_demand(conv, tool, input);
+        if size == PlanSize::Small {
+            return false;
+        }
+        let Some(c) = self.convs.get_mut(conv) else { return false };
+        let plan = c.plan.get_or_insert_with(|| Plan {
+            steps: vec![],
+            size: PlanSize::Small,
+            raised_because: None,
+            contract: None,
+            at: now(),
+            estimate: None,
+        });
+        if size > plan.size {
+            plan.size = size;
+            plan.raised_because = reason.map(str::to_string);
+            self.save(conv);
+            (self.emit)(AppEvent::Plan { conversation_id: conv.into(), plan: self.shown_plan(conv) });
+        }
+        if self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.covers(size)) {
+            return false;
+        }
+        let card = serde_json::json!({
+            "planBoundary": {"tool": tool, "input": input},
+            "questions": [{"question": "plan.contractQuestion", "header": "plan.label", "multiSelect": false,
+                "options": [{"label": "plan.stateContract", "description": "plan.contractDefault"}]}]
+        });
+        let turn = if let Some(m) = self.turn(conv) {
+            let list = m.permissions.get_or_insert_default();
+            list.retain(|p| p.request_id != request);
+            list.push(Permission { request_id: request.into(), tool: "AskUserQuestion".into(), input: card, epoch: None });
+            Some(m.id.clone())
+        } else {
+            None
+        };
+        self.save(conv);
+        if let Some(turn) = turn {
+            self.weigh(conv);
+            self.watch_question(conv, &turn, request);
+            self.push(conv, Some(&turn), true);
+        }
+        true
+    }
+
+    fn resume_plan_permissions(&mut self, conv: &str) {
+        if self.convs.get(conv).is_some_and(|c| c.stopped) {
+            return;
+        }
+        let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
+        let asks = self.turn(conv).and_then(|m| m.permissions.take()).unwrap_or_default();
+        for p in asks {
+            let boundary = &p.input["planBoundary"];
+            let (tool, input) = if let Some(tool) = boundary["tool"].as_str() {
+                (tool.to_string(), boundary["input"].clone())
+            } else if ["AskUserQuestion", "ExitPlanMode"].contains(&p.tool.as_str()) {
+                if let Some(m) = self.turn(conv) {
+                    m.permissions.get_or_insert_default().push(p);
+                }
+                continue;
+            } else {
+                (p.tool, p.input)
+            };
+            self.handle(conv, sid, EngineEvent::Permission { request_id: p.request_id, tool, input });
+        }
+    }
+
     fn follow_up_project(&self, id: &str) -> Option<crate::model::Project> {
         let c = self.convs.get(id)?;
         if c.area != Area::Project {
@@ -74,7 +189,7 @@ impl Core {
         Ok(())
     }
 
-    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value, done: bool) -> Result<&'static str, String> {
+    fn close_follow_ups(&mut self, conv: &str, input: &serde_json::Value, done: bool) -> Result<(), String> {
         let tasks: Vec<progress::FollowUp> = match input.get("follow_ups") {
             Some(value) => serde_json::from_value(value.clone()).map_err(|_| "Send follow_ups as task objects with title and done.")?,
             None => vec![],
@@ -86,35 +201,24 @@ impl Core {
             task.task_file()?;
         }
         let Some(project) = self.follow_up_project(conv) else {
-            return if tasks.is_empty() { Ok("") } else { Err("Follow-ups need a project folder.".into()) };
+            return if tasks.is_empty() { Ok(()) } else { Err("Follow-ups need a project folder.".into()) };
         };
         let root = Path::new(&project.path);
         if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
             return if tasks.is_empty() {
-                Ok("")
+                Ok(())
             } else {
                 Err("This project's task folder is read-only in Faber. No new task was written.".into())
             };
         }
-        let mut notice = "";
-        if done {
-            let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| &m.id);
-            let sent: Vec<_> = self.convs[conv].follow_ups.iter().filter(|t| t.sent && t.message.as_ref() == question).cloned().collect();
-            for task in sent {
-                if crate::project::memory::remove_follow_up(root, &task).is_ok() {
-                    self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != task.file);
-                } else {
-                    self.convs.get_mut(conv).unwrap().follow_ups.iter_mut().find(|t| t.file == task.file).unwrap().sent = false;
-                    notice = "The follow-up file was kept because it changed or could not be removed. The work can still conclude.";
-                }
-            }
-        }
         if self.convs[conv].follow_ups.len() + tasks.len() > 256 {
             return Err("Dismiss existing follow-ups before adding more.".into());
         }
+        let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| m.id.clone());
         for task in tasks {
             let revision = crate::project::memory::revision(task.task_file()?.as_bytes());
-            if self.convs[conv].follow_ups.iter().any(|t| t.revision == revision) {
+            // Tasks this conclusion will remove cannot stand in for a new offer.
+            if self.convs[conv].follow_ups.iter().any(|t| t.revision == revision && !(done && t.sent && t.message == question)) {
                 continue;
             }
             let saved = crate::project::memory::write_follow_up(root, &task)?;
@@ -125,7 +229,27 @@ impl Core {
                 return Err(error);
             }
         }
-        Ok(notice)
+        Ok(())
+    }
+
+    fn finish_follow_ups(&mut self, conv: &str) -> &'static str {
+        let Some(project) = self.follow_up_project(conv) else { return "" };
+        let root = Path::new(&project.path);
+        if !matches!(self.store.read_adopted_tasks(&project.id, root), Ok(None)) {
+            return "";
+        }
+        let question = self.convs[conv].messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map(|m| &m.id);
+        let sent: Vec<_> = self.convs[conv].follow_ups.iter().filter(|t| t.sent && t.message.as_ref() == question).cloned().collect();
+        let mut notice = "";
+        for task in sent {
+            if crate::project::memory::remove_follow_up(root, &task).is_ok() {
+                self.convs.get_mut(conv).unwrap().follow_ups.retain(|t| t.file != task.file);
+            } else {
+                self.convs.get_mut(conv).unwrap().follow_ups.iter_mut().find(|t| t.file == task.file).unwrap().sent = false;
+                notice = "The follow-up file was kept because it changed or could not be removed. The work can still conclude.";
+            }
+        }
+        notice
     }
     /// Adds what something cost, in US$, to the job's running total (rule 7): the conversation's, and its parent's when an
     /// agent started it. It is called where each cost is written (a turn, a helper, a quick side question), so the spend is
@@ -334,6 +458,7 @@ impl Core {
                 }
                 (c.plan, c.estimate) = (plan, estimate);
                 self.save(conv);
+                self.resume_plan_permissions(conv);
                 let plan = self.shown_plan(conv);
                 (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
                 self.refresh_running();
@@ -353,19 +478,33 @@ impl Core {
                 if self.turn(conv).is_none() {
                     return Err("No reply is under way.".into());
                 }
-                let follow_ups_notice = self.close_follow_ups(conv, input, box_.done)?;
+                self.close_follow_ups(conv, input, box_.done)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;
                 let concluded = box_.outcome.is_some();
-                m.wrap_up = Some(box_);
+                let previous_wrap_up = m.wrap_up.replace(box_);
                 let id = m.id.clone();
-                if done {
-                    self.count_close(conv);
-                }
                 // The job is over only when the agent says so: its estimate, and economy mode with it, go; a later list starts
                 // with none. The spend stays, and a new estimate counts from it.
-                let ended = done && self.convs.get_mut(conv).and_then(|c| c.estimate.take()).is_some();
-                self.save(conv);
+                let estimate = if done { self.convs.get_mut(conv).and_then(|c| c.estimate.take()) } else { None };
+                let ended = estimate.is_some();
+                // Publish durably before deleting task files, which may live on another filesystem.
+                if let Err(error) = self.try_save(conv) {
+                    self.turn(conv).unwrap().wrap_up = previous_wrap_up;
+                    if done {
+                        self.convs.get_mut(conv).unwrap().estimate = estimate;
+                    }
+                    return Err(error);
+                }
+                let follow_ups_notice = if done {
+                    self.count_close(conv);
+                    let notice = self.finish_follow_ups(conv);
+                    self.save(conv);
+                    notice
+                } else {
+                    ""
+                };
+                self.refresh_project_memory(conv);
                 if ended {
                     let plan = self.shown_plan(conv);
                     (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan });
@@ -405,6 +544,239 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn size_boundary_engine_call_including_existing_parent_probes_is_measured() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        app.with(|core| {
+            let conv = core.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            let input = serde_json::json!({"file_path":"src/new.txt"});
+            let started = std::time::Instant::now();
+            for _ in 0..1_000 {
+                assert_eq!(core.boundary_demand(&id, "Read", &input).0, crate::model::PlanSize::Small);
+            }
+            eprintln!(
+                "size_boundary_engine: {:.0} ns/call including existing-parent probes over 1000 approvals (debug)",
+                started.elapsed().as_nanos() as f64 / 1_000.0
+            );
+        });
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t515i_conclusion_recreates_the_current_sent_follow_up() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let brief = serde_json::json!({"title":"Fix export", "done":"Export test passes"});
+        let task: progress::FollowUp = serde_json::from_value(brief.clone()).unwrap();
+        let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+        task.sent = true;
+        task.message = Some("question-0".into());
+        let file = Path::new(&project.path).join(&task.file);
+        let original = std::fs::read(&file).unwrap();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups.push(task.clone());
+            c.try_save(&id).unwrap();
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                "follow_ups":[brief]});
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            let saved = c.store.get(&id).unwrap();
+            assert_eq!(saved.follow_ups.len(), 1, "concluding must leave one replacement for the repeated task");
+            assert_eq!(c.convs[&id].follow_ups, saved.follow_ups);
+            let replacement = &saved.follow_ups[0];
+            assert!(!replacement.sent && replacement.message.is_none());
+            assert_eq!(replacement.title, task.title);
+            assert_eq!(replacement.revision, task.revision);
+            assert_ne!(replacement.file, task.file);
+            assert_eq!(std::fs::read(Path::new(&project.path).join(&replacement.file)).unwrap(), original);
+            assert!(!file.exists());
+            assert_eq!(std::fs::read_dir(Path::new(&project.path).join(".faber/tasks")).unwrap().count(), 1);
+            assert!(saved.messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t515i_dedup_keeps_tasks_that_will_not_be_removed() {
+        for (outcome, sent, message) in [("blocked", true, "question-0"), ("done", true, "older-question"), ("done", false, "question-0")] {
+            let dir = crate::workspace::TestRoot::new();
+            let (app, _) = crate::engine::answer::tests::engine(&dir);
+            let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+            let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+            let brief = serde_json::json!({"title":"Fix export", "done":"Export test passes"});
+            let task: progress::FollowUp = serde_json::from_value(brief.clone()).unwrap();
+            let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+            task.sent = sent;
+            task.message = Some(message.into());
+            let file = Path::new(&project.path).join(&task.file);
+            let original = std::fs::read(&file).unwrap();
+            app.with_saves(false, |c| {
+                let conv = c.convs.get_mut(&id).unwrap();
+                conv.area = Area::Project;
+                conv.project_id = Some(project.id);
+                conv.follow_ups.push(task.clone());
+                c.try_save(&id).unwrap();
+                let input = serde_json::json!({"outcome":outcome, "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                    "follow_ups":[brief.clone(), brief]});
+                c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+                assert_eq!(c.convs[&id].follow_ups, vec![task.clone()]);
+                assert_eq!(c.store.get(&id).unwrap().follow_ups, vec![task]);
+                assert_eq!(std::fs::read(&file).unwrap(), original);
+                assert_eq!(std::fs::read_dir(Path::new(&project.path).join(".faber/tasks")).unwrap().count(), 1);
+            });
+            app.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn t515g_conclusion_syncs_directory_before_deleting_any_task() {
+        use crate::store::{Disk, RealDisk, Store};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct RecordingDisk {
+            tasks: Vec<PathBuf>,
+            events: Mutex<Vec<&'static str>>,
+            fail: AtomicBool,
+        }
+        impl Disk for RecordingDisk {
+            fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+                let mut events = self.events.lock().unwrap();
+                if self.tasks.iter().all(|task| !task.exists()) && !events.contains(&"task deletion") {
+                    events.push("task deletion");
+                }
+                RealDisk.write(path, bytes)?;
+                events.push("temp sync");
+                Ok(())
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                RealDisk.rename(from, to)?;
+                self.events.lock().unwrap().push("rename");
+                Ok(())
+            }
+            fn flush(&self, path: &Path) -> std::io::Result<()> {
+                self.events.lock().unwrap().push("dir sync");
+                if self.fail.load(Ordering::Relaxed) {
+                    return Err(std::io::Error::other("directory sync failed"));
+                }
+                RealDisk.flush(path)
+            }
+        }
+
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let tasks: Vec<_> = ["Fix export", "Fix import"]
+            .into_iter()
+            .map(|title| {
+                let task = serde_json::from_value(serde_json::json!({"title":title, "done":"Check passes"})).unwrap();
+                let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+                task.sent = true;
+                task.message = Some("question-0".into());
+                task
+            })
+            .collect();
+        let disk = Arc::new(RecordingDisk {
+            tasks: tasks.iter().map(|task| Path::new(&project.path).join(&task.file)).collect(),
+            events: Mutex::default(),
+            fail: AtomicBool::new(true),
+        });
+        let originals: Vec<_> = disk.tasks.iter().map(|task| std::fs::read(task).unwrap()).collect();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups = tasks;
+            c.try_save(&id).unwrap();
+            c.store = Arc::new(Store::with_disk(dir.path(), disk.clone()));
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed files", "result":"Files work", "verified":"Checks pass"});
+            assert_eq!(c.write_progress(&id, progress::WRAP_UP_TOOL, &input), Err("error.chat.saveFailed".into()));
+            assert_eq!(*disk.events.lock().unwrap(), ["temp sync", "rename", "dir sync"]);
+            for (task, original) in disk.tasks.iter().zip(&originals) {
+                assert_eq!(&std::fs::read(task).unwrap(), original, "failed directory sync must retain every task");
+            }
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            assert_eq!(c.convs[&id].follow_ups.len(), 2);
+            disk.fail.store(false, Ordering::Relaxed);
+            disk.events.lock().unwrap().clear();
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            assert_eq!(&disk.events.lock().unwrap()[..4], ["temp sync", "rename", "dir sync", "task deletion"]);
+            assert!(disk.tasks.iter().all(|task| !task.exists()));
+            assert!(c.store.get(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t515a_rejected_conclusion_keeps_the_sent_follow_up_file() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        let task: progress::FollowUp =
+            serde_json::from_value(serde_json::json!({"title":"Fix export", "done":"Export test passes"})).unwrap();
+        let mut task = crate::project::memory::write_follow_up(Path::new(&project.path), &task).unwrap();
+        task.sent = true;
+        task.message = Some("question-0".into());
+        let file = Path::new(&project.path).join(&task.file);
+        let original = std::fs::read(&file).unwrap();
+        app.with_saves(false, |c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id);
+            conv.follow_ups = (0..256)
+                .map(|i| {
+                    if i == 0 {
+                        task.clone()
+                    } else {
+                        crate::model::FollowUpTask { file: format!("other-{i}.md"), sent: false, ..task.clone() }
+                    }
+                })
+                .collect();
+            c.try_save(&id).unwrap();
+            let input = serde_json::json!({"outcome":"done", "did":"Fixed export", "result":"Export works", "verified":"Export test",
+                "follow_ups":[{"title":"First replacement", "done":"First check"}, {"title":"Second replacement", "done":"Second check"}]});
+            assert_eq!(
+                c.write_progress(&id, progress::WRAP_UP_TOOL, &input),
+                Err("Dismiss existing follow-ups before adding more.".into())
+            );
+            assert_eq!(std::fs::read(&file).unwrap(), original, "a rejected conclusion must not delete its input task");
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            assert_eq!(c.convs[&id].follow_ups.len(), 256);
+            c.convs.get_mut(&id).unwrap().follow_ups.truncate(1);
+            c.try_save(&id).unwrap();
+            let saved = dir.path().join("conversations").join(format!("{id}.json"));
+            let held = saved.with_extension("held");
+            std::fs::rename(&saved, &held).unwrap();
+            std::fs::create_dir(&saved).unwrap();
+            let mut input = input;
+            input.as_object_mut().unwrap().remove("follow_ups");
+            assert!(c.write_progress(&id, progress::WRAP_UP_TOOL, &input).is_err(), "a failed conclusion save must be reported");
+            assert_eq!(std::fs::read(&file).unwrap(), original);
+            assert!(c.convs[&id].messages.last().unwrap().wrap_up.is_none());
+            std::fs::remove_dir(&saved).unwrap();
+            std::fs::rename(&held, &saved).unwrap();
+            c.write_progress(&id, progress::WRAP_UP_TOOL, &input).unwrap();
+            assert!(!file.exists());
+            assert!(c.store.get(&id).unwrap().messages.last().unwrap().wrap_up.as_ref().unwrap().done);
+        });
+        app.shutdown();
+    }
+
+    #[tokio::test]
     async fn follow_up_refuses_compaction_and_streaming_admission_without_queueing_duplicates() {
         let dir = crate::workspace::TestRoot::new();
         let (app, _) = crate::engine::answer::tests::engine(&dir);
@@ -432,6 +804,42 @@ mod tests {
         });
         assert_eq!(app.follow_up(&id, &task.file, false), Err("error.memory.changed".into()));
         assert!(app.open(&id).unwrap().queued.is_empty());
+        app.shutdown();
+    }
+
+    #[tokio::test]
+    async fn project_memory_stale_paths_are_checked_only_after_a_closing_box() {
+        let dir = crate::workspace::TestRoot::new();
+        let (app, _) = crate::engine::answer::tests::engine(&dir);
+        let id = crate::engine::answer::tests::seed(&app, crate::events::Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let note = folder.path().join(".faber/memory.md");
+        std::fs::write(&note, "- Use `src/missing.rs`.\n").unwrap();
+        let project = app.add_project(&folder.path().to_string_lossy()).unwrap();
+        app.with(|core| {
+            let conv = core.convs.get_mut(&id).unwrap();
+            conv.area = Area::Project;
+            conv.project_id = Some(project.id.clone());
+        });
+        assert!(!app.project_memory(&project.id).unwrap().files.iter().flat_map(|f| &f.entries).any(|e| e.stale));
+        app.with(|core| {
+            core.write_progress(
+                &id,
+                progress::WRAP_UP_TOOL,
+                &serde_json::json!({
+                    "outcome": "blocked", "did": "Checked the project", "result": "Waiting for a file"
+                }),
+            )
+        })
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !std::fs::read_to_string(&note).unwrap().contains(" (stale?)") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a closing box refreshes stale paths, including a blocked close");
         app.shutdown();
     }
 }

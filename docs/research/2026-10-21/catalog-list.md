@@ -455,3 +455,49 @@ code ran, no prerequisites installed, and no candidate endpoint was contacted be
 | cargo test -q -p faber-engine | 506 unit and 944 integration tests pass, 0 fail. |
 | cargo t --all --filter catalog / plugins | 58 / 24 pass, 0 fail (screen part not run in this sandbox). |
 | Not checked | A real Claude Code or Codex run (the `agents.<name>.config_file` thread override is documented but not run live), memory and processor of the full app. |
+
+## 2026-11-04: #671 runtime-tree follow-up (R552)
+
+The [#671 preflight](https://github.com/startRED/faber/pull/671) supplied the ten exact versions below. Its zero-dependency rejection was historical evidence, not a reason to keep rejecting dependencies after R552 amends R253. This branch predates that note; its list was recovered from the original pull request. The current chrome-devtools pin was audited alongside it.
+
+`node scripts/pin-tool-server.mjs <output-directory>` fetches registry.npmjs.org metadata and original tarballs only at curation time. It resolves dependencies, optional dependencies and required peers, verifies registry SHA-512, checks actual manifests and tar entries, and writes path/name/version/integrity/URL records. No upstream code, npm install or lifecycle hook runs. Installation consumes only pins and never resolves a range. Archives and machine-readable reports remain local evidence outside the repository, not bundled code.
+
+Retained trees were downloaded in full; rejected trees may stop at their decisive unsafe entry or cap and are marked partial by the generator. The compressed/extracted limit is 67,108,864 bytes each, with at most 20,000 archive entries and 512 packages per server. Context7 is the largest admitted tree: 45,732,708 extracted bytes, 7,989,543 downloaded bytes, 9,399 files and 112 packages. Every candidate was measured under the same caps. Aggregate counters guard extraction and downloads.
+
+| Candidate at the #671 version | Result | Packages / extracted bytes inspected | Licence | Chat declaration | Evidence / reason |
+| :--- | :--- | ---: | :--- | :--- | :--- |
+| @playwright/mcp@0.0.84 | Admitted | 3 / 18908206 | Apache-2.0 | false | Uses installed Chrome with --headless --isolated --browser chrome; no account or key. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1. |
+| @executeautomation/playwright-mcp-server@1.0.12 | Excluded | 104 / 54275109 | MIT | not admitted | Three @playwright/browser-* packages have install=node install.js; fsevents contains fsevents.node; tree also hits the 64 MiB extracted cap. |
+| @upstash/context7-mcp@4.5.0 | Admitted | 112 / 45732708 | MIT | true | Anonymous stdio needs no key; empty CONTEXT7_API_KEY avoids inheriting one and OTEL_SDK_DISABLED=true disables telemetry. Needs Node.js 24. Queries reach the documentation service; optional upstream sign-in nudges do not make an account mandatory. |
+| @modelcontextprotocol/server-github@2025.4.8 | Excluded | 49 / 18462561 | SEE LICENSE IN LICENSE | not admitted | Technical tree passes; GitHub operations require a personal access token. No account or token storage is added. |
+| @modelcontextprotocol/server-postgres@0.6.2 | Excluded | 34 / 6848554 | SEE LICENSE IN LICENSE | not admitted | libpq@1.11.0 contains binding.gyp. It also needs a database connection argument, potentially with credentials. |
+| @modelcontextprotocol/server-filesystem@2.1.0 | Excluded | 12 / 21678178 | SEE LICENSE IN LICENSE | not admitted | Technical tree passes, but operation needs explicit allowed directories or client Roots. Catalog launch has no verified per-project directory binding; do not grant an implicit broad file scope. |
+| @modelcontextprotocol/server-memory@2.0.1 | Excluded | 4 / 14604063 | SEE LICENSE IN LICENSE | not admitted | Technical tree passes, but defaultMemoryDir is the installed dist folder; writes to dist/memory.jsonl change the checked tree. An external writable MEMORY_FILE_PATH needs a separate data-location decision. Relative overrides still resolve against that installed folder. |
+| @modelcontextprotocol/server-sequential-thinking@2.0.0 | Admitted | 21 / 15271817 | Apache-2.0 AND MIT AND CC-BY-4.0 | true | No files, key, account or setup: session state stays in memory. DISABLE_THOUGHT_LOGGING=true suppresses thought logs. Needs Node.js 24. |
+| mcp-remote@0.16.0 | Excluded | 84 / 6264803 | MIT | not admitted | Technical tree passes, but this bridge requires a remote server URL, with optional OAuth and a local auth cache; it is not a standalone no-setup server. |
+| mcp-debugger@1.0.0 | Excluded | 115 / 27544878 | MIT | not admitted | socks-proxy-agent@8.0.5 contains package/./dist/index.js, outside the canonical portable layout. The earlier debugger project-path-containment exclusion is not waived. |
+| chrome-devtools-mcp@1.11.0 | Kept | 3 / 14781883 | Apache-2.0 | false | Existing 1.11.0 root/release commit stay pinned; both declared dependencies are now individually pinned. The whole-tree digest changes, so old copies need explicit Catalog repair. Existing privacy/headless flags stay. |
+
+All admitted entries reuse Catalog cards/details, licence display, Node lookup, staged store lock/ledger, launch-time whole-folder recheck, project switches, Full access and session-kit delivery. Chat is explicit for Context7 and sequential thinking only; browser servers stay Projects-only. No plugin or account integration is included. Pinned trees may have one portable tar root as npm type packages use; multiple roots, links, native files and overwrites are refused.
+
+Source pins: Playwright uses registry gitHead be26c080edfae7c761db1e757c4aff9f6453b4d7; Context7 uses its [4.5.0 tag](https://github.com/upstash/context7/tree/a138857cc23f0abaf214b72b15d974e61598369b); sequential thinking uses [v2.0.0](https://github.com/modelcontextprotocol/servers/tree/51b6382a3e827aceb6bce430b1208d69b93d95ea/src/sequentialthinking), whose package version matches 2.0.0. Its [pinned LICENSE](https://github.com/modelcontextprotocol/servers/blob/51b6382a3e827aceb6bce430b1208d69b93d95ea/LICENSE) describes mixed Apache-2.0 and MIT code contributions and CC-BY-4.0 documentation; the card names all three instead of guessing from SEE LICENSE IN LICENSE.
+
+Proofs cover fake-source two-level install, both fake native launches, removal/Undo, grandchild tampering and isolated refusals for integrity, scripts, native addons, hosts, redirects, unsafe roots and aggregate size. Each admitted server has a kit-boundary check, and the screen checks every server name, licence, pin and Chat declaration. Real provider/model calls and real server execution are not used for these proofs.
+## Everyday tool servers: registry preflight (curate-tool-servers)
+
+Registry metadata was checked on 2026-11-04. No candidate below passes R253, which requires an npm package with no dependencies: each version checked declares runtime dependencies. The table records a specific version, not a claim about all versions. None is added to the catalog; no tarball digest or source commit is asserted for an excluded package. Additional review of credentials, containment, telemetry and update behavior would be required before admitting any different version.
+
+| Candidate and intended use | Registry version checked | Decision and evidence |
+| :--- | :--- | :--- |
+| [@playwright/mcp](https://registry.npmjs.org/%40playwright%2fmcp/0.0.84), browser automation | 0.0.84 | Excluded: declares `playwright` and `playwright-core`. |
+| [@executeautomation/playwright-mcp-server](https://registry.npmjs.org/%40executeautomation%2fplaywright-mcp-server/1.0.12), browser automation | 1.0.12 | Excluded: declares dependencies including Playwright, Express and the MCP SDK. |
+| [@upstash/context7-mcp](https://registry.npmjs.org/%40upstash%2fcontext7-mcp/4.5.0), documentation lookup | 4.5.0 | Excluded: declares 13 dependencies including `@modelcontextprotocol/server` and OpenTelemetry packages. |
+| [@modelcontextprotocol/server-github](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-github/2025.4.8), code hosting | 2025.4.8 | Excluded: declares seven dependencies including the MCP SDK and node-fetch. |
+| [@modelcontextprotocol/server-postgres](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-postgres/0.6.2), PostgreSQL | 0.6.2 | Excluded: declares `pg` and the MCP SDK. |
+| [@modelcontextprotocol/server-filesystem](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-filesystem/2.1.0), project files | 2.1.0 | Excluded: declares five dependencies including `@modelcontextprotocol/server` and glob. |
+| [@modelcontextprotocol/server-memory](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-memory/2.0.1), persistent knowledge | 2.0.1 | Excluded: declares `zod` and `@modelcontextprotocol/server`. |
+| [@modelcontextprotocol/server-sequential-thinking](https://registry.npmjs.org/%40modelcontextprotocol%2fserver-sequential-thinking/2.0.0), structured reasoning | 2.0.0 | Excluded: declares four dependencies including `@modelcontextprotocol/server` and yargs. |
+| [mcp-remote](https://registry.npmjs.org/mcp-remote/0.16.0), remote server transport | 0.16.0 | Excluded: declares four dependencies including Express and undici; remote services would also require their own review. |
+| [mcp-debugger](https://registry.npmjs.org/mcp-debugger/1.0.0), debugging | 1.0.0 | Excluded: declares four dependencies and the catalog count check in `engine/tests/tools.rs` also records its lack of project path containment. |
+
+These are the versions examined, not an exhaustive survey of all npm packages. The existing `chrome-devtools` server and catalog counts remain unchanged; no server was approved for Chat under R373.

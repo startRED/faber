@@ -466,6 +466,9 @@ mod tests {
     struct Told(Mutex<Vec<PaneEvent>>);
 
     impl Home for Told {
+        fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>> {
+            Box::pin(async move { faber_engine::browser::check_blocked_url(&url, &[]).map_err(str::to_string) })
+        }
         fn tabs(&self, _: String) -> BoxFuture<'_, Option<faber_engine::browser::tabs::Tabs>> {
             Box::pin(async { None })
         }

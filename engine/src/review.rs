@@ -205,7 +205,7 @@ pub fn score(by: &[(String, Verdict)]) -> Round {
     let mut findings: Vec<Finding> = Vec::new();
     for (name, verdict) in &counted {
         for row in &verdict.rows {
-            if let Some(finding) = findings.iter_mut().find(|f| f.row.line == row.line && f.row.file == row.file) {
+            if let Some(finding) = findings.iter_mut().find(|f| f.row == *row) {
                 if !finding.reviewers.contains(name) {
                     finding.reviewers.push(name.clone());
                 }
@@ -315,6 +315,21 @@ mod tests {
         assert_eq!(r.agreed.len(), 1);
         assert_eq!(r.agreed[0].row.file, "1");
         assert_eq!(r.agreed.len() + r.notes.len(), MAX_ROWS);
+    }
+
+    #[test]
+    fn t515a_distinct_problems_in_one_file_never_become_consensus() {
+        let first = Row { at: Some(10), what: "Save truncates the destination".into(), ..row(2, "store.rs") };
+        let second = Row { at: Some(90), what: "Load drops queued attachments".into(), ..row(2, "store.rs") };
+        let r = score(&[person("a", [4; 5], vec![first.clone()]), person("b", [4; 5], vec![second.clone()])]);
+        assert!(r.agreed.is_empty(), "different problems are not agreement");
+        assert_eq!(r.notes.iter().map(|f| f.row.clone()).collect::<Vec<_>>(), [first.clone(), second]);
+        let other = Row { what: "Save publishes before syncing".into(), ..first.clone() };
+        let r = score(&[person("a", [4; 5], vec![first.clone()]), person("b", [4; 5], vec![other])]);
+        assert!(r.agreed.is_empty(), "a shared location alone is not agreement");
+        let r = score(&[person("a", [4; 5], vec![first.clone(), first.clone()]), person("b", [4; 5], vec![first])]);
+        assert_eq!(r.agreed.len(), 1);
+        assert_eq!(r.agreed[0].reviewers, ["a", "b"]);
     }
 
     #[test]

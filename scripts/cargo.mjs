@@ -2,12 +2,37 @@
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { mkdir, lstat, readFile, writeFile, rename, rm, rmdir, realpath, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
+import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const DAY = 86400000;
+// The native call, like fs/promises realpath, expands Windows 8.3 names (RUNNER~1), so recorded paths compare equal.
+const systemTemp = realpathSync.native(os.tmpdir());
+const tempNamespace = path.join(systemTemp, tempNamespaceName(process.platform, process.getuid?.()));
+
+export function tempNamespaceName(platform, uid) {
+  return platform === 'win32' ? 'faber-cargo' : `faber-cargo-${uid}`;
+}
+
+export function validateTempNamespace(stat, uid, folder) {
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & 0o022) !== 0) {
+    throw new Error(`Refusing unsafe build temporary namespace: ${folder}; expected a real directory owned by uid ${uid} without group or other write access`);
+  }
+}
+
+export function validateTempAncestor(stat, uid, folder) {
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.uid !== 0 && stat.uid !== uid) || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)) {
+    throw new Error(`Refusing unsafe build temporary ancestor: ${folder}; expected a real directory owned by root or uid ${uid}, with the sticky bit if group or other writable`);
+  }
+}
+
+function tempParent(target) {
+  return path.join(tempNamespace, createHash('sha256').update(process.platform === 'win32' ? target.toLowerCase() : target).digest('hex').slice(0, 32));
+}
 const execute = promisify(execFile);
 
 async function directory(folder) {
@@ -16,10 +41,22 @@ async function directory(folder) {
   let stat;
   try { stat = await lstat(folder); } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    try { await mkdir(folder); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    try { await mkdir(folder, { mode: folder === tempNamespace ? 0o700 : 0o777 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
     stat = await lstat(folder);
   }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Expected a real directory, not a link: ${folder}`);
+  if (folder === tempNamespace && process.platform !== 'win32') {
+    const uid = process.getuid();
+    validateTempNamespace(stat, uid, folder);
+    let ancestor = folder;
+    for (;;) {
+      validateTempAncestor(stat, uid, ancestor);
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) break;
+      ancestor = parent;
+      stat = await lstat(ancestor);
+    }
+  }
+  else if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Expected a real directory, not a link: ${folder}`);
 }
 
 function dead(pid) {
@@ -27,9 +64,8 @@ function dead(pid) {
   try { process.kill(pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
 }
 
-async function removeTemp(target, name) {
+async function removeTemp(parent, name) {
   if (!/^run-[a-zA-Z0-9-]+$/.test(name)) throw new Error('Invalid owned temporary directory');
-  const parent = path.join(target, '.faber-tmp');
   await directory(parent);
   const folder = path.join(parent, name);
   try {
@@ -56,7 +92,27 @@ async function reap(target) {
     const owner = JSON.parse(await readFile(receipt, 'utf8'));
     if (!Number.isFinite(owner.createdAt) || Date.now() - owner.createdAt < DAY || !dead(owner.pid) || !dead(owner.childPid)) return;
     if (await overlapsLease(target)) return;
-    await removeTemp(target, owner.tempName);
+    if (typeof owner.tempName !== 'string' || !/^run-[a-zA-Z0-9-]+$/.test(owner.tempName)) return;
+    const legacy = path.join(target, '.faber-tmp');
+    if (owner.tempPath !== undefined) {
+      let canonical;
+      try {
+        if (owner.tempPath === path.join(tempParent(target), owner.tempName) || owner.tempPath === path.join(legacy, owner.tempName)) {
+          await directory(tempNamespace);
+          canonical = await realpath(owner.tempPath);
+        }
+      } catch (error) { if (error.code !== 'ENOENT') throw error; canonical = null; }
+      if (canonical !== null) {
+        if (canonical === owner.tempPath) {
+          await removeTemp(path.dirname(canonical), owner.tempName);
+        } else console.error(`Build temporary directory was left for system cleanup: ${JSON.stringify(owner.tempPath)}`);
+      }
+    }
+    try {
+      await lstat(legacy);
+      await removeTemp(legacy, owner.tempName);
+      await rmdir(legacy).catch((error) => { if (!['ENOTEMPTY', 'ENOENT'].includes(error.code)) throw error; });
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
     await rm(lease, { recursive: true });
     return true;
   } catch (error) {
@@ -146,10 +202,19 @@ export async function adoptTarget(target, copy) {
 }
 
 export async function acquireTarget(root, env, signal) {
-  const targets = env.CARGO_TARGET_DIR
+  let ancestor = systemTemp;
+  for (;;) {
+    try { await lstat(path.join(ancestor, '.git')); throw new Error(`Temporary directory is inside a Git working tree: ${systemTemp}`); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  await directory(tempNamespace);
+  let targets = env.CARGO_TARGET_DIR
     ? [path.resolve(root, env.CARGO_TARGET_DIR)]
     : [1, 2, 3].map((slot) => path.join(root, 'target', `build-${slot}`));
   for (const target of targets) await directory(target);
+  targets = await Promise.all(targets.map((target) => realpath(target)));
   for (;;) {
     signal?.throwIfAborted();
     for (const target of targets) {
@@ -164,6 +229,7 @@ export async function acquireTarget(root, env, signal) {
         continue;
       }
       const owner = { pid: process.pid, childPid: null, createdAt: Date.now(), tempName: `run-${randomUUID()}` };
+      owner.tempPath = path.join(tempParent(target), owner.tempName);
       const receipt = path.join(lease, 'owner.json');
       const save = async () => {
         await writeFile(path.join(lease, 'owner.new'), JSON.stringify(owner));
@@ -176,7 +242,7 @@ export async function acquireTarget(root, env, signal) {
           }
         }
       };
-      const temp = path.join(target, '.faber-tmp', owner.tempName);
+      const temp = owner.tempPath;
       try {
         await save();
         await directory(temp);
@@ -191,7 +257,7 @@ export async function acquireTarget(root, env, signal) {
         async interrupt() { owner.childPid = null; await save(); },
         async release() {
           // Keep the receipt when cleanup fails, so a later invocation can retry safely.
-          await removeTemp(target, owner.tempName);
+          await removeTemp(tempParent(target), owner.tempName);
           await rm(lease, { recursive: true });
         },
       };
@@ -320,7 +386,7 @@ export async function maintainStorage(root, ownTarget) {
     try {
       lease = await acquireTarget(root, { ...process.env, CARGO_TARGET_DIR: tools }, controller.signal);
       controller.signal.throwIfAborted();
-      const compiled = path.join(lease.env.TEMP, path.basename(program));
+      const compiled = path.join(lease.target, '.faber-lease', path.basename(program));
       compiler = spawn('rustc', ['--edition=2024', '-O', source, '-o', compiled], {
         cwd: sourceRoot, windowsHide: true, env: lease.env, shell: false, stdio: 'inherit', detached: process.platform !== 'win32',
       });

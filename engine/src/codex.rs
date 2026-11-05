@@ -1,6 +1,7 @@
 //! Codex driver: `codex app-server` processes spoken to over JSON-RPC on stdio.
 
 use crate::claude::EventSink;
+use crate::engine::NativePoint;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, CliSession, Permissions, ReasoningSummary, ReplyStyle, Tuning, Vendor, WebSearch};
 use crate::persona::{PersonaInput, persona};
@@ -835,15 +836,16 @@ enum ServerCommand {
         tools: Option<crate::tools::Delivery>,
         identity: Option<ThreadIdentity>,
         before_turn: Option<String>,
+        native_fork: Option<NativePoint>,
     },
     Session(u64, SessionCommand),
     Tools(crate::tools::Delivery),
     Retire,
 }
 
-struct ThreadIdentity {
-    identity: Arc<proc::ConversationIdentity>,
-    spawn: Spawner,
+pub(crate) struct ThreadIdentity {
+    pub(crate) identity: Arc<proc::ConversationIdentity>,
+    pub(crate) spawn: Spawner,
 }
 
 impl Drop for ThreadIdentity {
@@ -858,6 +860,7 @@ enum Waiting {
     Unsubscribe(u64),
     Thread(u64),
     Revert(u64),
+    ForkTail(u64),
     Other(u64, &'static str),
     /// A `turn/steer`; its tag tells the engine which message it was.
     Steer(u64, String),
@@ -895,7 +898,14 @@ fn skill_commands(result: &Value, cwd: &std::path::Path) -> Option<Vec<crate::mo
 }
 
 /// A conversation's side of the shared process.
+struct ForkOpen {
+    point: NativePoint,
+    verified: bool,
+    reply: Option<Value>,
+}
+
 struct Thread {
+    native_fork: Option<ForkOpen>,
     before_turn: Option<String>,
     early_completion: Vec<Value>,
     sink: EventSink,
@@ -954,7 +964,14 @@ fn refresh_native(threads: &mut HashMap<u64, Thread>, key: u64, server: Option<&
 
 impl Thread {
     fn open_params(&self, area: Area) -> (&'static str, Value) {
-        let (method, mut params) = thread_params(area, &self.params);
+        let (mut method, mut params) = thread_params(area, &self.params);
+        if let Some(fork) = &self.native_fork {
+            method = "thread/fork";
+            params["threadId"] = fork.point.session.clone().into();
+            params["lastTurnId"] = fork.point.cursor.turn.clone().expect("validated fork").into();
+            params["excludeTurns"] = true.into();
+            params.as_object_mut().expect("thread object").remove("dynamicTools");
+        }
         if let Some(identity) = &self.identity
             && let Some(token) = &identity.identity.token
         {
@@ -1142,8 +1159,9 @@ fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &Us
 /// The catalog's servers (`crate::tools`) beside the person's own, each under its own key so no other server is replaced.
 pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
     for s in servers {
+        // Codex starts MCP with its safe baseline; inherit no additional shell variables from user config.
         params["config"][format!("mcp_servers.{}", s.name)] =
-            json!({ "command": s.command, "args": s.args, "env": s.env, "enabled": true });
+            json!({ "command": s.command, "args": s.args, "env": s.env, "env_vars": [], "enabled": true });
     }
 }
 
@@ -1287,12 +1305,12 @@ impl CodexServer {
 
     /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
     pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
-        self.open_inner(thread, sink, None, None, None)
+        self.open_inner(thread, sink, None, None, None, None)
     }
 
     /// Uses the project's catalog choices for this launch, leaving already open conversations alone.
     pub fn open_with_tools(&self, thread: CodexThread, sink: EventSink, tools: crate::tools::Delivery) -> Session {
-        self.open_inner(thread, sink, Some(tools), None, None)
+        self.open_inner(thread, sink, Some(tools), None, None, None)
     }
 
     pub(crate) fn open_identified(
@@ -1300,13 +1318,16 @@ impl CodexServer {
         thread: CodexThread,
         sink: EventSink,
         tools: crate::tools::Delivery,
-        identity: Arc<proc::ConversationIdentity>,
-        spawn: Spawner,
+        identity: ThreadIdentity,
         before_turn: Option<String>,
+        native_fork: Option<NativePoint>,
     ) -> Session {
-        self.open_inner(thread, sink, Some(tools), Some(ThreadIdentity { identity, spawn }), before_turn)
+        self.open_inner(thread, sink, Some(tools), Some(identity), before_turn, native_fork)
     }
 
+    pub fn open_fork(&self, thread: CodexThread, point: NativePoint, sink: EventSink) -> Session {
+        self.open_inner(thread, sink, None, None, None, Some(point))
+    }
     fn open_inner(
         &self,
         thread: CodexThread,
@@ -1314,13 +1335,14 @@ impl CodexServer {
         tools: Option<crate::tools::Delivery>,
         identity: Option<ThreadIdentity>,
         before_turn: Option<String>,
+        native_fork: Option<NativePoint>,
     ) -> Session {
         let session_identity = identity.as_ref().map(|i| i.identity.clone());
         let sink =
             identity.as_ref().and_then(|i| i.identity.token.clone()).map_or_else(|| sink.clone(), |token| redact_sink(sink.clone(), token));
         let key = self.next.fetch_add(1, Ordering::Relaxed);
         if let Err(SendError(ServerCommand::Open { sink, .. })) =
-            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, identity, before_turn })
+            self.tx.send(ServerCommand::Open { key, thread: Box::new(thread), sink, tools, identity, before_turn, native_fork })
         {
             sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
             sink(EngineEvent::WriterExit { confirmed: true });
@@ -1546,7 +1568,7 @@ async fn serve(
     }
     macro_rules! open_thread {
         ($key:expr, $t:expr) => {{
-            if !$t.unsubscribed && $t.identity.as_ref().is_some_and(|i| i.identity.token.is_some()) && let Some(id) = &$t.params.resume {
+            if $t.native_fork.is_none() && !$t.unsubscribed && $t.identity.as_ref().is_some_and(|i| i.identity.token.is_some()) && let Some(id) = &$t.params.resume {
                 if threads.iter().any(|(&key, old)| key != $key && old.id.as_ref() == Some(id)) {
                     // Reloading a native thread kills its terminals; its retired owner must release its writers first.
                     resuming.insert($key);
@@ -1810,8 +1832,8 @@ async fn serve(
                                 continue;
                             }
                             let detail = error["message"].as_str().map(String::from).unwrap_or_else(|| error.to_string());
-                            if let Waiting::Thread(key) | Waiting::Revert(key) = kind
-                                && threads.get(&key).is_some_and(|t| t.before_turn.is_some())
+                            if let Waiting::Thread(key) | Waiting::Revert(key) | Waiting::ForkTail(key) = kind
+                                && threads.get(&key).is_some_and(|t| t.before_turn.is_some() || t.native_fork.is_some())
                                 && let Some(t) = threads.remove(&key)
                             {
                                 // No turn was sent: release this unopened owner without stopping the shared server.
@@ -1821,7 +1843,7 @@ async fn serve(
                             }
                             let (keys, what, fatal): (Vec<u64>, &str, bool) = match kind {
                                 Waiting::Initialize => (threads.keys().copied().collect(), "initialize", true),
-                                Waiting::Thread(key) | Waiting::Revert(key) => (vec![key], "thread", true),
+                                Waiting::Thread(key) | Waiting::Revert(key) | Waiting::ForkTail(key) => (vec![key], "thread", true),
                                 Waiting::Other(key, m) => (vec![key], m, false),
                                 Waiting::Steer(..) => unreachable!("handled above"),
                                 Waiting::McpStatus { .. } => unreachable!("handled above"),
@@ -1841,6 +1863,24 @@ async fn serve(
                                 t.turn = None;
                                 t.early_completion.clear();
                                 t.publish_writers(key, &subagents);
+                            }
+                            continue;
+                        }
+                        if let Waiting::ForkTail(key) = kind {
+                            let valid = threads.get(&key).and_then(|t| t.native_fork.as_ref()).is_some_and(|fork| {
+                                msg["result"]["data"].as_array().is_some_and(|tail| tail.len() == 1
+                                    && tail[0]["id"].as_str() == fork.point.cursor.turn.as_deref() && tail[0]["status"] != "inProgress")
+                            });
+                            if !valid {
+                                if let Some(t) = threads.remove(&key) {
+                                    (t.sink)(EngineEvent::Error { message: "error.sessionLost".into(), fatal: true });
+                                    (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                                }
+                            } else if let Some(fork) = threads.get_mut(&key).and_then(|t| t.native_fork.as_mut()) {
+                                fork.verified = true;
+                                let id = format!("faber-fork-verified-{key}");
+                                waiting.insert(id.clone(), Waiting::Thread(key));
+                                confirmed.push_back(json!({"id":id,"result":fork.reply.take().expect("pending fork metadata")}));
                             }
                             continue;
                         }
@@ -1888,7 +1928,7 @@ async fn serve(
                                     open_thread!(key, t);
                                 }
                             }
-                            Waiting::Thread(key) | Waiting::Revert(key) => {
+                            Waiting::Thread(key) | Waiting::Revert(key) | Waiting::ForkTail(key) => {
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
                                 if threads.get(&key).is_some_and(|t| t.before_turn.is_some() && (id.is_empty() || t.params.resume.as_deref() != Some(id.as_str())))
@@ -1899,6 +1939,20 @@ async fn serve(
                                     continue;
                                 }
                                 let Some(t) = threads.get_mut(&key) else { continue };
+                                if let Some(fork) = &mut t.native_fork {
+                                    if id.is_empty() || id == fork.point.session {
+                                        (t.sink)(EngineEvent::Error { message: "error.sessionLost".into(), fatal: true });
+                                        (t.sink)(EngineEvent::WriterExit { confirmed: true });
+                                        threads.remove(&key);
+                                        continue;
+                                    }
+                                    if !fork.verified {
+                                        // Retain metadata only while checking one turn summary, never the copied transcript.
+                                        fork.reply = Some(json!({"thread":{"id":id,"model":thread["model"]},"model":msg["result"]["model"]}));
+                                        request!("thread/turns/list", json!({"threadId":id,"limit":1,"sortDirection":"desc","itemsView":"summary"}), Waiting::ForkTail(key));
+                                        continue;
+                                    }
+                                }
                                 if matches!(kind, Waiting::Thread(_)) && let Some(before_turn) = &t.before_turn {
                                     t.state.model = msg["result"]["model"].as_str().unwrap_or_default().to_string();
                                     request!("thread/revert", json!({"threadId":id,"beforeTurnId":before_turn}), Waiting::Revert(key));
@@ -2140,6 +2194,12 @@ async fn serve(
                                     let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
                                     continue;
                                 }
+                                let input = if let Some(cwd) = params["cwd"].as_str().filter(|cwd| Some(Path::new(cwd)) != Some(t.params.cwd.as_path())) {
+                                    if input.is_string() { json!({"command": input, "cwd": cwd}) }
+                                    else if let Some(mut fields) = input.as_object().cloned() { fields.insert("cwd".into(), cwd.into()); Value::Object(fields) }
+                                    else if input.is_array() { json!({"changes": input, "cwd": cwd}) }
+                                    else { input }
+                                } else { input };
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // A question to the person is a card in every mode, like Claude Code's `AskUserQuestion`; the
@@ -2293,10 +2353,15 @@ async fn serve(
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
-                Some(ServerCommand::Open { key, thread, sink, tools, identity, before_turn }) => {
-                    let state = CodexTurnState::new(thread.resume.is_some());
+                Some(ServerCommand::Open { key, thread, sink, tools, identity, before_turn, native_fork }) => {
+                    if native_fork.as_ref().is_some_and(|point| !point.valid(crate::model::Vendor::Codex) || before_turn.is_some() || thread.instructions.is_some() || matches!(thread.helper, crate::helper::Helper::Is | crate::helper::Helper::Aside)) {
+                        sink(EngineEvent::Error { message: "error.sessionLost".into(), fatal: true });
+                        sink(EngineEvent::WriterExit { confirmed: true });
+                        continue;
+                    }
+                    let state = CodexTurnState::new(thread.resume.is_some() || native_fork.is_some());
                     if let Some(token) = identity.as_ref().and_then(|i| i.identity.token.clone()) { tokens.insert(token); }
-                    let t = Thread { before_turn, sink, params: *thread, tools, identity, unsubscribed: false, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
+                    let t = Thread { native_fork: native_fork.map(|point| ForkOpen { point, verified: false, reply: None }), before_turn, sink, params: *thread, tools, identity, unsubscribed: false, id: None, turn: None, queued: vec![], compact: false, state, approvals: HashMap::new(), questions: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), interrupt_pending: false, blocked: false, closing: false, stop_children: false, early_completion: vec![], commands: HashMap::new(), unconfirmed_commands: HashMap::new(), owns_server: !no_process, server_writers: false, native_commands: Default::default(), stop_reported: false };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -2821,6 +2886,7 @@ mod rewind_tests {
                     tools: None,
                     identity: None,
                     before_turn: None,
+                    native_fork: None,
                 })
                 .unwrap();
                 let open = read(output.next_line().await.unwrap().unwrap());
@@ -2842,6 +2908,7 @@ mod rewind_tests {
                     tools: None,
                     identity: None,
                     before_turn: Some("cut".into()),
+                    native_fork: None,
                 })
                 .unwrap();
                 tx.send(ServerCommand::Session(1, SessionCommand::Send(UserTurn::text("pending")))).unwrap();
@@ -2937,7 +3004,7 @@ mod rewind_tests {
                             identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some(format!("key-cancel-{cancel_key}")) }),
                             spawn: spawn.clone(),
                         });
-                        tx.send(ServerCommand::Open { key: cancel_key, thread: Box::new(params.clone()), sink, tools: None, identity, before_turn: None }).unwrap();
+                        tx.send(ServerCommand::Open { key: cancel_key, thread: Box::new(params.clone()), sink, tools: None, identity, before_turn: None, native_fork: None }).unwrap();
                         assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err());
                         tx.send(ServerCommand::Session(cancel_key, cancel)).unwrap();
                         loop {
@@ -2945,7 +3012,7 @@ mod rewind_tests {
                         }
                     }
                 }
-                tx.send(ServerCommand::Open { key, thread: Box::new(params), sink, tools: None, identity, before_turn: None }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(params), sink, tools: None, identity, before_turn: None, native_fork: None }).unwrap();
                 if resume.is_some() {
                     assert!(tokio::time::timeout(Duration::from_millis(20), output.next_line()).await.is_err(), "a native writer must survive token rotation until it finishes");
                     input.write_all(format!("{}\n",json!({"method":"item/completed","params":{"threadId":"native-one","item":{"id":"background","type":"commandExecution","processId":"terminal-one","exitCode":0}}})).as_bytes()).await.unwrap();
@@ -2988,7 +3055,7 @@ mod rewind_tests {
                 identity: Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("key-failed".into()) }),
                 spawn,
             });
-            tx.send(ServerCommand::Open { key: 4, thread: Box::new(params), sink, tools: None, identity, before_turn: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 4, thread: Box::new(params), sink, tools: None, identity, before_turn: None, native_fork: None }).unwrap();
             let unsubscribe: Value = serde_json::from_str(&output.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(unsubscribe["method"], "thread/unsubscribe");
             input.write_all(format!("{}\n", json!({"id":unsubscribe["id"],"error":{"message":"unsupported"}})).as_bytes()).await.unwrap();
@@ -3074,7 +3141,7 @@ mod rewind_tests {
             let mut params = thread(sink.clone()).params;
             params.cwd = root.path().into();
             params.permissions = Permissions::Isolated;
-            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None, identity: Some(ThreadIdentity { identity, spawn }), before_turn: None }).unwrap();
+            tx.send(ServerCommand::Open { key: 1, thread: Box::new(params), sink, tools: None, identity: Some(ThreadIdentity { identity, spawn }), before_turn: None, native_fork: None }).unwrap();
             let config = read(&mut output).await;
             assert_eq!(config["method"], "config/read");
             write(&mut input, json!({"id":config["id"],"result":{"config":{"mcp_servers":{}}}})).await;
@@ -3114,7 +3181,14 @@ mod rewind_tests {
         };
         let identity = Arc::new(proc::ConversationIdentity { id: "one".into(), token: Some("test-key".into()) });
         let server = CodexServer::start(opts);
-        let _session = server.open_identified(thread(Arc::new(|_| {})).params, Arc::new(|_| {}), Default::default(), identity, spawn, None);
+        let _session = server.open_identified(
+            thread(Arc::new(|_| {})).params,
+            Arc::new(|_| {}),
+            Default::default(),
+            ThreadIdentity { identity, spawn },
+            None,
+            None,
+        );
         let recorded = recorded.lock().unwrap();
         let (args, env) = recorded.as_ref().unwrap();
         assert!(args.iter().all(|arg| !arg.contains("test-key")));
@@ -3123,9 +3197,44 @@ mod rewind_tests {
         }
     }
 
+    #[test]
+    fn native_branch_fork_keeps_the_new_identity_and_current_thread_policy() {
+        let mut owner = thread(Arc::new(|_| {}));
+        owner.params.resume = Some("source".into());
+        owner.identity = Some(ThreadIdentity {
+            identity: Arc::new(proc::ConversationIdentity { id: "branch".into(), token: Some("synthetic-branch-key".into()) }),
+            spawn: Arc::new(|_, _, _| Err(std::io::Error::other("not spawned by this metadata test"))),
+        });
+        let (_, ordinary) = owner.open_params(Area::Chat);
+        owner.native_fork = Some(ForkOpen {
+            point: NativePoint { session: "source".into(), cursor: crate::rewind::Cursor { entry: None, turn: Some("kept".into()) } },
+            verified: false,
+            reply: None,
+        });
+        let (method, fork) = owner.open_params(Area::Chat);
+        assert_eq!(method, "thread/fork");
+        assert_eq!(fork["threadId"], "source");
+        assert_eq!(fork["lastTurnId"], "kept");
+        for key in ["approvalPolicy", "sandbox", "developerInstructions", "cwd"] {
+            assert_eq!(fork[key], ordinary[key], "fork must preserve {key}");
+        }
+        // Each launch names its profile freshly; compare the complete resolved policy instead of its generated name.
+        let policy = |params: &Value| {
+            let mut config = params["config"].as_object().expect("thread config").clone();
+            let selected = config.remove("default_permissions").expect("selected profile");
+            let profile = config.remove(&format!("permissions.{}", selected.as_str().expect("profile name"))).expect("profile policy");
+            (config, profile)
+        };
+        assert_eq!(policy(&fork), policy(&ordinary), "fork must preserve all config and the selected policy");
+        assert_eq!(fork["config"]["shell_environment_policy.set"]["FABER_CONVERSATION"], "branch");
+        assert_eq!(fork["config"]["shell_environment_policy.set"]["FABER_AGENT_TOKEN"], "synthetic-branch-key");
+        assert!(fork.get("dynamicTools").is_none());
+    }
+
     fn thread(sink: EventSink) -> Thread {
         Thread {
             before_turn: None,
+            native_fork: None,
             sink,
             identity: None,
             unsubscribed: false,
@@ -3447,6 +3556,7 @@ mod rewind_tests {
                 tools: None,
                 identity: None,
                 before_turn: None,
+                native_fork: None,
             })
             .unwrap();
             let open = read(&mut output).await;
@@ -3557,7 +3667,7 @@ mod rewind_tests {
             write(&mut input, json!({"id":init["id"],"result":{}})).await;
             assert_eq!(read(&mut output).await["method"], "initialized");
             for (key, id) in [(1, "owner"), (2, "peer")] {
-                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, identity: None, before_turn: None }).unwrap();
+                tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink.clone()).params), sink: sink.clone(), tools: None, identity: None, before_turn: None, native_fork: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                 while !matches!(events.recv().await.unwrap(), EngineEvent::Started { .. }) {}
@@ -3666,7 +3776,7 @@ mod rewind_tests {
                 write(&mut input, json!({"id":init["id"],"result":{}})).await;
                 assert_eq!(read(&mut output).await["method"], "initialized");
                 for (key, id) in [(1, "owner"), (2, "peer")] {
-                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, identity: None, before_turn: None }).unwrap();
+                    tx.send(ServerCommand::Open { key, thread: Box::new(thread(sink(key)).params), sink: sink(key), tools: None, identity: None, before_turn: None, native_fork: None }).unwrap();
                     let open = read(&mut output).await;
                     write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":id}}})).await;
                     while !matches!(events.recv().await.unwrap(), (k, EngineEvent::Started { .. }) if k == key) {}
@@ -3686,7 +3796,7 @@ mod rewind_tests {
                 while !matches!(events.recv().await.unwrap(), (1, EngineEvent::Error { .. })) {}
                 let mut next = thread(sink(3)).params;
                 next.effort = Some("high".into());
-                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, identity: None, before_turn: None }).unwrap();
+                tx.send(ServerCommand::Open { key: 3, thread: Box::new(next), sink: sink(3), tools: None, identity: None, before_turn: None, native_fork: None }).unwrap();
                 let open = read(&mut output).await;
                 write(&mut input, json!({"id":open["id"],"result":{"thread":{"id":replacement}}})).await;
                 while !matches!(events.recv().await.unwrap(), (3, EngineEvent::Started { .. })) {}
@@ -3754,6 +3864,7 @@ mod rewind_tests {
                 tools: None,
                 identity: None,
                 before_turn: None,
+                native_fork: None,
             })
             .unwrap();
             let open = read(&mut output).await;

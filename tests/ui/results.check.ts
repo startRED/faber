@@ -63,6 +63,11 @@ check('results: a chat conversation shows no note, and a project lists only conv
   const dispose = render(() => createComponent(ProjectResults, { projectId: 'p', summaries }), root);
   try {
     await until(() => root.querySelector('section'));
+    equal(root.querySelectorAll('p.note').length, 1, 'only the total until a person asks for each conversation');
+    const each = root.querySelector<HTMLButtonElement>('.results-each')!;
+    equal(each.getAttribute('aria-expanded'), 'false');
+    each.click();
+    await until(() => root.querySelectorAll('p.note').length > 1);
     const rows = [...root.querySelectorAll('p.note')].map((p) => p.textContent ?? '');
     ok(rows[0]?.startsWith('Total'), 'the total is first');
     equal(rows.length, 3, 'total and two conversations');

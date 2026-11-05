@@ -36,6 +36,11 @@ impl Core {
             Ok(open) => open,
             Err(text) => return self.answer_browse(conv, sid, &call, false, text, Vec::new()),
         };
+        if let browser::Request::Open(url) = &request
+            && let Err(why) = browser::check_blocked_url(url, self.store.settings().blocked_hosts.as_deref().unwrap_or_default())
+        {
+            return self.answer_browse(conv, sid, &call, false, why.to_string(), Vec::new());
+        }
         // A check at the sizes that matter, with none named: the ones of where the project runs, from its own files.
         let folder = matches!(&request, browser::Request::Sizes(sizes) if sizes.is_empty())
             .then(|| self.convs.get(conv).and_then(|c| self.cwd_of(c).ok()))

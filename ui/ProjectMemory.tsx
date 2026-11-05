@@ -98,7 +98,8 @@ function MemoryList(props: { projectId: string }) {
             <Show when={first && file.overLimit}><p class="hint">{t('memory.overLimit', { size: file.overLimit![0], target: file.overLimit![1] })}</p></Show>
             <Show when={entry} fallback={<p class="hint">{t(file.tooLarge ? 'memory.tooLarge' : 'memory.noEntries')}</p>}>
               {(entry) => <Show when={editing() === key(file, entry())} fallback={<>
-                <p class="memory-text">{entry().body || entry().text}</p>
+                <p class="memory-text">{(entry().body || entry().text).replace(/ \(stale\?\)$/u, '')}</p>
+                <Show when={entry().stale}><p class="hint memory-stale">{t('memory.stale')}</p></Show>
                 <Show when={file.path !== ".faber/rules.md"}><div class="memory-actions">
                   <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
                   <button type="button" class="btn ghost" data-edit disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>

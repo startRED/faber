@@ -233,6 +233,118 @@ pub fn checked_url(input: &Value) -> Result<String, &'static str> {
     Ok(url.to_string())
 }
 
+/// Canonical form of a host entered in Settings, without a scheme, port, credentials or path.
+pub fn blocked_host(input: &str) -> Result<String, &'static str> {
+    let input = input.trim();
+    if input.is_empty()
+        || input.len() > 253
+        || input.chars().any(|c| c.is_control() || c.is_whitespace())
+        || input.contains(['/', '\\', '@', '?', '#', '%'])
+    {
+        return Err("error.browser.invalidHost");
+    }
+    let url = reqwest::Url::parse(&format!("http://{input}/")).map_err(|_| "error.browser.invalidHost")?;
+    if (input.contains(':') && !(input.starts_with('[') && input.ends_with(']')))
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("error.browser.invalidHost");
+    }
+    let host = url.host_str().ok_or("error.browser.invalidHost")?.trim_end_matches('.');
+    if host.is_empty() || host.len() > 253 {
+        return Err("error.browser.invalidHost");
+    }
+    if !host.starts_with('[')
+        && host.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+    {
+        return Err("error.browser.invalidHost");
+    }
+    Ok(host.to_owned())
+}
+
+/// Validate the complete list before saving it, so a rejected edit changes nothing.
+pub fn blocked_hosts(inputs: &[String]) -> Result<Vec<String>, &'static str> {
+    if inputs.len() > 50 {
+        return Err("error.browser.tooManyHosts");
+    }
+    let mut hosts = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        let host = blocked_host(input)?;
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    Ok(hosts)
+}
+
+#[cfg(test)]
+mod blocked_host_tests {
+    use super::{blocked_host, blocked_hosts, check_blocked_url};
+
+    #[test]
+    fn each_redirect_destination_is_checked() {
+        let hosts = blocked_hosts(&["bank.example".into(), "[::1]".into()]).unwrap();
+        let hops = ["https://news.example/", "https://news.example/redirect", "https://LOGIN.Bank.Example.:8443/"];
+        assert!(hops[..2].iter().all(|url| check_blocked_url(url, &hosts).is_ok()));
+        assert_eq!(check_blocked_url(hops[2], &hosts), Err("error.browser.blockedHost"));
+        assert_eq!(check_blocked_url("http://[0:0:0:0:0:0:0:1]/", &hosts), Err("error.browser.blockedHost"));
+        assert_eq!(check_blocked_url("http://0177.0.0.1/", &["127.0.0.1".into()]), Err("error.browser.blockedHost"));
+    }
+
+    #[test]
+    fn canonical_hosts_and_label_boundaries() {
+        let hosts = [blocked_host("BANK.Example.").unwrap(), blocked_host("bücher.example").unwrap(), blocked_host("127.1").unwrap()];
+        assert_eq!(hosts, ["bank.example", "xn--bcher-kva.example", "127.0.0.1"]);
+        for address in ["https://BANK.example./", "https://login.bank.example:443/", "https://bücher.example/", "http://127.0.0.1/"] {
+            assert_eq!(check_blocked_url(address, &hosts), Err("error.browser.blockedHost"), "{address}");
+        }
+        for address in ["https://evil-bank.example/", "https://bank.example.evil/", "https://other.example/"] {
+            assert!(check_blocked_url(address, &hosts).is_ok(), "{address}");
+        }
+        for input in ["https://bank.example", "bank.example/path", "user@bank.example", "bank.example:80", "bank.example?x", ""] {
+            assert!(blocked_host(input).is_err(), "{input}");
+        }
+        assert_eq!(blocked_host("[::1]").unwrap(), "[::1]");
+        assert_eq!(check_blocked_url("https://allowed.example@bank.example/", &hosts), Err("error.browser.blockedHost"));
+        assert!(check_blocked_url("https://bank.example@allowed.example/", &hosts).is_ok());
+        assert_eq!(blocked_hosts(&["BANK.example".into(), "bank.example.".into()]).unwrap(), ["bank.example"]);
+        assert!(blocked_hosts(&vec!["a.example".into(); 51]).is_err());
+        assert!(blocked_host(&"a".repeat(254)).is_err());
+        for input in [
+            "-bank.example",
+            "bank-.example",
+            "bank..example",
+            "bank_example",
+            "bank.example:443",
+            "bank.example:0",
+            "bank%2eexample",
+            "bank.example\\path",
+        ] {
+            assert!(blocked_host(input).is_err(), "{input}");
+        }
+        assert!(blocked_host(&format!("{}.example", "a".repeat(64))).is_err());
+        assert_eq!(check_blocked_url("http://0x7f000001/", &hosts), Err("error.browser.blockedHost"));
+        assert_eq!(check_blocked_url("https://xn--bcher-kva.example/", &hosts), Err("error.browser.blockedHost"));
+    }
+}
+
+/// Checks a navigation against already canonicalized hosts, including subdomains on label boundaries.
+pub fn check_blocked_url(address: &str, blocked: &[String]) -> Result<(), &'static str> {
+    let url = reqwest::Url::parse(address).map_err(|_| "error.browser.invalidHost")?;
+    let host = url.host_str().ok_or("error.browser.invalidHost")?.trim_end_matches('.');
+    if blocked.iter().any(|entry| host == entry || host.strip_suffix(entry).is_some_and(|prefix| prefix.ends_with('.'))) {
+        return Err("error.browser.blockedHost");
+    }
+    Ok(())
+}
+
 /// The longest title and address the agent reads; the page sets both, and they come before the line that marks its words.
 pub const MAX_TITLE: usize = 300;
 pub const MAX_URL: usize = 2_048;

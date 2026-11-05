@@ -44,6 +44,39 @@ check('taste_lesson: project memory marks unreviewed notes without offering deci
   } finally { dispose(); root.remove(); api.projectMemory = before; useLanguage('en'); }
 });
 
+check('project memory: stale file references show plain words without changing the editable text', async () => {
+  const before = api.projectMemory;
+  const data = sample();
+  data.files[0].path = '.faber/decisions.md'; data.files[0].source = 'faber';
+  const entry = data.files[0].entries[0];
+  entry.text = '- Keep `src/gone.rs` (stale?)';
+  entry.stale = true;
+  data.files[0].entries.push({ start: 40, end: 70, line: 4, text: '- My file [by person]', body: '- My file', author: 'person', stale: true });
+  api.projectMemory = async () => structuredClone(data);
+  const root = document.createElement('div'); root.dataset.motion = 'none'; document.body.append(root);
+  const dispose = render(() => createComponent(ProjectMemory, { projectId: 'memory-project' }), root);
+  try {
+    button(root, 'memory.title').click(); await settle();
+    equal(root.querySelector('.memory-stale')?.textContent, 'File may no longer exist; left out of the start card.');
+    equal(root.querySelectorAll('.memory-stale').length, 2, 'person-authored words need no suffix to show the mark');
+    equal(root.querySelector('.memory-text')?.textContent, '- Keep `src/gone.rs`');
+    button(root, 'memory.edit').click(); await settle();
+    equal(root.querySelector('textarea')?.value, entry.text);
+    for (const row of data.files[0].entries) delete row.stale;
+    button(root, 'memory.cancel').click();
+    button(root, 'memory.refresh').click(); await settle();
+    equal(root.querySelector('.memory-stale'), null);
+    equal(root.querySelector('.memory-text')?.textContent, '- Keep `src/gone.rs`', 'a preserved source suffix stays out of the displayed words after restoration');
+    entry.stale = true;
+    for (const language of ['pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      button(root, 'memory.refresh').click(); await settle();
+      equal(root.querySelector('.memory-stale')?.textContent, t('memory.stale'));
+      ok(t('memory.stale') !== 'File may no longer exist; left out of the start card.');
+    }
+  } finally { dispose(); root.remove(); api.projectMemory = before; useLanguage('en'); }
+});
+
 check('project memory: the project page lists each source and line, edits and deletes only after confirmation, and rereads on refresh', async () => {
   const before = { read: api.projectMemory, edit: api.editProjectMemory };
   let reads = 0;

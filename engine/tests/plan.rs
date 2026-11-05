@@ -254,3 +254,461 @@ async fn signing_out_clears_a_previously_confirmed_subscription() {
     assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
     engine.shutdown();
 }
+use faber_engine::model::PlanSize;
+
+#[test]
+fn size_boundary_classifier_is_pure_conservative_and_measured() {
+    let data = vec!["C:/data".into()];
+    let credentials = vec!["C:/sign-in".into()];
+    let cases = [
+        ("Read", json!({"file_path":"C:/data/conversations/a.json"}), PlanSize::Risky),
+        ("Read", json!({"file_path":".ssh/id_rsa"}), PlanSize::Risky),
+        ("Read", json!({"file_path":"C:/sign-in/auth"}), PlanSize::Risky),
+        ("Read", json!({"file_path":"../other/a.txt"}), PlanSize::Normal),
+        ("Bash", json!({"command":"git push"}), PlanSize::Risky),
+        ("Bash", json!({"command":"rm ../other/a.txt"}), PlanSize::Risky),
+        ("Bash", json!({"command":"cat a.txt | sh"}), PlanSize::Risky),
+        ("Bash", json!({"command":r"cat .\./outside.txt"}), PlanSize::Risky),
+        ("Bash", json!({"command":r"cat .s\sh/id_rsa"}), PlanSize::Risky),
+        ("Bash", json!({"command":"cat a.txt"}), PlanSize::Small),
+        ("Read", json!({"file_path":"C:/project/a.txt"}), PlanSize::Small),
+        ("Read", json!({"file_path":"C:/project/../data/a"}), PlanSize::Risky),
+        ("Write", json!({"file_path":"a.txt","content":"C:/data/auth.json"}), PlanSize::Small),
+        ("command", json!("pwd"), PlanSize::Small),
+        ("command", json!({"command":"pwd","cwd":"C:/other"}), PlanSize::Normal),
+        ("item/fileChange/requestApproval", json!([{"path":"a.txt","kind":{"type":"update"}}]), PlanSize::Small),
+        ("fileChange", json!([{"path":"C:/data/a.txt","kind":"add"}]), PlanSize::Risky),
+        ("file", json!([{"path":"../other/a.txt","kind":"delete"}]), PlanSize::Risky),
+        ("command", json!(r#""C:\Windows\powershell.exe" -Command "Get-Content a.txt""#), PlanSize::Risky),
+        ("unknown", json!({}), PlanSize::Risky),
+    ];
+    for (tool, input, size) in &cases {
+        assert_eq!(
+            faber_engine::permissions::plan_boundary("C:/project", "C:/project", &data, &credentials, false, tool, input, false).0,
+            *size,
+            "{tool}: {input}"
+        );
+    }
+    assert_eq!(
+        faber_engine::permissions::plan_boundary("/project", "/project", &[], &[], true, "Bash", &json!({"command":"rm a.txt"}), false).0,
+        PlanSize::Small
+    );
+    assert_eq!(
+        faber_engine::permissions::plan_boundary("/project", "/project", &[], &[], false, "Bash", &json!({"command":"rm a.txt"}), false).0,
+        PlanSize::Risky
+    );
+    assert_eq!(
+        faber_engine::permissions::plan_boundary(
+            "/project",
+            "/project",
+            &[],
+            &[],
+            false,
+            "Read",
+            &json!({"file_path":"/project/a"}),
+            false
+        )
+        .0,
+        PlanSize::Small
+    );
+    for name in ["auth.json", "credentials.json", ".env", "signing.pem"] {
+        assert_eq!(
+            faber_engine::permissions::plan_boundary("/project", "/project", &[], &[], false, "Read", &json!({"file_path":name}), false).0,
+            PlanSize::Risky
+        );
+    }
+    #[cfg(not(windows))]
+    assert_eq!(
+        faber_engine::permissions::plan_boundary(
+            "/project",
+            "/project",
+            &[],
+            &[],
+            false,
+            "Read",
+            &json!({"file_path":"/PROJECT/a"}),
+            false
+        )
+        .0,
+        PlanSize::Normal
+    );
+    let start = std::time::Instant::now();
+    let count = 100_000;
+    for n in 0..count {
+        let (tool, input, _) = &cases[n % cases.len()];
+        std::hint::black_box(faber_engine::permissions::plan_boundary(
+            "C:/project",
+            "C:/project",
+            &data,
+            &credentials,
+            false,
+            tool,
+            std::hint::black_box(input),
+            false,
+        ));
+    }
+    eprintln!(
+        "size_boundary_classifier: {:.0} ns/call over {count} mixed approvals (debug build)",
+        start.elapsed().as_nanos() as f64 / count as f64
+    );
+}
+
+#[test]
+fn size_boundary_plan_input_defaults_and_never_lowers_or_expands_an_old_contract() {
+    let input = json!({"steps":[{"text":"Check","state":"in_progress"}]});
+    let first = faber_engine::progress::plan(None, &input, 1).unwrap().unwrap();
+    assert_eq!(first.size, PlanSize::Small);
+    let normal = faber_engine::progress::plan(
+        Some(&first),
+        &json!({"size":"normal", "contract":{"extends":"Current feature","proof":"Run its checks"}}),
+        2,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(normal.covers(PlanSize::Normal));
+    let risky = faber_engine::progress::plan(Some(&normal), &json!({"size":"risky"}), 3).unwrap().unwrap();
+    assert!(!risky.covers(PlanSize::Risky));
+    for input in [json!({"size":"small"}), json!({"steps":[]}), input] {
+        assert_eq!(faber_engine::progress::plan(Some(&risky), &input, 4).unwrap().unwrap().size, PlanSize::Risky);
+    }
+    let cleared = faber_engine::progress::plan(
+        Some(&normal),
+        &json!({"steps":[],"size":"risky","contract":{"extends":"Current feature","proof":"Run checks"}}),
+        5,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(cleared.steps.is_empty() && cleared.size == PlanSize::Risky && cleared.covers(PlanSize::Risky));
+    assert!(faber_engine::progress::plan(None, &json!({"size":"huge","steps":[]}), 1).is_err());
+    assert_eq!(serde_json::from_value::<faber_engine::model::Plan>(json!({"steps":[],"at":1})).unwrap().size, PlanSize::Small);
+}
+
+async fn boundary_started() -> (support::DataFolder, tempfile::TempDir, Engine, support::Pipe, String) {
+    let dir = support::DataFolder::new();
+    let folder = support::work_folder();
+    let (spawn, made) = support::pipes();
+    let (engine, _, _) = start(&dir, spawn, Some(Arc::new(|_| Box::pin(async { None }))));
+    engine
+        .save_settings(faber_engine::model::Settings { permissions: Some(faber_engine::model::Permissions::Ask), ..Default::default() })
+        .unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(faber_engine::SendRequest {
+            conversation_id: None,
+            area: faber_engine::model::Area::Project,
+            project_id: Some(project.id),
+            text: "Check this project".into(),
+            images: vec![],
+            files: vec![],
+            choice: faber_engine::router::Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let mut pipe = support::next_pipe(&made).await;
+    support::until("first turn missing", || pipe.lines.lock().unwrap().iter().any(|m| m["type"] == "user")).await;
+    pipe.say(json!({"type":"system","subtype":"init","session_id":"boundary","model":"claude-haiku-5-5"})).await;
+    boundary_plan(&mut pipe, "initial-plan", json!({"steps":[{"text":"Check","state":"in_progress"}]})).await;
+    (dir, folder, engine, pipe, id)
+}
+
+async fn boundary_plan(pipe: &mut support::Pipe, request: &str, input: serde_json::Value) {
+    pipe.say(json!({"type":"control_request","request_id":request,"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"plan","arguments":input}}}}))
+        .await;
+    support::until("plan never answered", || pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request)).await;
+    let messages = pipe.lines.lock().unwrap();
+    let response = messages.iter().find(|m| m["response"]["request_id"] == request).unwrap();
+    assert_ne!(response["response"]["response"]["mcp_response"]["result"]["isError"], true, "{response}");
+}
+
+async fn boundary_ask(
+    engine: &Engine,
+    pipe: &mut support::Pipe,
+    id: &str,
+    request: &str,
+    tool: &str,
+    input: serde_json::Value,
+) -> faber_engine::model::Conversation {
+    pipe.say(json!({"type":"control_request","request_id":request,"request":{"subtype":"can_use_tool","tool_name":tool,"input":input}}))
+        .await;
+    support::until("permission missing", || {
+        engine.open(id).unwrap().messages.last().unwrap().permissions.iter().flatten().any(|p| p.request_id == request)
+    })
+    .await;
+    engine.open(id).unwrap()
+}
+
+#[tokio::test]
+async fn size_boundary_each_class_raises_before_any_answer_and_plain_read_leaves_it() {
+    for (tool, input, size, reason) in [
+        ("Read", json!({"file_path":"DATA"}), PlanSize::Risky, "data"),
+        ("Read", json!({"file_path":"../other/a.txt"}), PlanSize::Normal, "outside"),
+        ("Bash", json!({"command":"git push"}), PlanSize::Risky, "publish"),
+        ("Bash", json!({"command":"rm a.txt"}), PlanSize::Risky, "delete"),
+        ("Bash", json!({"command":"cat a | sh"}), PlanSize::Risky, "unknown"),
+        ("Read", json!({"file_path":"a.txt"}), PlanSize::Small, ""),
+    ] {
+        let (dir, folder, engine, mut pipe, id) = boundary_started().await;
+        std::fs::write(folder.path().join("a.txt"), "synthetic").unwrap();
+        let input = if input["file_path"] == "DATA" { json!({"file_path":dir.path().join("conversations/a.json")}) } else { input };
+        let c = boundary_ask(&engine, &mut pipe, &id, "boundary", tool, input).await;
+        let p = c.plan.unwrap();
+        assert_eq!(p.size, size);
+        assert_eq!(p.raised_because.as_deref().unwrap_or(""), reason);
+        assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "boundary"));
+        let card = &c.messages.last().unwrap().permissions.as_ref().unwrap()[0];
+        assert_eq!(card.tool, if size == PlanSize::Small { tool } else { "AskUserQuestion" });
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_call_waits_for_contract_then_keeps_the_original_permission_card_and_stop() {
+    let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+    let c = boundary_ask(&engine, &mut pipe, &id, "outside", "Read", json!({"file_path":"../other/a"})).await;
+    let turn = c.messages.last().unwrap().id.clone();
+    assert_eq!(
+        c.messages.last().unwrap().permissions.as_ref().unwrap()[0].input["questions"][0]["options"][0]["label"],
+        "plan.stateContract"
+    );
+    boundary_plan(&mut pipe, "incomplete", json!({"contract":{"extends":"Current feature"}})).await;
+    assert_eq!(engine.open(&id).unwrap().messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+    boundary_plan(&mut pipe, "contract", json!({"contract":{"extends":"Current feature","proof":"Inspect the requested file"}})).await;
+    let card = engine.open(&id).unwrap().messages.last().unwrap().permissions.as_ref().unwrap()[0].clone();
+    assert_eq!((card.tool.as_str(), card.request_id.as_str(), &card.input), ("Read", "outside", &json!({"file_path":"../other/a"})));
+    assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "outside"));
+    engine.answer(&id, &turn, "outside", true, false).await.unwrap();
+    assert_eq!(
+        pipe.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m["response"]["request_id"] == "outside" && m["response"]["response"]["behavior"] == "allow")
+            .count(),
+        1
+    );
+    let c = boundary_ask(&engine, &mut pipe, &id, "risky", "Bash", json!({"command":"git push"})).await;
+    assert_eq!(c.plan.unwrap().size, PlanSize::Risky);
+    assert_eq!(
+        c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool,
+        "AskUserQuestion",
+        "a normal contract does not cover risky"
+    );
+    engine.interrupt(&id);
+    assert!(engine.answer_question(&id, &turn, "risky", json!({})).await.is_err());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn size_boundary_default_states_the_contract_instead_of_allowing_the_call() {
+    let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+    let c = boundary_ask(&engine, &mut pipe, &id, "outside", "Read", json!({"file_path":"../other/a"})).await;
+    let turn = c.messages.last().unwrap().id.clone();
+    engine.answer_question(&id, &turn, "outside", json!({"plan.contractQuestion":"plan.stateContract"})).await.unwrap();
+    let messages = pipe.lines.lock().unwrap();
+    let result = &messages.iter().find(|m| m["response"]["request_id"] == "outside").unwrap()["response"]["response"];
+    assert_eq!(result["behavior"], "deny");
+    assert!(result["message"].as_str().unwrap().contains("plan tool"));
+    assert!(!engine.open(&id).unwrap().plan.unwrap().covers(PlanSize::Normal));
+    drop(messages);
+    engine.interrupt(&id);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn size_boundary_skip_declines_without_instructing_a_retry() {
+    let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+    let c = boundary_ask(&engine, &mut pipe, &id, "outside", "Read", json!({"file_path":"../other/a"})).await;
+    engine.answer(&id, &c.messages.last().unwrap().id, "outside", false, false).await.unwrap();
+    let messages = pipe.lines.lock().unwrap();
+    let result = &messages.iter().find(|m| m["response"]["request_id"] == "outside").unwrap()["response"]["response"];
+    assert_eq!(result["behavior"], "deny");
+    assert_eq!(result["message"], "The user declined.");
+    drop(messages);
+    assert!(engine.open(&id).unwrap().queued.is_empty());
+    engine.interrupt(&id);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn size_boundary_git_metadata_git_reads_and_glob_escape_wait_for_a_contract() {
+    for (tool, input) in [
+        ("Write", json!({"file_path":".git/config","content":"[core]\nfsmonitor = helper"})),
+        ("Bash", json!({"command":"git diff"})),
+        ("Glob", json!({"path":".","pattern":"../../**"})),
+        ("Glob", json!({"path":".","pattern":"{..,src}/*"})),
+        ("PowerShell", json!({"command":"Get-Content env:GH_TOKEN"})),
+    ] {
+        let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+        let c = boundary_ask(&engine, &mut pipe, &id, "unsafe", tool, input).await;
+        assert!(c.plan.unwrap().size > PlanSize::Small);
+        assert_eq!(c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+        assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "unsafe"));
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_existing_links_are_risky_even_for_missing_children_and_parent_traversal() {
+    #[allow(unused_mut)]
+    let mut cases = vec![
+        ("Write", json!({"file_path":"link/new.txt","content":"ordinary text"})),
+        ("Bash", json!({"command":"rm -rf link/victim"})),
+        ("Read", json!({"file_path":"link/../victim"})),
+        ("Write", json!({"file_path":"missing/../link/new.txt","content":"ordinary"})),
+    ];
+    #[cfg(unix)]
+    cases.push(("Write", json!({"file_path":"*/link/new.txt","content":"ordinary"})));
+    for (tool, input) in cases {
+        let (_dir, folder, engine, mut pipe, id) = boundary_started().await;
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            std::fs::create_dir(folder.path().join("*")).unwrap();
+            std::os::unix::fs::symlink(outside.path(), folder.path().join("*/link")).unwrap();
+        }
+        #[cfg(windows)]
+        junction::create(outside.path(), folder.path().join("link")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("link")).unwrap();
+        let c = boundary_ask(&engine, &mut pipe, &id, "linked", tool, input).await;
+        let plan = c.plan.unwrap();
+        assert_eq!((plan.size, plan.raised_because.as_deref()), (PlanSize::Risky, Some("outside")));
+        assert_eq!(c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_network_paths_and_probe_limits_wait_for_a_contract() {
+    for (tool, input) in [
+        ("Read", json!({"file_path":"//attacker/share/x"})),
+        ("Read", json!({"file_path":r"\attacker\s"})),
+        ("command", json!({"command":"cat x","cwd":"//attacker/share"})),
+        ("command", json!({"command":"cat x","cwd":r"\attacker\s"})),
+        ("Bash", json!({"command":format!("cat {}", "x ".repeat(8_000))})),
+        ("Read", json!({"file_path":"a/".repeat(65)})),
+    ] {
+        let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+        let start = std::time::Instant::now();
+        let c = boundary_ask(&engine, &mut pipe, &id, "bounded", tool, input).await;
+        assert_eq!(c.plan.unwrap().size, PlanSize::Risky);
+        assert_eq!(c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+        eprintln!("size_boundary_network_or_limit: {:.3} ms/call", start.elapsed().as_secs_f64() * 1_000.0);
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_directory_searches_require_risky_even_with_a_normal_contract() {
+    for (tool, input) in [
+        ("Grep", json!({"path":"src","pattern":"."})),
+        ("Grep", json!({"pattern":"."})),
+        ("Glob", json!({"path":"src","pattern":"*.rs"})),
+        ("Glob", json!({"pattern":"src/**/*.rs"})),
+        ("LS", json!({"path":"src"})),
+        ("LS", json!({})),
+        ("Bash", json!({"command":"rg . src"})),
+        ("Bash", json!({"command":"rg ."})),
+        ("Bash", json!({"command":"grep -r . src"})),
+        ("Bash", json!({"command":"grep -R . src"})),
+        ("Bash", json!({"command":"find src"})),
+        ("Bash", json!({"command":"ls -R src"})),
+        ("Bash", json!({"command":"ls --recursive src"})),
+        ("PowerShell", json!({"command":"Get-ChildItem -Recurse src"})),
+    ] {
+        let (_dir, folder, engine, mut pipe, id) = boundary_started().await;
+        std::fs::create_dir(folder.path().join("src")).unwrap();
+        boundary_plan(&mut pipe, "normal", json!({"size":"normal","contract":{"extends":"Search files","proof":"Check results"}})).await;
+        let c = boundary_ask(&engine, &mut pipe, &id, "directory", tool, input.clone()).await;
+        let plan = c.plan.unwrap();
+        assert_eq!((plan.size, plan.raised_because.as_deref()), (PlanSize::Risky, Some("unknown")), "{tool}: {input}");
+        assert_eq!(c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, "AskUserQuestion");
+        assert!(!pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "directory"));
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_single_file_reads_and_searches_stay_small() {
+    for (tool, input) in [
+        ("Read", json!({"file_path":"plain.txt"})),
+        ("Bash", json!({"command":"cat plain.txt"})),
+        ("Bash", json!({"command":"rg . plain.txt"})),
+        ("Bash", json!({"command":"grep . plain.txt"})),
+        ("Grep", json!({"path":"plain.txt","pattern":"."})),
+    ] {
+        let (_dir, folder, engine, mut pipe, id) = boundary_started().await;
+        std::fs::write(folder.path().join("plain.txt"), "synthetic").unwrap();
+        let c = boundary_ask(&engine, &mut pipe, &id, "file", tool, input.clone()).await;
+        assert_eq!(c.plan.unwrap().size, PlanSize::Small, "{tool}: {input}");
+        assert_eq!(c.messages.last().unwrap().permissions.as_ref().unwrap()[0].tool, tool);
+        engine.interrupt(&id);
+        engine.shutdown();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn size_boundary_unix_literal_backslash_cannot_disguise_an_external_write() {
+    let (_dir, folder, engine, mut pipe, id) = boundary_started().await;
+    let outside = tempfile::Builder::new().prefix("boundary-outside-").suffix(r"\..").tempdir_in(folder.path().parent().unwrap()).unwrap();
+    std::fs::create_dir(outside.path().join(folder.path().file_name().unwrap())).unwrap();
+    let raw = format!(
+        "../{}/{}/report.txt",
+        outside.path().file_name().unwrap().to_str().unwrap(),
+        folder.path().file_name().unwrap().to_str().unwrap()
+    );
+    let c = boundary_ask(&engine, &mut pipe, &id, "literal", "Write", json!({"file_path":raw,"content":"ordinary"})).await;
+    assert_eq!(c.plan.unwrap().size, PlanSize::Risky);
+    engine.interrupt(&id);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn size_boundary_without_a_current_turn_denies_instead_of_hanging() {
+    for covered in [false, true] {
+        let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+        if covered {
+            boundary_plan(&mut pipe, "covered", json!({"size":"risky","contract":{"extends":"Current feature","proof":"Run checks"}}))
+                .await;
+        }
+        pipe.say(json!({"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"boundary"})).await;
+        support::until("turn did not end", || {
+            engine.open(&id).unwrap().messages.last().unwrap().status != Some(faber_engine::model::Status::Streaming)
+        })
+        .await;
+        pipe.say(json!({"type":"control_request","request_id":"late","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git diff"}}})).await;
+        support::until("late approval request was never answered", || {
+            pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "late")
+        })
+        .await;
+        let lines = pipe.lines.lock().unwrap();
+        assert_eq!(lines.iter().find(|m| m["response"]["request_id"] == "late").unwrap()["response"]["response"]["behavior"], "deny");
+        drop(lines);
+        assert!(engine.open(&id).unwrap().messages.iter().all(|m| m.permissions.iter().flatten().all(|p| p.request_id != "late")));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn size_boundary_credentials_still_refuse_silently_without_a_contract_card() {
+    let (_dir, _folder, engine, mut pipe, id) = boundary_started().await;
+    pipe.say(json!({"type":"control_request","request_id":"secret","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":".ssh/id_rsa"}}})).await;
+    support::until("credential request was never refused", || {
+        pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == "secret")
+    })
+    .await;
+    let lines = pipe.lines.lock().unwrap();
+    assert_eq!(lines.iter().find(|m| m["response"]["request_id"] == "secret").unwrap()["response"]["response"]["behavior"], "deny");
+    drop(lines);
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.plan.unwrap().size, PlanSize::Small);
+    assert!(c.messages.iter().all(|m| m.permissions.iter().flatten().all(|p| p.request_id != "secret")));
+    engine.interrupt(&id);
+    engine.shutdown();
+}

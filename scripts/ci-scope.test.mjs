@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isWords, scope, suitesFor } from './ci-scope.mjs';
@@ -69,6 +71,71 @@ test('the command reads the list from its input and prints one output line per d
   assert.equal(run(''), 'lints=true\nrust=true\nui=true\nscreen=true\n');
 });
 
+test('bad documents and Rust formatting stop expensive jobs before they start', () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const job = (name) => ci.split(`\n  ${name}:`)[1]?.split(/\n  [a-z][\w-]*:/)[0] ?? '';
+  const preflight = job('preflight');
+  assert.match(preflight, /node scripts\/docs\.mjs/);
+  assert.match(preflight, /cargo fmt --all --check/);
+  assert.match(preflight, /needs\.changes\.outputs\.lints == 'true'/);
+  for (const name of ['check', 'app', 'electron-app', 'costs', 'docs']) {
+    assert.match(job(name), /needs: \[changes, preflight\]/, `${name} waits for preflight`);
+  }
+  const gate = job('gate');
+  assert.match(gate, /needs: \[changes, preflight,/);
+  assert.match(gate, /PREFLIGHT: \$\{\{ needs\.preflight\.result \}\}/);
+  assert.match(gate, /\[ "\$PREFLIGHT" = success \].*exit 1/);
+});
+
+test('a green workflow change asks for finish instead of splitting and rechecking it', (t) => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const report = ci.split('\n  report:')[1].split('\n  train:')[0];
+  assert.match(report, /GATE: \$\{\{ needs\.gate\.result \}\}/);
+  const body = report.split('        run: |\n')[1].split('\n  #')[0].split('\n').map((line) => line.slice(10)).join('\n');
+  const gitPath = spawnSync('git', ['--exec-path'], { encoding: 'utf8' }).stdout.trim();
+  const bash = process.platform === 'win32' ? path.resolve(gitPath, '../../../bin/bash.exe') : '/bin/bash';
+  const root = realpathSync(tmpdir());
+  const work = mkdtempSync(path.join(root, 'faber-report-'));
+  t.after(() => { if (path.dirname(realpathSync(work)) === root) rmSync(work, { recursive: true }); });
+  const mock = `
+    git() { case "$1" in
+      log) echo head ;; show) echo "'--split' '--train'" ;;
+      fetch) if [ "$CASE" = fetch_error ]; then return 2; fi ;;
+      diff) if [ "$CASE" = diff_error ]; then return 2; elif [ "$CASE" != other ] && [ "$CASE" != landed ]; then echo .github/workflows/ci.yml; fi ;;
+      ls-remote) if [ "$CASE" = remote_error ]; then return 2; elif [ "$CASE" = stale ]; then printf 'other\\trefs/heads/queue/pr-7\\n'; else printf '%s\\trefs/heads/queue/pr-7\\n' "$GITHUB_SHA"; fi ;;
+      merge-base) if [ "$CASE" = merge_error ]; then return 2; fi; [ "$CASE" = landed ] ;;
+    esac; }
+    gh() { echo "gh:$*"; }
+    node() { echo "node:$*"; if [ "$CASE" = landed ] && [[ "$*" = *--split* ]]; then return 3; fi; }
+  `;
+  const run = (which, gate = 'success') => {
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-c', mock + body], {
+      cwd: work, encoding: 'utf8', env: { ...process.env, CASE: which, GATE: gate, GITHUB_REF: 'refs/heads/queue/pr-7',
+        GITHUB_SHA: 'abc123', GITHUB_REPOSITORY: 'owner/repo', GITHUB_RUN_ID: '1', RUNNER_TEMP: '.', RUN: 'run', FAILED: 'checks failed' },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const ready = run('workflow');
+  assert.match(ready, /Checks passed; finish: node scripts\/land\.mjs 7 --finish/);
+  assert.doesNotMatch(ready, /node:.*--split/);
+  assert.match(ready, /node:.*--train/);
+  const stale = run('stale');
+  assert.doesNotMatch(stale, /gh:/);
+  assert.doesNotMatch(stale, /node:.*--split/);
+  assert.doesNotMatch(run('landed'), /gh:/);
+  for (const out of [run('workflow', 'failure'), run('other')]) {
+    assert.match(out, /node:.*--split/);
+    assert.doesNotMatch(out, /Checks passed; finish/);
+  }
+  for (const state of ['fetch_error', 'diff_error', 'remote_error', 'merge_error']) {
+    const out = run(state);
+    assert.match(out, /node:.*--split/, state);
+    assert.match(out, /gh:api.*state=failure/, state);
+    assert.doesNotMatch(out, /Checks passed; finish/, state);
+  }
+});
+
 test('main warms lint/app caches; Rust suites refresh their cache only when they actually run (R165)', () => {
   // A Windows checkout may end its lines with CRLF.
   const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -125,7 +192,7 @@ test('a runner GitHub never provided retries once and never blames riders (41518
   };
   await detect(github, context, core);
   assert.equal(unavailable, 'true', 'actual cancelled/runner_id=0 incident must not blame code');
-  for (const name of ['changes', 'docs', 'costs', 'app', 'ui', 'screen (1/8)']) {
+  for (const name of ['changes', 'preflight', 'docs', 'costs', 'app', 'ui', 'screen (1/8)']) {
     jobs[0].name = name;
     await detect(github, context, core);
     assert.equal(unavailable, 'true', name);

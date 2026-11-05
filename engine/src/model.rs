@@ -428,6 +428,9 @@ pub struct Message {
     /// Coverage of the file baseline immediately before this user message; unavailable history never blocks a turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind: Option<crate::rewind::PointInfo>,
+    /// The CLI's exact native boundary for a later branch or retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_point: Option<crate::engine::NativePoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -457,6 +460,12 @@ pub struct Message {
     /// The one closing reminder was attempted for this reply, including refused delivery.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub conclusion_requested: bool,
+    /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_kept: Vec<crate::project::memory::KeptDecision>,
+    /// A fold lost a kept decision; the next admitted input consumes this plain notice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fold_lost: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
@@ -714,6 +723,10 @@ pub struct KeepProgress {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_because: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<PlanContract>,
     /// When the agent last sent it, in milliseconds.
@@ -728,6 +741,8 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanContract {
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -736,6 +751,31 @@ pub struct PlanContract {
     pub proof: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSize {
+    #[default]
+    Small,
+    Normal,
+    Risky,
+}
+
+impl PlanSize {
+    fn is_small(&self) -> bool {
+        *self == Self::Small
+    }
+}
+
+impl Plan {
+    pub fn covers(&self, size: PlanSize) -> bool {
+        size == PlanSize::Small
+            || self
+                .contract
+                .as_ref()
+                .is_some_and(|c| c.size >= size && (c.extends.is_some() || c.new_because.is_some()) && c.proof.is_some())
+    }
 }
 
 /// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.
@@ -998,6 +1038,7 @@ impl Message {
             mode: None,
             note: None,
             rewind: None,
+            native_point: None,
             recovery: None,
             nudge: None,
             look: None,
@@ -1006,6 +1047,8 @@ impl Message {
             acts: vec![],
             closed: false,
             conclusion_requested: false,
+            fold_kept: vec![],
+            fold_lost: false,
             halt: None,
             auto_answers: None,
             away: None,
@@ -1237,6 +1280,8 @@ pub struct Conversation {
     pub rewind_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_native: Option<crate::rewind::NativeRewind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_fork: Option<crate::engine::NativeFork>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]
@@ -1520,6 +1565,9 @@ pub struct PaceNote {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    /// Sites the browser must not open, in canonical host form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_hosts: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appearance: Option<serde_json::Map<String, Value>>,
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
@@ -1815,6 +1863,7 @@ fn is_zero_usd(n: &f64) -> bool {
 impl Conversation {
     pub fn for_screen(mut self) -> Self {
         self.messages = self.messages.into_iter().map(Message::for_screen).collect();
+        self.session_start_cards.clear();
         self.plan = self.shown_plan();
         self
     }

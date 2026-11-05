@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-# One test program for every file in tests/ (see tests/all.rs), plus cost tests that must run alone.
+# One shared test program (tests/all.rs), plus cost tests and hostile Store fixtures that need their own process.
 autotests = false
 
 [dependencies]
@@ -62,6 +62,11 @@ junction = "2"
 [[test]]
 name = "engine"
 path = "tests/all.rs"
+
+# These hostile Store fixtures must not poison other tests through the live-root registry.
+[[test]]
+name = "guarded_commands"
+path = "tests/guarded_commands/main.rs"
 
 [[test]]
 name = "rewind"

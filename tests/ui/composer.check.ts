@@ -3,11 +3,32 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { PERMISSION_MODES, type Choice, type Summary, type PermissionMode } from '../../ui/api.ts';
 import { Composer, type Draft, PermissionChip } from '../../ui/Composer.tsx';
+import { readAs } from '../../ui/attachments.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import titleWords from '../../ui/locales/conversation-titles.json';
 import { modelOptions } from '../../ui/models.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
+
+check('composer: attachment read errors include the file on error abort and synchronous failure', async () => {
+  const read = FileReader.prototype.readAsDataURL;
+  try {
+    for (const mode of ['error', 'abort', 'throw']) {
+      FileReader.prototype.readAsDataURL = function () {
+        if (mode === 'throw') throw new DOMException('Unreadable', 'NotReadableError');
+        queueMicrotask(() => {
+          const event = new ProgressEvent(mode) as ProgressEvent<FileReader>;
+          if (mode === 'abort') this.onabort?.call(this, event);
+          else this.onerror?.call(this, event);
+        });
+      };
+      let failure: unknown;
+      try { await readAs(new File(['bytes'], 'unreadable.pdf'), 'dataUrl'); }
+      catch (err) { failure = err; }
+      deepEqual(failure, { key: 'error.attachmentRead', detail: 'unreadable.pdf' }, mode);
+    }
+  } finally { FileReader.prototype.readAsDataURL = read; }
+});
 
 check('composer: access choices show what each allows, preserve the current mode and return focus without sending', async () => {
   try {
@@ -716,4 +737,128 @@ check('composer: cleaning edited inline metadata on reopen preserves a newly sel
     FileReader.prototype.readAsDataURL = read;
     resume?.(); current?.close(); await forgetDraft(key);
   }
+});
+
+check('composer: attachment limits also reject older oversized restored drafts before sending', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  let restore!: (saved: Draft) => boolean;
+  let sends = 0;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => { sends++; },
+    onRestore: (receive) => { restore = receive; },
+  }), root);
+  try {
+    await frames();
+    ok(restore({ text: 'Keep this restored message', images: [], files: [{ name: 'older.pdf', base64: 'A'.repeat((8 * 1024 * 1024 + 1) / 3 * 4) }] }));
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sends, 0, 'restoring a draft is not a way around the current UI limit');
+    const error = root.querySelector('.composer-attachment-error')!;
+    ok(error.textContent?.includes('older.pdf') && error.textContent.includes('8'));
+    equal(root.querySelector('textarea')!.value, 'Keep this restored message');
+    equal(root.querySelectorAll('.thumb').length, 1, 'the file stays available for explicit removal');
+    root.querySelector<HTMLButtonElement>('.thumb-x')!.click();
+    equal(root.querySelector('.composer-attachment-error'), null, 'removing the refused restored file clears its stale error');
+  } finally { dispose(); root.remove(); }
+});
+
+check('composer: attachment errors stay with the draft that rejected the file', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [key, setKey] = createSignal(`attachment-error-${crypto.randomUUID()}`);
+  const dispose = render(() => createComponent(Composer, {
+    get draftKey() { return key(); }, vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+  }), root);
+  try {
+    const file = new File([], 'large.pdf');
+    Object.defineProperty(file, 'size', { value: 8 * 1024 * 1024 + 1 });
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [file] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await frames();
+    ok(root.querySelector('.composer-attachment-error'));
+    setKey(`attachment-error-other-${crypto.randomUUID()}`);
+    await frames();
+    equal(root.querySelector('.composer-attachment-error'), null, 'another conversation does not inherit this error');
+  } finally { dispose(); root.remove(); }
+});
+
+check('composer: attachment limits reject large and concurrent batches before reading and preserve a failed read', async () => {
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  document.body.append(root);
+  const read = FileReader.prototype.readAsDataURL;
+  const pending: FileReader[] = [];
+  let reads = 0;
+  let sent: Draft | undefined;
+  FileReader.prototype.readAsDataURL = function () { reads++; pending.push(this); };
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: (draft) => { sent = draft; },
+  }), root);
+  const settle = async () => { await frames(2); };
+  const pick = (name: string, bytes: number) => {
+    const file = new File(['pdf'], name, { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: bytes });
+    const input = root.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const complete = (reader: FileReader) => {
+    Object.defineProperty(reader, 'result', { value: 'data:application/pdf;base64,cGRm' });
+    reader.onload?.call(reader, new ProgressEvent('load') as ProgressEvent<FileReader>);
+  };
+  try {
+    const field = root.querySelector('textarea')!;
+    field.value = 'Keep these words';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    pick('large.pdf', 8 * 1024 * 1024 + 1);
+    await settle();
+    equal(reads, 0, 'the per-file limit applies before FileReader allocates a base64 string');
+    ok(root.querySelector('.composer-attachment-error')?.textContent?.includes('8'), 'the limit is explained beside the composer');
+    ok(root.querySelector('.composer-attachment-error')?.textContent?.includes('large.pdf'), 'the refused file is named');
+    const longName = 'ConsolidatedFinancialStatementsAndNotesToTheFinancialStatementsForTheYearEndedDecemberThirtyFirstOfTwoThousandAndTwentySixForNorthwindIndustrialHoldingsInternational.pdf';
+    for (const language of ['en', 'de'] as const) {
+      useLanguage(language);
+      pick(longName, 8 * 1024 * 1024 + 1);
+      await settle();
+      await document.fonts.ready;
+      const error = root.querySelector<HTMLElement>('.composer-attachment-error')!;
+      const range = document.createRange();
+      range.selectNodeContents(error);
+      const bounds = root.querySelector('form')!.getBoundingClientRect();
+      for (const glyphs of range.getClientRects()) ok(glyphs.left >= bounds.left - 1 && glyphs.right <= bounds.right + 1, `${language}: long refused filenames wrap inside the composer`);
+      equal(getComputedStyle(error).paddingLeft, getComputedStyle(field).paddingLeft, 'the error aligns with the message text');
+    }
+    useLanguage('en');
+    pick('one.pdf', 4 * 1024 * 1024);
+    pick('two.pdf', 4 * 1024 * 1024);
+    await settle();
+    equal(reads, 2, 'the inclusive message limit allows two files of 4 MiB');
+    pick('third.pdf', 1);
+    await settle();
+    equal(reads, 2, 'in-flight reads reserve the batch total instead of each seeing an empty draft');
+    for (const reader of pending.splice(0)) complete(reader);
+    await settle();
+    equal(root.querySelectorAll('.thumb').length, 2);
+    pick('unreadable.pdf', 1);
+    await settle();
+    const failed = pending.shift()!;
+    failed.onerror?.call(failed, new ProgressEvent('error') as ProgressEvent<FileReader>);
+    await settle();
+    ok(root.querySelector('.composer-attachment-error')?.textContent?.includes('unreadable.pdf'), 'a read failure names the file and offers retry');
+    equal(field.value, 'Keep these words', 'a rejected file preserves entered text');
+    equal(root.querySelectorAll('.thumb').length, 2, 'a rejected file preserves the already attached files');
+    pick('unreadable.pdf', 1);
+    await settle();
+    complete(pending.shift()!);
+    await settle();
+    equal(root.querySelectorAll('.thumb').length, 3, 'the same file can be selected again after a failed read');
+    equal(root.querySelector('.composer-attachment-error'), null, 'a successful retry clears the read error');
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    equal(sent?.text, 'Keep these words');
+    equal(sent?.files.length, 3);
+  } finally { FileReader.prototype.readAsDataURL = read; dispose(); root.remove(); }
 });

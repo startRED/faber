@@ -14,7 +14,11 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 mod pack;
+mod review;
+#[cfg(test)]
+mod safety_tests;
 mod store;
+pub use review::{AnswerChangePatch, AnswerChanges};
 pub use store::History;
 
 pub const FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -281,6 +285,7 @@ impl SavedConversation {
         c.piece_values.clone_from(&self.piece_values);
         c.sessions.clear();
         c.tentative.clear();
+        c.native_fork = None;
         c.rewind_native.clone_from(&self.native);
         if let Some(native) = &self.native {
             c.sessions.insert(Vendor::Codex, native.thread.clone());
@@ -323,6 +328,10 @@ pub(super) struct Point {
     saved: SavedConversation,
     writers: Vec<String>,
     unknown_author: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_shared: Option<bool>,
+    #[serde(skip)]
+    review_pending: bool,
     #[serde(skip)]
     active: bool,
 }
@@ -554,6 +563,26 @@ impl History {
 
     pub fn has_open(&self, root: &Path) -> bool {
         self.points.values().any(|p| p.active && !p.info.sealed && p.root == root)
+    }
+
+    pub(crate) fn open_infos(&self, root: &Path) -> Vec<(String, PointInfo)> {
+        self.points
+            .values()
+            .filter(|point| point.active && !point.info.sealed && point.root == root)
+            .map(|point| (point.conversation.clone(), point.info.clone()))
+            .collect()
+    }
+
+    pub(crate) fn refresh_infos(&self, infos: &mut [(String, PointInfo)]) {
+        for (conversation, info) in infos {
+            if let Some(point) = self.points.get(&info.id).filter(|point| point.conversation == *conversation) {
+                info.clone_from(&point.info);
+            } else {
+                info.sealed = false;
+                info.coverage.unavailable = true;
+                info.coverage.incomplete = true;
+            }
+        }
     }
 
     pub fn recovery_conversations(&self) -> Vec<String> {
@@ -882,6 +911,8 @@ impl History {
             saved: source.saved,
             writers: vec![format!("turn:{turn}")],
             unknown_author,
+            review_shared: None,
+            review_pending: false,
             active: true,
         };
         self.save_point(&point)?;
@@ -953,13 +984,16 @@ impl History {
     }
 
     pub fn prepare_seal(&self, seal: Sealing) -> Publication {
+        let shared = seal.ids.len() > 1;
         let snapshot = Arc::new(seal.snapshot);
         let mut updates = Vec::new();
         for id in seal.ids {
             if let Some(mut point) = self.points.get(&id).cloned() {
                 point.after = Some(snapshot.clone());
                 point.info.sealed = true;
+                point.review_pending = true;
                 point.active = false;
+                point.review_shared = Some(shared || point.unknown_author);
                 let after = snapshot.coverage();
                 point.info.coverage.incomplete |= after.incomplete;
                 point.info.coverage.skipped += after.skipped;
@@ -972,13 +1006,30 @@ impl History {
     /// Memory publication shares the engine's idle/admission check. Disk work runs after releasing that lock.
     pub fn publish_seal(&mut self, publication: &Publication) {
         for point in &publication.updates {
-            self.points.insert(point.info.id.clone(), point.clone());
+            let mut pending = point.clone();
+            pending.info.sealed = false;
+            self.points.insert(point.info.id.clone(), pending);
         }
     }
 
     pub fn persist_seal(&mut self, publication: Publication, at: u64) -> Result<(), String> {
-        for point in publication.updates {
-            self.save_point(&point)?;
+        for (index, point) in publication.updates.iter().enumerate() {
+            if let Err(error) = self.save_point(point) {
+                for failed in &publication.updates[index..] {
+                    if let Some(saved) = self.points.get_mut(&failed.info.id) {
+                        saved.review_pending = false;
+                        saved.info.sealed = false;
+                        saved.info.coverage.unavailable = true;
+                        saved.info.coverage.incomplete = true;
+                    }
+                }
+                return Err(error);
+            }
+            if let Some(saved) = self.points.get_mut(&point.info.id) {
+                saved.review_pending = false;
+                saved.info.sealed = true;
+                saved.info.coverage.clone_from(&point.info.coverage);
+            }
         }
         self.cleanup_known(at)
     }
@@ -990,6 +1041,12 @@ pub struct Sealing {
 }
 pub struct Publication {
     updates: Vec<Point>,
+}
+
+impl Publication {
+    pub(crate) fn infos(&self) -> Vec<(String, PointInfo)> {
+        self.updates.iter().map(|point| (point.conversation.clone(), point.info.clone())).collect()
+    }
 }
 
 /// File bytes and identity are checked independently: the same bytes in a replaced inode still conflict for redo.
@@ -2086,5 +2143,18 @@ mod validation_tests {
         assert!(matches!(before.known("cache-other"), Some(None)));
         let log_root = Path::new("project/.faber/verify");
         assert!(!CapturePolicy { root: log_root }.names_allow("output.log"));
+    }
+    #[test]
+    fn rewind_saved_conversation_invalidates_a_pending_native_fork() {
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "3611dcb7-6387-47c6-8b25-1b6f20903171", "title": "Rewind", "area": "chat",
+            "createdAt": 1, "updatedAt": 1, "messages": [],
+            "nativeFork": { "vendor": "codex", "point": { "session": "thread-before", "cursor": { "turn": "turn-before" } } }
+        }))
+        .unwrap();
+        assert!(conversation.native_fork.is_some());
+        let saved = SavedConversation::bindings(&conversation);
+        saved.apply(&mut conversation);
+        assert!(conversation.native_fork.is_none());
     }
 }

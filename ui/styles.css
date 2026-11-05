@@ -258,6 +258,8 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 .rrow .s { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); }
 .rrow.ask .t { color: var(--amber-ink); }
 .resume.terminal:has(> .from-terminal) { margin-top: 20px; }
+.results-each { display: inline-flex; align-items: center; gap: 6px; min-height: var(--h-sm); font-size: var(--fs-sm); color: var(--ink-3); transition: color var(--dur-fast) var(--ease); }
+.results-each:hover, .results-each[aria-expanded='true'] { color: var(--ink-2); }
 .from-terminal { display: inline-flex; align-items: center; gap: 6px; min-height: var(--h-sm); font-size: var(--fs-sm); color: var(--ink-2); transition: color var(--dur-fast) var(--ease); }
 .from-terminal:hover { color: var(--ink); }
 .resume.terminal > .s { margin: 0; padding: calc(12px * var(--dens)) 0; font-size: var(--fs-sm); color: var(--ink-2); }
@@ -414,6 +416,13 @@ svg.i.sm { width: 14px; height: 14px; }
 .change-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-data); }
 .change-counts { color: var(--ink-3); font-size: var(--fs-xs); }
 .change-content { padding: 0 12px 12px; }
+.answer-changes { min-width: 0; margin-block: 12px; }
+.answer-change-body { min-width: 0; padding: 0 12px 12px; }
+.answer-change-patch { max-width: 100%; max-height: 360px; overflow: auto; }
+.answer-change-patch .patch-line { white-space: pre; overflow-wrap: normal; }
+.answer-change-pages { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; color: var(--ink-3); font-size: var(--fs-xs); }
+.answer-change-pages .btn { white-space: normal; }
+.answer-changes .btn[aria-disabled="true"] { opacity: 0.4; cursor: default; pointer-events: none; }
 
 /* A just-in-time confirmation shares Changes' file preview, with no work or timers while it is closed. */
 .rewind-confirm, .cookies { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 24px; overflow: auto; color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); font-size: var(--fs-ui); overflow-wrap: anywhere; }
@@ -550,7 +559,7 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 
 /* Messages */
 .you { position: relative; justify-self: end; max-width: min(88%, 620px); padding: 12px 17px; background: var(--s2); border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); box-shadow: var(--card-shadow); font-size: var(--fs-read); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; text-wrap: pretty; }
-.mine { display: grid; justify-items: end; gap: 6px; min-width: 0; }
+.mine { content-visibility: auto; contain-intrinsic-size: auto 160px; overflow-clip-margin: 12px; padding-bottom: 8px; margin-bottom: -8px; display: grid; justify-items: end; gap: 6px; min-width: 0; }
 /* The arrows between a message's versions (parity T7): quiet, under the bubble, the count between them. */
 .versions { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .versions .iconbtn { width: var(--h-sm); height: var(--h-sm); }
@@ -837,6 +846,11 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .bar, .ai .actions > :not(.foot) { opacity: 0; transition: opacity min(var(--dur-fast), var(--dur-feedback-max)) var(--ease-in); }
 :is(.ai, .mine):is(:hover, :focus-within) :is(.bar, .actions > :not(.foot)) { opacity: 1; transition-timing-function: var(--ease); }
 @media (hover: none) { .bar, .ai .actions > :not(.foot) { opacity: 1; transform: none; } }
+@media (hover: hover) {
+/* Hide only the drawing after the fade; visibility transitions also work without discrete display support. */
+:is(.mine-bar, .ai > .actions) .iconbtn > :is(.swap, .i) { visibility: hidden; transition: visibility min(var(--dur-fast), var(--dur-feedback-max)) linear; }
+:is(.ai, .mine):is(:hover, :focus-within) :is(.mine-bar, .actions) .iconbtn > :is(.swap, .i) { visibility: visible; transition-duration: 0s; }
+}
 .mine-bar { display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: var(--h-sm); margin-bottom: -8px; }
 .mine-bar .iconbtn { width: var(--h-sm); height: var(--h-sm); }
 .when { color: var(--ink-3); font: 400 var(--fs-xs) var(--font-data); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -937,6 +951,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 
 /* Composer */
 .composer { position: relative; z-index: 1; width: min(calc(100% - 48px), var(--col-w)); margin: 0 auto calc(18px * var(--dens)); display: grid; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
+.composer .composer-attachment-error { overflow-wrap: anywhere; min-width: 0; margin: 0; padding: 12px 18px 0; }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
 .composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; }
 /* An archived conversation (ui/App.tsx): one quiet line where the composer was, and the button that brings it back. */
@@ -1043,6 +1058,12 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .st-pad { padding: 14px 16px; }
 .st-extra { display: grid; gap: 8px; padding: 10px 16px 14px; }
 .st-extra:has(> .recents:empty) { display: none; }
+.blocked-host-add, .blocked-hosts li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.blocked-host-add .field { min-width: 0; flex: 1; }
+.blocked-hosts { margin: 0; padding: 12px 16px; }
+.blocked-hosts li { justify-content: space-between; }
+.blocked-hosts li span { min-width: 0; overflow-wrap: anywhere; }
+.blocked-hosts .btn { flex: none; }
 .st-note { padding: 12px 16px 0; }
 .st-val { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-2); }
 .st-fold-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 12px 16px; text-align: left; }
@@ -1669,7 +1690,10 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 
 /* Task 017: the agent's plan under the newest reply, and the closing box of a task. Quiet facts: nothing moves. */
 .plan { margin: 10px 0 4px; font-size: var(--fs-sm); color: var(--ink-2); }
-.plan-head { display: flex; gap: 8px; margin: 0 0 4px; color: var(--ink-3); }
+.plan-head { display: flex; align-items: center; gap: 8px; max-width: 100%; margin: 0 0 4px; text-align: left; color: var(--ink-3); }
+.plan-head:hover, .plan-head[aria-expanded='true'] { color: var(--ink-2); }
+.plan-head > :not(.plan-now) { flex: none; }
+.plan-head .plan-now { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .plan ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .plan li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .plan li .mark { flex: none; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--line-2); display: inline-grid; place-items: center; transform: translateY(2px); }

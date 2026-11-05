@@ -187,9 +187,24 @@ jobs:
             echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"; echo "waits=$waits"
           } >> "$GITHUB_OUTPUT"
 
+  # Stop a malformed combined tree before building apps or starting the native suites (run 41950963030).
+  preflight:
+    needs: changes
+    if: needs.changes.outputs.waits != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/docs.mjs
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.lints == 'true'
+        with:
+          components: rustfmt
+      - if: needs.changes.outputs.lints == 'true'
+        run: cargo fmt --all --check
+
   # The lints and native suites on Windows and macOS. A train shares each required suite across its riders.
   check:
-    needs: changes
+    needs: [changes, preflight]
     if: needs.changes.outputs.check == 'true'
     name: check (${{ matrix.os }}, ${{ matrix.part }})
     strategy:
@@ -254,7 +269,7 @@ jobs:
 
   # The Windows test app is built once and handed to the ui part and the eight screen parts (R163).
   app:
-    needs: changes
+    needs: [changes, preflight]
     if: needs.changes.outputs.app == 'true'
     runs-on: windows-latest
     steps:
@@ -286,7 +301,7 @@ jobs:
 
   # Electron follows the app plan and keeps its own cache and artifact.
   electron-app:
-    needs: changes
+    needs: [changes, preflight]
     if: needs.changes.outputs.app == 'true'
     runs-on: windows-latest
     env:
@@ -380,7 +395,7 @@ jobs:
   # How long each screen scenario took in the newest green runs, so the parts are dealt by today's seconds and not by a
   # table that ages (scripts/screen-costs.mjs, R165). It never fails: without the runs it hands on the table in the repo.
   costs:
-    needs: changes
+    needs: [changes, preflight]
     if: needs.changes.outputs.screen == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -491,7 +506,7 @@ jobs:
   # Reuse the existing Ubuntu job for the Linux compile guard; no desktop libraries or app build are needed.
   # The documents still run for every change, including words only.
   docs:
-    needs: changes
+    needs: [changes, preflight]
     # Waiting riders dispatch a train; its docs job checks the combined tree before it can land.
     if: needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
@@ -511,7 +526,7 @@ jobs:
   # for main below: every job passed, or the plan left it out on purpose.
   # A waiting queue run tested nothing, so it has no gate at all: a green one would let `land.mjs --finish` land it.
   gate:
-    needs: [changes, docs, check, app, screen, electron-app, electron]
+    needs: [changes, preflight, docs, check, app, screen, electron-app, electron]
     if: always() && needs.changes.result != 'skipped' && needs.changes.outputs.waits != 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -534,7 +549,7 @@ jobs:
               for (const job of jobs) {
                 // Electron jobs are advisory while ELECTRON_BLOCKS_GATE is false below.
                 if (job.runner_id || job.steps?.length || !job.check_run_url ||
-                    !/^(check \(|changes$|docs$|costs$|app$|ui$|screen \()/.test(job.name)) continue;
+                    !/^(check \(|changes$|preflight$|docs$|costs$|app$|ui$|screen \()/.test(job.name)) continue;
                 const annotations = await github.paginate(github.rest.checks.listAnnotations, {
                   ...repo, check_run_id: Number(job.check_run_url.split('/').pop()), per_page: 100,
                 });
@@ -550,6 +565,7 @@ jobs:
             if (unavailable) await core.summary.addRaw('RETRY: GitHub did not provide a runner (or its evidence). No rider is blamed; landing remains blocked.').write();
       - env:
           CHANGES: ${{ needs.changes.result }}
+          PREFLIGHT: ${{ needs.preflight.result }}
           RUNNER_UNAVAILABLE: ${{ steps.runner.outputs.unavailable }}
           DOCS: ${{ needs.docs.result }}
           CHECK: ${{ needs.check.result }}
@@ -567,6 +583,7 @@ jobs:
           ok() { [ "$1" = success ] || { [ "$1" = skipped ] && [ "$2" = false ]; }; }
           [ "$RUNNER_UNAVAILABLE" != true ] || { echo "::error::RETRY: runner unavailable; no rider is blamed"; exit 1; }
           [ "$CHANGES" = success ] || { echo "::error::changes: $CHANGES"; exit 1; }
+          [ "$PREFLIGHT" = success ] || { echo "::error::preflight: $PREFLIGHT"; exit 1; }
           [ "$DOCS" = success ] || { echo "::error::docs: $DOCS"; exit 1; }
           ok "$CHECK" "$PLAN_CHECK" || { echo "::error::check: $CHECK"; exit 1; }
           ok "$APP" "$PLAN_APP" || { echo "::error::app: $APP"; exit 1; }
@@ -750,6 +767,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GATE: ${{ needs.gate.result }}
           FAILED: ${{ needs.gate.result == 'failure' && 'its checks failed' || 'it could not land on phase-1-base' }}
         if: needs.gate.outputs.runner_unavailable != 'true'
         run: |
@@ -760,15 +778,34 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
-          code=0
-          # An older land.mjs would read --split as a plain queueing: then the red is reported as before.
-          if grep -q "'--split'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" "$pr" --split "$GITHUB_SHA" --self "$GITHUB_RUN_ID" || code=$?; fi
-          if [ "$code" = 3 ]; then
-            echo "Checked again alone, landed already, or its train's first half rides again: nobody is blamed yet."
-          else
+          manual=unknown
+          if [ "$GATE" = success ] && git fetch --quiet origin +refs/heads/phase-1-base:refs/remotes/origin/phase-1-base && git diff --name-only --no-renames origin/phase-1-base..."$GITHUB_SHA" -- .github/workflows | grep -q .; then
+            if queued=$(git ls-remote --heads origin "refs/heads/queue/pr-$pr" | cut -f1); then
+              if [ "$queued" != "$GITHUB_SHA" ] || git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base; then
+                manual=stale
+              else
+                code=$?
+                if [ "$code" = 1 ]; then manual=ready; fi
+              fi
+            fi
+          fi
+          if [ "$manual" = ready ]; then
             gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
-              -f description="Queued as ${GITHUB_SHA:0:9}, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
-            gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
+              -f description="Checks passed; finish: node scripts/land.mjs $pr --finish"
+            gh pr comment "$pr" --body "Checks passed: $RUN. Finish this workflow change from the PC with \`node scripts/land.mjs $pr --finish\`."
+          elif [ "$manual" = stale ]; then
+            echo "Already landed or queued again: no old finish request."
+          else
+            code=0
+            # An older land.mjs would read --split as a plain queueing: then the red is reported as before.
+            if grep -q "'--split'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" "$pr" --split "$GITHUB_SHA" --self "$GITHUB_RUN_ID" || code=$?; fi
+            if [ "$code" = 3 ]; then
+              echo "Checked again alone, landed already, or its train's first half rides again: nobody is blamed yet."
+            else
+              gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
+                -f description="Queued as ${GITHUB_SHA:0:9}, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
+              gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
+            fi
           fi
           # The train this run checked has ended: the next one leaves, without a rider just blamed (R497).
           if grep -q "'--train'" "$RUNNER_TEMP/land.mjs"; then node "$RUNNER_TEMP/land.mjs" --train --after "$GITHUB_SHA" --self "$GITHUB_RUN_ID"; fi

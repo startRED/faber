@@ -176,7 +176,7 @@ impl Pane {
     /// Loads a page the person asked for from a conversation's reply. The page is that conversation's from then on.
     pub async fn show_page(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
         // An address the pane never loads leaves another conversation's page and tabs as they were.
-        if checked(url).is_err() {
+        if checked(url).is_err() || self.home.check_navigation(url.to_string()).await.is_err() {
             return false;
         }
         let tab = self.tab_step(conversation, TabStep::Show(url.to_string())).await.and_then(|(_, tab)| tab);
@@ -186,7 +186,10 @@ impl Pane {
     /// The person loads `url` in the tab in front (an address they typed): the tab keeps it.
     pub async fn go(self: &Arc<Self>, conversation: &str, url: &str) -> bool {
         // An address too long for its tab to keep would load and then reopen on the page before.
-        if checked(url).is_err() || url.chars().count() > faber_engine::browser::MAX_URL {
+        if checked(url).is_err()
+            || url.chars().count() > faber_engine::browser::MAX_URL
+            || self.home.check_navigation(url.to_string()).await.is_err()
+        {
             return false;
         }
         let front = self.tabs_of(conversation).await.and_then(|tabs| tabs.front);
@@ -542,6 +545,7 @@ impl Pane {
     }
 
     pub async fn site_open(self: &Arc<Self>, id: String, url: String) -> Res<bool> {
+        self.home.check_navigation(url.clone()).await?;
         Ok(self.show_page(&id, &url).await)
     }
 
@@ -550,6 +554,7 @@ impl Pane {
     }
 
     pub async fn site_go(self: &Arc<Self>, id: String, url: String) -> Res<bool> {
+        self.home.check_navigation(url.clone()).await?;
         Ok(self.go(&id, &url).await)
     }
 

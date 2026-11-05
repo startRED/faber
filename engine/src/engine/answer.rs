@@ -210,6 +210,23 @@ impl Core {
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
+        if tool == "AskUserQuestion" && clicked.input["planBoundary"].is_object() {
+            if self.convs.get(conv).is_some_and(|c| c.stopped) {
+                return Err(STALE.into());
+            }
+            // Return to the agent to state the contract and retry, never allow the held action with a question answer.
+            let instruction = "Faber held this action for the plan contract. State size and contract (extends or new_because, and proof) with the plan tool, then retry. This does not grant permission for the action.";
+            let (sid, session, vendor) = (live.sid, live.session.clone(), live.vendor);
+            // Codex approvals carry only accept/decline. Its instruction uses the durable wake queue, not an untracked steer.
+            if allow && vendor == Vendor::Codex {
+                self.send_by_itself(conv, instruction.into(), crate::model::Wake::of("wake.planContract"))?;
+            }
+            let ack = session.answer_with(request_id, false, allow.then(|| serde_json::json!({"planContract": instruction})));
+            return Ok(Handed { requests: vec![(request_id.into(), ack)], tool, sid, always: false, epoch: None });
+        }
+        if allow && !["AskUserQuestion", "ExitPlanMode"].contains(&tool.as_str()) && !self.plan_allows(conv, &tool, &clicked.input) {
+            return Err(STALE.into());
+        }
         // The card of `offer_bigger` is Faber's own: the CLI never asked it, so nothing goes to the CLI as a control response. The
         // person's choice (or the first one, for Skip and for Keep going) goes back as the tool's result, and the answer counts as
         // delivered at once. Only the process that made the card gets it; any other is stale like an install card.
@@ -242,7 +259,9 @@ impl Core {
             && tool != "ExitPlanMode"
             && live.permissions != Permissions::Plan
             && epoch == self.store.settings().grants_epoch;
-        let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
+        let others = waiting
+            .iter()
+            .filter(|p| allow && always && p.tool == tool && p.request_id != request_id && self.plan_allows(conv, &p.tool, &p.input));
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
         let requests = ids
             .map(|id| (id.to_string(), live.session.answer_with(id, allow, (id == request_id).then(|| choices.clone()).flatten())))
@@ -346,7 +365,8 @@ impl Core {
     /// Allows the questions without asking the user. The answers are watched without the lock: one the CLI did not
     /// take, or did not confirm in time, becomes a question on the list again, so the turn is never left blocked behind
     /// a row that says it is working.
-    pub(super) fn auto_answer(&self, conv: &str, asks: Vec<Permission>) {
+    pub(super) fn auto_answer(&mut self, conv: &str, asks: Vec<Permission>) {
+        let asks: Vec<_> = asks.into_iter().filter(|p| !self.hold_plan_boundary(conv, &p.request_id, &p.tool, &p.input)).collect();
         let asks: Vec<_> = asks.into_iter().filter(|p| p.tool != "ExitPlanMode").collect();
         let Some(l) = self.live.get(conv).filter(|_| !asks.is_empty()) else { return };
         let (sid, turn) = (l.sid, l.turn.clone());

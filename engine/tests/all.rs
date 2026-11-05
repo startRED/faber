@@ -1,7 +1,7 @@
 //! The engine's integration tests, linked into one test program instead of one per file: on Windows each program is a
 //! separate link and a separate process, and one changed file relinked all 27 at once (33 linkers, 7.8 GB). The files
 //! stay where they are; a new one must be listed here, and `every_test_file_is_listed` fails until it is.
-//! Cost tests keep their own programs: they read the memory of their own process, which no other test may share.
+//! Cost tests and hostile Store fixtures keep their own programs: their process-wide state cannot be shared.
 
 // Real containment helpers must not create console hosts that outlive the simulated CLI workers.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -100,6 +100,8 @@ mod persona;
 mod plain_words;
 #[path = "plan.rs"]
 mod plan;
+#[path = "plan_boundary_qualification.rs"]
+mod plan_boundary_qualification;
 #[path = "plugins.rs"]
 mod plugins;
 #[path = "pr_watch.rs"]
@@ -211,3 +213,6 @@ fn every_test_file_is_listed() {
     }
     assert!(missing.is_empty(), "add these to engine/tests/all.rs: {missing:?}");
 }
+
+#[path = "native_branch.rs"]
+mod native_branch;
