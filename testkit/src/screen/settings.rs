@@ -7,7 +7,7 @@ use crate::app::Ctx;
 use crate::page::{Page, css, role_any};
 use crate::sandbox::Launch;
 use serde_json::json;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 
@@ -73,6 +73,25 @@ fn open_settings(page: &mut Page) -> Result {
     page.wait_visible(&heading)
 }
 
+fn wait_keyboard_switch(page: &mut Page, what: &str, condition: &str) -> Result {
+    let Err(error) = page.wait_for(what, condition) else { return Ok(()) };
+    let previous = page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+    let evidence = page.eval(
+        r#"(() => {
+        const box = document.activeElement;
+        return { id: box?.id, checked: box?.checked, changes: window.__settingsSwitchChanges };
+    })()"#,
+    );
+    let saved = page.eval(
+        r#"(async () => {
+        const invoke = window.faberShell?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+        return invoke ? (await invoke('state')).settings.autostart ?? false : null;
+    })()"#,
+    );
+    page.cdp.set_deadline(previous);
+    Err(format!("{error}; keyboard switch evidence after the timeout: {evidence:?}; saved autostart: {saved:?}"))
+}
+
 fn keyboard_traversal(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "de")?;
     super::shell::seed_project(ctx, "Keyboard fixture")?;
@@ -87,6 +106,18 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
     page.press("Control+,")?;
     page.wait_visible(&css(".settings"))?;
     page.wait_for("Settings takes keyboard focus", "document.activeElement === document.querySelector('.s-nav button')")?;
+    page.eval(
+        r#"(() => {
+        window.__settingsSwitchChanges = [];
+        document.addEventListener('change', (event) => {
+            const box = event.target;
+            if (!(box instanceof HTMLInputElement) || !box.matches('input[role=switch]')) return;
+            const changes = window.__settingsSwitchChanges;
+            changes.push({ id: box.id, checked: box.checked });
+            if (changes.length > 12) changes.shift();
+        }, true);
+    })()"#,
+    )?;
     // All native Tab stops are checked in DOM order; closed/disabled controls must never enter the walk.
     for section in 2..=6 {
         page.press_on(&css(&format!(".s-nav button:nth-child({section})")), "Enter")?;
@@ -127,9 +158,17 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
                 if switch && section != 3 {
                     let checked = page.eval("document.activeElement.checked")?;
                     page.press("Space")?;
-                    page.wait_for("switch saves its keyboard choice", &format!("document.activeElement.checked !== {checked}"))?;
+                    wait_keyboard_switch(
+                        page,
+                        "switch saves its keyboard choice",
+                        &format!("document.activeElement.checked !== {checked}"),
+                    )?;
                     page.press("Space")?;
-                    page.wait_for("switch restores its keyboard choice", &format!("document.activeElement.checked === {checked}"))?;
+                    wait_keyboard_switch(
+                        page,
+                        "switch restores its keyboard choice",
+                        &format!("document.activeElement.checked === {checked}"),
+                    )?;
                 }
                 let range = page.eval("document.activeElement.matches('input[type=range]')")?.as_bool() == Some(true);
                 if range {
