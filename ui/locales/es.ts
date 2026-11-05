@@ -2589,6 +2589,7 @@ export const es: Messages = {
   'notes.409.better': 'Puedes leer el título completo de los detalles del Catálogo en una ventana pequeña y seguir teniendo Volver a mano.',
   'notes.410.fixed': 'El texto sin enviar, los archivos adjuntos y la conversación anterior vuelven al abrir Faber después de un cierre forzado.',
   'notes.411.new': 'Puedes bloquear sitios y sus subdominios en Ajustes, en Privacidad, para que no se abran en el navegador de Faber.',
+  'notes.412.better': 'Al terminar, el agente ordena las notas largas del proyecto y comprueba que sigan las decisiones que conservaste.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

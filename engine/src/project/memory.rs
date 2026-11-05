@@ -975,6 +975,22 @@ pub fn mark_kept(list: &mut MemoryList, kept: &[KeptDecision]) {
     }
 }
 
+/// A partial read cannot prove that a decision was lost. Only active decisions count, as on the start card.
+pub(crate) fn present_kept(list: &MemoryList, kept: &[KeptDecision]) -> Option<Vec<KeptDecision>> {
+    if list.incomplete || list.files.iter().any(|file| decisions(&file.path) && file.too_large) {
+        return None;
+    }
+    let items: Vec<_> = list
+        .files
+        .iter()
+        .filter(|file| decisions(&file.path))
+        .flat_map(|file| &file.entries)
+        .filter_map(|entry| entry.body.as_deref())
+        .map(KeptDecision::of)
+        .collect();
+    Some(kept.iter().filter(|record| items.iter().any(|item| record.matches(item))).cloned().collect())
+}
+
 fn entries(text: &str, limit: usize) -> Vec<Entry> {
     let mut depth = 0;
     let mut item = None;
@@ -1945,6 +1961,31 @@ mod tests {
         assert_eq!(list.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), [".faber/decisions.md"]);
         assert!(!list.incomplete);
         assert!(list_with_private(project.path(), &[]).is_err(), "the whole walk still fails on it");
+    }
+
+    #[test]
+    fn t495_legacy_faber_notes_remain_listed() {
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path().join(".faber");
+        std::fs::create_dir(&dir).unwrap();
+        for name in ["plans", "recipes", "learning", "memory"] {
+            std::fs::write(dir.join(format!("{name}.md")), "- Older note\n").unwrap();
+        }
+        let list = list_faber(project.path()).unwrap();
+        for name in ["plans", "recipes", "learning", "memory"] {
+            assert!(list.files.iter().any(|file| file.path == format!(".faber/{name}.md")), "{name}");
+        }
+    }
+
+    #[test]
+    fn t495_old_decisions_never_enter_the_card() {
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path().join(".faber");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("decisions.md"), "- Use local exports. [by person]\n").unwrap();
+        std::fs::write(dir.join("decisions-old.md"), "- Use remote exports. [by person]\n").unwrap();
+        let kept = [KeptDecision::of("- Use local exports."), KeptDecision::of("- Use remote exports.")];
+        assert_eq!(kept_for_card(project.path(), &kept).unwrap(), ["- Use local exports."]);
     }
 
     #[test]

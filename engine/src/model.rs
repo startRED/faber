@@ -457,6 +457,12 @@ pub struct Message {
     /// The one closing reminder was attempted for this reply, including refused delivery.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub conclusion_requested: bool,
+    /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_kept: Vec<crate::project::memory::KeptDecision>,
+    /// A fold lost a kept decision; the next admitted input consumes this plain notice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fold_lost: bool,
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
@@ -1006,6 +1012,8 @@ impl Message {
             acts: vec![],
             closed: false,
             conclusion_requested: false,
+            fold_kept: vec![],
+            fold_lost: false,
             halt: None,
             auto_answers: None,
             away: None,

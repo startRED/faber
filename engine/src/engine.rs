@@ -4625,6 +4625,7 @@ impl Core {
             t.approved = None;
         }
         self.rewind.bump(id);
+        let text = self.fold_notice_input(id, text);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());

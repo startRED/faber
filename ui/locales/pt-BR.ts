@@ -2576,6 +2576,7 @@ export const ptBR: Messages = {
   'notes.409.better': 'Você consegue ler o título inteiro dos detalhes no Catálogo numa janela pequena, com Voltar sempre ao alcance.',
   'notes.410.fixed': 'Seu texto ainda não enviado, os anexos e a conversa anterior voltam quando você reabre o Faber depois de um fechamento forçado.',
   'notes.411.new': 'Você pode bloquear sites e seus subdomínios em Configurações, na seção Privacidade, pra impedir que abram no navegador do Faber.',
+  'notes.412.better': 'O agente organiza as notas longas do projeto ao encerrar e confere se as decisões que você guardou continuam lá.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -2469,6 +2469,7 @@ export const en = {
   'notes.409.better': 'You can read the full Catalog detail title in a small window, with Back still within reach.',
   'notes.410.fixed': 'Your unsent text, attachments and previous conversation return when you reopen Faber after a forced close.',
   'notes.411.new': 'You can block sites and their subdomains in Settings, under Privacy, to keep them out of Faber’s browser.',
+  'notes.412.better': 'The agent tidies long project notes at close and checks that decisions you kept are still there.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -2589,6 +2589,7 @@ export const fr: Messages = {
   'notes.409.better': 'Dans une petite fenêtre, vous pouvez lire le titre complet des détails du Catalogue et garder Retour à portée de main.',
   'notes.410.fixed': 'Votre texte non envoyé, vos pièces jointes et la conversation précédente reviennent quand vous rouvrez Faber après une fermeture forcée.',
   'notes.411.new': 'Vous pouvez bloquer des sites et leurs sous-domaines dans Paramètres, sous Confidentialité, pour les empêcher de s’ouvrir dans le navigateur de Faber.',
+  'notes.412.better': 'En terminant, l’agent range les longues notes du projet et vérifie que les décisions que vous avez gardées sont toujours là.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

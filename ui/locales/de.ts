@@ -2589,6 +2589,7 @@ export const de: Messages = {
   'notes.409.better': 'Auch im kleinen Fenster kannst du den vollständigen Titel der Katalogdetails lesen und Zurück weiterhin erreichen.',
   'notes.410.fixed': 'Nach einem erzwungenen Schließen findest du beim Öffnen von Faber deinen ungesendeten Text, die Anhänge und das vorige Gespräch wieder.',
   'notes.411.new': 'Du kannst Websites und ihre Unterdomains unter Einstellungen, Datenschutz sperren, damit sie in Fabers Browser nicht geöffnet werden.',
+  'notes.412.better': 'Zum Abschluss räumt der Agent lange Projektnotizen auf und prüft, ob deine behaltenen Entscheidungen noch da sind.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
