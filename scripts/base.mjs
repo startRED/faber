@@ -34,23 +34,58 @@ export function verdict(runs) {
   return { run: last, since, newer };
 }
 
-/** A later, complete queue check of the current tip supersedes an older failed base run. */
-export function tipPassed(red, tip, runs, jobsFor) {
-  if (!/^[a-f0-9]{40}$/.test(tip) || tip === red.run.headSha) return false;
-  const required = [
+const FULL_JOBS = [
     'changes', 'preflight', 'docs', 'app', 'costs', 'ui', 'gate',
     'check (windows-latest, lints)', 'check (windows-latest, rust)', 'check (macos-latest, lints rust ui)',
     ...Array.from({ length: 8 }, (_, i) => `screen (${i + 1}/8)`),
-  ];
+];
+const passedJobs = (jobs, names) => names.every((name) =>
+  jobs.some((job) => job.name === name && job.status === 'completed' && job.conclusion === 'success'));
+
+// A successful waiting train has no gate and says nothing about the commit.
+function queueJobs(red, tip, runs, jobsFor) {
   for (const candidate of runs) {
     if (candidate.headSha !== tip || candidate.createdAt <= red.run.createdAt || candidate.status !== 'completed' ||
-        candidate.event !== 'workflow_dispatch' || !candidate.headBranch?.startsWith('queue/')) continue;
+        !['push', 'workflow_dispatch'].includes(candidate.event) || !candidate.headBranch?.startsWith('queue/')) continue;
     if (RED.has(candidate.conclusion)) return false;
     if (candidate.conclusion !== 'success') continue;
     const jobs = jobsFor(candidate.databaseId);
     if (!jobs.some((job) => job.name === 'gate' && job.conclusion !== 'skipped')) continue;
-    return required.every((name) =>
-      jobs.some((job) => job.name === name && job.status === 'completed' && job.conclusion === 'success'));
+    return jobs;
+  }
+  return null;
+}
+
+/** A later, complete queue check of the current tip supersedes an older failed base run. */
+export function tipPassed(red, tip, runs, jobsFor) {
+  if (!/^[a-f0-9]{40}$/.test(tip) || tip === red.run.headSha) return false;
+  const jobs = queueJobs(red, tip, runs, jobsFor);
+  return Array.isArray(jobs) && passedJobs(jobs, FULL_JOBS);
+}
+
+/** A fully checked ancestor and a checked chain of script-test-only edits prove the current tree too. */
+export function scopedTipPassed(red, tip, { runsFor, jobsFor, changeFor, scriptsAt, workflowAt }) {
+  if (!/^[a-f0-9]{40}$/.test(tip) || tip === red.run.headSha) return false;
+  const jobs = queueJobs(red, tip, runsFor(tip), jobsFor);
+  const required = ['changes', 'preflight', 'docs', 'gate', 'land', 'check (windows-latest, lints)', 'check (macos-latest, lints)'];
+  if (!Array.isArray(jobs) || !passedJobs(jobs, required) || !required.slice(-2).every((name) =>
+    jobs.find((job) => job.name === name)?.steps?.some((step) => step.name === 'Run npm run lint' && step.conclusion === 'success'))) return false;
+  const changed = new Set();
+  let sha = tip;
+  for (let i = 0; i < 16; i++) {
+    const { parents, changes } = changeFor(sha);
+    if (parents.length !== 1 || changes.length === 0 || !changes.every((file) =>
+      file.oldMode === '100644' && file.newMode === '100644' && file.status === 'M' &&
+      /^scripts\/(?:[a-zA-Z0-9._-]+\/)*[a-zA-Z0-9._-]+\.test\.mjs$/.test(file.path))) return false;
+    for (const file of changes) changed.add(file.path);
+    sha = parents[0];
+    if (sha === red.run.headSha) return false;
+    const parentJobs = queueJobs(red, sha, runsFor(sha), jobsFor);
+    if (parentJobs === false) return false;
+    if (Array.isArray(parentJobs) && passedJobs(parentJobs, FULL_JOBS)) {
+      const scripts = scriptsAt(sha);
+      return workflowAt(sha) && [...changed].every((file) => scripts.includes(file));
+    }
   }
   return false;
 }
@@ -113,9 +148,36 @@ function status() {
       try {
         const tip = () => run('git', ['ls-remote', 'origin', `refs/heads/${BASE}`]).trim().split(/\s+/)[0];
         const sha = tip();
-        const candidates = JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--commit', sha, '--status', 'completed',
-          '--limit', '20', '--json', `${fields},event,headBranch`]));
-        cleared = tipPassed(red, sha, candidates, (id) => JSON.parse(run('gh', ['run', 'view', String(id), '--json', 'jobs'])).jobs) && tip() === sha;
+        const cachedRuns = new Map();
+        const cachedJobs = new Map();
+        const runsFor = (commit) => {
+          if (!cachedRuns.has(commit)) cachedRuns.set(commit, JSON.parse(run('gh', ['run', 'list', '--workflow', 'ci.yml', '--commit', commit,
+            '--status', 'completed', '--limit', '20', '--json', `${fields},event,headBranch`])));
+          return cachedRuns.get(commit);
+        };
+        const jobsFor = (id) => {
+          if (!cachedJobs.has(id)) cachedJobs.set(id, JSON.parse(run('gh', ['run', 'view', String(id), '--json', 'jobs'])).jobs);
+          return cachedJobs.get(id);
+        };
+        const changeFor = (commit) => {
+          const parents = run('git', ['show', '-s', '--format=%P', commit]).trim().split(/\s+/);
+          if (parents.length !== 1 || !/^[a-f0-9]{40}$/.test(parents[0])) return { parents, changes: [] };
+          const raw = run('git', ['diff-tree', '--no-commit-id', '--raw', '-z', '--no-renames', '-r', parents[0], commit]).split('\0');
+          const changes = [];
+          for (let i = 0; i + 1 < raw.length; i += 2) {
+            const match = /^:(\d{6}) (\d{6}) [a-f0-9]+ [a-f0-9]+ ([A-Z])$/.exec(raw[i]);
+            if (!match) return { parents, changes: [] };
+            changes.push({ oldMode: match[1], newMode: match[2], status: match[3], path: raw[i + 1] });
+          }
+          return { parents, changes };
+        };
+        const scriptsAt = (commit) => {
+          const script = JSON.parse(run('git', ['show', `${commit}:package.json`])).scripts['test:scripts'];
+          return /^node --test(?:\s|$)/.test(script) ? script.split(/\s+/) : [];
+        };
+        const workflowAt = (commit) => /^ {6}- if: contains\(matrix\.part, 'lints'\)\n {8}shell: bash\n {8}run: \|\n {10}npm run lint\n {10}npm run typecheck\n {10}npm run test:scripts\n/m
+          .test(run('git', ['show', `${commit}:.github/workflows/ci.yml`]).replaceAll('\r\n', '\n'));
+        cleared = (tipPassed(red, sha, runsFor(sha), jobsFor) || scopedTipPassed(red, sha, { runsFor, jobsFor, changeFor, scriptsAt, workflowAt })) && tip() === sha;
       } catch {
         // Without complete evidence, retain the red warning.
       }
