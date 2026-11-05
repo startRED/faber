@@ -131,8 +131,9 @@ A project conversation also opens "Technical details" in this same slot, from on
 or beside its running row. Its head has Back, the title and Close; the existing modal, focus and width rules apply.
 It reuses the command rows, check and follow controls, and Changes' file disclosures, with facts newest first within
 each history. Only the open view holds DOM and at most one file patch; no extra reader, timer or stored history.
+A quiet disclosure shows the exact project start card of the current session, its byte size and omitted counts; no card means no row. Its text is fetched only when this view opens and mounted only when unfolded.
 
-Its first group is one list of background work: existing shell rows (named by their parsed description when unique),
+Its background work group is one list: existing shell rows (named by their parsed description when unique),
 monitors, helpers, Faber's checks and followed pull requests. Quiet wrapping chips carry one state word each, with no
 motion: running, passed, failed, stopped, "waiting for you", "no report yet" (a monitor or shell from an earlier reply
 with nothing reported, neutral), or the helper's own words ("seems stuck" with what was seen, R174). Amber only for

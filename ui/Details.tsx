@@ -1,11 +1,11 @@
-import { createMemo, createSignal, For, Show, type ComponentProps } from 'solid-js';
+import { createMemo, createResource, createSignal, For, Show, type ComponentProps } from 'solid-js';
 import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
 import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { CommandStop } from './Commands.tsx';
 import { ChangesFiles } from './Changes.tsx';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { bytes, t } from './i18n.ts';
 import { agentState, type AgentState } from './worklog.ts';
 import { showAgent } from './AgentChat.tsx';
 import { backgroundCalls, backgroundOf, createBackgroundCache, followedIn, indexed, referenceLines, prune, workStatus, type BackgroundWork, type ToolIndex } from './background.ts';
@@ -164,6 +164,10 @@ export function DetailsPane(props: {
   const cache = createBackgroundCache();
   const d = createMemo(() => detailsOf(props.messages, cache.tools));
   const [referencesOpen, setReferencesOpen] = createSignal(false);
+  const [card] = createResource(() => props.conversationId, async (id) => ({ id, text: await api.startCard(id).catch(() => null) }));
+  const cardText = () => card()?.id === props.conversationId ? card()?.text : null;
+  const [cardOpen, setCardOpen] = createSignal(false);
+  const omitted = (text: string, kind: string) => Number(text.split('\n').find((line) => line.endsWith(` ${kind}; search them with memory_search.`))?.match(/^And (\d+) /)?.[1] ?? 0);
   const work = createMemo(() => backgroundOf(props.messages, props.background, props.conversationId, cache));
   const follows = createMemo(() => followedIn(props.messages));
   const checks = () => d().replies.filter((m) => m.checks && !work().some((row) => row.id === `${m.id}:checks`));
@@ -180,6 +184,10 @@ export function DetailsPane(props: {
     <div class="rc-body side-body details-view">
       {/* The copy's branch and folder stay here, for people who look, instead of in the topbar. */}
       <Show when={props.copy}>{(copy) => <p class="det-copy" data-testid="details-copy">{t('details.copy', { branch: copy().branch })}<span>{copy().path}</span></p>}</Show>
+      <Show when={cardText()}>{(text) => <section class="det-g"><details class="disclosure" data-testid="start-card" onToggle={(e) => setCardOpen(e.currentTarget.open)}>
+        <summary>{t('details.startCard')}</summary>
+        <Show when={cardOpen()}><p class="side-meta" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '4px 12px' }}><span>{bytes(new TextEncoder().encode(text()).length)}</span><Show when={omitted(text(), 'more rule lines')}><span>{t('details.cardRules', { n: omitted(text(), 'more rule lines') })}</span></Show><Show when={omitted(text(), 'older decisions')}><span>{t('details.cardDecisions', { n: omitted(text(), 'older decisions') })}</span></Show><Show when={omitted(text(), 'more taste lines')}><span>{t('details.cardTaste', { n: omitted(text(), 'more taste lines') })}</span></Show></p><pre class="command-output" style={{ 'font-family': 'var(--font-mono)', padding: '8px', border: '1px solid var(--line)', 'border-radius': 'var(--r-xs)' }}>{text()}</pre></Show>
+      </details></section>}</Show>
       <Show when={work().length}><section class="det-g"><h3>{t('background.title')}</h3>
         <BackgroundList rows={work()} conversationId={props.conversationId} follows={follows()} />
       </section></Show>

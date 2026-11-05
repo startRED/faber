@@ -1863,6 +1863,7 @@ fn is_zero_usd(n: &f64) -> bool {
 impl Conversation {
     pub fn for_screen(mut self) -> Self {
         self.messages = self.messages.into_iter().map(Message::for_screen).collect();
+        self.session_start_cards.clear();
         self.plan = self.shown_plan();
         self
     }

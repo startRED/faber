@@ -1120,6 +1120,19 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|core| core.opened(id))
     }
+    /// The exact card bound to the current native session, only when the screen asks for it.
+    pub fn start_card(&self, id: &str) -> Option<String> {
+        self.with(|core| {
+            let live = core.live.get(id).map(|l| l.vendor);
+            let c = core.load(id)?;
+            if c.area != Area::Project {
+                return None;
+            }
+            let vendor = live.or_else(|| c.messages.iter().rev().filter(|m| m.role == Role::Assistant).find_map(|m| m.vendor))?;
+            let (native, card) = c.session_start_cards.get(&vendor)?;
+            (c.resumable(vendor) == Some(native)).then(|| card.clone())
+        })
+    }
     /// The catalog tools the conversation's agent has now, each with its job group (why it was picked): the kit saved for the
     /// session of the AI at work, else of the newest reply's AI. Read on request from what is in memory; nothing is prepared.
     pub fn tools_in_use(&self, id: &str) -> Vec<(String, String)> {

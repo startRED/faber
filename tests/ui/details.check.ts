@@ -6,7 +6,7 @@ import { DetailsLine, detailsOf, openedDetails, showDetails } from '../../ui/Det
 import { Thread } from '../../ui/Thread.tsx';
 import { showAside } from '../../ui/QuickQuestion.tsx';
 import { store } from '../../ui/running.ts';
-import { t } from '../../ui/i18n.ts';
+import { bytes, t, useLanguage } from '../../ui/i18n.ts';
 import recorded from '../fixtures/conversation-changes.json';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -306,4 +306,43 @@ check('details: the project thread opens the real column, sharing changes, check
     if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
     store.offer({ revision: store.list().revision + 1, items: [] });
   }
+});
+
+check('details: the exact project start card is available only when one was sent', async () => {
+  const { DetailsPane } = await import('../../ui/Details.tsx');
+  const before = api.startCard;
+  useLanguage('en');
+  const sent = '```faber-start-card\nProject facts exactly as sent: ação 字.\nAnd 1 more rule lines; search them with memory_search.\nAnd 2 older decisions; search them with memory_search.\nAnd 3 more taste lines; search them with memory_search.\n```';
+  api.startCard = async () => sent;
+  const host = document.createElement('div'); document.body.append(host);
+  host.className = 'rc-body side-body';
+  host.style.width = '720px';
+  const dispose = render(() => createComponent(DetailsPane, { conversationId: 'project', messages: [], background: [], changes: { id: 'project', files: [], loading: false }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await settle();
+    const fold = host.querySelector<HTMLDetailsElement>('[data-testid=start-card]');
+    ok(fold, 'a sent card has a row');
+    equal(fold.querySelector('pre'), null, 'the card text is not mounted while folded');
+    fold.open = true; fold.dispatchEvent(new Event('toggle')); await settle();
+    equal(fold.querySelector('pre')?.textContent, sent, 'the text is unchanged');
+    ok(fold.textContent?.includes(bytes(new TextEncoder().encode(sent).length)), 'the size counts UTF-8 bytes');
+    ok(fold.textContent?.includes('1 rule line did not fit.'), 'the singular rule count is shown');
+    ok(fold.textContent?.includes('2 decisions'), 'the omitted count is shown');
+    ok(fold.textContent?.includes('3 taste lines'), 'the omitted taste count is shown');
+    useLanguage('de');
+    await settle();
+    ok(fold.textContent?.includes('2 Entscheidungen'), 'the counts stay visible in German');
+    ok(host.clientWidth > 0, 'the check exercises a real rendered layout');
+    ok(host.scrollWidth <= host.clientWidth, 'the translated card fits a 720 px container');
+    host.style.width = '360px';
+    await settle();
+    ok(host.scrollWidth <= host.clientWidth, 'the card also fits the narrow side column');
+    fold.open = false; fold.dispatchEvent(new Event('toggle')); await settle();
+    equal(fold.querySelector('pre'), null, 'closing releases the text block');
+  } finally { dispose(); host.remove(); api.startCard = before; useLanguage('en'); }
+  api.startCard = async () => null;
+  const empty = document.createElement('div'); document.body.append(empty);
+  const close = render(() => createComponent(DetailsPane, { conversationId: 'empty', messages: [], background: [], changes: { id: 'empty', files: [], loading: false }, onBack: () => {}, onClose: () => {} }), empty);
+  try { await settle(); equal(empty.querySelector('[data-testid=start-card]'), null, 'a conversation without a card has no row'); }
+  finally { close(); empty.remove(); api.startCard = before; useLanguage('en'); }
 });

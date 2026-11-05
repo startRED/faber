@@ -1031,6 +1031,7 @@ export const api = {
   backgroundCommands: () => invoke<BackgroundList>('background_commands'),
   stopBackground: (id: string) => invoke<void>('stop_background', { id }),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
+  startCard: (id: string) => invoke<string | null>('start_card', { id }),
   messagesBefore: (id: string, messageId: string) => invoke<Message[] | null>('messages_before', { id, messageId }),
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),

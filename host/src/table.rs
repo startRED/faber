@@ -115,6 +115,9 @@ table! {
         lock(&h.feed).forget();
         Ok(h.engine.open_for_screen_window(&id, 40))
     }
+    Read Screen fn start_card(h, id: String) -> Option<String> {
+        Ok(h.engine.start_card(&id))
+    }
     /// The previous screen page, oldest first; message ids keep the boundary stable while a reply grows.
     Read Screen fn messages_before(h, id: String, message_id: String) -> Option<Vec<faber_engine::model::Message>> {
         Ok(h.engine.messages_before(&id, &message_id, 40))

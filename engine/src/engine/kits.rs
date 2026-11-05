@@ -1118,11 +1118,47 @@ mod tests {
                 core.handle("kit", sid, EngineEvent::TurnStarted);
                 assert_eq!(core.convs["kit"].session_start_cards.get(&vendor), Some(&("native-history".into(), sent.clone())));
             });
+            assert_eq!(engine.start_card("kit"), Some(sent.clone()), "the screen receives the exact card captured by the fake CLI");
+            assert!(engine.open_for_screen("kit").unwrap().session_start_cards.is_empty(), "ordinary screen snapshots omit card text");
             engine.shutdown();
             if state == "fresh" {
                 previous_card = Some(sent);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn project_start_card_details_rejects_missing_and_other_sessions_and_measures_reads() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        assert_eq!(engine.start_card("missing"), None);
+        engine.with(|core| {
+            conversation(core, Area::Project, None, &folder, "Read the card");
+            let c = core.convs.get_mut("kit").unwrap();
+            c.messages[1].vendor = Some(Vendor::Claude);
+            c.sessions.insert(Vendor::Claude, "current".into());
+        });
+        assert_eq!(engine.start_card("kit"), None);
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().session_start_cards.insert(Vendor::Claude, ("old".into(), "old text".into()));
+        });
+        assert_eq!(engine.start_card("kit"), None, "a previous native session's card is not the current card");
+        engine.with(|core| {
+            core.convs.get_mut("kit").unwrap().session_start_cards.insert(Vendor::Claude, ("current".into(), "x".repeat(6144)));
+        });
+        let started = std::time::Instant::now();
+        for _ in 0..1000 {
+            assert_eq!(engine.start_card("kit").unwrap().len(), 6144);
+        }
+        eprintln!(
+            "project_start_card_details_cost: 1000 in-memory reads of a 6144-byte card in {:.3} ms; one 6144-byte response allocation at a time; no additional retained card",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+        engine.with(|core| core.convs.get_mut("kit").unwrap().area = Area::Chat);
+        assert_eq!(engine.start_card("kit"), None, "Chat never exposes a project card");
+        engine.shutdown();
     }
 
     #[tokio::test]
