@@ -548,29 +548,38 @@ test('a successful interrupt stops the process tree, cleans temp and makes the s
   const grandchildCode = 'require("node:fs").writeFileSync(require("node:path").join(process.env.TEMP,"grandchild"),String(process.pid));setInterval(()=>{},1000)';
   const childCode = 'const cp=require("node:child_process");cp.spawn(process.execPath,["-e",process.argv[1]],{stdio:"ignore",windowsHide:true});setInterval(()=>{},1000)';
   const running = launcher.runChild(root, process.execPath, ['-e', childCode, grandchildCode], {});
+  let settled = false;
+  running.then(() => { settled = true; }, () => { settled = true; });
   const receipt = path.join(root, 'target', 'build-1', '.faber-lease', 'owner.json');
   let owner;
   let grandchild;
-  const until = Date.now() + 3000;
-  for (;;) {
-    try {
-      owner = JSON.parse(await readFile(receipt));
-      grandchild = Number(await readFile(path.join(tempParent(path.join(root, 'target', 'build-1')), owner.tempName, 'grandchild')));
-      break;
-    } catch (error) {
-      if (Date.now() > until) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+  const until = Date.now() + 30000;
+  try {
+    for (;;) {
+      try {
+        owner = JSON.parse(await readFile(receipt));
+        grandchild = Number(await readFile(path.join(tempParent(path.join(root, 'target', 'build-1')), owner.tempName, 'grandchild')));
+        break;
+      } catch (error) {
+        if (Date.now() > until) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    t.after(() => { for (const pid of [owner.childPid, grandchild]) { try { process.kill(pid, 'SIGKILL'); } catch { /* Already exited. */ } } });
+    process.emit('SIGINT');
+    assert.equal(await running, 130);
+    assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
+    await assert.rejects(readFile(receipt), { code: 'ENOENT' });
+    assert.deepEqual(await readdir(tempParent(path.join(root, 'target', 'build-1'))), []);
+    const reused = await launcher.acquireTarget(root, {});
+    assert.equal(path.basename(reused.target), 'build-1');
+    await reused.release();
+  } finally {
+    if (!settled) {
+      process.emit('SIGINT');
+      await running;
     }
   }
-  t.after(() => { for (const pid of [owner.childPid, grandchild]) { try { process.kill(pid, 'SIGKILL'); } catch { /* Already exited. */ } } });
-  process.emit('SIGINT');
-  assert.equal(await running, 130);
-  assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
-  await assert.rejects(readFile(receipt), { code: 'ENOENT' });
-  assert.deepEqual(await readdir(tempParent(path.join(root, 'target', 'build-1'))), []);
-  const reused = await launcher.acquireTarget(root, {});
-  assert.equal(path.basename(reused.target), 'build-1');
-  await reused.release();
 });
 
 test('an abandoned ancestor claim cannot reap temp when a nested reservation exists', async (t) => {
