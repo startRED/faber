@@ -117,6 +117,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId, groupId: saved?.groupId });
   const [current, setCurrent] = createSignal<Conversation>();
+  const [temporary, setTemporary] = createSignal(false);
   const [agentAsks, setAgentAsks] = createSignal<import('./api.ts').AgentAsk[]>([]);
   let asksRevision = 0;
   let asksTimer: ReturnType<typeof setTimeout> | undefined;
@@ -356,7 +357,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const draftConversation = createMemo(() => current()?.id);
   createEffect(on([draftQueue, draftConversation, loading], () => {
     const c = current();
-    if (!c || loading() || place().id !== c.id) return;
+    if (!c || c.temporary || loading() || place().id !== c.id) return;
     const ids = new Set(c.queued?.map((q) => q.id));
     for (const id of queuedDrafts(c.id)) {
       if (ids.has(id)) continue;
@@ -376,7 +377,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const keepReading = () => {
     const id = current()?.id;
-    if (!thread || !id || loading() || restoringReading || place().id !== id) return;
+    if (!thread || !id || current()?.temporary || loading() || restoringReading || place().id !== id) return;
     if (stick) {
       reading = undefined;
       if (scrolls.delete(id)) readingDirty = true;
@@ -913,8 +914,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // A plan that changed while its conversation was opening: the snapshot may be older (task 017).
   const planHeard: { plan?: { id: string; plan?: Plan } } = {};
   // The conversation the user is in: opening it asks the engine for a snapshot and the answer takes a while.
-  const go = async (next: Place, messageIndex?: number) => {
+  const go = async (next: Place, messageIndex?: number, privateChat = false) => {
     const generation = ++historyGeneration;
+    const leaving = place().id;
+    const privateNext = privateChat || (leaving === next.id && temporary());
+    if (temporary() && leaving && !next.id) {
+      try { await api.closeChat(leaving); }
+      catch (err) { if (generation === historyGeneration) fail(err); return; }
+      if (generation !== historyGeneration) return;
+    }
+    if (temporary() && leaving && next.id !== leaving) held.delete(leaving);
     olderPage = undefined;
     keepReading(); saveReading();
     reading = undefined;
@@ -925,7 +934,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setFrom(Math.max(0, (current()?.messages.length ?? 0) - PAGE));
     planHeard.plan = undefined;
     setVersions([]);
-    setPlace(next);
+    batch(() => { setTemporary(privateNext); setPlace(next); });
     remember('faber.place', next);
     const token = opening.begin(next.id);
     setLoading(next.id !== undefined);
@@ -950,6 +959,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // Messages that came while the snapshot was on its way are already in it, merged by `opening`.
     const done = opening.finish(token, snapshot);
     if (done.stale) return;
+    setTemporary(privateNext || !!done.conversation?.temporary);
     setLoading(false);
     const offset = done.conversation?.earlier ?? 0;
     const target = messageIndex !== undefined && messageIndex >= offset && messageIndex < offset + (done.conversation?.messages.length ?? 0) ? messageIndex - offset : undefined;
@@ -996,6 +1006,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const fresh = (next: Pick<Place, 'area' | 'projectId' | 'groupId'>) => {
     const group = next.area === 'chat' ? next.groupId ?? (next === place() ? groupForChat()?.id : undefined) : undefined;
     return group ? newGroupChat(group) : go({ area: next.area, projectId: next.projectId, id: undefined });
+  };
+  let temporaryStart = 0;
+  const temporaryChat = async () => {
+    const start = ++temporaryStart;
+    const generation = historyGeneration;
+    const id = await api.startTemporaryChat();
+    if (generation !== historyGeneration || start !== temporaryStart) { await api.closeChat(id); return; }
+    await go({ area: 'chat', id }, undefined, true);
+    document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus();
   };
   // A session started in a terminal (parity F5) becomes this project's conversation, or opens the one it already is.
   const pickUpSession = async (projectId: string, session: CliSession) => {
@@ -1333,7 +1352,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
-    if (current()) remember(`faber.choice.${current()!.id}`, c);
+    if (current() && !current()!.temporary) remember(`faber.choice.${current()!.id}`, c);
   };
 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
@@ -1356,6 +1375,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const outgoing = aim ? { ...draft, text: t('agent.tellAbout', { title: aim.about }) + draft.text } : draft;
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
+    const privateChat = temporary();
     const chosen = picked();
     const ticket = ++sendTicket;
     // Written while an answer runs, the message is queued or handed to that answer: it is the engine's to keep, so a
@@ -1378,13 +1398,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         choice: chosen,
       });
       const key = `faber.choice.${id}`;
-      remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
+      if (!privateChat) remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       accepted = true;
+      if (privateChat && place() !== at) return;
       if (aim && helperTarget() === aim) dropHelperTarget();
       if (ticket === sendTicket && !alongside) held.set(id, { draft: outgoing });
       const moved = place() === at && id !== opening.id;
       if (moved) await go({ ...at, id });
-      const sent = moved && current()?.id === id ? current() : await api.open(id);
+      const sent = moved && current()?.id === id ? current() : place() === at ? await api.open(id) : undefined;
       if (ticket === sendTicket && !alongside) {
         const reply = sent?.messages.at(-1);
         const tracked = held.get(id) ?? { draft: outgoing };
@@ -1405,8 +1426,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setError(undefined);
     try {
       const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
-      remember(`faber.choice.${id}`, picked);
-      await go({ ...at, id });
+      if (!c.temporary) remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id }, undefined, !!c.temporary);
     } catch (err) {
       fail(err);
     }
@@ -1419,8 +1440,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     setError(undefined);
     try {
       const id = await api.branchHere(c.id, messageId);
-      remember(`faber.choice.${id}`, picked());
-      await go({ ...at, id });
+      if (!c.temporary) remember(`faber.choice.${id}`, picked());
+      await go({ ...at, id }, undefined, !!c.temporary);
     } catch (err) {
       fail(err);
     }
@@ -1605,7 +1626,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
-        draftKey={composerKey()}
+        draftKey={temporary() ? undefined : composerKey()}
+        temporary={temporary()}
         vendors={state().vendors}
         options={options()}
         choice={picked()}
@@ -1950,6 +1972,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 usage={state().usage ?? []}
                 now={clock()}
                 onNew={() => (closeSide(false), void fresh(place()).catch(fail))}
+                onTemporary={() => { closeSide(false); void temporaryChat().catch(fail); }}
                 onArea={switchArea}
                 onProject={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
@@ -2089,6 +2112,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 </div>
               </div>
               <div class="work" classList={{ under: colShown() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
+                <Show when={temporary() && !state().vendors.length}>
+                  <p class="hint" data-temporary-chat role="status">{t('chat.temporaryLine')}</p>
+                </Show>
                 <Show when={groupPage()?.id} keyed fallback={
                 <Show
                   when={needsProject()}
@@ -2127,6 +2153,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                               >
                                 {(c) => (
                                   <Thread
+                                    temporary={current()?.temporary}
                                     conversations={linkedConversations()}
                                     running={items()}
                                     onOpenChild={openSummary}

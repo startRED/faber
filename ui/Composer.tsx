@@ -22,6 +22,7 @@ export interface Draft {
 const EMPTY: Draft = { text: '', images: [], files: [] };
 
 interface Props {
+  temporary?: boolean;
   vendors: Vendor[];
   options: Option[];
   choice: Choice;
@@ -639,6 +640,9 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
+      <Show when={props.temporary}>
+        <p class="hint" data-temporary-chat role="status">{t('chat.temporaryLine')}</p>
+      </Show>
       <Show when={attachmentReadError()}>
         {(message) => <p class="note err composer-attachment-error" id={attachmentReadNotice} role="alert">{message()}</p>}
       </Show>

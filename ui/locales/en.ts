@@ -1,6 +1,10 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
+  "side.newMenu": "New conversation options",
+  "chat.temporary": "Temporary chat",
+  "chat.temporaryLine": "Temporary chat: deleted when you leave it.",
+
   'set.blockedHosts': 'Blocked sites',
   'set.blockedHostsHint': 'Keep these sites out of Faber’s browser.',
   'set.blockedHostsMore': 'Add up to 50 site names, such as bank.example, without https://, a port or a path. Subdomains are blocked too. This applies to Faber’s browser, not to other apps or the AI’s own web tools.',

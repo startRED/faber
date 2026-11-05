@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
+  "side.newMenu": "Options de nouvelle conversation",
+  "chat.temporary": "Conversation temporaire",
+  "chat.temporaryLine": "Conversation temporaire : supprimée quand vous la quittez.",
+
   'set.blockedHosts': 'Sites bloqués',
   'set.blockedHostsHint': 'Empêchez ces sites de s’ouvrir dans le navigateur de Faber.',
   'set.blockedHostsMore': 'Ajoutez jusqu’à 50 noms de sites, comme banque.example, sans https://, port ni chemin. Leurs sous-domaines sont aussi bloqués. Ce réglage concerne le navigateur de Faber, pas les autres applications ni les outils web de l’IA.',

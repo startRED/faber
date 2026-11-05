@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "new": {
+      "en": "You can start a temporary chat from New conversation; it stays out of history and is deleted when you leave it.",
+      "pt-BR": "Você pode abrir uma conversa temporária em Nova conversa; ela fica fora do histórico e é apagada quando você sai dela.",
+      "es": "Puedes abrir una conversación temporal desde Nueva conversación; no aparece en el historial y se borra cuando sales de ella.",
+      "fr": "Vous pouvez ouvrir une conversation temporaire depuis Nouvelle conversation ; elle reste hors de l’historique et disparaît quand vous la quittez.",
+      "de": "Über Neues Gespräch können Sie ein temporäres Gespräch öffnen; es erscheint nicht im Verlauf und wird beim Verlassen gelöscht."
+    }
+  }
+}

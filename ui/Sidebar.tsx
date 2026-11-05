@@ -104,6 +104,7 @@ interface Props {
   now: number;
   /** A new conversation in the area and project the user is in. */
   onNew: () => void;
+  onTemporary?: () => void;
   onClose?: () => void;
   onArea: (area: Area) => void;
   /** The user picked a project: its row is selected and no conversation is open. */
@@ -433,6 +434,12 @@ export function Sidebar(props: Props) {
           <span>{t('side.new')}</span>
           <kbd>{keysOf('new')}</kbd>
         </button>
+        <Show when={inChat() && !props.catalogOpen && props.onTemporary}>
+          <button class="iconbtn" aria-label={t('side.newMenu')} aria-haspopup="menu" onClick={(e) => openMenu(e, [
+            { id: 'new-chat', label: t('side.new'), run: props.onNew },
+            { id: 'temporary-chat', label: t('chat.temporary'), run: () => props.onTemporary?.() },
+          ], e.currentTarget)}><Icon name="down" /></button>
+        </Show>
         <Show when={props.onClose}>
           <button class="iconbtn side-close" aria-label={t('side.hide')} title={t('side.hide')} onClick={() => props.onClose?.()}>
             <Icon name="close" />

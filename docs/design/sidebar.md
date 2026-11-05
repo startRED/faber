@@ -83,3 +83,7 @@ remain usable from the keyboard in both areas.
 ## Damaged conversations
 
 An unreadable conversation stays in the sidebar as one quiet line, “This conversation could not be read.” Show the file reveals its preserved copy. Remove changes to “Remove the damaged copy?” and needs a separate activation; Escape or leaving the row cancels. A failed removal keeps the row. Both buttons remain visible and wrap within the sidebar, including its narrow-window overlay, without new motion. The original record stays untouched; dismissal lasts for the app run or until that record changes. Its unknown area falls back to Chat. It is absent from the homes’ pick-up lists and command search.
+
+## Temporary Chat
+
+In Chat, the quiet arrow beside New conversation opens the existing Faber menu with New conversation and Temporary chat. The main button and Ctrl+N still start an ordinary chat. Projects and Catalog have no temporary entry. The menu uses the existing keyboard, Escape, focus return and reduced-motion behavior. Temporary chats have no sidebar row or search hit. Leaving for a new conversation, group or Projects calls the engine close command; opening another conversation uses the engine’s existing cleanup. A refused close leaves the conversation and draft visible with the usual error line.

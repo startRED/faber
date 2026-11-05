@@ -69,9 +69,9 @@ export function QuickQuestion(props: {
   // can come back then, and the cleanup runs then).
   let shown: string | undefined;
   // A draft belongs to the conversation it was typed for, even when an answer to it comes back after a switch.
-  const write = (value: string, conversation = id()) => {
+  const write = (value: string, conversation = id(), temporary = props.conversation?.temporary) => {
     if (!conversation) return;
-    keep(`aside.${conversation}`, value);
+    if (!temporary) keep(`aside.${conversation}`, value);
     if (conversation === shown) setText(value);
   };
   createEffect(on(id, (conversation, previous) => {
@@ -79,7 +79,7 @@ export function QuickQuestion(props: {
     if (previous) release(`aside.${previous}`);
     shown = conversation;
     // The draft of this conversation's side chat comes back, as the main box's does.
-    setText(conversation ? kept(`aside.${conversation}`) : '');
+    setText(conversation && !props.conversation?.temporary ? kept(`aside.${conversation}`) : '');
     if (!conversation) return;
     const seen = heard.get(conversation) ?? 0;
     void api.asides(conversation).then((list) => {
@@ -100,15 +100,16 @@ export function QuickQuestion(props: {
   // ever replace its draft.
   const ask = async (question: string, from: 'box' | 'btw' | 'suggestion') => {
     const conversation = id();
+    const temporary = props.conversation?.temporary;
     if (!conversation || !question.trim()) return;
     setError('');
     pinned = true;
     if (from !== 'box') box?.focus();
     try {
       await api.askAside(conversation, question, model() || undefined);
-      if (from === 'box') write('', conversation);
+      if (from === 'box') write('', conversation, temporary);
     } catch (err) {
-      if (from === 'box' || (from === 'btw' && !kept(`aside.${conversation}`).trim())) write(question, conversation);
+      if (from === 'box' || (from === 'btw' && !(temporary ? text() : kept(`aside.${conversation}`)).trim())) write(question, conversation, temporary);
       if (conversation === shown) setError(fromEngine(errorText(err)));
     }
   };
