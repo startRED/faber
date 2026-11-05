@@ -235,6 +235,10 @@ pub trait Shell: Send + Sync + 'static {
     fn update_status(&self) -> Value {
         json!({ "phase": "none" })
     }
+    /// "Check for updates now": looks once, downloads what it finds, and answers where the update is.
+    fn update_check(&self) -> BoxFuture<'_, Res<Value>> {
+        Box::pin(async { Err(NO_WINDOW.into()) })
+    }
     /// "Update ready, restart": installs the kept update now.
     fn update_restart(&self) -> BoxFuture<'_, Res<()>> {
         Box::pin(async { Err(NO_WINDOW.into()) })

@@ -728,6 +728,21 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// "Check for updates now": one look outside the six-hour clock. Nothing happens while a look, a download or an install
+/// already runs, or an update is already kept.
+pub(crate) async fn check_now(app: AppHandle) -> Result<Status, String> {
+    let Some(install_dir) = install_dir(&app) else { return Err("error.update.none".into()) };
+    if lock(&app.state::<Faber>().update).is_none() && status(&app).phase == Phase::None {
+        set_stage(&app, Phase::Checking);
+        let ok = fetch(&Live::new(&app, &install_dir, Reopen::Tray), LATER_DOWNLOAD).await;
+        set_stage(&app, Phase::None);
+        if !ok {
+            return Err("error.update.checkFailed".into());
+        }
+    }
+    Ok(status(&app))
+}
+
 pub(crate) fn keep_updated(app: &AppHandle) {
     let Some(install_dir) = install_dir(app) else {
         log(&app.state::<Faber>().data_dir, "no-safe-folder", "Faber stays on this version");

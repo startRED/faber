@@ -1,0 +1,10 @@
+{
+  "notes": { "new": {
+    "en": "Settings now has a button to look for a new version of Faber right away.",
+    "pt-BR": "Nas Configurações há agora um botão para procurar uma versão nova do Faber na hora.",
+    "es": "Los Ajustes tienen ahora un botón para buscar una versión nueva de Faber al instante.",
+    "fr": "Les Réglages ont maintenant un bouton pour chercher tout de suite une nouvelle version de Faber.",
+    "de": "In den Einstellungen gibt es jetzt eine Schaltfläche, um sofort nach einer neuen Version von Faber zu suchen."
+  } },
+  "decisions": ["| R-next | 2026-11-05 | Settings > Updates has \"Check now\": one look outside the six-hour clock through the new `update_check` command (the same check and download the clock does; nothing runs while a look, download or install already does). Closing the window while something runs sends one tray note that Faber keeps working. No new process or timer. | AI (Erick delegou) |"]
+}

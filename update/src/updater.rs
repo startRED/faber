@@ -370,6 +370,20 @@ impl Updater {
         tokio::spawn(keep_updated(self.0.clone()));
     }
 
+    /// "Check for updates now": one look outside the six-hour clock. Nothing happens while a look, a download or an install
+    /// already runs, or an update is already kept.
+    pub async fn check_now(&self) -> Result<Status, String> {
+        if lock(&self.0.ready).is_none() && self.0.status().phase == Phase::None {
+            self.0.set_stage(Phase::Checking);
+            let ok = fetch(&Live::new(&self.0, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await;
+            self.0.set_stage(Phase::None);
+            if !ok {
+                return Err("error.update.checkFailed".into());
+            }
+        }
+        Ok(self.0.status())
+    }
+
     /// "Update ready, restart": installs the kept update now, with the window as it is. Work that runs is cut, noted first so
     /// it goes on after the restart.
     pub async fn restart_now(&self) -> Result<(), String> {
