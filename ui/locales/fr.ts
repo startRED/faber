@@ -1,7 +1,7 @@
 import type { Messages } from './en.ts';
 
 export const fr: Messages = {
-  "side.newMenu": "Options de nouvelle conversation",
+  "side.newMenu": "Options de conversation",
   "chat.temporary": "Conversation temporaire",
   "chat.temporaryLine": "Conversation temporaire : supprimée quand vous la quittez.",
 

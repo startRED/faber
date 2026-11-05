@@ -1,7 +1,7 @@
 // Every text on screen. Other languages are written by hand from this file, never machine-translated;
 // a new language needs a native speaker to review it.
 export const en = {
-  "side.newMenu": "New conversation options",
+  "side.newMenu": "Conversation options",
   "chat.temporary": "Temporary chat",
   "chat.temporaryLine": "Temporary chat: deleted when you leave it.",
 

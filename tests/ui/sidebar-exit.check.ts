@@ -116,6 +116,19 @@ async function startTemporary(root: HTMLElement) {
   equal(root.querySelector('[data-temporary-chat]')?.textContent, t('chat.temporaryLine'));
 }
 
+check('temporary chat: menu trigger has a distinct accessible name in every language', async () => {
+  await temporaryChatScreen(['codex'], async (root) => {
+    for (const language of LANGUAGES) {
+      useLanguage(language.code);
+      await frames();
+      const buttons = [...root.querySelectorAll<HTMLButtonElement>('.side-start button')];
+      const matches = buttons.filter((button) => (button.getAttribute('aria-label') ?? button.textContent ?? '').toLocaleLowerCase().includes(t('side.new').toLocaleLowerCase()));
+      equal(matches.length, 1, language.code + ': only the primary button matches New conversation');
+      equal(root.querySelector('[aria-haspopup="menu"]')?.getAttribute('aria-label'), t('side.newMenu'));
+    }
+  });
+});
+
 check('temporary chat: starts from the menu, keeps private drafts out of storage and is deleted on leaving', async () => {
   await temporaryChatScreen(['codex'], async (root, records, refuse) => {
     localStorage.setItem('faber.unsent.ordinary-temp-proof', 'ORDINARY-SAVED-PROOF');
