@@ -9,6 +9,12 @@ import { check, deepEqual, equal, ok } from './check.ts';
 
 // Task 017: the agent's plan under the newest reply, and the closing box of a task.
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The plan starts closed as one line; the checks that read its steps open it first, as a person would. */
+const openPlan = async (root: HTMLElement) => {
+  await settle();
+  root.querySelector<HTMLButtonElement>('.plan-head')!.click();
+  await settle();
+};
 const mount = (view: () => unknown) => {
   const root = document.createElement('div');
   document.body.append(root);
@@ -22,6 +28,7 @@ check('plan: the contract shows two localized lines and disappears with an older
   const before = lang();
   const view = mount(() => createComponent(PlanList, { get plan() { return plan(); } }));
   try {
+    await openPlan(view.root);
     for (const code of ['en', 'pt-BR', 'es', 'fr', 'de']) {
       useLanguage(code);
       await settle();
@@ -58,6 +65,7 @@ check('plan: done steps are checked, the current one is marked, and the count fo
   const [p, setP] = createSignal(plan(1));
   const view = mount(() => createComponent(PlanList, { get plan() { return p(); } }));
   try {
+    await openPlan(view.root);
     await settle();
     const steps = [...view.root.querySelectorAll('.plan li')];
     deepEqual(steps.map((s) => s.className), ['done', 'active', 'pending']);
@@ -84,6 +92,7 @@ check('plan: a done step shows evidence beside a done step only', async () => {
   };
   const view = mount(() => createComponent(PlanList, { plan }));
   try {
+    await openPlan(view.root);
     await settle();
     const steps = [...view.root.querySelectorAll<HTMLLIElement>('.plan li')];
     equal(steps[0]!.querySelector('.now')!.textContent, ' · Read ui/Plan.tsx lines 1-42.');
@@ -110,6 +119,7 @@ check('plan: the economy line shows only once the estimate is passed, and fits 7
   const view = mount(() => createComponent(PlanList, { get plan() { return p(); } }));
   view.root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
   try {
+    await openPlan(view.root);
     await settle();
     equal(view.root.querySelector('.plan .note'), null, 'an estimate not passed says nothing');
     setP(plan());
@@ -189,7 +199,7 @@ check('plan: a working reply shows the current thinking headline after its words
   };
   const view = mount(() => createComponent(Thread, { conversationId: 'c1', messages, from: 0, options: [], onBranch: () => {}, plan }));
   try {
-    await settle();
+    await openPlan(view.root);
     equal(view.root.querySelector('.plan li.active .now')!.textContent, ' · Auditing failing assertions');
     await settle(1_600);
     view.root.querySelector<HTMLButtonElement>('.steps-head')!.click();
@@ -238,6 +248,7 @@ check('plan: a step another conversation does names it with where it stands, and
   );
   view.root.style.width = '720px';
   try {
+    await openPlan(view.root);
     await settle();
     const steps = [...view.root.querySelectorAll<HTMLElement>('.plan li')];
     const links = steps.map((s) => s.querySelector<HTMLButtonElement>('.member button'));
@@ -250,6 +261,38 @@ check('plan: a step another conversation does names it with where it stands, and
     ok(member.top >= text.bottom - 1 && member.right <= view.root.getBoundingClientRect().right + 0.5, 'under the step, inside the column');
   } finally {
     useLanguage('en');
+    view.done();
+  }
+});
+
+check('plan: it starts closed as one line with the count and the step under way, and a click shows every step', async () => {
+  const plan: Plan = {
+    at: 1,
+    steps: [
+      { text: 'Read the page', state: 'done', evidence: 'Read ui/Plan.tsx lines 1-42.' },
+      { text: 'Fix the redirect', state: 'active' },
+      { text: 'Check it works', state: 'pending' },
+    ],
+    contract: { proof: 'Run checks' },
+  };
+  const view = mount(() => createComponent(PlanList, { plan }));
+  view.root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  try {
+    await settle();
+    const head = view.root.querySelector<HTMLButtonElement>('.plan-head')!;
+    equal(head.getAttribute('aria-expanded'), 'false', 'closed at first');
+    equal(view.root.querySelectorAll('.plan li').length, 0, 'no step list while closed');
+    equal(view.root.querySelector('.plan-contract'), null, 'no contract while closed');
+    equal(head.querySelector('.num')!.textContent, t('plan.count', { done: 1, total: 3 }));
+    equal(head.querySelector('.plan-now')!.textContent, 'Fix the redirect', 'the step under way stands beside the count');
+    ok(view.root.querySelector<HTMLElement>('.plan')!.getBoundingClientRect().height < 40, 'one line');
+    head.click();
+    await settle();
+    equal(head.getAttribute('aria-expanded'), 'true');
+    equal(view.root.querySelectorAll('.plan li').length, 3, 'every step once open');
+    equal(head.querySelector('.plan-now'), null, 'the list says the step under way once open');
+    ok(view.root.querySelector('.plan-contract'), 'the contract shows once open');
+  } finally {
     view.done();
   }
 });

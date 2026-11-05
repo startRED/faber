@@ -1,5 +1,7 @@
 import { createResource, createSignal, For, onCleanup, Show } from 'solid-js';
 import { api, type Message, type Summary } from './api.ts';
+import { Collapse } from './controls.tsx';
+import { Icon } from './Glyphs.tsx';
 import { resultsLine } from './results.ts';
 import { t } from './i18n.ts';
 
@@ -23,6 +25,7 @@ export function ResultsNote(props: { conversationId: string; message: Message })
 }
 
 export function ProjectResults(props: { projectId: string; summaries: Summary[] }) {
+  const [each, setEach] = createSignal(false);
   const [view] = createResource(
     // Read again only when a conversation of this project gained a turn or a cost, never for another project's news.
     () => `${props.projectId}|${props.summaries.filter((s) => s.projectId === props.projectId).map((s) => `${s.id}:${s.results?.cost.turns ?? 0}:${s.results?.cost.usd ?? 0}`).join(',')}`,
@@ -32,9 +35,15 @@ export function ProjectResults(props: { projectId: string; summaries: Summary[] 
     <section class="resume">
       <h2>{t('results.title')}</h2>
       <p class="note">{t('results.total')}: {resultsLine(value().total)}</p>
-      <For each={value().conversations.filter((row) => row.results.cost.turns).sort((a, b) => b.results.cost.usd - a.results.cost.usd)}>{(row) =>
-        <p class="note"><span>{row.title}</span>: {resultsLine(row.results)}</p>
-      }</For>
+      {/* Each conversation's line waits behind one quiet button: the total is what a person reads on the start screen. */}
+      <button type="button" class="results-each" aria-expanded={each()} onClick={() => setEach(!each())}>
+        <Icon name={each() ? 'down' : 'right'} small />{t('results.each')}
+      </button>
+      <Collapse open={each()}>
+        <For each={value().conversations.filter((row) => row.results.cost.turns).sort((a, b) => b.results.cost.usd - a.results.cost.usd)}>{(row) =>
+          <p class="note"><span>{row.title}</span>: {resultsLine(row.results)}</p>
+        }</For>
+      </Collapse>
     </section>
   }</Show>;
 }
