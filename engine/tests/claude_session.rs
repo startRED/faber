@@ -1785,6 +1785,11 @@ fn the_catalog_s_servers_join_faber_s_own_in_one_config_only_in_full_access() {
     };
     let config = |area: Area, permissions: Permissions| {
         let args = claude_args(&ClaudeLaunch { permissions, tools: tools.clone(), verify: true, ..launch(area) });
+        if permissions == Permissions::FullAccess {
+            let settings = args.iter().position(|a| a == "--settings").unwrap();
+            let settings: serde_json::Value = serde_json::from_str(&args[settings + 1]).unwrap();
+            assert_eq!(settings["env"]["CLAUDE_CODE_MCP_ALLOWLIST_ENV"], "1", "user settings cannot re-enable shell inheritance");
+        }
         let at = args.iter().position(|a| a == "--mcp-config");
         assert_eq!(args.iter().filter(|a| *a == "--mcp-config").count(), at.map_or(0, |_| 1), "one config at most: {args:?}");
         at.map(|i| serde_json::from_str::<serde_json::Value>(&args[i + 1]).unwrap())

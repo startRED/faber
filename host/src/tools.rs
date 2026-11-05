@@ -4,6 +4,40 @@ use crate::{Host, Res, check_revoked, request_flag};
 use faber_engine::tools::{InstallError, Store, catalog, find};
 use serde::Serialize;
 
+fn install_error(why: InstallError) -> String {
+    match why {
+        InstallError::Node => "error.tools.node".into(),
+        InstallError::Failed(detail)
+            if matches!(
+                detail.as_str(),
+                "error.tools.integrity"
+                    | "error.tools.scripts"
+                    | "error.tools.native"
+                    | "error.tools.host"
+                    | "error.tools.size"
+                    | "error.tools.tree"
+            ) =>
+        {
+            detail
+        }
+        _ => "error.tools.install".into(),
+    }
+}
+
+#[cfg(test)]
+mod install_errors {
+    use super::*;
+
+    #[test]
+    fn checked_package_refusals_reach_the_screen_as_localized_keys() {
+        for key in ["integrity", "scripts", "native", "host", "size", "tree"] {
+            let key = format!("error.tools.{key}");
+            assert_eq!(install_error(InstallError::Failed(key.clone())), key);
+        }
+        assert_eq!(install_error(InstallError::Failed("untrusted archive detail".into())), "error.tools.install");
+    }
+}
+
 /// Reads only known skill directories and the plugin installation manifest; no CLI is started.
 pub(crate) async fn tools_inventory(h: &Host, project_id: Option<String>) -> Res<Vec<faber_engine::tool_inventory::List>> {
     let engine = h.engine.clone();
@@ -113,13 +147,9 @@ pub(crate) async fn tools_install(h: &Host, id: String) -> Res<()> {
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     // The project agent's install comes through the same function: the Node check, host list, digest and caps are one.
     check_revoked(request_flag().as_deref())?;
-    faber_engine::tools::install_checked(&store, &item, source.as_deref()).await.map_err(|why| match why {
-        InstallError::Node => "error.tools.node".to_string(),
-        InstallError::Held(_) => "error.tools.install".to_string(),
-        InstallError::Failed(detail) => {
-            eprintln!("tools: install of {id} failed: {detail}");
-            "error.tools.install".to_string()
-        }
+    faber_engine::tools::install_checked(&store, &item, source.as_deref()).await.map_err(|why| {
+        eprintln!("tools: install of {id} failed: {why:?}");
+        install_error(why)
     })
 }
 
@@ -150,10 +180,7 @@ pub(crate) async fn tools_replace(h: &Host, plan: faber_engine::tools::Replaceme
     let store = tokio::task::spawn_blocking(move || Store::new(&data)).await.map_err(|_| "error.tools.install".to_string())?;
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     check_revoked(request_flag().as_deref())?;
-    faber_engine::tools::replace_checked(&store, &plan, source.as_deref()).await.map_err(|why| match why {
-        InstallError::Node => "error.tools.node".to_string(),
-        InstallError::Held(_) | InstallError::Failed(_) => "error.tools.install".to_string(),
-    })
+    faber_engine::tools::replace_checked(&store, &plan, source.as_deref()).await.map_err(install_error)
 }
 
 pub(crate) async fn tools_remove(h: &Host, id: String) -> Res<()> {

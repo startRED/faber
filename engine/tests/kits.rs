@@ -418,16 +418,162 @@ fn a_helper_task_gets_its_own_kit_and_disabled_or_removed_items_never_enter_a_fr
     assert!(!path.exists(), "ending the last session releases its copy");
 }
 
-fn install_server(store: &Store, item: &Item, root: &Path) {
-    let archive = root.join(format!("{}.tgz", item.id));
-    let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(std::fs::File::create(&archive).unwrap(), flate2::Compression::fast()));
-    let body = b"fixture server";
-    let mut header = tar::Header::new_gnu();
-    header.set_size(body.len() as u64);
-    header.set_mode(0o644);
-    tar.append_data(&mut header, format!("package/{}", item.server.as_ref().unwrap().entry), &body[..]).unwrap();
-    tar.into_inner().unwrap().finish().unwrap();
-    store.install_from(item, &archive).unwrap();
+fn server_fixture(item: &mut Item, root: &Path) -> (std::path::PathBuf, std::collections::BTreeMap<String, std::path::PathBuf>) {
+    use base64::Engine;
+    use sha2::{Digest, Sha512};
+    let root = root.join(&item.id);
+    let source = root.join("source");
+    let server = item.server.as_mut().unwrap();
+    let mut packages = std::collections::BTreeMap::new();
+    let mut root_archive = None;
+    let count = server.tree.len().max(1);
+    for index in 0..count {
+        let package = server.tree.get(index);
+        let path = package.map_or("", |package| package.path.as_str());
+        let entry = if path.is_empty() { server.entry.as_str() } else { "run.js" };
+        let mut files = vec![(entry, b"fixture server".to_vec())];
+        if let Some(package) = package {
+            files.push((
+                "package.json",
+                serde_json::to_vec(&serde_json::json!({"name": package.package, "version": package.version})).unwrap(),
+            ));
+        }
+        let archive = root.join(format!("{index}.tgz"));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut tar =
+            tar::Builder::new(flate2::write::GzEncoder::new(std::fs::File::create(&archive).unwrap(), flate2::Compression::fast()));
+        for (file, body) in files {
+            let out = source.join(path).join(file);
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::fs::write(out, &body).unwrap();
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            tar.append_data(&mut header, format!("package/{file}"), body.as_slice()).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap();
+        if path.is_empty() {
+            root_archive = Some(archive.clone());
+        } else {
+            packages.insert(path.to_owned(), archive.clone());
+        }
+        if let Some(package) = server.tree.get_mut(index) {
+            package.integrity =
+                format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(Sha512::digest(std::fs::read(&archive).unwrap())));
+        }
+    }
+    item.digest = digest(&source).unwrap();
+    (root_archive.unwrap(), packages)
+}
+
+#[tokio::test]
+async fn a_checked_two_level_server_tree_starts_through_both_fake_native_sessions_and_removes_together() {
+    let task = "Benchmark browser performance with devtools";
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let (item, archives) = crate::tools::pinned_tree_fixture(Value::Null, &[]);
+        let source = crate::tools::tree_source(archives);
+        let dir = tempfile::tempdir().unwrap();
+        let node = dir.path().join("fixture-node");
+        let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]).with_node(node.clone());
+        faber_engine::tools::install(&store, &item, Some(&source.origin)).await.unwrap();
+        let (kit, report) = store.kit_for(vendor, task, Some(dir.path()), Area::Project, Permissions::FullAccess, &[]);
+        assert!(report.ids.contains(&item.id));
+        assert_eq!(kit.servers.len(), 1);
+        let launch = kit.servers[0].clone();
+        assert_eq!(launch.command, node);
+        let root = Path::new(&launch.args[0]).parent().unwrap();
+        assert_eq!(digest(root).unwrap(), item.digest);
+        assert!(root.join("node_modules/middle/node_modules/@scope/leaf/run.js").is_file());
+        let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+        assert!(damaged.is_empty() && !io_failed);
+        let (args, messages) = replay(vendor, Area::Project, Permissions::FullAccess, checked, dir.path(), false, task).await;
+        let config = match vendor {
+            Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
+            Vendor::Claude => serde_json::from_str::<Value>(&args.windows(2).find(|pair| pair[0] == "--mcp-config").unwrap()[1]).unwrap()
+                ["mcpServers"]["faber-measure"].clone(),
+            Vendor::Codex => messages.iter().find(|message| message["method"] == "thread/start").unwrap()["params"]["config"]
+                ["mcp_servers.faber-measure"].clone(),
+        };
+        assert_eq!(config["command"], serde_json::json!(launch.command));
+        assert_eq!(config["args"], serde_json::json!(launch.args));
+        store.remove(&item.id).unwrap();
+        assert!(store.installed().is_empty());
+        assert!(store.kit_for(vendor, task, Some(dir.path()), Area::Project, Permissions::FullAccess, &[]).0.servers.is_empty());
+        assert!(root.join("node_modules/middle/node_modules/@scope/leaf/run.js").is_file(), "the active session retains its checked tree");
+    }
+}
+
+#[tokio::test]
+async fn each_admitted_server_is_picked_for_its_task_and_keeps_its_reviewed_session_boundaries() {
+    for (id, task, chat_safe) in [
+        ("chrome-devtools", "Benchmark browser performance with devtools", false),
+        ("playwright-mcp", "Automate browser tests with Playwright", false),
+        ("sequential-thinking", "Plan the project step by step with sequential thinking", true),
+        ("context7", "Look up library docs with Context7", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut item = faber_engine::tools::find(id).expect("each audited server is listed").clone();
+        assert_eq!(item.chat_safe, chat_safe, "{id}: the explicit review determines Chat access");
+        let (archive, packages) = server_fixture(&mut item, dir.path());
+        let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]).with_node(dir.path().join("fixture-node"));
+        store.install_sources(&item, &archive, &packages).unwrap();
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for area in [Area::Chat, Area::Project] {
+                for permissions in [
+                    Permissions::FullAccess,
+                    Permissions::Ask,
+                    Permissions::AcceptEdits,
+                    Permissions::Plan,
+                    Permissions::Auto,
+                    Permissions::Isolated,
+                ] {
+                    let allowed = permissions == Permissions::FullAccess && (area == Area::Project || chat_safe);
+                    let (kit, report) = store.kit_for(vendor, task, Some(dir.path()), area, permissions, &[]);
+                    assert_eq!(report.ids.contains(&item.id), allowed, "{id}: {vendor:?} {area:?} {permissions:?}");
+                    assert_eq!(kit.servers.len(), usize::from(allowed), "{id}: {vendor:?} {area:?} {permissions:?}");
+                    if allowed {
+                        let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+                        assert!(damaged.is_empty() && !io_failed);
+                        let name = format!("faber-{id}");
+                        let launch = checked.servers[0].clone();
+                        let (args, messages) = replay(vendor, area, permissions, checked, dir.path(), false, task).await;
+                        let config = match vendor {
+                            Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
+                            Vendor::Claude => {
+                                serde_json::from_str::<Value>(&args.windows(2).find(|pair| pair[0] == "--mcp-config").unwrap()[1]).unwrap()
+                                    ["mcpServers"][&name]
+                                    .clone()
+                            }
+                            Vendor::Codex => {
+                                messages.iter().find(|message| message["method"] == "thread/start").unwrap()["params"]["config"]
+                                    [format!("mcp_servers.{name}")]
+                                .clone()
+                            }
+                        };
+                        assert_eq!(config["command"], serde_json::json!(launch.command), "{id}: {vendor:?} {area:?}");
+                        assert_eq!(config["args"], serde_json::json!(launch.args), "{id}: {vendor:?} {area:?}");
+                    }
+                }
+            }
+            assert!(
+                store
+                    .kit_for(vendor, task, Some(dir.path()), Area::Project, Permissions::FullAccess, &[format!("faber-{id}")])
+                    .0
+                    .servers
+                    .is_empty(),
+                "{id}: a project switch wins over task selection"
+            );
+        }
+        store.set_enabled(id, false).unwrap();
+        for area in [Area::Chat, Area::Project] {
+            assert!(
+                store.kit(task, Some(dir.path()), area, Permissions::FullAccess, &[]).0.servers.is_empty(),
+                "{id}: an off item reaches no session"
+            );
+        }
+        store.remove(id).unwrap();
+        assert!(store.installed().is_empty());
+    }
 }
 
 #[tokio::test]
@@ -435,17 +581,13 @@ async fn the_kept_server_installs_and_reaches_both_native_sessions_until_switche
     let task = "Benchmark browser performance with devtools";
     for vendor in [Vendor::Claude, Vendor::Codex] {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("source");
         let mut item = faber_engine::tools::find("chrome-devtools").unwrap().clone();
+        // Keep the shipped tree shape and launch metadata; only bytes and their pins belong to this inert fixture.
+        let (archive, packages) = server_fixture(&mut item, dir.path());
         let server = item.server.as_ref().unwrap().clone();
-        let script = source.join(&server.entry);
-        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
-        std::fs::write(&script, b"fixture server").unwrap();
-        // Keep the shipped metadata; only package bytes and their pin belong to this inert fixture.
-        item.digest = digest(&source).unwrap();
         let node = dir.path().join("fixture-node");
         let store = Store::with_catalog(&dir.path().join("data"), vec![item.clone()]).with_node(node.clone());
-        install_server(&store, &item, dir.path());
+        store.install_sources(&item, &archive, &packages).unwrap();
         assert_eq!(store.installed().get(&item.id), Some(&item.commit));
         for state in ["installed", "off", "on", "removed"] {
             match state {
@@ -483,6 +625,7 @@ async fn the_kept_server_installs_and_reaches_both_native_sessions_until_switche
                 let mut expected = serde_json::json!({"command": launch.command, "args": launch.args, "env": launch.env});
                 if vendor == Vendor::Codex {
                     expected["enabled"] = true.into();
+                    expected["env_vars"] = serde_json::json!([]);
                 } else {
                     expected["type"] = "stdio".into();
                 }
@@ -498,8 +641,6 @@ async fn the_kept_server_installs_and_reaches_both_native_sessions_until_switche
 #[test]
 fn chat_servers_require_an_explicit_review_and_never_cross_guarded_modes_or_project_switches() {
     let dir = tempfile::tempdir().unwrap();
-    let content = tempfile::tempdir().unwrap();
-    std::fs::write(content.path().join("run.js"), b"fixture server").unwrap();
     let server = |id: &str, chat_safe| Item {
         id: id.into(),
         job: "measure".into(),
@@ -507,16 +648,24 @@ fn chat_servers_require_an_explicit_review_and_never_cross_guarded_modes_or_proj
         repo: "fixture/server".into(),
         commit: "1234".into(),
         path: String::new(),
-        digest: digest(content.path()).unwrap(),
-        server: Some(Server { package: id.into(), version: "1.0.0".into(), entry: "run.js".into(), args: vec![], env: Default::default() }),
+        digest: String::new(),
+        server: Some(Server {
+            package: id.into(),
+            version: "1.0.0".into(),
+            entry: "run.js".into(),
+            args: vec![],
+            env: Default::default(),
+            tree: vec![],
+        }),
         chat_safe,
         cli_name: None,
         tier: Default::default(),
     };
-    let items = vec![server("reviewed", true), server("not-reviewed", false)];
+    let mut items = vec![server("reviewed", true), server("not-reviewed", false)];
+    let fixtures = items.iter_mut().map(|item| server_fixture(item, dir.path())).collect::<Vec<_>>();
     let store = Store::with_catalog(&dir.path().join("data"), items.clone()).with_node("node".into());
-    for item in &items {
-        install_server(&store, item, dir.path());
+    for (item, (archive, packages)) in items.iter().zip(&fixtures) {
+        store.install_sources(item, archive, packages).unwrap();
     }
     let task = "Benchmark browser performance with devtools";
     for area in [Area::Chat, Area::Project] {

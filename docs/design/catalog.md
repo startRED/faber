@@ -14,8 +14,8 @@ controls out of Settings > Projects. It is not a work area: no conversation, com
 
 Search is the main action; the quiet Select all shown button follows the results, leaving the search row to finding tools. Search is focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
 shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons; Plugins joins them only when the
-catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 114 skills, one unchanged
-server and zero plugins; the twenty rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.
+catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 114 skills, four
+servers and zero plugins; the twenty rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.
 Its ten recommended-tier entries include the original debugging, test-driven development, ponytail and interface
 design entry points; area-specific tools and ponytail-debt stay under their job groups. Its picks move to the front before paging, so
 recommendations outside the first source page are reachable and no item repeats on a later page. The ten plain groups
@@ -178,3 +178,8 @@ new catalog preparation, while unknown or changed recovery files remain preserve
 Replacement hashes stream through a 64 KiB buffer, with the existing 64 MiB tool-file cap, and run during explicit
 capture/publication and the preparation worker. Ready-cache reads gain no filesystem scan. No new timer, process or
 persistent screen is added. Runtime memory and processor costs still require the queued commit's measurements.
+
+Pinned runtime trees add three server cards through the existing search, paging, detail, licence and install controls.
+Their hand-written descriptions disclose Chrome or Node.js 24 requirements; rejection reasons use the ordinary retry
+notice in all five languages. Context7 and step-by-step thinking follow the same Full access boundary in Chat and
+Projects; browser servers remain Projects-only. No layout, focus, motion, empty-state or 720 px rule changes.

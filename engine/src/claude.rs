@@ -314,6 +314,11 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let aside = launch.helper == crate::helper::Helper::Aside;
     // The caller verifies the used folders once, immediately before this launch.
     let tools = &launch.tools;
+    let servers: Vec<_> = tools
+        .servers
+        .iter()
+        .filter(|s| offers_servers(launch.area, launch.permissions) && !tools.disabled_servers.contains(&s.name))
+        .collect();
     if aside {
         // A quick question on the side (R250): only reads in the working folder, none of the person's integrations, and no
         // history: a fork of the conversation's session leaves that session as it was. Every read asks, so the driver checks it with
@@ -405,6 +410,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             Permissions::FullAccess => {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
                 settings["permissions"] = json!({ "deny": deny() });
+                if !servers.is_empty() {
+                    // Scope the process-wide allowlist to catalog sessions; inline settings beat user env overrides.
+                    settings["env"] = json!({ "CLAUDE_CODE_MCP_ALLOWLIST_ENV": "1" });
+                }
             }
             // Every guarded mode carries the same credential denies as full access: a person's own rule or an approval card
             // must not open them.
@@ -457,11 +466,6 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push(words);
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
-        let servers: Vec<_> = tools
-            .servers
-            .iter()
-            .filter(|s| offers_servers(launch.area, launch.permissions) && !tools.disabled_servers.contains(&s.name))
-            .collect();
         if !servers.is_empty() {
             let mut config: Value =
                 serde_json::from_str(if mcp_tools(launch).any() { crate::helper::CLAUDE_MCP_CONFIG } else { r#"{"mcpServers":{}}"# })

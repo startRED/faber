@@ -1381,7 +1381,7 @@ impl Store {
             serde_json::to_vec(&SnapshotState { items: picked.iter().map(|item| (*item).clone()).collect(), plugins: plugins.to_vec() })
                 .map_err(io::Error::other)?;
         let mut hash = Sha256::new();
-        hash.update(b"faber-catalog-snapshot-v4\0");
+        hash.update(b"faber-catalog-snapshot-v5\0");
         hash.update(&state);
         let key: [u8; 16] = hash.finalize()[..16].try_into().map_err(io::Error::other)?;
         let parent = self.root.join("kits");
@@ -1413,7 +1413,7 @@ impl Store {
                 let mut remaining = SNAPSHOT_LIMIT;
                 for item in &picked {
                     let target = staging.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
-                    copy_checked(&self.resource_source(item), &target, &mut remaining)?;
+                    copy_checked(&self.resource_source(item), &target, &mut remaining, item.server.is_none())?;
                     if digest(&target)? != item.digest {
                         if source_digest(&self.root, item)? != item.digest {
                             return Err(io::Error::other(InvalidItem(item.id.clone())));
@@ -1629,7 +1629,7 @@ fn eligible(item: &Item, area: Area, permissions: Permissions, disabled_servers:
                 && !disabled_servers.iter().any(|name| name == &item.id || name == &format!("faber-{}", item.id))))
 }
 
-fn copy_checked(source: &Path, dest: &Path, remaining: &mut u64) -> io::Result<()> {
+fn copy_checked(source: &Path, dest: &Path, remaining: &mut u64, hardlinks: bool) -> io::Result<()> {
     if !std::fs::symlink_metadata(source)?.is_dir() {
         return Err(io::Error::other("Not a plain tool folder"));
     }
@@ -1644,11 +1644,12 @@ fn copy_checked(source: &Path, dest: &Path, remaining: &mut u64) -> io::Result<(
     for (path, name, kind) in entries {
         let target = dest.join(name);
         if kind.is_dir() {
-            copy_checked(&path, &target, remaining)?;
+            copy_checked(&path, &target, remaining, hardlinks)?;
         } else if kind.is_file() {
             let length = std::fs::metadata(&path)?.len();
             *remaining = remaining.checked_sub(length).ok_or_else(|| io::Error::other("Catalog snapshot exceeds its size limit"))?;
-            if std::fs::hard_link(&path, &target).is_ok() {
+            // Server dependencies must not share writable store files after launch verification.
+            if hardlinks && std::fs::hard_link(&path, &target).is_ok() {
                 continue;
             }
             copy_file(&path, &target)?;
@@ -1679,20 +1680,20 @@ mod tests {
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("file"), "verified bytes").unwrap();
         let mut remaining = 14;
-        copy_checked(&source, &dest, &mut remaining).unwrap();
+        copy_checked(&source, &dest, &mut remaining, true).unwrap();
         assert_eq!(remaining, 0);
         assert_eq!(digest(&source).unwrap(), digest(&dest).unwrap());
         // Both are on this temporary volume, where the standard hard-link operation must succeed.
         std::fs::write(source.join("file"), "same inode").unwrap();
         assert_eq!(std::fs::read(dest.join("file")).unwrap(), b"same inode");
-        assert!(copy_checked(&source, &tmp.path().join("too-large"), &mut 2).is_err());
+        assert!(copy_checked(&source, &tmp.path().join("too-large"), &mut 2, true).is_err());
         let fallback = tmp.path().join("fallback");
         std::fs::create_dir(&fallback).unwrap();
         copy_file(&source.join("file"), &fallback.join("file")).unwrap();
         assert_eq!(digest(&source).unwrap(), digest(&fallback).unwrap());
         std::fs::write(source.join("file"), "changed source").unwrap();
         assert_eq!(std::fs::read(fallback.join("file")).unwrap(), b"same inode");
-        assert!(copy_checked(&source, &fallback, &mut 100).is_err(), "a planted existing destination is never overwritten");
+        assert!(copy_checked(&source, &fallback, &mut 100, true).is_err(), "a planted existing destination is never overwritten");
         assert_eq!(std::fs::read(fallback.join("file")).unwrap(), b"same inode");
         let planted = tmp.path().join("planted-file");
         std::fs::hard_link(fallback.join("file"), &planted).unwrap();
@@ -1702,7 +1703,7 @@ mod tests {
         {
             let linked = tmp.path().join("linked-directory");
             junction::create(&fallback, &linked).unwrap();
-            assert!(copy_checked(&source, &linked, &mut 100).is_err());
+            assert!(copy_checked(&source, &linked, &mut 100, true).is_err());
             assert_eq!(std::fs::read(fallback.join("file")).unwrap(), b"same inode");
             junction::delete(linked).unwrap();
         }
@@ -1998,7 +1999,7 @@ mod tests {
             let path = if part.is_empty() { alias.clone() } else { alias.join(part) };
             if !part.is_empty() {
                 let mut remaining = SNAPSHOT_LIMIT;
-                copy_checked(original, &alias, &mut remaining).unwrap();
+                copy_checked(original, &alias, &mut remaining, true).unwrap();
                 std::fs::remove_dir_all(&path).unwrap();
             }
             #[cfg(windows)]
@@ -2069,6 +2070,45 @@ mod tests {
     }
 
     #[test]
+    fn server_snapshot_dependencies_do_not_share_writable_store_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = store(tmp.path(), &[("debug", "debugging", 100)]).with_node("C:/fixture/node.exe".into());
+        let source = store.servers().join("measure");
+        std::fs::create_dir_all(source.join("node_modules/dep")).unwrap();
+        std::fs::write(source.join("run.js"), "trusted server").unwrap();
+        std::fs::write(source.join("node_modules/dep/index.js"), "trusted dependency").unwrap();
+        store.items.push(Item {
+            id: "measure".into(),
+            job: "measure".into(),
+            digest: digest(&source).unwrap(),
+            server: Some(super::super::Server {
+                tree: vec![],
+                package: "fixture".into(),
+                version: "1".into(),
+                entry: "run.js".into(),
+                args: vec![],
+                env: Default::default(),
+            }),
+            ..store.items[0].clone()
+        });
+        store.write_ledger(&store.items.iter().map(|item| (item.id.clone(), item.commit.clone())).collect()).unwrap();
+        let (kit, _) = store.kit("devtools", None, Area::Project, Permissions::FullAccess, &[]);
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            assert_eq!(kit.verified_for_launch(vendor).0.servers.len(), 1);
+        }
+        std::fs::write(source.join("run.js"), "injected server").unwrap();
+        std::fs::write(source.join("node_modules/dep/index.js"), "injected dependency").unwrap();
+        let script = Path::new(&kit.servers[0].args[0]);
+        assert_eq!(std::fs::read_to_string(script).unwrap(), "trusted server");
+        assert_eq!(std::fs::read_to_string(script.parent().unwrap().join("node_modules/dep/index.js")).unwrap(), "trusted dependency");
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+            assert_eq!(checked.servers.len(), 1);
+            assert!(damaged.is_empty() && !io_failed);
+        }
+    }
+
+    #[test]
     fn catalog_launch_rechecks_support_files_and_servers_without_blaming_io_failures() {
         let tmp = tempfile::tempdir().unwrap();
         let mut store =
@@ -2084,6 +2124,7 @@ mod tests {
             job: "measure".into(),
             digest: digest(&server_dir).unwrap(),
             server: Some(super::super::Server {
+                tree: vec![],
                 package: "fixture".into(),
                 version: "1".into(),
                 entry: "run.js".into(),
@@ -2096,6 +2137,7 @@ mod tests {
         let (kit, _) = store.kit("debug devtools", None, Area::Project, Permissions::FullAccess, &[]);
         std::fs::write(kit.skills.as_ref().unwrap().join("debug/scripts/run.py"), "injected script").unwrap();
         std::fs::write(&kit.servers[0].args[0], "injected server").unwrap();
+        std::fs::write(server_dir.join("run.js"), "injected server").unwrap();
         for vendor in [Vendor::Claude, Vendor::Codex] {
             let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
             assert_eq!(damaged, ["debug", "measure"]);
@@ -2441,6 +2483,7 @@ mod tests {
             job: "measure".into(),
             digest: digest(&dir).unwrap(),
             server: Some(super::super::Server {
+                tree: vec![],
                 package: "fixture".into(),
                 version: "1".into(),
                 entry: "dist/run.js".into(),
@@ -2563,6 +2606,7 @@ mod tests {
             job: "measure".into(),
             digest: digest(&server_dir).unwrap(),
             server: Some(super::super::Server {
+                tree: vec![],
                 package: "measure".into(),
                 version: "1".into(),
                 entry: "run.js".into(),
@@ -3031,6 +3075,7 @@ mod tests {
         let store = store(tmp.path(), &[("measure", "measure", 10)]);
         let mut item = store.items[0].clone();
         item.server = Some(super::super::Server {
+            tree: vec![],
             package: "measure".into(),
             version: "1".into(),
             entry: "run.js".into(),

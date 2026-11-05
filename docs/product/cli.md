@@ -16,6 +16,12 @@ are not expanded. The process passes its own `FABER_AGENT_TOKEN` and `FABER_CONV
 token establishes the conversation. Without one it is an agent without a conversation, never a person. An invalid token
 is refused. The AI client starts this process only when it needs it; Faber does not keep it running.
 
+Claude Code sessions that load catalog servers enable its process-wide MCP environment allowlist. All stdio servers
+in that session receive only the CLI's safe baseline plus their explicitly configured `env`; personal servers must
+configure any required values there. A personally configured `faber mcp` server in such a session receives no inherited
+conversation identity and remains an agent without a conversation. Faber's built-in SDK tools and shell-invoked
+`faber` commands retain their existing identity path. Sessions without catalog servers keep their existing policy.
+
 ## Reaching Faber
 
 `faber` talks to the running Faber over a local channel (`channel/`), never a network port:

@@ -72,6 +72,7 @@ fn fixture(dir: &Path, files: &[(&str, &str)], package_metadata: &str) -> (Defin
     server.path.clear();
     server.digest = package_digest;
     server.server = Some(Server {
+        tree: vec![],
         package: "fixture-server".into(),
         version: "1.0.0".into(),
         entry: "run.js".into(),

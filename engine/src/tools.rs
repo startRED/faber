@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
+mod npm;
+pub use npm::Package;
 mod plugin_delivery;
 pub mod replacement;
 pub use replacement::ReplacementPlan;
@@ -48,10 +50,12 @@ pub struct Item {
     pub chat_safe: bool,
 }
 
-/// A tool server of the catalog (step 3): an npm package with no dependencies that Node runs and the CLIs speak to over
+/// A pinned npm server and its curated runtime tree that Node runs and the CLIs speak to over
 /// stdio (MCP). Faber writes its arguments and environment itself, so its data collection and update checks stay off.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Server {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tree: Vec<Package>,
     pub package: String,
     pub version: String,
     /// The script Node runs, relative to the package.
@@ -127,7 +131,7 @@ const SKILL_LIMIT: u64 = 8 * 1024 * 1024;
 const SKILL_FILES: usize = 400;
 /// A server is built JavaScript with its dependencies inside: chrome-devtools-mcp 1.11.0 is 370 files and 14 MB.
 const SERVER_LIMIT: u64 = 64 * 1024 * 1024;
-const SERVER_FILES: usize = 2000;
+const SERVER_FILES: usize = 20_000;
 
 /// What the CLIs get from the store: the plugin folder for Claude Code and the skill root for Codex while a skill is installed
 /// (an empty plugin would only cost the CLI a folder scan), and how to start each installed server.
@@ -596,7 +600,7 @@ impl Store {
             plugins::extract(plugin, zip, packages, staging)
         } else {
             match &item.server {
-                Some(_) => extract_package(zip, staging),
+                Some(server) => npm::extract_tree(server, zip, packages, staging),
                 None => extract_skill(zip, &item.path, staging),
             }
         };
@@ -1205,6 +1209,10 @@ fn extract_skill(zip: &Path, path: &str, dest: &Path) -> Result<(), String> {
 /// Copies the files of an npm package (`.tgz`, every file under `package/`) into `dest`. Only plain files are taken; a link,
 /// an absolute or parent path, a name twice, too many files or too many bytes refuse the whole package.
 fn extract_package(tgz: &Path, dest: &Path) -> Result<(), String> {
+    extract_package_capped(tgz, dest, &mut (0, 0), false)
+}
+
+fn extract_package_capped(tgz: &Path, dest: &Path, budget: &mut (usize, u64), pinned_tree: bool) -> Result<(), String> {
     let file = std::fs::File::open(tgz).map_err(|e| e.to_string())?;
     if file.metadata().map_err(|e| e.to_string())?.len() > ARCHIVE_LIMIT {
         return Err("The archive is too large".into());
@@ -1213,19 +1221,34 @@ fn extract_package(tgz: &Path, dest: &Path) -> Result<(), String> {
     // that unpacks to gigabytes stops here.
     let unpacked = flate2::read::GzDecoder::new(io::BufReader::new(file)).take(SERVER_LIMIT + SERVER_LIMIT / 4);
     let mut archive = tar::Archive::new(unpacked);
-    let (mut files, mut bytes) = (0usize, 0u64);
+    let mut files = 0usize;
+    let mut archive_root = None;
     let mut seen = std::collections::HashSet::new();
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     for entry in archive.entries().map_err(|e| format!("Not a package: {e}"))? {
         let mut entry = entry.map_err(|e| format!("Not a package: {e}"))?;
         let kind = entry.header().entry_type();
-        let path = entry.path().map_err(|e| e.to_string())?.into_owned();
-        let Ok(rel) = path.strip_prefix("package") else {
+        let raw = entry.path_bytes();
+        let raw = std::str::from_utf8(&raw).map_err(|_| "error.tools.tree")?;
+        let raw = if kind.is_dir() { raw.strip_suffix('/').unwrap_or(raw) } else { raw };
+        if !raw.split('/').all(portable_name) {
+            return Err(format!("A name no system can hold the same way: {raw:?}"));
+        }
+        let path = Path::new(raw).to_path_buf();
+        let Some(std::path::Component::Normal(root)) = path.components().next() else {
             return Err(format!("Outside the package: {}", path.display()));
         };
+        if !root.to_str().is_some_and(portable_name) || (!pinned_tree && root != "package") {
+            return Err(format!("Outside the package: {}", path.display()));
+        }
+        if archive_root.get_or_insert_with(|| root.to_owned()) != root {
+            return Err("error.tools.tree".into());
+        }
+        let rel = path.strip_prefix(root).map_err(|_| "error.tools.tree")?;
         files += 1;
-        if files > SERVER_FILES {
-            return Err("The package is larger than a server may be".into());
+        budget.0 += 1;
+        if budget.0 > SERVER_FILES {
+            return Err("error.tools.size".into());
         }
         if kind.is_dir() || rel.as_os_str().is_empty() {
             continue;
@@ -1240,9 +1263,9 @@ fn extract_package(tgz: &Path, dest: &Path) -> Result<(), String> {
         if !seen.insert(rel.to_string_lossy().to_lowercase()) {
             return Err(format!("A name twice in the package: {}", path.display()));
         }
-        bytes += entry.size();
-        if bytes > SERVER_LIMIT {
-            return Err("The package is larger than a server may be".into());
+        budget.1 = budget.1.checked_add(entry.size()).ok_or("error.tools.size")?;
+        if budget.1 > SERVER_LIMIT {
+            return Err("error.tools.size".into());
         }
         let out = dest.join(crate::install::sanitize_archive_path(rel)?);
         if let Some(parent) = out.parent() {
@@ -1253,7 +1276,13 @@ fn extract_package(tgz: &Path, dest: &Path) -> Result<(), String> {
         if body.len() as u64 != entry.size() {
             return Err(format!("{} is not the size the package says", path.display()));
         }
-        std::fs::File::create(&out).and_then(|mut f| f.write_all(&body)).map_err(|e| e.to_string())?;
+        npm::check_file(rel, &body)?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out)
+            .and_then(|mut f| f.write_all(&body))
+            .map_err(|e| e.to_string())?;
     }
     if files == 0 {
         return Err("The package is empty".into());
@@ -1370,6 +1399,13 @@ async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) ->
         sources.extend(definition.parts.iter().filter_map(|part| part.server.clone().map(|server| (Some(part.id.clone()), server))));
     }
     for (id, source) in sources {
+        if let Some(server) = source.server.as_ref().filter(|server| !server.tree.is_empty()) {
+            if id.is_some() {
+                return Err("error.tools.tree".into());
+            }
+            npm::download_tree(server, &store.root, loopback, &mut downloaded).await?;
+            continue;
+        }
         let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
         let url = match loopback {
             Some(origin) => source.archive_path(origin),
@@ -1864,6 +1900,7 @@ mod tests {
             digest: digest(d.path()).unwrap(),
             chat_safe: false,
             server: Some(Server {
+                tree: vec![],
                 package: "measure".into(),
                 version: "1.0.0".into(),
                 entry: "bin/run.js".into(),
@@ -1904,6 +1941,21 @@ mod tests {
         store.wait_prepared_for_test();
         store.remove("measure").unwrap();
         assert!(!dir.exists() && store.delivery() == Delivery::default());
+    }
+
+    #[test]
+    fn package_paths_reject_raw_dot_and_empty_components() {
+        let tmp = tempfile::tempdir().unwrap();
+        for path in ["bin/./run.js", "bin//run.js", "./bin/run.js", "/bin/run.js", "bin/run.js/"] {
+            let archive = package(tmp.path(), &[(path, RUN, FILE)]);
+            assert!(extract_package(&archive, &tmp.path().join(uuid::Uuid::new_v4().to_string())).is_err(), "{path}");
+            assert!(
+                extract_package_capped(&archive, &tmp.path().join(uuid::Uuid::new_v4().to_string()), &mut (0, 0), true).is_err(),
+                "{path}"
+            );
+        }
+        let archive = package(tmp.path(), &[("bin/", b"", tar::EntryType::Directory), ("bin/run.js", RUN, FILE)]);
+        extract_package(&archive, &tmp.path().join("canonical")).unwrap();
     }
 
     #[test]

@@ -15,6 +15,304 @@ fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
 
 const SKILL: &[u8] = b"---\nname: careful\ndescription: Be careful.\n---\nBe careful.";
 
+/// The digest covers the supplied bytes, including a refused payload: the final digest cannot hide a missing guard.
+pub(super) fn pinned_tree_fixture(leaf_scripts: serde_json::Value, leaf_files: &[(&str, &[u8])]) -> (Item, Vec<(String, Vec<u8>)>) {
+    use base64::Engine;
+    use sha2::{Digest, Sha512};
+    let source = tempfile::tempdir().unwrap();
+    let mut tree = Vec::new();
+    let mut archives = Vec::new();
+    for (path, name, dependencies, script) in [
+        ("", "@scope/tree", serde_json::json!({"middle":"1.0.0"}), "module.exports = require('middle');"),
+        ("node_modules/middle", "middle", serde_json::json!({"@scope/leaf":"1.0.0"}), "module.exports = require('@scope/leaf');"),
+        ("node_modules/middle/node_modules/@scope/leaf", "@scope/leaf", serde_json::json!({}), "module.exports = 'leaf';"),
+    ] {
+        let mut manifest = serde_json::json!({"name": name, "version":"1.0.0", "main":"run.js", "dependencies": dependencies});
+        if name == "@scope/leaf" && !leaf_scripts.is_null() {
+            manifest["scripts"] = leaf_scripts.clone();
+        }
+        let manifest = serde_json::to_vec(&manifest).unwrap();
+        let mut files = vec![("package.json", manifest.as_slice()), ("run.js", script.as_bytes())];
+        if name == "@scope/leaf" {
+            files.extend_from_slice(leaf_files);
+        }
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (file, body) in files {
+            let out = source.path().join(path).join(file);
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::fs::write(out, body).unwrap();
+            let mut header = tar::Header::new_gnu();
+            header.set_mode(0o644);
+            header.set_size(body.len() as u64);
+            tar.append_data(&mut header, format!("package/{file}"), body).unwrap();
+        }
+        let bytes = tar.into_inner().unwrap().finish().unwrap();
+        let url_path = format!("/{name}/-/{}-1.0.0.tgz", name.rsplit('/').next().unwrap());
+        tree.push(faber_engine::tools::Package {
+            path: path.into(),
+            package: name.into(),
+            version: "1.0.0".into(),
+            integrity: format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&bytes))),
+            url: format!("https://registry.npmjs.org{url_path}"),
+        });
+        archives.push((url_path, bytes));
+    }
+    let item = Item {
+        id: "measure".into(),
+        cli_name: None,
+        job: "measure".into(),
+        tier: Default::default(),
+        license: "MIT".into(),
+        repo: "fixture/tree".into(),
+        commit: "0123".into(),
+        path: String::new(),
+        digest: digest(source.path()).unwrap(),
+        chat_safe: false,
+        server: Some(faber_engine::tools::Server {
+            package: "@scope/tree".into(),
+            version: "1.0.0".into(),
+            entry: "run.js".into(),
+            args: vec![],
+            env: Default::default(),
+            tree,
+        }),
+    };
+    (item, archives)
+}
+
+pub(super) fn tree_source(archives: Vec<(String, Vec<u8>)>) -> loopback::Server {
+    loopback::Server::start(move |_, path, stream| match archives.iter().find(|(name, _)| name == path) {
+        Some((_, body)) => loopback::send(stream, body),
+        None => loopback::not_found(stream),
+    })
+}
+
+async fn tree_refused(item: Item, archives: Vec<(String, Vec<u8>)>, key: &str) {
+    let source = tree_source(archives);
+    let data = tempfile::tempdir().unwrap();
+    let store = Store::with_catalog(data.path(), vec![item.clone()]).with_node("fixture-node".into());
+    assert_eq!(install(&store, &item, Some(&source.origin)).await.unwrap_err(), key);
+    assert!(store.installed().is_empty(), "a refused tree never enters the ledger");
+    assert!(!data.path().join("tools/servers/measure").exists(), "no refused package is published");
+    if let Ok(entries) = std::fs::read_dir(data.path().join("tools")) {
+        assert!(
+            !entries.flatten().any(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.starts_with(".download-") || name.starts_with(".staging-")
+            }),
+            "temporary payloads are removed on refusal"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_pinned_two_level_server_tree_installs_rechecks_every_dependency_and_removes_as_one_item() {
+    let (item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+    let source = tree_source(archives);
+    let data = tempfile::tempdir().unwrap();
+    let store = Store::with_catalog(data.path(), vec![item.clone()]).with_node("fixture-node".into());
+    install(&store, &item, Some(&source.origin)).await.unwrap();
+    let root = data.path().join("tools/servers/measure");
+    let leaf = "node_modules/middle/node_modules/@scope/leaf/run.js";
+    assert_eq!(digest(&root).unwrap(), item.digest);
+    assert_eq!(std::fs::read_to_string(root.join(leaf)).unwrap(), "module.exports = 'leaf';");
+    assert_eq!(store.delivery().servers.len(), 1);
+    let (kit, _) = store.kit(
+        "Benchmark browser performance with devtools",
+        None,
+        faber_engine::model::Area::Project,
+        faber_engine::model::Permissions::FullAccess,
+        &[],
+    );
+    assert_eq!(kit.servers.len(), 1);
+    let copied_root = std::path::Path::new(&kit.servers[0].args[0]).parent().unwrap();
+    std::fs::write(copied_root.join(leaf), "changed grandchild").unwrap();
+    assert!(
+        kit.verified_for_launch(faber_engine::model::Vendor::Claude).0.servers.is_empty(),
+        "launch rechecks the entire dependency tree"
+    );
+    std::fs::write(root.join(leaf), "changed grandchild").unwrap();
+    assert!(store.delivery().servers.is_empty(), "the stored grandchild is checked too");
+    drop(kit);
+    install(&store, &item, Some(&source.origin)).await.unwrap();
+    store.remove(&item.id).unwrap();
+    assert!(store.installed().is_empty() && !root.exists());
+    store.restore(&item.id).unwrap();
+    assert_eq!(digest(&root).unwrap(), item.digest, "Undo preserves the whole checked tree");
+}
+
+#[tokio::test]
+async fn a_dependency_with_bad_sha512_integrity_refuses_the_whole_server() {
+    let (mut item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+    item.server.as_mut().unwrap().tree[2].integrity = item.server.as_ref().unwrap().tree[0].integrity.clone();
+    tree_refused(item, archives, "error.tools.integrity").await;
+}
+
+#[tokio::test]
+async fn each_install_lifecycle_script_even_empty_refuses_the_whole_pinned_server() {
+    for lifecycle in ["preinstall", "install", "postinstall"] {
+        let scripts = serde_json::Value::Object([(lifecycle.into(), "".into())].into_iter().collect());
+        let (item, archives) = pinned_tree_fixture(scripts, &[]);
+        tree_refused(item, archives, "error.tools.scripts").await;
+    }
+}
+
+#[tokio::test]
+async fn a_native_addon_in_any_dependency_refuses_the_whole_pinned_server() {
+    for name in ["binding.gyp", "build/native.node", "build/Native.NODE"] {
+        let (item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[(name, b"native payload")]);
+        tree_refused(item, archives, "error.tools.native").await;
+    }
+}
+
+#[tokio::test]
+async fn another_dependency_host_is_refused_before_any_download() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    for host in [
+        "https://github.com",
+        "http://registry.npmjs.org",
+        "https://user@registry.npmjs.org",
+        "https://registry.npmjs.org:444",
+        "https://registry.npmjs.org:443",
+        "https://registry.npmjs.org.evil.invalid",
+    ] {
+        let (mut item, _) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+        item.server.as_mut().unwrap().tree[2].url = format!("{host}/@scope/leaf/-/leaf-1.0.0.tgz");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let source = loopback::Server::start(move |_, _, stream| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            loopback::not_found(stream)
+        });
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::with_catalog(data.path(), vec![item.clone()]).with_node("fixture-node".into());
+        assert_eq!(install(&store, &item, Some(&source.origin)).await.unwrap_err(), "error.tools.host", "{host}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the complete source list is validated before any request");
+        assert!(store.installed().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_dependency_path_cannot_escape_or_overwrite_another_package() {
+    for path in ["../outside", "node_modules/middle/../../outside", "node_modules/MIDDLE", "run.js"] {
+        let (mut item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+        item.server.as_mut().unwrap().tree[2].path = path.into();
+        tree_refused(item, archives, "error.tools.tree").await;
+    }
+}
+
+#[tokio::test]
+async fn a_tree_over_the_package_count_cap_is_refused_before_any_payload_is_needed() {
+    let (mut item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+    let server = item.server.as_mut().unwrap();
+    while server.tree.len() <= 512 {
+        let mut package = server.tree[1].clone();
+        package.path = format!("node_modules/package-{}", server.tree.len());
+        package.package = format!("package-{}", server.tree.len());
+        server.tree.push(package);
+    }
+    tree_refused(item, archives, "error.tools.size").await;
+}
+
+#[tokio::test]
+async fn the_unpacked_size_cap_covers_the_whole_tree_rather_than_each_package() {
+    use base64::Engine;
+    use sha2::{Digest, Sha512};
+    let (mut item, mut archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+    for (package, (_, bytes)) in item.server.as_mut().unwrap().tree.iter_mut().zip(&mut archives).take(2) {
+        let mut previous = tar::Archive::new(flate2::read::GzDecoder::new(std::io::Cursor::new(&*bytes)));
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for entry in previous.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().into_owned();
+            let mut header = entry.header().clone();
+            tar.append_data(&mut header, path, &mut entry).unwrap();
+        }
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o644);
+        header.set_size(33 * 1024 * 1024);
+        tar.append_data(&mut header, "package/padding.bin", std::io::Read::take(std::io::repeat(0), 33 * 1024 * 1024)).unwrap();
+        let padded = tar.into_inner().unwrap().finish().unwrap();
+        package.integrity = format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&padded)));
+        drop(previous);
+        *bytes = padded;
+    }
+    tree_refused(item, archives, "error.tools.size").await;
+}
+
+#[tokio::test]
+async fn a_tree_server_entry_must_be_a_portable_relative_path_inside_the_checked_folder() {
+    for entry in ["../outside.js", "/outside.js", "C:/outside.js", "..\\outside.js", "run.js:stream", "node_modules/../run.js", "", "."] {
+        let (mut item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+        item.server.as_mut().unwrap().entry = entry.into();
+        tree_refused(item, archives, "error.tools.tree").await;
+    }
+}
+
+#[tokio::test]
+async fn registry_package_redirects_are_refused_without_following_even_another_allowed_test_path() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let (item, archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+    let redirected = Arc::new(AtomicUsize::new(0));
+    let counted = redirected.clone();
+    let source = loopback::Server::start(move |origin, path, stream| {
+        if path == "/@scope/tree/-/tree-1.0.0.tgz" {
+            return loopback::redirect(stream, &format!("{origin}/redirected-root.tgz"));
+        }
+        if path == "/redirected-root.tgz" {
+            counted.fetch_add(1, Ordering::SeqCst);
+            return loopback::send(stream, &archives[0].1);
+        }
+        match archives.iter().find(|(name, _)| name == path) {
+            Some((_, bytes)) => loopback::send(stream, bytes),
+            None => loopback::not_found(stream),
+        }
+    });
+    let data = tempfile::tempdir().unwrap();
+    let store = Store::with_catalog(data.path(), vec![item.clone()]).with_node("fixture-node".into());
+    assert_eq!(install(&store, &item, Some(&source.origin)).await.unwrap_err(), "error.tools.host");
+    assert_eq!(redirected.load(Ordering::SeqCst), 0);
+    assert!(store.installed().is_empty() && !data.path().join("tools/servers/measure").exists());
+}
+
+#[tokio::test]
+async fn a_pinned_types_package_may_have_one_portable_archive_root_but_never_two() {
+    use base64::Engine;
+    use sha2::{Digest, Sha512};
+    for mixed_roots in [false, true] {
+        let (mut item, mut archives) = pinned_tree_fixture(serde_json::Value::Null, &[]);
+        let original = std::mem::take(&mut archives[2].1);
+        let mut previous = tar::Archive::new(flate2::read::GzDecoder::new(std::io::Cursor::new(original)));
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (index, entry) in previous.entries().unwrap().enumerate() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().strip_prefix("package").unwrap().to_owned();
+            let root = if mixed_roots && index > 0 { "another root" } else { "node v22.20" };
+            let mut header = entry.header().clone();
+            tar.append_data(&mut header, std::path::Path::new(root).join(path), &mut entry).unwrap();
+        }
+        archives[2].1 = tar.into_inner().unwrap().finish().unwrap();
+        item.server.as_mut().unwrap().tree[2].integrity =
+            format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&archives[2].1)));
+        if mixed_roots {
+            tree_refused(item, archives, "error.tools.tree").await;
+        } else {
+            let source = tree_source(archives);
+            let data = tempfile::tempdir().unwrap();
+            let store = Store::with_catalog(data.path(), vec![item.clone()]).with_node("fixture-node".into());
+            install(&store, &item, Some(&source.origin)).await.unwrap();
+            assert_eq!(digest(&data.path().join("tools/servers/measure")).unwrap(), item.digest);
+            assert_eq!(store.delivery().servers.len(), 1);
+        }
+    }
+}
+
 #[tokio::test]
 async fn every_catalog_command_handles_empty_app_data_without_a_preexisting_store() {
     let profile = tempfile::tempdir().unwrap();
@@ -50,8 +348,8 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     let items = catalog();
     assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
     assert_eq!(file["skills"].as_array().unwrap().len(), 114, "21 original and 93 fully audited new skills");
-    assert_eq!(file["servers"].as_array().unwrap().len(), 1, "mcp-debugger lacks project path containment");
-    assert!(source.len() <= 36 * 1024, "metadata budget: {} bytes", source.len());
+    assert_eq!(file["servers"].as_array().unwrap().len(), 4, "only audited credential-free trees enter the catalog");
+    assert!(source.len() <= 128 * 1024, "metadata budget including complete runtime pins: {} bytes", source.len());
     let locales = [
         include_str!("../../ui/locales/en.ts"),
         include_str!("../../ui/locales/pt-BR.ts"),
@@ -65,7 +363,10 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     for (entry, item) in entries.iter().zip(items) {
         assert!(ids.insert(&item.id), "unique id: {}", item.id);
         assert_eq!(entry["id"].as_str(), Some(item.id.as_str()));
-        assert!(matches!(item.license.as_str(), "MIT" | "Apache-2.0" | "BSD-3-Clause" | "Apache-2.0 AND OFL-1.1"));
+        assert!(matches!(
+            item.license.as_str(),
+            "MIT" | "Apache-2.0" | "BSD-3-Clause" | "Apache-2.0 AND OFL-1.1" | "Apache-2.0 AND MIT AND CC-BY-4.0"
+        ));
         assert_eq!(item.commit.len(), 40, "full commit: {}", item.id);
         assert_eq!(item.digest.len(), 64, "digest: {}", item.id);
         assert!(item.commit.bytes().chain(item.digest.bytes()).all(|b| b.is_ascii_hexdigit()));
@@ -74,12 +375,22 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
             "game-design" => 23,
             "marketing" => 11,
             "debugging" | "testing" | "lean" | "design" | "architecture" | "plan" | "mcp" | "skills" | "performance" | "database"
-            | "payments" | "platform" | "mobile" | "auth" | "measure" | "documents" => 14,
+            | "payments" | "platform" | "mobile" | "auth" | "measure" | "documents" | "web" | "research" => 14,
             unknown => panic!("unknown job: {unknown}"),
         };
         let count = counts.entry(&item.job).or_insert(0);
         *count += 1;
         assert!(*count <= limit, "{} exceeds its {limit}-item budget", item.job);
+        if let Some(server) = &item.server {
+            assert_eq!(entry["chatSafe"].as_bool(), Some(item.chat_safe), "{} carries an explicit Chat review", item.id);
+            assert!(!server.tree.is_empty(), "{} carries its complete runtime tree", item.id);
+            let root = &server.tree[0];
+            assert!(root.path.is_empty() && root.package == server.package && root.version == server.version);
+            for package in &server.tree {
+                assert!(package.url.starts_with("https://registry.npmjs.org/"), "{}: {}", item.id, package.url);
+                assert!(package.integrity.starts_with("sha512-"), "{}: {}", item.id, package.package);
+            }
+        }
         if let Some(tier) = entry.get("tier") {
             assert!(matches!(tier.as_str(), Some("recommended" | "more")));
         } else {
@@ -351,6 +662,7 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
             entry: "run.js".into(),
             args: vec![],
             env: Default::default(),
+            tree: vec![],
         }),
     };
     assert_eq!(measure("1.0.0").archive_url(), "https://registry.npmjs.org/@scope/measure/-/measure-1.0.0.tgz");

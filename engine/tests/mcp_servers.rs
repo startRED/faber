@@ -87,6 +87,9 @@ fn mcp_servers_launch_choice_filters_only_catalog_servers_without_strict_claude_
             tools: delivery.clone(),
         };
         let args = claude_args(&launch);
+        let settings = args.iter().position(|a| a == "--settings").unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&args[settings + 1]).unwrap();
+        assert_eq!(settings["env"]["CLAUDE_CODE_MCP_ALLOWLIST_ENV"].as_str(), enabled.then_some("1"));
         assert!(!args.iter().any(|a| a == "--strict-mcp-config"), "the person's own servers still load");
         let at = args.iter().position(|a| a == "--mcp-config").unwrap();
         let config: serde_json::Value = serde_json::from_str(&args[at + 1]).unwrap();

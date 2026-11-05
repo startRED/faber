@@ -565,6 +565,7 @@ mod tests {
             cli_name: None,
             tier: Default::default(),
             server: Some(crate::tools::Server {
+                tree: vec![],
                 package: "browser-fixture".into(),
                 version: "1.0.0".into(),
                 entry: "server.js".into(),
@@ -3352,6 +3353,13 @@ mod tests {
                     std::fs::rename(Path::new(&script).parent().unwrap(), folder.join("hidden-server")).unwrap();
                 } else {
                     std::fs::write(script, "changed server code").unwrap();
+                    if damage == "source" {
+                        // Server snapshots are independent copies, so damage the store separately.
+                        let source = folder.join("tools/servers/browser/server.js");
+                        assert_eq!(std::fs::read_to_string(&source).unwrap(), "console.log('one');");
+                        std::fs::write(&source, "changed server code").unwrap();
+                        assert_eq!(std::fs::read_to_string(&source).unwrap(), "changed server code");
+                    }
                 }
                 core.launch("kit", &pick(Vendor::Codex)).unwrap();
                 assert!(!core.live["kit"].resumed, "a retained server discovered damaged at this launch revokes the saved configuration");

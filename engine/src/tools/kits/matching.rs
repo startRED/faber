@@ -55,6 +55,9 @@ pub(super) fn item_capability(id: &str) -> &'static str {
         "flutter-add-widget-test" => "Add Flutter widget tests",
         "jetpack-compose-performance" => "Improve Jetpack Compose rendering performance",
         "chrome-devtools" => "Measure and diagnose browser rendering and performance",
+        "playwright-mcp" => "Automate browser testing in an isolated headless Chrome",
+        "context7" => "Look up current library documentation without an account",
+        "sequential-thinking" => "Work through complex problems step by step in memory",
         _ => "Catalog instructions for this capability",
     }
 }
@@ -67,6 +70,13 @@ pub(super) fn matches_task(item: &Item, request: &str, stacks: &BTreeSet<&str>) 
     let has = |terms: &str| terms.split('|').any(|term| contains_term(&text, term));
     // A shared job is a shortlist, not permission to load unrelated specializations.
     let intent = match item.id.as_str() {
+        "playwright-mcp" => Some(
+            "playwright|browser automation|automate browser|automacao de navegador|automatizar navegador|automatizacion del navegador|automatisation du navigateur|browserautomatisierung",
+        ),
+        "context7" => Some(
+            "context7|library docs|library documentation|documentacao de bibliotecas|documentacion de bibliotecas|documentation des bibliotheques|bibliotheksdokumentation",
+        ),
+        "sequential-thinking" => Some("sequential thinking|step by step|passo a passo|paso a paso|etape par etape|schritt fur schritt"),
         "animate" => {
             Some("animation|animate|animacao|animar|animacion|animer|animationen|animieren|transition|transicao|transicion|ubergang")
         }
@@ -360,6 +370,7 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         ),
         ("writing", "write writing article essay texto escrever artigo redacao"),
         ("research", "research investigate sources pesquisar pesquisa fontes"),
+        ("testing", "playwright"),
         ("image", "image images photo illustration imagem imagens foto ilustracao"),
         ("video", "video animation animacao film filme"),
         ("spreadsheet", "spreadsheet excel csv planilha planilhas"),
@@ -375,6 +386,15 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
     }
     let phrase = |terms: &str| terms.split('|').any(|term| contains_term(&text, term));
     for (job, terms) in [
+        (
+            "testing",
+            "browser automation|automate browser|automacao de navegador|automatizar navegador|automatizacion del navegador|automatisation du navigateur|browserautomatisierung",
+        ),
+        (
+            "documents",
+            "context7|library docs|library documentation|documentacao de bibliotecas|documentacion de bibliotecas|documentation des bibliotheques|bibliotheksdokumentation",
+        ),
+        ("plan", "sequential thinking|step by step|passo a passo|paso a paso|etape par etape|schritt fur schritt"),
         (
             "documents",
             "humanize|humanise|humanizar|humaniza|humaniser|humanisez|menschlicher|ki-text|obsidian|markdown|mind map|mapa mental|carte mentale|mindmap",

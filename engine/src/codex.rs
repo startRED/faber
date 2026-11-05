@@ -1126,8 +1126,9 @@ fn start_params(thread: &str, settings: &mut CodexThread, model: &str, turn: &Us
 /// The catalog's servers (`crate::tools`) beside the person's own, each under its own key so no other server is replaced.
 pub fn add_servers(params: &mut Value, servers: &[crate::tools::Launch]) {
     for s in servers {
+        // Codex starts MCP with its safe baseline; inherit no additional shell variables from user config.
         params["config"][format!("mcp_servers.{}", s.name)] =
-            json!({ "command": s.command, "args": s.args, "env": s.env, "enabled": true });
+            json!({ "command": s.command, "args": s.args, "env": s.env, "env_vars": [], "enabled": true });
     }
 }
 
