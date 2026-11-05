@@ -147,7 +147,7 @@ fn source(path: &str) -> Option<&'static str> {
     if let Some(i) = parts.iter().position(|p| *p == ".faber") {
         let kind = parts.get(i + 1)?;
         return (name.ends_with(".md")
-            && ["decisions", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
+            && ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
                 .contains(&kind.trim_end_matches(".md")))
         .then_some("faber");
     }
@@ -164,7 +164,11 @@ fn source(path: &str) -> Option<&'static str> {
 /// `.faber/decisions.md` (or a file under `.faber/decisions/`): the one list whose entries carry an author.
 fn decisions(path: &str) -> bool {
     let parts: Vec<_> = path.split('/').collect();
-    parts.iter().position(|p| *p == ".faber").and_then(|i| parts.get(i + 1)).is_some_and(|kind| kind.trim_end_matches(".md") == "decisions")
+    parts
+        .iter()
+        .position(|p| *p == ".faber")
+        .and_then(|i| parts.get(i + 1))
+        .is_some_and(|kind| matches!(kind.trim_end_matches(".md"), "decisions" | "decisions-old"))
 }
 
 struct Mark {
@@ -2100,6 +2104,16 @@ mod tests {
                 over_target: false,
             },
         )
+    }
+
+    #[test]
+    fn old_decisions_are_listed_but_not_loaded_into_the_card() {
+        let (project, file) = decisions_file("- Keep exports [by AI]\n");
+        let record = keep(project.path(), &file, 0).unwrap().unwrap();
+        std::fs::write(project.path().join(".faber/decisions-old.md"), "- Keep exports [by AI]\n").unwrap();
+        std::fs::write(project.path().join(".faber/decisions.md"), "").unwrap();
+        assert!(listed(project.path(), ".faber/decisions-old.md", std::slice::from_ref(&record)).entries[0].reviewed);
+        assert!(kept_for_card(project.path(), &[record]).unwrap().is_empty());
     }
 
     #[test]

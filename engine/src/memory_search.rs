@@ -75,12 +75,13 @@ fn notes(list: &MemoryList, query: &str) -> Vec<String> {
             let text = e.body.as_deref().unwrap_or(&e.text).trim_start();
             // The list marker is Markdown, not what was written.
             let text = ["- ", "* ", "+ "].iter().find_map(|m| text.strip_prefix(m)).unwrap_or(text);
+            let old = if f.path == ".faber/decisions-old.md" { " · old" } else { "" };
             let who = if crate::project::memory::LearningKind::for_path(&f.path).is_some() {
                 if e.reviewed { "kept by the person" } else { "not reviewed" }
             } else {
                 author(e)
             };
-            crate::search::matches(text, query).then(|| format!("{}:{} · {} · {}", flat(&f.path), e.line, who, cut(text, NOTE_CHARS)))
+            crate::search::matches(text, query).then(|| format!("{}:{}{old} · {} · {}", flat(&f.path), e.line, who, cut(text, NOTE_CHARS)))
         })
         .collect()
 }
@@ -199,6 +200,23 @@ mod tests {
     }
 
     const NOW: u64 = 10_000_000_000;
+
+    #[test]
+    fn old_decisions_and_legacy_notes_are_searchable() {
+        let project = tempfile::tempdir().unwrap();
+        let notes = project.path().join(".faber");
+        std::fs::create_dir(&notes).unwrap();
+        std::fs::write(notes.join("decisions-old.md"), "- Use Postgres [by AI]\n").unwrap();
+        for name in ["plans", "recipes", "learning", "memory"] {
+            std::fs::write(notes.join(format!("{name}.md")), "- Postgres\n").unwrap();
+        }
+        let list = crate::project::memory::list_faber(project.path()).unwrap();
+        let text = answer("postgres", &results(true, vec![]), &Ok(list), NOW);
+        assert!(text.contains(".faber/decisions-old.md:1 · old · an AI proposal, not reviewed · Use Postgres"), "{text}");
+        for name in ["plans", "recipes", "learning", "memory"] {
+            assert!(text.contains(&format!(".faber/{name}.md:1")), "{text}");
+        }
+    }
 
     #[test]
     fn an_author_mark_is_worded_as_a_claim_and_the_header_says_marks_are_not_verified() {
