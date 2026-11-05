@@ -2470,6 +2470,7 @@ export const en = {
   'notes.410.fixed': 'Your unsent text, attachments and previous conversation return when you reopen Faber after a forced close.',
   'notes.411.new': 'You can block sites and their subdomains in Settings, under Privacy, to keep them out of Faber’s browser.',
   'notes.412.better': 'The agent tidies long project notes at close and checks that decisions you kept are still there.',
+  'notes.413.fixed': 'Go back restores files in regular chats without a selected folder; unsaved file history no longer appears ready.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

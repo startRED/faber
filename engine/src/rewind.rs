@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 mod pack;
+#[cfg(test)]
+mod safety_tests;
 mod store;
 pub use store::History;
 
@@ -556,6 +558,26 @@ impl History {
         self.points.values().any(|p| p.active && !p.info.sealed && p.root == root)
     }
 
+    pub(crate) fn open_infos(&self, root: &Path) -> Vec<(String, PointInfo)> {
+        self.points
+            .values()
+            .filter(|point| point.active && !point.info.sealed && point.root == root)
+            .map(|point| (point.conversation.clone(), point.info.clone()))
+            .collect()
+    }
+
+    pub(crate) fn refresh_infos(&self, infos: &mut [(String, PointInfo)]) {
+        for (conversation, info) in infos {
+            if let Some(point) = self.points.get(&info.id).filter(|point| point.conversation == *conversation) {
+                info.clone_from(&point.info);
+            } else {
+                info.sealed = false;
+                info.coverage.unavailable = true;
+                info.coverage.incomplete = true;
+            }
+        }
+    }
+
     pub fn recovery_conversations(&self) -> Vec<String> {
         self.journals
             .values()
@@ -972,13 +994,28 @@ impl History {
     /// Memory publication shares the engine's idle/admission check. Disk work runs after releasing that lock.
     pub fn publish_seal(&mut self, publication: &Publication) {
         for point in &publication.updates {
-            self.points.insert(point.info.id.clone(), point.clone());
+            let mut pending = point.clone();
+            pending.info.sealed = false;
+            self.points.insert(point.info.id.clone(), pending);
         }
     }
 
     pub fn persist_seal(&mut self, publication: Publication, at: u64) -> Result<(), String> {
-        for point in publication.updates {
-            self.save_point(&point)?;
+        for (index, point) in publication.updates.iter().enumerate() {
+            if let Err(error) = self.save_point(point) {
+                for failed in &publication.updates[index..] {
+                    if let Some(saved) = self.points.get_mut(&failed.info.id) {
+                        saved.info.sealed = false;
+                        saved.info.coverage.unavailable = true;
+                        saved.info.coverage.incomplete = true;
+                    }
+                }
+                return Err(error);
+            }
+            if let Some(saved) = self.points.get_mut(&point.info.id) {
+                saved.info.sealed = true;
+                saved.info.coverage.clone_from(&point.info.coverage);
+            }
         }
         self.cleanup_known(at)
     }
@@ -990,6 +1027,12 @@ pub struct Sealing {
 }
 pub struct Publication {
     updates: Vec<Point>,
+}
+
+impl Publication {
+    pub(crate) fn infos(&self) -> Vec<(String, PointInfo)> {
+        self.updates.iter().map(|point| (point.conversation.clone(), point.info.clone())).collect()
+    }
 }
 
 /// File bytes and identity are checked independently: the same bytes in a replaced inode still conflict for redo.

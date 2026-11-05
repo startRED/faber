@@ -153,7 +153,11 @@ fn undeletable(path: &Path, readable: bool) -> Option<Box<dyn std::any::Any>> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        let held = std::fs::OpenOptions::new().read(true).share_mode(u32::from(readable)).open(path).unwrap();
+        let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(path).unwrap();
+        if !readable {
+            // An existing reader may still be open; block contents without racing its handle or allowing deletion.
+            held.try_lock().unwrap();
+        }
         Some(Box::new(held))
     }
     #[cfg(unix)]
@@ -174,6 +178,24 @@ fn undeletable(path: &Path, readable: bool) -> Option<Box<dyn std::any::Any>> {
         }
         Some(Box::new(guard))
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn unreadable_guard_coexists_with_an_existing_reader_and_releases_its_locks() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("record.json");
+    std::fs::write(&record, b"saved record").unwrap();
+    let reader = std::fs::File::open(&record).unwrap();
+
+    let held = undeletable(&record, false).unwrap();
+    assert!(std::fs::read(&record).is_err(), "the guard must refuse actual reads");
+    assert!(std::fs::remove_file(&record).is_err(), "the guard must also refuse deletion");
+    drop(held);
+
+    assert_eq!(std::fs::read(&record).unwrap(), b"saved record");
+    std::fs::remove_file(&record).unwrap();
+    assert_eq!(reader.metadata().unwrap().len(), 12, "the earlier reader stayed open throughout the check");
 }
 
 #[tokio::test]
@@ -268,6 +290,7 @@ async fn a_record_nothing_can_read_is_not_reported_deleted() {
     std::fs::write(&notes, b"keep these notes").unwrap();
 
     let held = undeletable(&record, false).unwrap();
+    assert!(std::fs::read(&record).is_err(), "the fixture must make the record unreadable before testing deletion");
     assert_eq!(app.remove_with(&id, false).unwrap_err(), "error.chat.deleteFailed");
     assert!(record.is_file() && notes.is_file(), "a file that stayed keeps its attachments");
     drop(held);

@@ -2590,6 +2590,7 @@ export const fr: Messages = {
   'notes.410.fixed': 'Votre texte non envoyé, vos pièces jointes et la conversation précédente reviennent quand vous rouvrez Faber après une fermeture forcée.',
   'notes.411.new': 'Vous pouvez bloquer des sites et leurs sous-domaines dans Paramètres, sous Confidentialité, pour les empêcher de s’ouvrir dans le navigateur de Faber.',
   'notes.412.better': 'En terminant, l’agent range les longues notes du projet et vérifie que les décisions que vous avez gardées sont toujours là.',
+  'notes.413.fixed': 'Revenir en arrière restaure aussi les fichiers des chats classiques sans dossier choisi ; l’historique n’apparaît prêt qu’une fois enregistré.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

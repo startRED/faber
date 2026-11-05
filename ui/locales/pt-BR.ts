@@ -2577,6 +2577,7 @@ export const ptBR: Messages = {
   'notes.410.fixed': 'Seu texto ainda não enviado, os anexos e a conversa anterior voltam quando você reabre o Faber depois de um fechamento forçado.',
   'notes.411.new': 'Você pode bloquear sites e seus subdomínios em Configurações, na seção Privacidade, pra impedir que abram no navegador do Faber.',
   'notes.412.better': 'O agente organiza as notas longas do projeto ao encerrar e confere se as decisões que você guardou continuam lá.',
+  'notes.413.fixed': 'Voltar também recupera arquivos de chats comuns sem pasta escolhida; o histórico de arquivos só fica pronto depois de ser salvo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

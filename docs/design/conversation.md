@@ -20,6 +20,9 @@ Quota handoff reasons name the exhausted AI and its saved model, then the AI tak
 
 ## Answers
 
+Go back uses the same file history for non-temporary chats with or without a chosen folder; see
+[the saved-history states](rewind.md). It adds no control or animation to the answer.
+
 The newest reply has a quiet, wrapping line of what the conversation delivered and its work time and API-price cost; a second, quieter line names a run of at least three turns with nothing delivered. The project home lists the same facts by conversation, most spent first, with the total above them. Neither needs motion or a card.
 
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).

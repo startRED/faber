@@ -2590,6 +2590,7 @@ export const de: Messages = {
   'notes.410.fixed': 'Nach einem erzwungenen Schließen findest du beim Öffnen von Faber deinen ungesendeten Text, die Anhänge und das vorige Gespräch wieder.',
   'notes.411.new': 'Du kannst Websites und ihre Unterdomains unter Einstellungen, Datenschutz sperren, damit sie in Fabers Browser nicht geöffnet werden.',
   'notes.412.better': 'Zum Abschluss räumt der Agent lange Projektnotizen auf und prüft, ob deine behaltenen Entscheidungen noch da sind.',
+  'notes.413.fixed': 'Zurückgehen stellt auch Dateien normaler Chats ohne gewählten Ordner wieder her; der Dateiverlauf erscheint erst nach dem Speichern als bereit.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

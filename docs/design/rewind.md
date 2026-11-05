@@ -8,6 +8,10 @@ The message menu's confirmation and its saved-message notice, in Chat and Projec
   instead, including after a restart. An empty conversation keeps that menu on its calm saved-message notice. There
   is no toolbar action, setting or second entry point. A message whose file history is incomplete or unavailable
   carries a quiet, named mark.
+  Non-temporary default Chat folders use the same bounded file history as chosen folders and projects. Temporary chats
+  never capture or seal file history. A point is marked ready only after its final file versions are saved. A failed
+  scan or save marks only affected, unsaved points unavailable, including if the conversation left memory before the
+  result arrived. Failed maintenance retains each saved point's durable status and closes new history writes until recovery.
 - One modal confirmation offers Files only, Conversation only and Files and conversation (the default). It names the
   file and message counts, incomplete coverage and redo expiry. Details explain that files over 8 MB are not saved and
   history keeps up to 1 GB for 30 days, deleting the oldest copies automatically. Exclusions use saved project versions,

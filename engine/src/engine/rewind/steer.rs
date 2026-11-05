@@ -34,7 +34,7 @@ impl Core {
         if self.rewind.preparing_steers.contains_key(&item.id) {
             return true;
         }
-        let Some(conversation) = self.convs.get(id).filter(|c| c.area == Area::Project || c.working_folder.is_some()) else {
+        let Some(conversation) = self.convs.get(id).filter(|c| !c.temporary) else {
             return false;
         };
         let source = crate::rewind::Capture::new(conversation);
