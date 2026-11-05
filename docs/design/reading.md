@@ -8,13 +8,18 @@ How conversation text reads and keeps its place, in Chat and Projects.
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
 - A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it
-  requests the preceding 40 and prepends them with an instant viewport correction, after restoring any focused search
-  marker. The next frame reapplies the reading anchor after offscreen replies update their estimated heights; resize
-  corrections then keep using that anchor. One request per conversation window may be in flight; replies from a previous
-  opening are discarded.
+  requests the preceding 40 and inserts them in four-message batches across animation frames, with an instant viewport
+  correction after each batch and any focused search marker restored. The final frame and resize corrections reapply
+  the same anchor after offscreen replies update their estimated heights. One request per conversation window may be
+  in flight; remaining batches are discarded after navigation or disposal. Scrolling by hand between batches updates
+  the anchor. Capturing a reading position starts with viewport hit testing, with a geometry fallback; restoring it
+  matches message identity before measuring that row. Unchanged positions never write to the native scroll offset.
   Search and version links, and a saved reading position, load as many pages as their target needs. Message indices and
   saved positions include the unloaded `Conversation.earlier` offset. Loaded pages are retained; nothing adds a setting,
   a second scroll view or motion. Chat and Projects share this behavior, including reduced motion and narrow windows.
+- User messages share the native `content-visibility: auto` skipping used by answers, with a remembered intrinsic height
+  of 160 px until measured; offscreen rows stay in the same DOM for selection, find and reading anchors. Bottom padding
+  contains the action bar's negative margin, so native paint containment never clips its hit targets.
 - Returning to a conversation, including after a restart, keeps the same message at the same reading offset even when
   earlier text or pictures changed height. Search still opens its result, keeping its focus and brief outline if scrolling
   loads an earlier page. Pagination restores its viewport after reconnecting focus, so any geometry change caused by

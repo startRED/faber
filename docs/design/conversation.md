@@ -42,10 +42,10 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   Every inherited project attachment is copied before the new conversation appears, even one from an earlier message;
   a failed copy refuses the edit rather than publishing broken references. Deleting the original leaves these copies intact.
 - That line is a hover bar (R264; the owner, 2026-10-17). It stays in the layout, so nothing moves when it
-  shows, and is transparent until the pointer is on the message or the keyboard is inside it; it fades in and
-  slides down 4 px with `--dur-ui` and `--ease` (out with `--dur-exit` and `--ease-in`). The last answer is no
+  shows, and is transparent until the pointer is on the message or the keyboard is inside it; it only fades within
+  150 ms, using `--dur-fast` and `--ease` (out with `--ease-in`). The last answer is no
   exception. A screen with no hover (`@media (hover: none)`) shows it always; reduced and no motion show it without
-  the slide. The person's own message has the same bar under its bubble, right-aligned: the time, copy, edit. An icon
+  a fade. The person's own message has the same bar under its bubble, right-aligned: the time, copy, edit. An icon
   that answers a press (copy turns into a check for 1.6 s, read aloud into a stop square while speaking) cross-fades
   with a small scale. Read aloud uses the browser's voice for the screen language and skips code blocks.
 - The same line carries the reply's state (the owner, 2026-10-18: "you should have said you finished"), after the buttons, in the
@@ -95,6 +95,14 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   click outside to close, a count at the bottom, Tab kept inside. Its DOM exists only while open. Pictures inside
   an answer are thumbnails too (at most 280 × 200 px).
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
+- Loading earlier messages keeps already drawn top-level message rows and their text nodes by message id. Streaming
+  still updates that same row in place; paging does not reparse unchanged ordinary replies or move their text selection
+  (`tests/ui/thread.check.ts`, `thread: 300 messages open`; `tests/ui/thread-stall.check.ts` measures frame gaps).
+- The reading column does not animate message arrivals or reordering: scrolling never runs the list-motion helper's
+  per-row style and geometry reads. Disclosures and controls retain their own motion.
+- Hidden copy/edit/reply-action glyphs skip painting using `visibility` on the existing SVG or swap span; their layout and the buttons' focus targets remain.
+  Hover and focus within the message reveal them with no visibility transition or delay; the visibility exit waits for the existing opacity fade to finish, including on WebKit without discrete display transitions.
+  Touch keeps them visible; reduced and no motion disable both transitions through the shared motion rules.
 - There is no permission sentence over a conversation: the mode is a Settings matter.
 - The project's own web-search change uses the existing self-change card, with localized current and proposed
   choices, Allow once, its own Always allow choice and Deny. The card explains that stricter choices stop replies

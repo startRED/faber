@@ -19,13 +19,41 @@ export function savedReading(value: unknown): Map<string, Reading> {
   return positions;
 }
 
-const nodes = (thread: HTMLElement) => [...thread.querySelectorAll<HTMLElement>('[data-message-index], [data-reading-id]')];
+const ANCHORS = '[data-message-index], [data-reading-id]';
+const nodes = (thread: HTMLElement) => [...thread.querySelectorAll<HTMLElement>(ANCHORS)];
 const indexOf = (node: HTMLElement) => Number(node.dataset.readingIndex ?? node.dataset.messageIndex);
 const idOf = (node: HTMLElement, messages: Message[], earlier: number) => node.dataset.readingId ?? messages[indexOf(node) - earlier]?.id;
 
 export function readingPoint(thread: HTMLElement, messages: Message[], earlier = 0): Reading | undefined {
-  const top = thread.getBoundingClientRect().top;
-  const node = nodes(thread).find((node) => node.getClientRects().length && node.getBoundingClientRect().bottom > top);
+  const box = thread.getBoundingClientRect();
+  const top = box.top;
+  const available = nodes(thread);
+  const column = (thread.querySelector<HTMLElement>(':scope > .col') ?? thread).getBoundingClientRect();
+  const x = (column.left + column.right) / 2;
+  const start = Math.max(0, top), end = Math.min(innerHeight, box.bottom);
+  let node: HTMLElement | undefined;
+  // Hit testing starts in the viewport instead of laying out every earlier offscreen reply.
+  if (x >= 0 && x < innerWidth && end > start) {
+    for (const fraction of [0, 0.25, 0.5, 0.75]) {
+      const y = Math.min(end - 1, start + 1 + (end - start) * fraction);
+      const hit = document.elementsFromPoint(x, y).map((el) => el.closest<HTMLElement>(ANCHORS))
+        .find((el) => el && el !== thread && thread.contains(el));
+      if (!hit) continue;
+      node = hit;
+      for (let parent = node.parentElement?.closest<HTMLElement>(ANCHORS); parent && parent !== thread && thread.contains(parent); parent = parent.parentElement?.closest<HTMLElement>(ANCHORS)) node = parent;
+      const at = available.indexOf(node);
+      if (at < 0) { node = undefined; continue; }
+      for (let i = at - 1; i >= 0; i--) {
+        const previous = available[i]!;
+        const rect = previous.getBoundingClientRect();
+        if (!rect.width && !rect.height && !previous.getClientRects().length) continue;
+        if (rect.bottom <= top) break;
+        node = previous;
+      }
+      break;
+    }
+  }
+  node ??= available.find((node) => node.getClientRects().length && node.getBoundingClientRect().bottom > top);
   const id = node && idOf(node, messages, earlier);
   return node && id ? { id, index: indexOf(node), offset: node.getBoundingClientRect().top - top,
     ...(node.dataset.readingRun ? { run: true } : {}) } : undefined;
@@ -42,12 +70,21 @@ export function readingWindow(messages: Message[], point: Reading, page: number,
 }
 
 export function restoreReading(thread: HTMLElement, point: Reading, messages: Message[], earlier = 0): void {
-  const available = nodes(thread).filter((node) => node.getClientRects().length);
-  const node = available.find((node) => idOf(node, messages, earlier) === point.id && !!node.dataset.readingRun === !!point.run)
-    ?? available.find((node) => indexOf(node) >= point.index) ?? available.at(-1);
+  const available = nodes(thread);
+  // Check identity before geometry so restoring one anchor never lays out every offscreen reply.
+  const visible = (node: HTMLElement) => node.getClientRects().length > 0;
+  const node = available.find((node) => idOf(node, messages, earlier) === point.id && !!node.dataset.readingRun === !!point.run && visible(node))
+    ?? available.find((node) => indexOf(node) >= point.index && visible(node)) ?? available.findLast(visible);
   if (!node) return;
   const box = node.getBoundingClientRect();
   // A shortened message still leaves its last line visible.
   const offset = Math.max(point.offset, -Math.max(0, box.height - 1));
-  thread.scrollTop += box.top - thread.getBoundingClientRect().top - offset;
+  const delta = box.top - thread.getBoundingClientRect().top - offset;
+  if (delta) thread.scrollTop += delta;
+}
+
+/** Avoid waiting for a compositor commit when the tail is already in view. */
+export function followTail(thread: HTMLElement): void {
+  const end = Math.max(0, thread.scrollHeight - thread.clientHeight);
+  if (Math.abs(thread.scrollTop - end) > 1) thread.scrollTop = end;
 }

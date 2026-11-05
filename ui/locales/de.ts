@@ -2609,6 +2609,8 @@ export const de: Messages = {
   'notes.414.better': 'Aktionen über eine Grenze hinaus erhöhen den Planumfang und warten auf eine passende Vereinbarung; deine Berechtigungen gelten weiterhin.',
   'notes.415.fixed': 'Ordnersuchen und das Löschen von Ordnern brauchen jetzt immer eine Vereinbarung für riskante Arbeit; bei einzelnen Dateien bleiben die Pfadprüfungen erhalten.',
   'notes.416.fixed': 'Wartende Nachrichten bleiben nach einem Neustart erhalten, fehlgeschlagenes Speichern bewahrt Dateien, wiederholte Aufgaben bleiben verfügbar und Prüfungen halten unterschiedliche Probleme auseinander.',
+  'notes.417.better': 'Lange Unterhaltungen lassen sich beim Laden älterer Nachrichten flüssig durchscrollen.',
+  'notes.418.fixed': 'Die Symbole der Nachrichtenaktionen erscheinen beim Fokussieren sofort und bleiben bis zum Ende des Ausblendens sichtbar, auch unter macOS.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

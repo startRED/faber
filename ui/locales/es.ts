@@ -2609,6 +2609,8 @@ export const es: Messages = {
   'notes.414.better': 'Las acciones que cruzan límites suben el tamaño del plan y esperan un acuerdo acorde; tus permisos siguen vigentes.',
   'notes.415.fixed': 'Las búsquedas en carpetas y su eliminación ahora siempre requieren un acuerdo de riesgo; las acciones en un archivo conservan sus comprobaciones de ruta.',
   'notes.416.fixed': 'Los mensajes pendientes sobreviven al reinicio, guardar sin éxito conserva archivos, las tareas repetidas siguen disponibles y las revisiones distinguen problemas diferentes.',
+  'notes.417.better': 'Las conversaciones largas se desplazan sin tirones al cargar mensajes anteriores.',
+  'notes.418.fixed': 'Los iconos de las acciones de los mensajes aparecen al recibir el foco y permanecen visibles hasta terminar de desvanecerse, también en macOS.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

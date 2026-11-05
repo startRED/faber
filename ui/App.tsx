@@ -69,7 +69,7 @@ import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
 import { ToEnd } from './Floating.tsx';
-import { readingPoint, readingWindow, restoreReading, savedReading, type Reading } from './reading.ts';
+import { followTail, readingPoint, readingWindow, restoreReading, savedReading, type Reading } from './reading.ts';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
@@ -411,7 +411,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // One observer keeps the tail visible when the thread box or the column inside it changes size.
   let tail: ResizeObserver | undefined;
   const tailWatch = () => (tail ??= new ResizeObserver(() => {
-    if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
+    if (thread && stick && !restoringReading) followTail(thread);
     else holdReading();
   }));
   let lastScrollTop = 0;
@@ -834,6 +834,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   let historyGeneration = 0;
   let olderPage: Promise<void> | undefined;
+  onCleanup(() => { historyGeneration++; olderPage = undefined; });
   const loadOlder = (): Promise<void> => {
     if (olderPage) return olderPage;
     const c = current();
@@ -845,41 +846,50 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         const older = await api.messagesBefore(c.id, first);
         if (generation !== historyGeneration || current()?.id !== c.id || current()?.messages[0]?.id !== first) return;
         if (!older?.length) return;
-        keepReading();
-        const point = reading;
-        const el = thread;
-        const height = el?.scrollHeight ?? 0;
-        const marked = searchMark?.classList.contains('search-focus');
-        const focused = searchMark === document.activeElement;
-        const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
-        restoringReading = true;
-        batch(() => {
-          setFrom((f) => f === 0 ? 0 : f + older.length);
-          setUntil((end) => end === undefined ? undefined : end + older.length);
-          setSearchIndex((at) => at === undefined ? undefined : at + older.length);
-          setCurrent((latest) => latest && ({ ...latest, earlier: Math.max(0, (latest.earlier ?? 0) - older.length), messages: [...older, ...latest.messages] }));
+        const nextFrame = () => new Promise<void>((resolve) => {
+          const frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+          const timer = setTimeout(() => { cancelAnimationFrame(frame); resolve(); }, 100);
         });
-        if (el) {
-          if (searchAt !== undefined) {
-            searchMark?.classList.remove('search-focus');
-            searchMark = el.querySelector<HTMLElement>(`[data-message-index="${searchAt}"]`) ?? undefined;
-            if (marked) searchMark?.classList.add('search-focus');
-            if (focused) searchMark?.focus({ preventScroll: true });
+        let expected = first;
+        // Bound the DOM work per frame while the same forty-message request stays in flight.
+        for (let end = older.length; end > 0; end -= 4) {
+          if (generation !== historyGeneration || current()?.id !== c.id || current()?.messages[0]?.id !== expected) return;
+          const page = older.slice(Math.max(0, end - 4), end);
+          if (!reading || thread?.scrollTop !== lastScrollTop) keepReading();
+          const point = reading;
+          const el = thread;
+          const height = point ? 0 : el?.scrollHeight ?? 0;
+          const marked = searchMark?.classList.contains('search-focus');
+          const focused = searchMark === document.activeElement;
+          const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
+          restoringReading = true;
+          batch(() => {
+            setFrom((f) => f === 0 ? 0 : f + page.length);
+            setUntil((end) => end === undefined ? undefined : end + page.length);
+            setSearchIndex((at) => at === undefined ? undefined : at + page.length);
+            setCurrent((latest) => latest && ({ ...latest, earlier: Math.max(0, (latest.earlier ?? 0) - page.length), messages: [...page, ...latest.messages] }));
+          });
+          if (el) {
+            if (searchAt !== undefined) {
+              searchMark?.classList.remove('search-focus');
+              searchMark = el.querySelector<HTMLElement>(`[data-message-index="${searchAt}"]`) ?? undefined;
+              if (marked) searchMark?.classList.add('search-focus');
+              if (focused) searchMark?.focus({ preventScroll: true });
+            }
+            if (point) restoreReading(el, point, current()!.messages, current()?.earlier);
+            else el.scrollTop += el.scrollHeight - height;
+            lastScrollTop = el.scrollTop;
           }
-          if (point) restoreReading(el, point, current()!.messages, current()?.earlier);
-          else el.scrollTop += el.scrollHeight - height;
-          lastScrollTop = el.scrollTop;
-        }
-        requestAnimationFrame(() => {
-          if (generation !== historyGeneration) return;
+          expected = page[0]!.id;
           restoringReading = false;
-          // Offscreen replies can replace their estimated heights after the prepend's first layout.
-          holdReading();
-        });
+          await nextFrame();
+          if (generation !== historyGeneration) return;
+          if (end <= 4) holdReading();
+        }
       } catch (err) {
         if (generation === historyGeneration) fail(err);
       } finally {
-        if (generation === historyGeneration) olderPage = undefined;
+        if (generation === historyGeneration) { restoringReading = false; olderPage = undefined; }
       }
     })();
     return olderPage;
@@ -1263,7 +1273,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // Follow the answer while it streams, unless the user scrolled up to read.
   createEffect(
     on(current, () => {
-      if (thread && stick && !restoringReading) thread.scrollTop = thread.scrollHeight;
+      if (thread && stick && !restoringReading) followTail(thread);
     }),
   );
 
@@ -1277,12 +1287,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const onScroll = (el: HTMLDivElement) => {
     if (restoringReading) return;
-    const below = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const top = el.scrollTop;
+    const moved = top !== lastScrollTop;
+    const below = el.scrollHeight - top - el.clientHeight;
     const end = until();
     if (below < 40 && (end === undefined || end >= (current()?.messages.length ?? 0))) stick = true;
-    else if (el.scrollTop < lastScrollTop - 1) stick = false;
-    lastScrollTop = el.scrollTop;
-    keepReading();
+    else if (top < lastScrollTop - 1) stick = false;
+    lastScrollTop = top;
+    if (moved || !reading || stick) keepReading();
     if (below < 400 && end !== undefined) {
       const next = end + PAGE;
       setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);
@@ -1291,7 +1303,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
       const point = reading;
-      // Prepending reuses message rows by position; keep the search marker on its message.
+      // Keep the search marker on its logical message while the visible window grows.
       const marked = searchMark?.classList.contains('search-focus');
       const focused = searchMark === document.activeElement;
       const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
@@ -2103,7 +2115,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           when={newChat()}
                           fallback={
                             <div class="col" ref={(el) => {
-                              animateList(el);
                               onMount(() => {
                                 tailWatch().observe(el);
                                 onCleanup(() => tailWatch().unobserve(el));

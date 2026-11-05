@@ -2489,6 +2489,8 @@ export const en = {
   'notes.414.better': 'Boundary actions now raise the plan’s size and wait for a matching contract; your permissions still apply.',
   'notes.415.fixed': 'Directory searches and folder deletions now always need a risky contract; single-file actions keep their path checks.',
   'notes.416.fixed': 'Waiting messages survive a restart, failed saves preserve files, repeated tasks stay available, and reviews keep different problems apart.',
+  'notes.417.better': 'Long conversations scroll smoothly when you load earlier messages.',
+  'notes.418.fixed': 'Message action icons appear right away on focus and stay visible until their fade finishes, including on macOS.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

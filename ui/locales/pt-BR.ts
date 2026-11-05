@@ -2596,6 +2596,8 @@ export const ptBR: Messages = {
   'notes.414.better': 'Ações que cruzam limites aumentam o tamanho do plano e esperam um combinado à altura; suas permissões continuam valendo.',
   'notes.415.fixed': 'Buscas em pastas e exclusões de pastas agora sempre exigem um combinado de risco; ações em um arquivo mantêm as verificações do caminho.',
   'notes.416.fixed': 'Mensagens na fila sobrevivem ao reinício, falhas ao salvar preservam arquivos, tarefas repetidas continuam disponíveis e revisões separam problemas diferentes.',
+  'notes.417.better': 'Conversas longas rolam sem travar ao carregar mensagens antigas.',
+  'notes.418.fixed': 'Os ícones das ações das mensagens aparecem assim que recebem foco e continuam visíveis até terminar de desaparecer, inclusive no macOS.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

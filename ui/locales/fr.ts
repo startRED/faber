@@ -2609,6 +2609,8 @@ export const fr: Messages = {
   'notes.414.better': 'Les actions qui franchissent une limite attendent un contrat adapté au nouveau niveau du plan ; vos permissions restent en vigueur.',
   'notes.415.fixed': 'Les recherches dans les dossiers et leur suppression exigent désormais un contrat de risque ; les actions sur un fichier gardent leurs vérifications de chemin.',
   'notes.416.fixed': 'Les messages en attente restent après un redémarrage, les enregistrements ratés préservent les fichiers, les tâches répétées restent disponibles et les revues distinguent les problèmes.',
+  'notes.417.better': 'Les longues conversations défilent sans à-coups quand vous chargez les anciens messages.',
+  'notes.418.fixed': 'Les icônes des actions des messages apparaissent dès la prise de focus et restent visibles jusqu’à la fin du fondu, y compris sur macOS.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

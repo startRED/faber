@@ -550,7 +550,7 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 
 /* Messages */
 .you { position: relative; justify-self: end; max-width: min(88%, 620px); padding: 12px 17px; background: var(--s2); border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); box-shadow: var(--card-shadow); font-size: var(--fs-read); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; text-wrap: pretty; }
-.mine { display: grid; justify-items: end; gap: 6px; min-width: 0; }
+.mine { content-visibility: auto; contain-intrinsic-size: auto 160px; overflow-clip-margin: 12px; padding-bottom: 8px; margin-bottom: -8px; display: grid; justify-items: end; gap: 6px; min-width: 0; }
 /* The arrows between a message's versions (parity T7): quiet, under the bubble, the count between them. */
 .versions { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .versions .iconbtn { width: var(--h-sm); height: var(--h-sm); }
@@ -837,6 +837,11 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .bar, .ai .actions > :not(.foot) { opacity: 0; transition: opacity min(var(--dur-fast), var(--dur-feedback-max)) var(--ease-in); }
 :is(.ai, .mine):is(:hover, :focus-within) :is(.bar, .actions > :not(.foot)) { opacity: 1; transition-timing-function: var(--ease); }
 @media (hover: none) { .bar, .ai .actions > :not(.foot) { opacity: 1; transform: none; } }
+@media (hover: hover) {
+/* Hide only the drawing after the fade; visibility transitions also work without discrete display support. */
+:is(.mine-bar, .ai > .actions) .iconbtn > :is(.swap, .i) { visibility: hidden; transition: visibility min(var(--dur-fast), var(--dur-feedback-max)) linear; }
+:is(.ai, .mine):is(:hover, :focus-within) :is(.mine-bar, .actions) .iconbtn > :is(.swap, .i) { visibility: visible; transition-duration: 0s; }
+}
 .mine-bar { display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: var(--h-sm); margin-bottom: -8px; }
 .mine-bar .iconbtn { width: var(--h-sm); height: var(--h-sm); }
 .when { color: var(--ink-3); font: 400 var(--fs-xs) var(--font-data); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
