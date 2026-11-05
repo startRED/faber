@@ -42,6 +42,8 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
 /// How often an idle moment is looked for while an update waits.
 const LOOK_EVERY: Duration = Duration::from_secs(30);
+/// Held for the whole of a release look, the automatic one or the button's: only one runs at a time.
+static LOOK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// The look for a release when Faber opens; an offline start waits this long at most.
 const START_CHECK: Duration = Duration::from_secs(8);
 /// The download at open: past this the line goes away and the update is tried again soon.
@@ -732,6 +734,11 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
 /// already runs, or an update is already kept.
 pub(crate) async fn check_now(app: AppHandle) -> Result<Status, String> {
     let Some(install_dir) = install_dir(&app) else { return Err("error.update.none".into()) };
+    // A look that already runs (the automatic one) is joined: wait for it, then report what it found.
+    let Ok(_look) = LOOK.try_lock() else {
+        drop(LOOK.lock().await);
+        return Ok(status(&app));
+    };
     if lock(&app.state::<Faber>().update).is_none() && status(&app).phase == Phase::None {
         set_stage(&app, Phase::Checking);
         let ok = fetch(&Live::new(&app, &install_dir, Reopen::Tray), LATER_DOWNLOAD).await;
@@ -767,7 +774,11 @@ pub(crate) fn keep_updated(app: &AppHandle) {
         loop {
             // A downloaded update is kept and installed first; the next one is looked for after it.
             if lock(&app.state::<Faber>().update).is_none() && Instant::now() >= next_check {
-                next_check = Instant::now() + next_check_delay(fetch(&Live::new(&app, &install_dir, Reopen::Tray), LATER_DOWNLOAD).await);
+                // A look the button started already runs: this round waits for the next tick.
+                if let Ok(_look) = LOOK.try_lock() {
+                    next_check =
+                        Instant::now() + next_check_delay(fetch(&Live::new(&app, &install_dir, Reopen::Tray), LATER_DOWNLOAD).await);
+                }
             }
             install_when_idle(&app, &install_dir);
             sleep(LOOK_EVERY).await;
