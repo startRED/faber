@@ -36,3 +36,4 @@
 - The CLI, the AI's faber tools and the screen call one shared command list in Rust, over a local channel that needs a per-run secret; signing in to an AI, granting folder access and money stay with the person. [by AI]
 - A conversation counts as done only when its AI concluded it (wrap_up with done); a turn that ends without that shows as ended without a conclusion, and Faber asks the AI once for its closing summary. [by AI]
 - Conversations speak in the AI's own voice: Faber's added instructions keep the language, safety and evidence rules but no longer make the AI talk as Faber. [by AI]
+- Composer attachments are limited to 8 MiB total per message before browser file reads and sending, including restored drafts and pending reads; this fits the existing 16 MiB Electron/host transport without widening it. [by AI]

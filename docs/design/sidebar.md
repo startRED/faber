@@ -3,6 +3,13 @@
 The area's conversation lists, pinning, export, archive and footer. Window widths and the sidebar overlay stay in
 [layout.md](layout.md). Search details are in [search.md](search.md).
 
+While a conversation, project or Chat group row has focus, Up and Down move to the previous or next visible row;
+Home and End move to the first or last. They stop at the list edges and never activate a row or its delete action.
+Right expands a project or group, then enters its first conversation; Left returns to its parent or collapses that
+parent. Collapsed rows, including their departing animation, are skipped. Enter and Space keep their native button
+activation, Tab still reaches row actions, and modified arrows and text-field editing keep their existing behavior.
+`tests/ui/sidebar-navigation.check.ts` covers focus, filtering, empty lists and project expansion without activation.
+
 Pinned and date groups share one labelled section with a semantic heading, styled like the existing quiet labels.
 Chat group rows are reconciled synchronously by id during a state refresh, including after a rename changes the group.
 The row keeps its rename draft and focus; Enter keeps focus on its button after the save refresh completes

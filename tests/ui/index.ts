@@ -19,6 +19,7 @@ import './appearance.check.ts';
 import './thread-stall.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
+import './sidebar-navigation.check.ts';
 import './details.check.ts';
 import './background.check.ts';
 import './prompt-history.check.ts';

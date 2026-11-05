@@ -39,6 +39,18 @@ The attachment picker copies its selected files and immediately clears the nativ
 the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
 (`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
 
+New attachments are limited to 8 MiB total per message, including inline text files and reads already in
+flight. The whole incoming selection is rejected before reading when it exceeds the bound. An unreadable file or
+an oversized selection reports a localized error naming the refused file and the limit beside the field, associated with the textarea and announced as
+an alert. Existing text and attachments remain available; choosing a valid file retries through the ordinary path.
+The existing image preview and individual removal controls are unchanged. `tests/ui/composer.check.ts` covers byte
+limits, concurrent drops, read failures and retry.
+Sending also checks older restored drafts, keeps oversized files visible for explicit removal and preserves the text.
+The cap leaves room below the Electron/host 16 MiB JSON boundary after base64 encoding, without widening transport
+limits. `scripts/attachment-limits.test.mjs` checks the shared UI/engine budget against both transport boundaries.
+This is UI admission; the shared file writer is bounded, but the combined image/file guard at engine turn admission
+is a follow-up, so programmatic host/CLI requests do not yet have the combined UI guarantee.
+
 Each image/file removal button uses the existing small-control size (`--h-sm`) and small-corner radius (`--r-xs`,
 capped at 6 px even with increased corner roundness), without scaling its hit area.
 A centered 24 CSS px square remains clickable, including near its rounded corners;

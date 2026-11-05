@@ -159,6 +159,19 @@ Ctrl+1, 2 and 3 open Chat, Projects and Catalog (the browser pane picks tabs wit
 Esc closes the top layer (palette, menu, find bar, sidebar overlay, running column, account cards, Settings), Enter sends and Shift+Enter
 adds a line, Up recalls earlier messages and Ctrl+R searches them in the message box, Shift+F10 opens the menu of what has focus, and ? (outside a text box) lists them, with the keys of Faber's browser ("In Faber's browser": Ctrl+T, Ctrl+Shift+T, Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+1–9, Ctrl+L, Ctrl+R, Alt+←, Alt+→; see "Page in Faber's browser"). Every Ctrl key is defined once in `ui/keys.ts`, and the first run, the tutorial, "What's new" and the Ctrl+K box hold them back while open. Browser keys (F5, F7, Ctrl+R, P, S, U, F) do nothing.
 
+Sidebar row focus uses Up/Down and Home/End through visible conversation, project and Chat group rows. Right expands
+or enters a parent and Left returns to or collapses it; none opens a conversation or triggers a row action. Text
+fields and modified arrows keep their own behavior (`tests/ui/sidebar-navigation.check.ts`).
+
+Attachment admission limits all files and images to 8 MiB total per message before reading new
+files, counting inline text and concurrent reads. Size refusals name the file and limit; fresh read failures identify the file beside the composer without
+discarding the draft. Sending checks restored older drafts too. The shared file writer also refuses an oversized file
+batch before decoding (`ui/Composer.tsx`, `ui/attachments.ts`, `engine/src/workspace.rs` including its unit checks,
+`tests/ui/composer.check.ts`). The combined image/file guard at engine turn admission is not wired yet: programmatic
+host/CLI requests are not covered by the UI limit. A ready follow-up adds the guard before `send_task` effects after
+the exclusive claim on `engine/src/engine.rs` clears. `scripts/attachment-limits.test.mjs` verifies that
+the shared budget fits the existing Electron and host transport limits after encoding; transport limits are unchanged.
+
 ### Project instruction discovery
 
 Checked on 2026-10-20 with installed Claude Code 2.1.302 and Codex 0.162.1 (version/help), their official
