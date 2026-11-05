@@ -17,6 +17,7 @@ use tauri::image::Image;
 use tauri::menu::{IsMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_notification::NotificationExt;
 
@@ -128,7 +129,7 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id().as_ref() {
             "open" => crate::show(app),
-            "quit" => app.exit(0),
+            "quit" => ask_then_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, e| {
@@ -146,6 +147,48 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
 }
 
 /// The screen's words for the menu, the tooltip and the notification. A language change reaches the tray at once.
+/// Quit from the tray. With nothing running it ends at once; otherwise the person is asked first, because the work stops.
+fn ask_then_quit(app: &AppHandle) {
+    let (running, texts) = {
+        let tray = app.state::<Tray>();
+        let s = lock(&tray);
+        (s.counts.running, s.texts.clone())
+    };
+    if running == 0 {
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    // The question blocks until answered, so it never waits on the menu's own thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut ask = app
+            .dialog()
+            .message(&texts.quit_ask)
+            .title("Faber")
+            .buttons(MessageDialogButtons::OkCancelCustom(texts.quit.clone(), texts.quit_keep.clone()));
+        if let Some(w) = crate::main_window(&app) {
+            ask = ask.parent(&w);
+        }
+        if ask.blocking_show() {
+            app.exit(0);
+        }
+    });
+}
+
+/// The window closed while something runs: one short note that Faber stays in the tray and the work goes on.
+// Waits for the window-close handler in main.rs (another lane owns it) to call it after `api.prevent_exit()`.
+#[allow(dead_code)]
+pub(crate) fn window_closed(app: &AppHandle) {
+    let (running, text) = {
+        let tray = app.state::<Tray>();
+        let s = lock(&tray);
+        (s.counts.running, s.texts.closed_note.clone())
+    };
+    if running > 0 {
+        deliver_notices(app, &app.state::<crate::Faber>().engine.settings(), &[text]);
+    }
+}
+
 pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String> {
     let tray = app.state::<Tray>();
     let mut s = lock(&tray);

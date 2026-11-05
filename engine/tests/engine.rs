@@ -2120,17 +2120,51 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     let (dir, source) = research_plan_edit_approve_report(vendor, Area::Chat).await;
     let prompt = &source.messages[4];
     let text = faber_engine::engine::with_history(&source.messages[..4], &prompt.text, &str::to_owned);
+    let forked = "research-retry-thread";
+    let point = (vendor == Vendor::Codex).then(|| source.messages[3].native_point.as_ref().expect("recorded completed planning boundary"));
+    let remap_thread = |message: &mut serde_json::Value| {
+        for path in ["/result/thread/id", "/params/thread/id", "/params/threadId"] {
+            if let Some(id) = message.pointer_mut(path).filter(|id| id.is_string()) {
+                *id = forked.into();
+            }
+        }
+    };
     let mut recording = fixture(vendor.name(), "research-report");
     for entry in &mut recording {
+        if point.is_some() {
+            remap_thread(&mut entry.msg);
+            if entry.msg["id"] == 3 {
+                entry.msg["id"] = 4.into();
+            }
+        }
         if entry.msg["method"] == "thread/resume" {
-            entry.msg["method"] = "thread/start".into();
+            if let Some(point) = point {
+                entry.msg["method"] = "thread/fork".into();
+                entry.msg["params"]["threadId"] = point.session.clone().into();
+                entry.msg["params"]["lastTurnId"] = point.cursor.turn.clone().unwrap().into();
+                entry.msg["params"]["excludeTurns"] = true.into();
+            } else {
+                entry.msg["method"] = "thread/start".into();
+            }
         }
         if entry.input && entry.msg["type"] == "user" {
             entry.msg["message"]["content"] = text.clone().into();
         }
         if entry.msg["method"] == "turn/start" {
-            entry.msg["params"]["input"][0]["text"] = text.clone().into();
+            entry.msg["params"]["input"][0]["text"] = if point.is_some() { prompt.text.clone() } else { text.clone() }.into();
         }
+    }
+    if let Some(point) = point {
+        recording.splice(
+            5..5,
+            [
+                Entry {
+                    input: true,
+                    msg: json!({"id":3,"method":"thread/turns/list","params":{"threadId":forked,"limit":1,"itemsView":"summary"}}),
+                },
+                Entry { input: false, msg: json!({"id":3,"result":{"data":[{"id":point.cursor.turn,"status":"completed"}]}}) },
+            ],
+        );
     }
     let f = fake(recording);
     let (engine, _) = engine(&dir, vendor, f.spawn.clone());
@@ -2142,14 +2176,25 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
             choice: choice(vendor.name(), None),
         })
         .unwrap();
-    let retried = until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.status == Some(Status::Done))).await;
+    let retried = until(&engine, &id, |c| {
+        assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+        c.messages.last().is_some_and(|m| m.status == Some(Status::Done))
+    })
+    .await;
     let persona = if vendor == Vendor::Claude {
         f.args.lock().unwrap()[0].windows(2).find(|a| a[0] == "--append-system-prompt").unwrap()[1].clone()
     } else {
-        f.wire.messages().iter().find(|m| m["method"] == "thread/start").unwrap()["params"]["developerInstructions"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        let wire = f.wire.messages();
+        let request = wire.iter().find(|m| m["method"] == "thread/fork").unwrap();
+        let point = point.unwrap();
+        assert_eq!(request["params"]["threadId"], point.session);
+        assert_eq!(request["params"]["lastTurnId"], point.cursor.turn.as_deref().unwrap());
+        assert_eq!(request["params"]["excludeTurns"], true);
+        assert_eq!(retried.sessions.get(&Vendor::Codex).map(String::as_str), Some(forked));
+        assert!(retried.native_fork.is_none());
+        let turn = wire.iter().find(|m| m["method"] == "turn/start").unwrap();
+        assert_eq!(turn["params"]["input"][0]["text"], prompt.text, "native history is not replayed as text");
+        request["params"]["developerInstructions"].as_str().unwrap().to_string()
     };
     assert!(persona.contains("Search the web over many steps"), "Retry must keep the research instruction for {vendor:?}");
     assert!(persona.contains("Sources list"), "Retry must keep the citation instruction for {vendor:?}");
@@ -2162,6 +2207,9 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     // A restart must retain the retry's context, without making a later ordinary message another research turn.
     let mut recording = fixture(vendor.name(), "chat");
     for entry in &mut recording {
+        if point.is_some() {
+            remap_thread(&mut entry.msg);
+        }
         if entry.msg["method"] == "thread/start" {
             entry.msg["method"] = "thread/resume".into();
         }
@@ -2182,6 +2230,10 @@ async fn research_retry_report_keeps_instructions(vendor: Vendor) {
     assert!(!persona.contains("Search the web over many steps"));
     assert!(!persona.contains("Do not search yet."));
     assert!(ordinary.messages[6].wake.is_none());
+    if point.is_some() {
+        let wire = f.wire.messages();
+        assert_eq!(wire.iter().find(|m| m["method"] == "thread/resume").unwrap()["params"]["threadId"], forked);
+    }
     assert_eq!(engine.open(&source.id).unwrap().messages, source.messages, "Retry leaves the original report untouched");
     assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
     engine.shutdown();
@@ -3177,7 +3229,7 @@ async fn open_in_terminal_resumes_the_same_cli_session_in_the_conversation_folde
 }
 
 #[tokio::test]
-async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
+async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_without_reenabling_guarded_hooks() {
     let dir = support::DataFolder::new();
     let f = fake(fixture("claude", "chat"));
     let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone());
@@ -3192,7 +3244,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
     engine.send(send()).unwrap();
     finished(&mut rx, |_| {}).await;
-    assert!(!last_args().contains("disableAllHooks"));
+    assert!(last_args().contains("disableAllHooks"), "guarded launches keep hooks off even after opt-in");
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();

@@ -812,6 +812,22 @@ export interface RewindCoverage {
   unavailable: boolean;
   incomplete: boolean;
 }
+/** A single turn's saved before/after versions; at most 50 file names per page. */
+export interface AnswerChanges {
+  files: FileChange[];
+  total: number;
+  coverage: RewindCoverage;
+  sealed: boolean;
+  shared: boolean;
+}
+/** One saved file's unified diff, loaded only while open; at most 200 lines / 128 KiB. */
+export interface AnswerChangePatch {
+  lines: string[];
+  total: number;
+  binary: boolean;
+  tooLarge: boolean;
+  notice?: 'answerChanges.properties' | 'answerChanges.emptyAdded' | 'answerChanges.emptyDeleted';
+}
 export interface RewindCursor {
   entry: string | null;
   turn: string | null;
@@ -932,6 +948,9 @@ export interface ShellTexts {
   needsYou: Plural;
   notify: string;
   notifyMany: string;
+  quitAsk: string;
+  quitKeep: string;
+  closedNote: string;
   /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
   stopped: Record<string, string>;
 }
@@ -1080,6 +1099,8 @@ export const api = {
   contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
   changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
   rewindPoints: (id: string) => invoke<RewindPoint[]>('rewind_points', { id }),
+  answerChanges: (id: string, messageId: string, offset = 0) => invoke<AnswerChanges>('answer_changes', { id, messageId, offset }),
+  answerChangePatch: (id: string, messageId: string, path: string, offset = 0) => invoke<AnswerChangePatch>('answer_change_patch', { id, messageId, path, offset }),
   rewindRedos: (id: string) => invoke<RewindRedoInfo[]>('rewind_redos', { id }),
   rewindRedoPreview: (request: RewindRedoRequest) => invoke<RewindPreview>('rewind_redo_preview', { request }),
   rewindRecover: (id: string) => invoke<void>('rewind_recover', { id }),

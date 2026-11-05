@@ -1,4 +1,5 @@
 - Deliver original frontend-craft and frontend-proof instructions lazily through the existing first-party guide path; retain external catalog skills and each project's own visual system. [by AI]
+- Per-answer file review reads the existing private rewind before/after objects in bounded pages; retain one snapshot system and the existing restore confirmation, conflict choices, retention and recovery. [by AI]
 - Extend the existing composer draft keys with native IndexedDB Blob attachments, preserving synchronous text writes and explicit storage-failure recovery; a draft save does not establish delivery to the engine. [by AI]
 
 - Admit human sends only after their current intent is saved, restoring draft, archive, follow-up and routing state on refusal. A later research-mode write failure leaves that durable message accepted with a failed reply and ends Keep going without dropping human queued messages or starting the AI. [by AI]

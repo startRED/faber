@@ -419,7 +419,18 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             // must not open them.
             mode => {
                 args.extend(["--permission-mode".into(), permission_mode(mode).into()]);
-                settings["permissions"] = json!({ "deny": deny() });
+                // Ask rules take precedence over remembered CLI grants and native auto-approval.
+                let mut rules = deny();
+                // Monitor can start commands too, but has no checked replacement protocol here.
+                rules.push("Monitor".into());
+                settings["permissions"] = json!({ "deny": rules, "ask": ["Bash", "PowerShell"] });
+                settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+                // A sandboxed script must not plant project settings, hooks or servers for the next host launch.
+                args.extend(["--setting-sources".into(), "user".into()]);
+                if launch.area == Area::Project {
+                    args.push("--strict-mcp-config".into());
+                }
+                settings["disableAllHooks"] = true.into();
             }
         }
         if launch.permissions != Permissions::FullAccess {
@@ -807,8 +818,46 @@ pub struct ClaudeOptions {
     pub sandbox: Option<crate::cli::Cli>,
 }
 
+pub fn supports_fork(help: &str) -> bool {
+    help.lines().any(|line| {
+        line.starts_with([' ', '\t'])
+            && line
+                .trim_start()
+                .strip_prefix("--fork-session")
+                .is_some_and(|tail| tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t'))
+    })
+}
+
+pub fn claude_fork_args(launch: &ClaudeLaunch, point: &crate::engine::NativePoint, supported: bool) -> Result<Vec<String>, String> {
+    if !supported
+        || !point.valid(crate::model::Vendor::Claude)
+        || launch.instructions.is_some()
+        || matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Aside)
+    {
+        return Err("error.sessionLost".into());
+    }
+    let resumed = ClaudeLaunch { resume: Some(point.session.clone()), ..launch.clone() };
+    let mut args = claude_args(&resumed);
+    args.extend(["--fork-session".into(), format!("--resume-session-at={}", point.cursor.entry.as_deref().expect("validated entry"))]);
+    Ok(args)
+}
+
+pub fn start_claude_fork(
+    opts: ClaudeOptions,
+    point: &crate::engine::NativePoint,
+    supported: bool,
+    on_event: EventSink,
+) -> Result<Session, String> {
+    let args = claude_fork_args(&opts.launch, point, supported)?;
+    Ok(start_configured(opts, on_event, args))
+}
+
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     let args = claude_args(&opts.launch);
+    start_configured(opts, on_event, args)
+}
+
+fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
     // A denial in the result only means "nobody could answer" when the CLI ran with no prompts; with the host answering, a denial is
@@ -1033,7 +1082,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                     event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
-                                    if crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
+                                    if (opts.launch.permissions.guarded() && tool == "Monitor")
+                                        || crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "deny", "message": "Faber refused a write to its protected notes or data folder." } } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
@@ -1166,7 +1216,12 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
+                                let response = if allow && opts.launch.permissions.guarded() && ["Bash", "PowerShell"].contains(&tool.as_str()) {
+                                    match crate::permissions::guarded_input(&opts.cwd, opts.launch.permissions, tool, input, opts.sandbox.as_ref(), &crate::cli::find_cli) {
+                                        Some(updated) => allow_response(tool, &updated, None),
+                                        None => json!({ "behavior": "deny", "message": "The required data-folder sandbox is unavailable. Never retry unsandboxed." }),
+                                    }
+                                } else if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {

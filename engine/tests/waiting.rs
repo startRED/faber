@@ -585,6 +585,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         rewind_notice: None,
         rewind_summary: None,
         rewind_native: None,
+        native_fork: None,
         area: Area::Chat,
         project_id: None,
         sessions: BTreeMap::from([(Vendor::Claude, "old-session".into())]),

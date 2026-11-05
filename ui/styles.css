@@ -416,6 +416,13 @@ svg.i.sm { width: 14px; height: 14px; }
 .change-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-data); }
 .change-counts { color: var(--ink-3); font-size: var(--fs-xs); }
 .change-content { padding: 0 12px 12px; }
+.answer-changes { min-width: 0; margin-block: 12px; }
+.answer-change-body { min-width: 0; padding: 0 12px 12px; }
+.answer-change-patch { max-width: 100%; max-height: 360px; overflow: auto; }
+.answer-change-patch .patch-line { white-space: pre; overflow-wrap: normal; }
+.answer-change-pages { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; color: var(--ink-3); font-size: var(--fs-xs); }
+.answer-change-pages .btn { white-space: normal; }
+.answer-changes .btn[aria-disabled="true"] { opacity: 0.4; cursor: default; pointer-events: none; }
 
 /* A just-in-time confirmation shares Changes' file preview, with no work or timers while it is closed. */
 .rewind-confirm, .cookies { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 24px; overflow: auto; color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--lift-shadow); font-size: var(--fs-ui); overflow-wrap: anywhere; }

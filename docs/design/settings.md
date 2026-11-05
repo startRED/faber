@@ -24,7 +24,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
   `.field`. Under 960 px the control slot moves under the name.
 - Settings uses plain names in all five languages: automatic actions (with "hooks" explained beside the switch),
-  Stored copy for saved web results, and named limit periods. Incomplete readings say "at least" instead of a symbol.
+  Stored copy for saved web results, and named limit periods. The hook hint and help explain that Claude Code keeps automatic actions off outside Full access to protect saved approvals; the stored switch still applies to other backends. Incomplete readings say "at least" instead of a symbol.
   The account total keeps the shared "in API value" wording and immediately explains the estimate and that it is not a bill.
   Both access menus show every choice's description, with Ask's existing approvals and Full access's file, command and
   internet access stated in plain words. Long security warnings and all five existing modes, including Plan, remain. The Full access explanation also says in every language that the AI can bypass approval of project preferences and lessons.

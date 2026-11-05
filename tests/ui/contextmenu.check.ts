@@ -100,6 +100,33 @@ check('right-click: the browser reload, print, save and view-source shortcuts do
   equal(key(document.body, { key: 'F2' }), true, 'other keys are left alone');
 });
 
+check('right-click: unrelated scrolling keeps the menu, scrolling its origin closes it even when focus came from elsewhere', async () => {
+  const root = stage();
+  const dispose = sidebar(root, []);
+  const thread = document.createElement('div');
+  const composer = document.createElement('textarea');
+  thread.append(composer);
+  root.append(thread);
+  try {
+    composer.focus();
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    equal(menus().length, 1);
+    thread.dispatchEvent(new Event('scroll'));
+    menus()[0]!.dispatchEvent(new Event('scroll'));
+    await settle();
+    equal(menus().length, 1, 'scrolling the conversation or the menu itself keeps the row menu usable');
+    root.querySelector('.crow')!.parentElement!.dispatchEvent(new Event('scroll'));
+    await settle();
+    equal(menus().length, 0, 'scrolling the row away closes its menu');
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    document.dispatchEvent(new Event('scroll'));
+    await settle();
+    equal(menus().length, 0, 'viewport scrolling still closes the menu');
+  } finally { clickOutside(); dispose(); root.remove(); }
+});
+
 check('right-click: a chat offers Rename, Export, Archive and Delete, Delete asks twice, Rename edits in place', async () => {
   const root = stage();
   const calls: string[] = [];

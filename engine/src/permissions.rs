@@ -588,6 +588,147 @@ fn quoted(value: &str, powershell: bool) -> String {
     format!("'{}'", if powershell { value.replace('\'', "''") } else { value.replace('\'', "'\\''") })
 }
 
+// Path rules cannot protect a preexisting hardlink outside the Store. An incomplete scan grants nothing.
+fn unlinked_store(data: &Path) -> Option<()> {
+    let held = faber_winproc::rewind::Root::open(data).ok()?;
+    let mut pending = vec![data.to_path_buf()];
+    let mut left = 10_000usize;
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(dir).ok()? {
+            left = left.checked_sub(1)?;
+            let entry = entry.ok()?;
+            let kind = entry.file_type().ok()?;
+            if kind.is_symlink() {
+                return None;
+            }
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file() {
+                held.open_file(entry.path().strip_prefix(data).ok()?.to_str()?).ok()?;
+            } else {
+                return None;
+            }
+        }
+    }
+    Some(())
+}
+
+/// A guarded command can read normal files and write its project, but cannot read or write any Store root.
+pub fn guarded_command_argv(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Vec<String>> {
+    let cli = sandbox?;
+    if !mode.guarded() || !["Bash", "PowerShell"].contains(&tool) || !cli.prefix.is_empty() || !Path::new(&cli.command).is_absolute() {
+        return None;
+    }
+    let root = working_root(root)?.canonicalize().ok()?;
+    let root_text = unified(root.to_str()?);
+    let roots = crate::store::Store::data_roots();
+    if roots.is_empty() {
+        return None;
+    }
+    let writable = mode != crate::model::Permissions::Plan;
+    let mut config = data_sandbox_config(&root, writable);
+    let id = config["default_permissions"].as_str()?.to_owned();
+    let profile = config.get_mut(&format!("permissions.{id}"))?;
+    profile["network"] = json!({"enabled": true});
+    for metadata in [".claude", ".codex", ".mcp.json", ".git", ".faber/verify.local.json"] {
+        profile["filesystem"][":workspace_roots"][metadata] = "read".into();
+    }
+    for data in roots {
+        // A missing, replaced or unresolvable Store never authorizes an unprotected command.
+        let data = data.canonicalize().ok()?;
+        unlinked_store(&data)?;
+        let data_text = unified(data.to_str()?);
+        profile["filesystem"][&data_text] = "deny".into();
+        if inside(&normal(&root_text), &normal(&data_text)) {
+            return None;
+        } else if let Ok(relative) = data.strip_prefix(&root) {
+            // Deny its first workspace ancestor too: renaming an allowed parent bypasses a deeper path rule.
+            profile["filesystem"][":workspace_roots"][unified(relative.components().next()?.as_os_str().to_str()?)] = "deny".into();
+        }
+    }
+    if cfg!(windows) {
+        config.insert("windows.sandbox".into(), "mxc".into());
+    }
+    let mut command = vec![cli.command.clone()];
+    for (key, value) in config {
+        command.extend(["-c".into(), format!("{key}={}", inline(&value))]);
+    }
+    command.extend([
+        "sandbox".into(),
+        "--permission-profile".into(),
+        id,
+        "--include-managed-config".into(),
+        "-C".into(),
+        root_text,
+        "--".into(),
+    ]);
+    let powershell = tool == "PowerShell";
+    // Literal project entrypoints need no shell runtime; npm's fixed launcher prefix stays inside the sandbox.
+    if !powershell
+        && let Some(args) = words(input["command"].as_str()?, false)
+        && ["node", "python", "python3", "cargo", "npm", "pnpm", "yarn", "bun", "dotnet", "go", "git", "rg"]
+            .contains(&args[0].to_ascii_lowercase().trim_end_matches(".exe"))
+        && let Some(native) = resolve(&args[0])
+    {
+        if !Path::new(&native.command).is_absolute() {
+            return None;
+        }
+        command.extend(std::iter::once(native.command).chain(native.prefix).chain(args.into_iter().skip(1)));
+        return Some(command);
+    }
+    let shells = if powershell { [resolve("pwsh"), resolve("powershell")] } else { [resolve("bash"), None] };
+    let shell = shells.into_iter().flatten().find_map(|shell| {
+        if !shell.prefix.is_empty() || !Path::new(&shell.command).is_absolute() {
+            return None;
+        }
+        plain(Path::new(&shell.command).canonicalize().ok()?).to_str().map(str::to_owned)
+    })?;
+    // The Windows bash in System32 is a WSL launcher, not the native shell whose filesystem is sandboxed.
+    if cfg!(windows) && !powershell && normal(&shell).contains("/system32/") {
+        return None;
+    }
+    command.push(shell);
+    if powershell {
+        command.extend(["-NoProfile".into(), "-NonInteractive".into()]);
+        if cfg!(windows) {
+            command.extend(["-WindowStyle".into(), "Hidden".into()]);
+        }
+        use base64::Engine as _;
+        let script: Vec<_> = input["command"].as_str()?.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        command.extend(["-EncodedCommand".into(), base64::engine::general_purpose::STANDARD.encode(script)]);
+    } else {
+        command.extend(["--noprofile".into(), "--norc".into(), "-c".into()]);
+        command.push(input["command"].as_str()?.into());
+    }
+    Some(command)
+}
+
+pub fn guarded_input(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Value> {
+    let command = guarded_command_argv(root, mode, tool, input, sandbox, resolve)?;
+    let powershell = tool == "PowerShell";
+    let command = command.iter().map(|arg| quoted(arg, powershell)).collect::<Vec<_>>().join(" ");
+    let mut updated = input.clone();
+    updated["command"] = format!("{}{command}", if powershell { "& " } else { "" }).into();
+    if updated.get("run_in_background").is_some() {
+        updated["run_in_background"] = false.into();
+    }
+    Some(updated)
+}
+
 /// Build tools execute project code only inside an OS sandbox; never approve the original command as a fallback.
 pub fn checked_input(
     root: &Path,

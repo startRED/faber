@@ -35,6 +35,7 @@ The visual direction lives in this folder, one page per part ([docs/README.md](.
 ## Rules for every screen
 
 The shared message box's lists and earlier messages live in [composer.md](composer.md); replies and plan approval in [conversation.md](conversation.md), the line under an answer in [answer-line.md](answer-line.md). Reading width and scroll position live in [reading.md](reading.md).
+Saved per-answer file comparisons follow [answer-review.md](answer-review.md).
 Native pieces and generated pages have their own [visual-answer rules](visual-answers.md).
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language. A kind of step, a state and who is speaking each
@@ -63,7 +64,9 @@ Native pieces and generated pages have their own [visual-answer rules](visual-an
   by changing its own text; the second activation must be a separate gesture (one that follows within half a second is ignored).
   Go back and Redo instead open the shared confirmation described in [rewind.md](rewind.md);
   an empty conversation after going back keeps Redo on its saved-message notice's menu. The engine refuses to remove a project while a conversation or a mission works in it, and "Open folder" only reveals a folder that exists on this computer (never a program, address or network share). The menu opens at the pointer, or by the Menu key
-  and Shift+F10 on a focused row; arrows move, Enter chooses, Esc and a click outside close it, and it stays inside the
+  and Shift+F10 on a focused row; arrows move, Enter chooses, Esc and a click outside close it. Scrolling the menu's
+  originating area or the viewport closes it; scrolling another area (including automatic conversation scrolling) or
+  the menu itself keeps it open (`tests/ui/contextmenu.check.ts`). It stays inside the
   window. It uses the normal entrance and exit and is instant in reduced and no motion.
 - Every overlay (the first-run steps, the tutorial cards, the narrow-window sidebar, the overlay running column) says
   whether it is modal. A modal overlay moves focus into itself when it opens and gives focus back when it closes. Esc

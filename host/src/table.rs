@@ -526,6 +526,14 @@ table! {
         let engine = h.engine.clone();
         Ok(tokio::task::spawn_blocking(move || engine.change_patch(&id, &path)).await.unwrap_or_default())
     }
+    Read Free fn answer_changes(h, id: String, message_id: String, offset: usize) -> faber_engine::rewind::AnswerChanges {
+        let engine = h.engine.clone();
+        off("error.changes.read", move || engine.answer_changes(&id, &message_id, offset)).await?
+    }
+    Read Free fn answer_change_patch(h, id: String, message_id: String, path: String, offset: usize) -> faber_engine::rewind::AnswerChangePatch {
+        let engine = h.engine.clone();
+        off("error.changes.read", move || engine.answer_change_patch(&id, &message_id, &path, offset)).await?
+    }
     Read Free fn rewind_points(h, id: String) -> Vec<faber_engine::rewind::PointInfo> {
         let engine = h.engine.clone();
         off("error.rewind.storage", move || engine.rewind_points(&id)).await?

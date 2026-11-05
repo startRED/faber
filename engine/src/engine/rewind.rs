@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 mod retire_tests;
+mod review;
 #[cfg(test)]
 mod safety_tests;
 mod steer;

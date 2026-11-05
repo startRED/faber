@@ -341,7 +341,14 @@ fn native_picker(ctx: &mut Ctx) -> Result {
                 same(last["open"].clone(), json!(step == "opens"), "native picker open state after settling")?;
                 same(last["display"] == json!("none"), step == "closes", "native picker display after settling")?;
                 if mode == "full" {
-                    ensure(has_intermediate_opacity, || {
+                    // A page that got no frame for a while (a loaded runner) can run the whole transition between two
+                    // samples, so a sighting is demanded only while frames kept coming; a stalled run must still declare
+                    // the opacity transition, which a removed or zeroed one does not.
+                    let stalled =
+                        samples.windows(2).any(|w| w[1]["at"].as_f64().unwrap_or(0.0) - w[0]["at"].as_f64().unwrap_or(0.0) > 250.0);
+                    let declared = failure_diagnostics["picker"]["transitionProperty"].as_str().is_some_and(|p| p.contains("opacity"))
+                        && failure_diagnostics["picker"]["transitionDuration"].as_str().is_some_and(|d| d.split(", ").any(|d| d != "0s"));
+                    ensure(has_intermediate_opacity || (stalled && declared), || {
                         format!("the full-motion picker must have a real intermediate opacity: {evidence}")
                     })?;
                 } else {
