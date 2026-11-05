@@ -38,8 +38,13 @@ train blames nobody yet: `--split` sends its first half again and keeps its seco
 status keeps it off trains until it is queued again. A rider pushed again or closed, or a base that moved, sends the
 next train with whoever stands. A cancelled run reports nothing. `queue.yml` sends a train every twenty minutes when
 none runs. A workflow change never rides: it is checked alone and landed with `--finish`.
+When its checks pass, the queue status asks for `--finish` and keeps the checked commit instead of splitting and checking
+it again; `--finish` still refuses an incompatible base or a changed pull request.
 If GitHub never acquired a runner, the gate stays red but the report retries the train once instead of splitting or
 blaming riders. Another capacity failure holds the train with an infrastructure summary; it never reports a code failure.
+Before the costly app builds and native suites, an Ubuntu preflight checks the combined tree's documentation and Rust
+formatting. A failure stops those jobs and leaves the gate red; the existing checks still run after a passing preflight.
+On run 41950963030, a formatting error had already failed while the gate waited another ten minutes for the other jobs.
 
 The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
 run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
