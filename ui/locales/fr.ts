@@ -315,6 +315,9 @@ export const fr: Messages = {
   'tray.notify': '{title} a besoin de vous',
   // Handwritten wording; native-speaker review pending (English is the source).
   'tray.notifyMany': '{title} : {n} demandes ont besoin de vous',
+  'tray.quitAsk': "Du travail est en cours et il s’arrête si vous quittez. Quitter quand même ?",
+  'tray.quitKeep': "Continuer le travail",
+  'tray.closedNote': "Faber continue de travailler dans la zone de notification",
   'tray.stopped.done': '{title} : a continué jusqu’à ce qu’il ne reste rien',
   'tray.stopped.silent': '{title} : a cessé de continuer après deux tours sans nouveauté et sans conclusion',
   'tray.stopped.asked': '{title} : a cessé de continuer pour vous poser une question',
@@ -2636,6 +2639,7 @@ export const fr: Messages = {
   'notes.424.new': 'Vous pouvez ajouter des outils pour tester des sites, consulter la documentation des bibliothèques et réfléchir par étapes depuis le catalogue, sans compte.',
   'notes.425.better': "Faber s'ouvre et affiche vos conversations en une demi-seconde environ au lieu de 3 secondes, et répond tout de suite à vos clics pendant qu'il finit de démarrer.",
   'notes.426.better': "Le plan de l'agent tient maintenant sur une ligne avec l'étape en cours, et les résultats du projet n'affichent que le total ; un clic montre le reste.",
+  'notes.427.better': 'Quitter Faber depuis la zone de notification demande d’abord confirmation quand du travail est en cours, car il s’arrête.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

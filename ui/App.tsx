@@ -1264,6 +1264,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             needsYou: templates('tray.needsYou'),
             notify: templates('tray.notify').other,
             notifyMany: templates('tray.notifyMany').other,
+            quitAsk: t('tray.quitAsk'),
+            quitKeep: t('tray.quitKeep'),
+            closedNote: t('tray.closedNote'),
             stopped: Object.fromEntries(STOPS.map((why) => [why, templates(`tray.stopped.${why}`).other])),
           })
           .catch(() => undefined),

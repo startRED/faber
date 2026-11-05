@@ -931,6 +931,9 @@ export interface ShellTexts {
   needsYou: Plural;
   notify: string;
   notifyMany: string;
+  quitAsk: string;
+  quitKeep: string;
+  closedNote: string;
   /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
   stopped: Record<string, string>;
 }

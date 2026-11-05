@@ -476,6 +476,9 @@ export const es: Messages = {
   'tray.notify': '{title} te necesita',
   // Handwritten wording; native-speaker review pending (English is the source).
   'tray.notifyMany': '{title}: {n} solicitudes te necesitan',
+  'tray.quitAsk': "Aún hay trabajo en marcha y se detiene si sales. ¿Salir de todos modos?",
+  'tray.quitKeep': "Seguir trabajando",
+  'tray.closedNote': "Faber sigue trabajando en la bandeja",
   'tray.stopped.done': '{title}: siguió hasta que no quedó nada',
   'tray.stopped.silent': '{title}: dejó de seguir tras dos turnos sin novedades y sin conclusión',
   'tray.stopped.asked': '{title}: dejó de seguir para preguntarte algo',
@@ -2636,6 +2639,7 @@ export const es: Messages = {
   'notes.424.new': 'Puedes añadir herramientas para probar sitios, consultar documentación de bibliotecas y razonar paso a paso desde el catálogo, sin cuenta.',
   'notes.425.better': 'Faber se abre y muestra tus conversaciones en medio segundo más o menos, en lugar de 3 segundos, y responde a tus clics al instante mientras termina de arrancar.',
   'notes.426.better': 'El plan del agente ahora ocupa una sola línea con el paso en curso, y los resultados del proyecto muestran solo el total; un clic abre el resto.',
+  'notes.427.better': 'Salir de Faber desde la bandeja ahora pregunta antes si aún hay trabajo en marcha, porque ese trabajo se detiene.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
