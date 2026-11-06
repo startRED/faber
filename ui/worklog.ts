@@ -514,7 +514,8 @@ function codexChange(change: unknown): ChangedLine[] {
   const diff = o.diff ?? o.unified_diff;
   if (typeof diff === 'string') return diffed(diff);
   if (typeof o.content === 'string') return lines(o.content).map((text) => ({ added: true, text }));
-  return Object.values(o).flatMap((inner) => (inner && typeof inner === 'object' && !Array.isArray(inner) ? codexChange(inner) : []));
+  return Object.entries(o).flatMap(([kind, inner]) => (inner && typeof inner === 'object' && !Array.isArray(inner)
+    ? codexChange(inner).map((line) => (kind === 'delete' ? { ...line, added: false } : line)) : []));
 }
 
 /** The lines an edit step changed: Claude Code's Edit, MultiEdit and Write, and Codex's file changes. Anything else, or an
