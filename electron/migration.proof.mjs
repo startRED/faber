@@ -88,9 +88,62 @@ void app.whenReady().then(async () => { try {
     }
     const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } });
     await window.loadURL('faber://app/');
-    if (['restart-dirty', 'failed-idle', 'failed-read-idle', 'hydrate-pending'].includes(mode)) await window.webContents.executeJavaScript(`globalThis.faberShell = {
-      flushStorage: () => {}, invoke: async () => undefined, listen: () => () => {}, window: { isMaximized: async () => false, onResized: () => () => {} },
+    if (['restart-dirty', 'failed-idle', 'failed-read-idle', 'hydrate-pending', 'close-dirty'].includes(mode)) await window.webContents.executeJavaScript(`globalThis.faberShell = {
+      flushStorage: () => {}, invoke: async (command, args) => { if (command === 'draft_dirty') globalThis.updaterDirty = args.dirty; }, listen: () => () => {}, window: { isMaximized: async () => false, onResized: () => () => {} },
     }; void 0;`);
+    if (mode === 'close-dirty') {
+      const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+      const guard = main.slice(main.indexOf("window.webContents.on('will-prevent-unload'"), main.indexOf('  // Closing frees'));
+      Function('window', stripTypeScriptTypes(`let closingForQuit = false; ${guard}`))(window);
+      await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
+      await window.webContents.executeJavaScript(`
+        window.addEventListener('beforeunload', draftScreen.protectDraftClose);
+        globalThis.savedWrite = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, text) {
+          if (key === 'faber.unsent.close-proof') throw new Error('synthetic full disk');
+          return savedWrite.call(this, key, text);
+        };
+        globalThis.leaveComposer = draftScreen.mountComposer('close-proof');
+        const field = document.querySelector('textarea');
+        field.value = 'Synthetic unsaved words';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        leaveComposer();
+      `, true);
+      assert.equal(await window.webContents.executeJavaScript('updaterDirty'), true, 'navigation must not tell the unattended updater it may install and quitNow while the only text copy remains in memory');
+      const refuseClose = async () => {
+        const refused = new Promise((resolve) => window.webContents.once('will-prevent-unload', resolve));
+        window.close(); await refused;
+        assert.equal(window.isDestroyed(), false, 'a refused close retains the only current draft copy');
+      };
+      await refuseClose();
+      assert.equal(await window.webContents.executeJavaScript("draftScreen.kept('close-proof')"), 'Synthetic unsaved words');
+      assert.equal(window.isVisible(), false, 'the refused close hides the protected renderer');
+      assert.equal(await window.webContents.executeJavaScript('updaterDirty'), true, 'the Windows unattended updater must still receive draft_dirty=true after navigation and hidden close, preventing its quitNow path');
+      await window.webContents.executeJavaScript(`
+        Storage.prototype.setItem = savedWrite;
+        globalThis.savedOpen = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = () => { throw new Error('synthetic attachment failure'); };
+        draftScreen.keepAttachments('close-proof', { images: [], files: [{ name: 'synthetic.pdf', base64: 'AAEC' }], inlined: [] });
+      `);
+      await refuseClose();
+      assert.equal(await window.webContents.executeJavaScript("draftScreen.keptAttachments('close-proof').then((draft) => draft.files[0].base64)"), 'AAEC');
+      const cpu = () => new Map(app.getAppMetrics().map((metric) => [metric.pid, metric.cpu.cumulativeCPUUsage]));
+      const beforeCpu = cpu();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Startup helpers may exit between samples; compare only the same surviving process identities.
+      const cpuSeconds = [...cpu()].reduce((sum, [pid, seconds]) => sum + (beforeCpu.has(pid) ? Math.max(0, seconds - beforeCpu.get(pid)) : 0), 0);
+      console.log('COST: synthetic hidden retained draft working_set_kib=' + app.getAppMetrics().reduce((sum, metric) => sum + metric.memory.workingSetSize, 0) + ' surviving_cpu_ms_per_500ms=' + Math.round(cpuSeconds * 1000));
+      assert.equal(await window.webContents.executeJavaScript(`(async () => {
+        IDBFactory.prototype.open = savedOpen;
+        await draftScreen.keepAttachments('close-proof', await draftScreen.keptAttachments('close-proof'));
+        return draftScreen.flushDrafts();
+      })()`), true);
+      assert.equal(await window.webContents.executeJavaScript('updaterDirty'), false, 'successful saves must release the updater admission guard');
+      const closed = new Promise((resolve) => window.once('closed', resolve));
+      window.close(); await closed;
+      console.log('PASS: failed text and attachment saves survive native close, and successful retry releases the renderer');
+      clearTimeout(watchdog); app.quit(); return;
+    }
     if (mode === 'restart-dirty') {
       await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
       await window.webContents.executeJavaScript('draftScreen.restartWithFailedDraft()');

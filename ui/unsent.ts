@@ -109,12 +109,10 @@ export function keep(key: string, text: string): boolean {
   }
 }
 
-/** The box that wrote under `key` is gone: its text is no longer on the screen, so a failed write stops counting. */
+/** Retry a detached box's failed write; its memory-only text must keep blocking unattended updates until saved. */
 export function release(key: string): void {
-  if (memory.get(key) === '') return; // A failed deletion must still block a restart that could restore private text.
-  const owner = unwritten.get(key);
-  if (owner) setDirty(owner, false);
-  unwritten.delete(key);
+  const text = memory.get(key);
+  if (text !== undefined) keep(key, text);
 }
 
 /** Attachment bytes use IndexedDB; localStorage holds only a discoverable marker beside the existing text draft. */
@@ -346,4 +344,24 @@ export async function retryDraftRemovals(): Promise<boolean> {
 export function forgetDraft(key: string): Promise<boolean> {
   forgotten.add(key);
   return keepAttachments(key, emptyAttachments(), { text: '', forget: true });
+}
+
+/** Pending reads/writes and failed saves have their only current copy in this renderer, even after navigation. */
+function draftsSaved(): boolean {
+  return !memory.size && !attachmentWrites.size && !attachmentAppends.size && !attachmentOwners.size && !attachmentReaders.size;
+}
+
+export async function flushDrafts(): Promise<boolean> {
+  for (const [key, text] of memory) keep(key, text);
+  await Promise.allSettled([...attachmentWrites.values(), ...attachmentAppends.values()]);
+  flushStorage();
+  return draftsSaved();
+}
+
+/** Electron honours this refusal by hiding to the tray; a later close can release the renderer after storage recovers. */
+export function protectDraftClose(event: BeforeUnloadEvent): void {
+  if (draftsSaved()) return;
+  event.preventDefault();
+  event.returnValue = true;
+  void flushDrafts();
 }

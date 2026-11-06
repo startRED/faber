@@ -7,10 +7,9 @@ import { api } from '../ui/api.ts';
 import { dirtyCount, kept } from '../ui/unsent.ts';
 import { store } from '../ui/running.ts';
 
-export { dirtyCount, kept, keep } from '../ui/unsent.ts';
+export { dirtyCount, kept, keep, protectDraftClose, flushDrafts, keepAttachments, keptAttachments } from '../ui/unsent.ts';
 
 export function mountComposer(key) {
-  api.draftDirty = async () => {};
   const root = document.body.appendChild(document.createElement('div'));
   return render(() => createComponent(Composer, {
     draftKey: key, vendors: [], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',

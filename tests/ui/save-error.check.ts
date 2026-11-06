@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { App } from '../../ui/App.tsx';
 import { api, type AppEvent, type AppState, type Conversation } from '../../ui/api.ts';
 import { t } from '../../ui/i18n.ts';
-import { forgetDraft, keep, keepAttachments, kept } from '../../ui/unsent.ts';
+import { forgetDraft, keep, keepAttachments, kept, release } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
 
 const look = {
@@ -16,6 +16,72 @@ const removalFinished = async (keys: string[]) => {
   while (keys.some((key) => localStorage.getItem(`faber.unsent-attachments.${key}`) !== null) && performance.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 10));
 };
+
+check('t520: closing preserves text whose storage write failed, even after its box was released', async () => {
+  const hadShell = 'faberShell' in window;
+  if (!hadShell) Object.defineProperty(window, 'faberShell', { configurable: true, value: {} });
+  const host = document.createElement('div'); document.body.append(host);
+  const before = { warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts };
+  const initial = { conversations: [], projects: [], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
+  const write = Storage.prototype.setItem;
+  try {
+    Storage.prototype.setItem = () => { throw new Error('disk full'); };
+    keep('t520-close', 'Synthetic unsaved words');
+    release('t520-close');
+    const closing = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(closing);
+    equal(closing.defaultPrevented, true, 'the shell must keep the renderer with the only copy alive');
+    equal(kept('t520-close'), 'Synthetic unsaved words');
+  } finally {
+    Storage.prototype.setItem = write;
+    keep('t520-close', ''); dispose(); host.remove(); Object.assign(api, before);
+    if (!hadShell) Reflect.deleteProperty(window, 'faberShell');
+  }
+});
+
+check('t520: a delayed refused send restores its words below newer text and retries once', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const oldPlace = localStorage.getItem('faber.place');
+  const oldDraft = kept('new-chat-');
+  const before = { send: api.send, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts };
+  const initial = { conversations: [], projects: [], vendors: ['claude'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test', look,
+  } as AppState;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  let reject!: (error: unknown) => void;
+  let sends = 0;
+  api.send = () => { sends++; return new Promise((_resolve, fail) => { reject = fail; }); };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat' })); keep('new-chat-', '');
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), host);
+  const input = (text: string) => {
+    const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    field.value = text; field.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    input('Synthetic rejected A'); host.querySelector<HTMLFormElement>('.composer')!.requestSubmit();
+    input('Synthetic newer B');
+    reject({ key: 'error.chat.saveFailed' });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    equal(host.querySelector<HTMLTextAreaElement>('.composer textarea')!.value, 'Synthetic newer B\n\nSynthetic rejected A');
+    equal(kept('new-chat-'), 'Synthetic newer B\n\nSynthetic rejected A');
+    host.querySelector<HTMLFormElement>('.composer')!.requestSubmit();
+    equal(sends, 2, 'one explicit retry makes one additional request');
+    reject({ key: 'error.chat.saveFailed' });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  } finally {
+    dispose(); host.remove(); Object.assign(api, before); keep('new-chat-', oldDraft);
+    if (oldPlace === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', oldPlace);
+  }
+});
 
 check('save error: a conversation the engine could not write shows in the same toast as a refused command', async () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));

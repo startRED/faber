@@ -30,7 +30,7 @@ import {
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { dirtyCount, forgetDraft, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
+import { dirtyCount, forgetDraft, protectDraftClose, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
 import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
@@ -341,7 +341,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
     if (["error.quotaWait", "error.moveFailed", "error.quotaOut", "error.copy.failed"].includes(m.error ?? "")) {
       if (place().id !== id) return;
-      saved.restored = restore?.(saved.draft) || saved.restored;
+      if (!saved.restored) saved.restored = restore?.(saved.draft);
       if (m.error !== 'error.moveFailed') return;
     }
     held.delete(id);
@@ -397,6 +397,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     lastScrollTop = thread.scrollTop;
   };
   onMount(() => {
+    if ('faberShell' in window) {
+      window.addEventListener('beforeunload', protectDraftClose);
+      onCleanup(() => window.removeEventListener('beforeunload', protectDraftClose));
+    }
     const hidden = () => { if (document.hidden) saveReading(); };
     window.addEventListener('pagehide', saveReading);
     document.addEventListener('visibilitychange', hidden);
@@ -925,7 +929,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const generation = ++historyGeneration;
     const leaving = place().id;
     const privateNext = privateChat || (leaving === next.id && temporary());
-    if (temporary() && leaving && !next.id) {
+    if (temporary() && leaving && next.id !== leaving) {
       try { await api.closeChat(leaving); }
       catch (err) { if (generation === historyGeneration) fail(err); return; }
       if (generation !== historyGeneration) return;
@@ -1436,7 +1440,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
     } catch (err) {
       fail(err);
-      if (!accepted && ticket === sendTicket && place() === at) restore?.(draft);
+      if (!accepted && place() === at) restore?.(draft);
     }
   };
 

@@ -428,8 +428,11 @@ check('composer: a rejected message comes back with its pictures, files and text
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await thumbs(0);
     equal(root.querySelectorAll('.thumb').length, 0, 'sent, the box is empty');
+    const field = root.querySelector('textarea')!;
+    field.value = 'Synthetic newer words'; field.dispatchEvent(new Event('input', { bubbles: true }));
     ok(restore(sent!), 'the screen puts the rejected message back');
     await settle();
+    equal(field.value, `Synthetic newer words\n\n${sent!.text}`, 'both newer and rejected words remain editable');
     const names = [...root.querySelectorAll('.attach-row .thumb')].map((el) => el.querySelector('img')?.alt ?? el.querySelector('b')!.textContent);
     equal(names.join(), 'shot.png,notes.txt', 'with the names it had, the text file too');
     equal(root.querySelectorAll('.thumb-x').length, 2);
@@ -437,6 +440,54 @@ check('composer: a rejected message comes back with its pictures, files and text
     dispose();
     root.remove();
   }
+});
+
+check('t520b: rejected send during history search preserves the newer draft and rejected words', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  let sent!: Draft;
+  let restore!: (draft: Draft) => boolean;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+    onHistory: async () => ['Synthetic earlier prompt'],
+    onSend: (draft) => { sent = draft; }, onRestore: (receive) => { restore = receive; },
+  }), root);
+  try {
+    const field = root.querySelector('textarea')!;
+    const type = (text: string) => { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); };
+    type('Synthetic rejected A');
+    root.querySelector('form')!.requestSubmit();
+    equal(field.value, '');
+    type('Synthetic newer B');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, bubbles: true, cancelable: true }));
+    equal(field.value, '', 'Ctrl+R enters history search');
+    type('Synthetic query Q');
+    ok(restore(sent));
+    equal(field.value, 'Synthetic newer B\n\nSynthetic rejected A', 'restore must merge the draft from before search, never its query');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    equal(field.value, 'Synthetic newer B\n\nSynthetic rejected A', 'search is closed and cannot undo restoration');
+  } finally { dispose(); root.remove(); }
+});
+
+check('t520: unchanged restored drafts survive repeated send failures', async () => {
+  const root = document.createElement('div'); document.body.append(root);
+  let sent!: Draft;
+  let restore!: (draft: Draft) => boolean;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+    onSend: (draft) => { sent = draft; }, onRestore: (receive) => { restore = receive; },
+  }), root);
+  try {
+    const field = root.querySelector('textarea')!;
+    field.value = 'Synthetic retry words'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      root.querySelector('form')!.requestSubmit();
+      equal(field.value, '');
+      ok(restore(sent));
+      equal(field.value, 'Synthetic retry words', 'each refusal must return the same unchanged draft');
+    }
+  } finally { dispose(); root.remove(); }
 });
 
 check('composer: unsent attachments survive remount with names bytes and removable inline text', async () => {

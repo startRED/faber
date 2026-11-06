@@ -3,10 +3,52 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
-import { dirtyCount, keep, kept, release } from '../../ui/unsent.ts';
+import { dirtyCount, flushDrafts, keep, keepAttachments, kept, keptAttachments, protectDraftClose, release } from '../../ui/unsent.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+check('t520: close flush waits for attachment transactions and a failed save keeps exact bytes recoverable', async () => {
+  const key = 't520-close-attachments';
+  const open = IDBFactory.prototype.open;
+  let resume!: () => void;
+  const value = { images: [], files: [{ name: 'synthetic.pdf', base64: 'AAEC' }], inlined: [] };
+  try {
+    IDBFactory.prototype.open = function (...args: Parameters<IDBFactory['open']>) {
+      const request = open.apply(this, args);
+      Object.defineProperty(request, 'onsuccess', { set: (listener: IDBRequest['onsuccess']) => {
+        request.addEventListener('success', (event) => { resume = () => listener?.call(request, event); }, { once: true });
+      } });
+      return request;
+    };
+    const saving = keepAttachments(key, value);
+    let flushed = false;
+    const flushing = flushDrafts().then((ok) => { flushed = true; return ok; });
+    for (const start = performance.now(); !resume && performance.now() - start < 2000;) await settle();
+    ok(resume, 'the write is paused before its transaction');
+    equal(flushed, false, 'close cannot finish before the bytes commit');
+    const closing = new Event('beforeunload', { cancelable: true });
+    protectDraftClose(closing as BeforeUnloadEvent);
+    equal(closing.defaultPrevented, true);
+    resume(); ok(await saving); ok(await flushing);
+    IDBFactory.prototype.open = () => { throw new Error('disk full'); };
+    equal(await keepAttachments(key, value), false);
+    equal(await flushDrafts(), false, 'a failed attachment save cannot authorize destruction');
+    deepEqual(await keptAttachments(key), value, 'the exact failed bytes stay in memory');
+    const failed = new Event('beforeunload', { cancelable: true });
+    protectDraftClose(failed as BeforeUnloadEvent);
+    equal(failed.defaultPrevented, true);
+    IDBFactory.prototype.open = open;
+    ok(await keepAttachments(key, value));
+    ok(await flushDrafts());
+    const saved = new Event('beforeunload', { cancelable: true });
+    protectDraftClose(saved as BeforeUnloadEvent);
+    equal(saved.defaultPrevented, false, 'a later close releases the saved renderer');
+  } finally {
+    IDBFactory.prototype.open = open; resume?.();
+    await keepAttachments(key, { images: [], files: [], inlined: [] });
+  }
+});
 
 check('unsent: a failed storage write keeps the box reported as dirty until a write succeeds or the box is emptied', () => {
   const before = dirtyCount();
@@ -28,7 +70,11 @@ check('unsent: a failed storage write keeps the box reported as dirty until a wr
     equal(dirtyCount(), before, 'an emptied box has nothing to lose');
     keep('check-fails', 'again');
     release('check-fails');
-    equal(dirtyCount(), before, 'a box that is gone no longer counts');
+    equal(dirtyCount(), before + 1, 'a failed write stays protected after its box is gone');
+    Storage.prototype.setItem = write;
+    release('check-fails');
+    equal(dirtyCount(), before, 'detaching can release protection only after a successful retry');
+    equal(kept('check-fails'), 'again');
   } finally {
     Storage.prototype.setItem = write;
     keep('check-fails', '');

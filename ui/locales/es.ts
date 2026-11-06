@@ -2668,6 +2668,7 @@ export const es: Messages = {
   'notes.432.new': 'Puedes ver qué se le dijo al agente sobre tu proyecto en Detalles técnicos.',
   'notes.433.fixed': 'Tus borradores y archivos adjuntos siguen en la nueva aplicación de Windows; Faber espera al guardado al cerrar y se recupera de interrupciones.',
   'notes.434.fixed': 'Si falla al salir, Faber conserva la ventana y su icono para reintentarlo; pulsar Salir dos veces ya no interrumpe el guardado.',
+  'notes.435.fixed': 'Tus mensajes y archivos siguen disponibles si falla el guardado o el envío, incluso al cerrar la ventana o salir de un chat temporal.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

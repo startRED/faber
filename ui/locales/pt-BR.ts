@@ -2655,6 +2655,7 @@ export const ptBR: Messages = {
   'notes.432.new': 'Você pode ver o que foi dito ao agente sobre seu projeto em Detalhes técnicos.',
   'notes.433.fixed': 'Seus rascunhos e anexos continuam no novo app do Windows; o Faber também espera o salvamento ao fechar e se recupera de interrupções.',
   'notes.434.fixed': 'Se falhar ao sair, o Faber continua acessível pelo ícone perto do relógio; repetir Sair não interrompe o salvamento.',
+  'notes.435.fixed': 'Suas mensagens e anexos ficam disponíveis quando salvar ou enviar falha, mesmo ao fechar a janela ou sair de uma conversa temporária.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

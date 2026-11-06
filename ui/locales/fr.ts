@@ -2668,6 +2668,7 @@ export const fr: Messages = {
   'notes.432.new': 'Vous pouvez voir ce que l’agent a appris sur votre projet dans les détails techniques.',
   'notes.433.fixed': 'Vos brouillons et pièces jointes suivent dans la nouvelle application Windows ; Faber attend l’enregistrement à la fermeture et reprend après une interruption.',
   'notes.434.fixed': 'Si quitter échoue, Faber reste accessible pour réessayer ; demander à quitter plusieurs fois n’interrompt plus l’enregistrement.',
+  'notes.435.fixed': 'Vos messages et pièces jointes restent disponibles si l’enregistrement ou l’envoi échoue, même en fermant la fenêtre ou en quittant une conversation temporaire.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -79,6 +79,11 @@ quiet hint line, are associated with the textarea and announced as status; no mo
 When the person edited away an inline file's text, recovery deletes its obsolete removal metadata as well. That
 cleanup preserves unrelated file reads still in flight; an explicit send, discard or conversation deletion cancels them.
 
+Closing the Electron window with pending reads or saves, or failed draft writes, hides it to the tray and keeps the
+renderer alive while pending saves flush and text writes retry once. Reopening recovers the same draft; after saving
+succeeds, a later close can release the renderer. Healthy saved drafts keep the ordinary close path. This adds no
+polling, timer, dialog or motion; memory is retained only at this unsafe close boundary.
+
 A successful save means the storage transaction completed; writes request the browser's strict durability hint.
 This is not a power-loss guarantee. A pending or failed write is not promised to survive a crash, and this draft store
 does not close the later send/engine-acknowledgement gap. The outgoing-intent work remains separate. Component restoration
@@ -90,8 +95,9 @@ deletion clears its main and side drafts. An engine refusal leaves both intact. 
 the next opening; a failure uses the existing save-error toast and its Try again action. No retry loop or new screen.
 
 Sending first saves the message or queued intent. If that write fails, the existing save-error notice appears and the
-message returns through the same rejected-send draft restoration in Chat and Projects. Retrying adds it once; no AI
-turn or steering begins before admission (`engine/src/engine/send_admission.rs`). Queued edits remain in memory when
+message returns through the same rejected-send draft restoration in Chat and Projects. Newer words stay first,
+followed by the refused message and its attachments; repeated refusal events never duplicate it. Retrying adds it once;
+no AI turn or steering begins before admission (`engine/src/engine/send_admission.rs`). Queued edits remain in memory when
 writing fails; Send now, automatic draining and handover at the end of an agent step must save their current words
 before sending them. A failed step handover keeps the edited queue intact and retries storage at the next handover. Files copied before
 admission may remain in the attachment folder after a refusal; the guard does not delete files.

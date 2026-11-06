@@ -18,7 +18,7 @@ async function prove(modes) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'faber-profile-515b-'));
   const electron = createRequire(import.meta.url)('electron');
   try {
-    if (modes.some((mode) => ['failed-idle', 'failed-read-idle', 'hydrate-pending', 'restart-dirty'].includes(mode))) {
+    if (modes.some((mode) => ['failed-idle', 'failed-read-idle', 'hydrate-pending', 'restart-dirty', 'close-dirty'].includes(mode))) {
       const { build } = await import('vite');
       const { default: solid } = await import('vite-plugin-solid');
       const result = await build({ configFile: false, plugins: [solid()], logLevel: 'error', build: {
@@ -51,3 +51,5 @@ test('crash before attachment publication followed by a read failure and untouch
 test('hydrating pending import text never completes its attachment publication', { skip: process.platform !== 'win32' }, () => prove(['seed', 'crash-publication', 'hydrate-pending']));
 
 test('engine recovery refreshes state while preserving a live composer whose draft write failed', () => prove(['restart-dirty']));
+
+test('closing after navigation keeps failed drafts reported to the unattended updater until saved', () => prove(['close-dirty']));

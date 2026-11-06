@@ -116,6 +116,31 @@ async function startTemporary(root: HTMLElement) {
   equal(root.querySelector('[data-temporary-chat]')?.textContent, t('chat.temporaryLine'));
 }
 
+check('t520: switching conversations awaits temporary deletion and keeps its draft on failure', async () => {
+  await temporaryChatScreen(['codex'], async (root, records) => {
+    await startTemporary(root);
+    const id = [...records.values()].find((c) => c.temporary)!.id;
+    const field = root.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    field.value = 'Synthetic private unsent words'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    let reject!: (error: unknown) => void;
+    let closes = 0;
+    const close = api.closeChat;
+    api.closeChat = () => { closes++; return new Promise((_resolve, fail) => { reject = fail; }); };
+    root.querySelector<HTMLButtonElement>('[data-conversation-id="ordinary-temp-proof"] .item')!.click();
+    await frames(3);
+    equal(closes, 1, 'even a destination with an id must await close');
+    ok(root.querySelector('[data-temporary-chat]'), 'the private screen remains while deletion waits');
+    reject({ key: 'error.chat.deleteFailed' }); await frames(3);
+    ok(records.has(id) && root.querySelector('[data-temporary-chat]'), 'failed deletion keeps the private conversation');
+    equal(root.querySelector<HTMLTextAreaElement>('.composer textarea')!.value, 'Synthetic private unsent words');
+    api.closeChat = close;
+    root.querySelector<HTMLButtonElement>('[data-conversation-id="ordinary-temp-proof"] .item')!.click();
+    await frames(3);
+    ok(!records.has(id));
+    ok(root.querySelector('.crumb')?.textContent?.includes('Ordinary conversation'));
+  });
+});
+
 check('temporary chat: menu trigger has a distinct accessible name in every language', async () => {
   await temporaryChatScreen(['codex'], async (root) => {
     for (const language of LANGUAGES) {

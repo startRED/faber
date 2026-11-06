@@ -83,7 +83,7 @@ test('a repeated Quit cannot bypass a pending engine save', async () => {
   app.quit = () => { quits++; app.emit('before-quit', { preventDefault() { assert.fail('confirmed exit should permit Quit'); } }); };
   const host = { stop: () => { stops++; return new Promise((resolve) => { finish = resolve; }); } };
   const source = main.slice(main.indexOf('let stopping = false;'), main.indexOf('void app.whenReady()'));
-  runInNewContext(stripTypeScriptTypes(source), { app, host, HOST_STOP_MS: patience, release() {}, pane: { closeAll() {} } });
+  runInNewContext(stripTypeScriptTypes(source), { app, host, win: null, HOST_STOP_MS: patience, release() {}, pane: { closeAll() {} } });
   let prevented = 0;
   const event = { preventDefault() { prevented++; } };
   app.emit('before-quit', event);
@@ -124,7 +124,7 @@ test('failed termination keeps the tray and allows another Quit to retry', async
   } };
   const source = main.slice(main.indexOf('let stopping = false;'), main.indexOf('void app.whenReady()'));
   runInNewContext(stripTypeScriptTypes(source), {
-    app, host, HOST_STOP_MS: patience, release: () => { released++; },
+    app, host, win: null, HOST_STOP_MS: patience, release: () => { released++; },
     pane: { closeAll() { closed++; } }, console: { error: (...args) => failures.push(args) },
   });
   const event = { preventDefault() {} };

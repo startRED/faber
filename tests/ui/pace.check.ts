@@ -170,7 +170,7 @@ check('pace: paid credits require two clicks and name one vendor and one reply',
   } finally { dispose(); host.remove(); api.approveCredits = old; }
 });
 
-check('pace: restoring a failed draft keeps attachments and refuses to overwrite newer input', () => {
+check('pace: restoring a failed draft keeps attachments and preserves newer input', () => {
   const host = document.createElement('div');
   document.body.append(host);
   let restore: ((draft: Draft) => boolean) | undefined;
@@ -186,8 +186,6 @@ check('pace: restoring a failed draft keeps attachments and refuses to overwrite
     equal(restore!(saved), true);
     equal(host.querySelector('textarea')!.value, 'Kept text');
     ok(host.textContent!.includes('data.pdf'));
-    equal(restore!({ text: 'Older text', images: [], files: [] }), false);
-    equal(host.querySelector('textarea')!.value, 'Kept text');
     equal(clear!(saved), true, 'an accepted resume clears only the restored draft');
     equal(host.querySelector('textarea')!.value, '');
     equal(restore!(saved), true);
@@ -195,6 +193,8 @@ check('pace: restoring a failed draft keeps attachments and refuses to overwrite
     field.value = 'Newer text'; field.dispatchEvent(new InputEvent('input', { bubbles: true }));
     equal(clear!(saved), false, 'a user edit is not cleared by an older resume');
     equal(field.value, 'Newer text');
+    equal(restore!({ text: 'Older text', images: [], files: [] }), true);
+    equal(field.value, 'Newer text\n\nOlder text', 'a different refused message stays recoverable below the newer words');
   } finally { dispose(); host.remove(); }
 });
 

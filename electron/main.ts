@@ -203,6 +203,9 @@ function createWindow(): BrowserWindow {
   window.on('restore', seen(true));
   window.on('hide', seen(false));
   window.on('minimize', seen(false));
+  // A failed or pending draft save lives in this renderer; honour its beforeunload refusal without a dialog.
+  window.webContents.on('will-prevent-unload', () => { closingForQuit = false; window.hide(); });
+  window.on('close', () => window.webContents.session.flushStorageData());
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   window.on('closed', () => {
     if (win === window) win = null;
@@ -210,6 +213,7 @@ function createWindow(): BrowserWindow {
     host?.note({ kind: 'window', visible: false });
     releaseGpu();
     host?.call('quota_attention', { visible: false, focused: false }).catch(() => {});
+    if (closingForQuit) { closingForQuit = false; app.quit(); }
   });
   const load = () => window.loadURL(`${ORIGIN}/${testmode.startPage()}`);
   if (testmode.testing) {
@@ -325,10 +329,13 @@ app.on('window-all-closed', () => {});
 
 // Quitting waits for the engine's own shutdown, including slow saves; the minute bound covers a hung host.
 let stopping = false;
+let closingForQuit = false;
 app.on('before-quit', (event) => {
   if (!host) return;
   event.preventDefault();
   if (stopping) return;
+  // A refused draft close must leave the engine and tray usable too.
+  if (win) { closingForQuit = true; win.close(); return; }
   stopping = true;
   void host.stop(HOST_STOP_MS).then(() => {
     host = null;

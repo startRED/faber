@@ -538,8 +538,14 @@ export function Composer(props: Props) {
     field?.setSelectionRange(text.length, text.length);
   });
   props.onRestore?.((saved) => {
-    if (!attachmentsReady() || hasContent() || props.locked) return false;
-    batch(() => { editDraft(() => saved); setInlined(sentWith.get(saved) ?? []); }); warmed = false;
+    if (!alive || !attachmentsReady() || props.locked) return false;
+    batch(() => {
+      editDraft((newer) => hasContent() ? {
+        text: newer.text ? `${newer.text}\n\n${saved.text}` : saved.text,
+        images: [...newer.images, ...saved.images], files: [...newer.files, ...saved.files],
+      } : saved);
+      setInlined((current) => [...current, ...(sentWith.get(saved) ?? [])]);
+    }); warmed = false;
     field?.focus(); return true;
   });
   props.onClearRestored?.((saved) => {
