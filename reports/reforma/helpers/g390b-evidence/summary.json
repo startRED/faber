@@ -1,0 +1,40 @@
+{
+  "result": "bench-codex exited 1; see attempt-1-bench-codex.stderr.log",
+  "started": "2026-11-06T09:56:10.670Z",
+  "ended": "2026-11-06T10:07:04.295Z",
+  "capUsd": 25,
+  "attempts": [
+    {
+      "attempt": 1
+    }
+  ],
+  "receipts": [
+    {
+      "attempt": 1,
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793959586,
+          "completedAt": 1793959606,
+          "error": "app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted",
+          "unknownCost": true,
+          "vendor": "claude",
+          "windows": []
+        },
+        {
+          "at": 1793959606,
+          "completedAt": 1793959606,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.43,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

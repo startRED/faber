@@ -1,0 +1,71 @@
+{
+  "release": "0adba5bbcf55543d2f1e0c2299bf0b815b492520",
+  "checks": [
+    {
+      "command": "npm run lint",
+      "exit": 0,
+      "note": "Existing warnings, no errors"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit": 0
+    },
+    {
+      "command": "npm run docs",
+      "exit": 0,
+      "livingPages": 63
+    },
+    {
+      "command": "npm run build",
+      "exit": 0
+    },
+    {
+      "command": "node scripts/cargo.mjs fmt --all --check",
+      "exit": 0
+    },
+    {
+      "command": "npm run test:scripts",
+      "exit": 0,
+      "tests": 333,
+      "pass": 328,
+      "skipped": 5
+    },
+    {
+      "command": "node scripts/cargo.mjs test -p faber-engine --example bench",
+      "exit": 0,
+      "tests": 37,
+      "pass": 37
+    },
+    {
+      "command": "node scripts/cargo.mjs t --claims",
+      "exit": 0,
+      "note": "Claims only; no heavy suite. Existing shared build-storage/base warnings."
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    },
+    {
+      "command": "gameGuard readiness smoke",
+      "exit": 0,
+      "note": "Unprivileged 250 ms fallback reached READY; no CS2 process was launched."
+    }
+  ],
+  "review": {
+    "kind": "fresh read-only session",
+    "status": "No remaining blockers for guarded blocked execution",
+    "fixes": [
+      "Initial game presence must not count as quiet",
+      "Unknown quota spending survives interrupted attempts",
+      "Unverified quota receipts prohibit future readings",
+      "Closed guard ignores queued GAME messages",
+      "Release provenance includes manifests and lockfile"
+    ],
+    "notQualified": "Does not approve the benchmark quality/token gate"
+  },
+  "limits": [
+    "No live CS2-start event was induced",
+    "No real subscription model request may start while a hard ceiling cannot be guaranteed",
+    "No broad Rust or UI suites run locally; those belong to CI"
+  ]
+}

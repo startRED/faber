@@ -1,0 +1,16 @@
+{
+  "at": "2026-11-06T10:01:10.690Z",
+  "files": {
+    "scripts/bench-when-quiet.mjs": "925da24442e52886a94010272eb9423780c72e0bda6761d5075b456e6cdd84fb",
+    "scripts/bench-when-quiet.test.mjs": "84eed9e47133b580656d2a40eab1768aec82e7cc98dcd44e07e7144b64a04b84",
+    "bench/account_quiet.rs": "3b5ea9683b64d2e84cb4642f1954190b3f7f54bacff9e44cdc26c0614e913545",
+    "bench/quiet.rs": "6b67b1e04a2bcc8971a86b96c8bd1cbd4152bf9bccac1d2b6fbc7db8b9d99a0c",
+    "bench/pure.rs": "4797c1b11b95b4a3e8ea19a0e5881e9491a68f6a3902c51bbc18b5b724b92983",
+    "engine/examples/bench.rs": "58023419f5ce48bdc3facf33ece1801cd8a0ebe62202f5691844c86d6a43e662",
+    "engine/src/account.rs": "4a612267efd36ec68a6c11d3def6566591aaf4c739888d077517ac5ad4117a2c",
+    "scripts/cargo.mjs": "26bcca864e2330da3774253331bb26e094463d551be18f5b4f67e7cadb3e9eee",
+    "Cargo.toml": "bfd558e9e12a245a7402fc202d48c860920a83abefd3601b1818da4ccb57ec09",
+    "Cargo.lock": "44aa59e5eef0a0fe08ccb6ced987b4610fc4dc0d64cda68c673cf5274ff4a6d0",
+    "engine/Cargo.toml": "b805124c89754f526381892e82bff6ce32d961323cf69f779f1462179eea8b45"
+  }
+}

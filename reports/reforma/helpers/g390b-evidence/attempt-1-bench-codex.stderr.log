@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --require-hard-cap --plain codex --vendors claude,codex --cap-usd 12.5 --dir 'E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\reports\reforma\helpers\g390b-evidence' --run-id attempt-1-bench-codex`
+Error: "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started"
+error: process didn't exit successfully: `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --require-hard-cap --plain codex --vendors claude,codex --cap-usd 12.5 --dir 'E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\reports\reforma\helpers\g390b-evidence' --run-id attempt-1-bench-codex` (exit code: 1)

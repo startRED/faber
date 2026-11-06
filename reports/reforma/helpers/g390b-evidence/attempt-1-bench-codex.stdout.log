@@ -1,0 +1,10 @@
+Build storage: 32.9 GB exceeds the 12 GB budget; active and protected caches were kept
+run attempt-1-bench-codex: 8 request(s), Faber on ["claude", "codex"] (Auto) against plain codex (gpt-6.1-sol medium), judge strongest measured profile (profile effort) (automatic vendor selection), cap US$12.5 or 3000000 first-time tokens
+  1. organize-folder [Project] proof Some("organize"), A is Plain
+  2. plan-an-app [Chat] proof None, A is Faber
+  3. todo-app [Project] proof Some("todo"), A is Plain
+  4. research-with-sources [Chat] proof Some("sources"), A is Faber
+  5. everyday-question [Chat] proof Some("words"), A is Plain
+  6. fix-invoice [Project] proof Some("invoice"), A is Faber
+  7. migrate-settings [Project] proof Some("settings"), A is Plain
+  8. summarize-sales [Project] proof Some("sales"), A is Faber

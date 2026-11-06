@@ -1,0 +1,5 @@
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.66s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --quota-only`
+Error: "quota status could not verify zero model spending; no more readings or model work allowed"
+error: process didn't exit successfully: `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --quota-only` (exit code: 1)

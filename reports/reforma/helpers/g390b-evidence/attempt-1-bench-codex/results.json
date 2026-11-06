@@ -1,0 +1,195 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 1.5,
+    "usd": 12.5
+  },
+  "faberVendors": [
+    "claude",
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "rows": [
+    {
+      "a": "plain",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": null,
+      "request": "organize-folder",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Organize a messy folder",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "faber",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": null,
+      "request": "plan-an-app",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Plan an app in conversation",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "plain",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": null,
+      "request": "todo-app",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "A small complete app with tests",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "faber",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": null,
+      "request": "research-with-sources",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Research with sources",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "plain",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": null,
+      "request": "everyday-question",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "An everyday question with limits",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "faber",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": null,
+      "request": "fix-invoice",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Fix an invoice calculation without changing its interface",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "plain",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": null,
+      "request": "migrate-settings",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Migrate preferences without losing existing data",
+      "verdict": null,
+      "winner": null
+    },
+    {
+      "a": "faber",
+      "faber": null,
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": null,
+      "request": "summarize-sales",
+      "skipped": "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started",
+      "title": "Summarize a CSV export without changing the source",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-bench-codex",
+  "spent": {
+    "unknown_cost": false,
+    "usage": {
+      "cache_read": 0,
+      "cache_write": 0,
+      "input": 0,
+      "output": 0
+    },
+    "usd": 0.0
+  }
+}

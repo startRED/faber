@@ -1,0 +1,21 @@
+{
+  "at": "2026-11-06T09:59:34.6012554Z",
+  "processes": [
+    {
+      "Id": 11020,
+      "ProcessName": "node",
+      "StartTime": "2026-11-06T06:56:10.6249826-03:00",
+      "WorkingSet64": 64188416,
+      "CPU": 0.21875,
+      "Handles": 226
+    },
+    {
+      "Id": 14404,
+      "ProcessName": "powershell",
+      "StartTime": "2026-11-06T06:56:11.0373885-03:00",
+      "WorkingSet64": 84201472,
+      "CPU": 5.203125,
+      "Handles": 707
+    }
+  ]
+}

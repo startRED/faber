@@ -1,0 +1,23 @@
+[
+  {
+    "Id": 14144,
+    "ProcessName": "conhost",
+    "WorkingSet64": 8368128,
+    "CPU": 0.015625,
+    "Handles": 96
+  },
+  {
+    "Id": 11020,
+    "ProcessName": "node",
+    "WorkingSet64": 65298432,
+    "CPU": 0.328125,
+    "Handles": 226
+  },
+  {
+    "Id": 14404,
+    "ProcessName": "powershell",
+    "WorkingSet64": 94896128,
+    "CPU": 10.046875,
+    "Handles": 707
+  }
+]

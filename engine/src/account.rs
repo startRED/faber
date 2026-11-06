@@ -278,7 +278,7 @@ fn limits_args(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
 }
 
 /// Stock `/usage` is a local command; its terminal receipt must prove that no model loop ran.
-pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<crate::events::EngineEvent> {
+pub async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<crate::events::EngineEvent> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let args = limits_args(&|name| std::env::var(name).ok());
     let args: Vec<_> = cli.prefix.iter().cloned().chain(args).collect();

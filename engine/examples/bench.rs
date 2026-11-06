@@ -36,6 +36,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 type Failure = Box<dyn std::error::Error>;
 
+const HARD_CAP_BLOCKER: &str = "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started";
+
 /// One request on one side may take this long, whatever the cap says.
 const RUN_LIMIT: Duration = Duration::from_secs(20 * 60);
 const PROOF_LIMIT: Duration = Duration::from_secs(5 * 60);
@@ -811,6 +813,78 @@ fn judge_result(vendor: Vendor, model: &str, run: &Finished) -> Judged {
 
 // --- The run -------------------------------------------------------------------------------------------------------
 
+fn pending_row(request: &Request, a: Side) -> Row {
+    Row {
+        request: request.id.clone(),
+        title: request.title.clone(),
+        kind: request.kind,
+        a,
+        verdict: None,
+        winner: None,
+        faber: None,
+        plain: None,
+        judge_cost_usd: None,
+        judge_attempted: false,
+        judge: None,
+        judge_usage: Usage::default(),
+        skipped: None,
+    }
+}
+
+fn hard_cap_admission(required: bool, root: &Path, requests: &[Request], options: &Options) -> Result<(), Failure> {
+    if !required {
+        return Ok(());
+    }
+    let rows: Vec<_> = requests
+        .iter()
+        .enumerate()
+        .map(|(index, request)| {
+            let mut row = pending_row(request, pure::a_side(&options.run_id, index));
+            row.skipped = Some(HARD_CAP_BLOCKER.into());
+            row
+        })
+        .collect();
+    write_results(root, options, &rows, &Spend::default())?;
+    Err(HARD_CAP_BLOCKER.into())
+}
+
+async fn quota_receipt() -> serde_json::Value {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| repo_root());
+    let mut readings = Vec::new();
+    for vendor in Vendor::RUNNABLE {
+        let mut receipt = json!({"vendor": vendor.name(), "at": chrono::Utc::now().timestamp(), "windows": []});
+        if faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name)) {
+            receipt["error"] = json!("billing environment is not isolated; no CLI started");
+        } else if let Some(cli) = find_cli(vendor.name()) {
+            match bench_quiet::reading(vendor, &cli, proc::real_spawner(), &cwd).await {
+                Ok((source, events)) => {
+                    receipt["source"] = json!(source);
+                    receipt["windows"] = json!(
+                        events
+                            .into_iter()
+                            .filter_map(|event| match event {
+                                faber_engine::events::EngineEvent::Quota { window, used, resets_at } => Some(json!({
+                                    "window": window, "used": used, "resetsAt": resets_at,
+                                })),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                    );
+                }
+                Err(error) => {
+                    receipt["unknownCost"] = json!(error.contains("spending is unknown"));
+                    receipt["error"] = json!(error);
+                }
+            }
+        } else {
+            receipt["error"] = json!("official CLI is not installed");
+        }
+        receipt["completedAt"] = json!(chrono::Utc::now().timestamp());
+        readings.push(receipt);
+    }
+    json!({"readings": readings})
+}
+
 fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend) -> Result<(), Failure> {
     let value = json!({
         "runId": options.run_id,
@@ -836,6 +910,14 @@ fn write_checkpoint(run_dir: &Path, options: &Options, rows: &[Row], row: &Row, 
 
 #[tokio::main]
 async fn main() -> Result<(), Failure> {
+    if std::env::args().any(|arg| arg == "--quota-only") {
+        let receipt = quota_receipt().await;
+        println!("{receipt}");
+        if receipt["readings"].as_array().is_some_and(|readings| readings.iter().any(|r| r["unknownCost"] == true)) {
+            return Err("quota status could not verify zero model spending; no more readings or model work allowed".into());
+        }
+        return Ok(());
+    }
     // Export the actual wire definitions for paired CLI token measurements, without spending quota.
     if std::env::args().any(|arg| arg == "--tool-definitions") {
         println!("{}", json!({ "mcp": faber_engine::toolbox::mcp_tools(), "dynamic": faber_engine::toolbox::codex_tools() }));
@@ -870,6 +952,8 @@ async fn main() -> Result<(), Failure> {
     if options.dry_run {
         return Ok(());
     }
+    // Admission budgets are not a hard ceiling; fail before account/model work when one is required.
+    hard_cap_admission(std::env::args().any(|arg| arg == "--require-hard-cap"), &root, &requests, &options)?;
     let node = find_cli("node").ok_or("node is not on the PATH (the fixtures and proofs are Node scripts)")?;
     let judges: BTreeMap<_, _> = Vendor::RUNNABLE.into_iter().filter_map(|v| find_cli(v.name()).map(|cli| (v, cli))).collect();
     if judges.is_empty() {
@@ -900,21 +984,7 @@ async fn main() -> Result<(), Failure> {
     write_results(&root, &options, &rows, &spent)?;
     for (index, request) in requests.iter().enumerate() {
         let a = pure::a_side(&options.run_id, index);
-        let mut row = Row {
-            request: request.id.clone(),
-            title: request.title.clone(),
-            kind: request.kind,
-            a,
-            verdict: None,
-            winner: None,
-            faber: None,
-            plain: None,
-            judge_cost_usd: None,
-            judge_attempted: false,
-            judge: None,
-            judge_usage: Usage::default(),
-            skipped: None,
-        };
+        let mut row = pending_row(request, a);
         if let Some(why) = options.cap.reached(&spent) {
             println!("stopping before {}: {why}", request.id);
             row.skipped = Some(format!("the cap was reached: {why}"));
@@ -1013,6 +1083,26 @@ async fn main() -> Result<(), Failure> {
 #[cfg(test)]
 mod checkpoint_tests {
     use super::*;
+
+    #[test]
+    fn a_required_hard_ceiling_records_every_unstarted_request_and_spends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = Options::read().unwrap();
+        let requests = load_requests(&repo_root().join("bench"), &[]).unwrap();
+        assert_eq!(requests.len(), 8);
+        assert!(hard_cap_admission(false, dir.path(), &requests, &options).is_ok());
+        assert!(!dir.path().join("results.json").exists());
+        let error = hard_cap_admission(true, dir.path(), &requests, &options).unwrap_err();
+        assert!(error.to_string().contains("hard dollar ceiling unavailable"));
+        let result: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("results.json")).unwrap()).unwrap();
+        assert_eq!(result["spent"]["usd"], 0.0);
+        assert_eq!(result["spent"]["unknown_cost"], false);
+        assert_eq!(result["rows"].as_array().unwrap().len(), 8);
+        assert!(result["rows"].as_array().unwrap().iter().all(|row| row["faber"].is_null()
+            && row["plain"].is_null()
+            && row["judge_attempted"] == false
+            && row["skipped"].as_str().unwrap().contains("hard dollar ceiling unavailable")));
+    }
 
     #[test]
     fn a_completed_side_is_saved_before_the_next_admission_without_changing_spending() {

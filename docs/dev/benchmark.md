@@ -21,6 +21,19 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--plain-model`, `--plain-effort` | claude-sonnet-5-5 medium | The plain CLI's model, the everyday default Faber itself starts on |
 | `--judge-model`, `--judge-effort` | strongest measured profile of the selected vendor | Optional overrides for the fresh judge; default model and effort come from `route::PROFILES`, ordered by intelligence then agent score |
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
+| `--quota-only` | off | Read both subscriptions with the app's local quota readers; print sources, windows and times, without model work |
+| `--require-hard-cap` | off | Refuse model work and save all selected rows as skipped when an absolute dollar ceiling is required; the current harness cannot guarantee one |
+
+For the Windows 1.0 gate, `node scripts/bench-when-quiet.mjs` waits up to 14 hours, polling local processor counters
+and CS2 presence every 60 seconds. Ten uninterrupted minutes below 15% processor use admit an attempt. A hidden
+250 ms process-presence guard kills only the watcher's spawned child tree by PID if CS2 starts, then restarts the wait
+(poll detection latency up to 250 ms plus OS scheduling/termination; it needs no administrator access).
+Every child is hidden and below normal priority; billing environment overrides are removed only from its environment.
+The two plain-vendor comparisons run sequentially, with both vendors' quota receipts before and after, in
+`reports/reforma/helpers/g390b-evidence/`. The US$25 total is split into two US$12.50 admission budgets, but the watcher
+also requires a hard ceiling: until the Codex and auxiliary in-flight bounds exist, both comparisons stop before paid
+work and write the blocker for each request. This is a blocked qualification, never a successful benchmark.
+An exclusive receipt lock prevents a second watcher from overwriting the run or restarting its budget.
 
 ## What a run does
 
@@ -64,6 +77,10 @@ This is conservative evidence of no **observed** account movement between stages
 Each run needs a new run folder: an existing `--run-id` is rejected before saving anything, so earlier results cannot be overwritten. Completed sides, proofs and known spending are saved before the next admission. To cancel during a pause, create an empty file named `CANCEL` in the run folder printed by the harness. Cancellation starts no new paid work and preserves those checkpoints; an in-flight status read may take up to 45 seconds to finish. It does not resume a cancelled run or recover an invocation interrupted before its result was collected. The quiet policy and cancellation/checkpoint paths have fake-clock or local checks; real-account behavior remains unverified until a manual qualification run.
 
 ## Request coverage
+
+When Claude's zero-token text `/usage` returns no windows, `bench/account_quiet.rs` falls back to the structured local
+`account::claude_limits` reader used by `Engine::check_plans` (the app's quota reader). It requires a local usage receipt,
+zero reported model cost and no models. It never calls the model-based `claude_probe`. Missing windows remain unknown.
 
 The eight-request sample has five Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, and summarize a CSV export) and three Chat requests. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
 

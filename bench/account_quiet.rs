@@ -1,6 +1,6 @@
 //! Account admission for the manual benchmark, separate from Keep going.
 use faber_engine::{
-    account::{UsageRead, claude_usage},
+    account::{UsageRead, claude_limits, claude_usage},
     budget::vendor_wide,
     cadence,
     cli::Cli,
@@ -32,6 +32,43 @@ pub struct Accounts {
 
 fn now() -> f64 {
     chrono::Utc::now().timestamp_millis() as f64 / 1000.0
+}
+
+/// The same local, structured /usage reader as Engine::check_plans; never claude_probe.
+pub async fn reading(vendor: Vendor, cli: &Cli, real: proc::Spawner, root: &Path) -> Result<(String, Vec<EngineEvent>), String> {
+    let spawn = status_spawner(vendor, cli, real);
+    match vendor {
+        Vendor::Claude => {
+            match claude_usage(cli, &spawn, root, Duration::from_secs(45), now(), chrono::Local::now().offset().local_minus_utc() as i64)
+                .await
+            {
+                UsageRead::Windows(windows) => Ok((
+                    "claude_usage (local, zero tokens)".into(),
+                    windows
+                        .into_iter()
+                        .map(|(window, used, resets_at)| EngineEvent::Quota { window: window.into(), used, resets_at })
+                        .collect(),
+                )),
+                UsageRead::NoWindows => {
+                    let events = claude_limits(cli, &spawn, root, Duration::from_secs(45)).await;
+                    if !events.iter().any(|event| matches!(event, EngineEvent::Quota { .. })) {
+                        return Err(
+                            "app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted"
+                                .into(),
+                        );
+                    }
+                    Ok(("app claude_limits (structured local /usage, zero model cost)".into(), events))
+                }
+                UsageRead::Failed => Err("Claude local quota reading failed".into()),
+                UsageRead::Spent => Err("quota status unexpectedly used a model; spending is unknown, no more work admitted".into()),
+            }
+        }
+        Vendor::Codex => Ok((
+            "app account/rateLimits/read".into(),
+            faber_engine::codex::read_codex_limits(&cli.command, root, cfg!(windows), spawn, Duration::from_secs(20)).await,
+        )),
+        Vendor::Gemini => Err("benchmark supports only Claude and Codex".into()),
+    }
 }
 
 impl Accounts {
@@ -70,34 +107,11 @@ impl Accounts {
                 if time < account.next {
                     continue;
                 }
-                let spawn = status_spawner(*vendor, cli, proc::real_spawner());
-                let events = match vendor {
-                    Vendor::Gemini => continue,
-                    Vendor::Claude => match claude_usage(
-                        cli,
-                        &spawn,
-                        &self.root,
-                        Duration::from_secs(45),
-                        time,
-                        chrono::Local::now().offset().local_minus_utc() as i64,
-                    )
-                    .await
-                    {
-                        UsageRead::Windows(windows) => windows
-                            .into_iter()
-                            .map(|(window, used, resets_at)| EngineEvent::Quota { window: window.into(), used, resets_at })
-                            .collect(),
-                        UsageRead::Failed | UsageRead::NoWindows => Vec::new(),
-                        UsageRead::Spent => {
-                            spent.unknown_cost = true;
-                            return Err("quota status unexpectedly used a model; spending is unknown, no more work admitted".into());
-                        }
-                    },
-                    Vendor::Codex => {
-                        faber_engine::codex::read_codex_limits(&cli.command, &self.root, cfg!(windows), spawn, Duration::from_secs(20))
-                            .await
-                    }
-                };
+                let (source, events) = reading(*vendor, cli, proc::real_spawner(), &self.root).await.map_err(|error| {
+                    spent.unknown_cost |= error.contains("spending is unknown");
+                    error
+                })?;
+                println!("  {} quota source: {source}", vendor.name());
                 let time = now();
                 let gap = cadence::gap(*vendor);
                 account.next = time + gap;
@@ -145,6 +159,52 @@ fn samples(events: Vec<EngineEvent>, time: f64) -> BTreeMap<String, policy::Samp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn missing_text_windows_use_the_apps_local_reader_without_a_model_probe() {
+        for valid in [true, false] {
+            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let seen = calls.clone();
+            let fake: proc::Spawner = Arc::new(move |_, args, _| {
+                seen.lock().unwrap().push(args.to_vec());
+                let output = if args.iter().any(|s| s == "--input-format") {
+                    let report = serde_json::json!({"type":"assistant", "usage_report":{"rate_limits":{"limits":[
+                        {"kind":"weekly_all", "percent":20, "resets_at":"2030-01-01T00:00:00Z"},
+                        {"kind":"session", "percent":10, "resets_at":"2030-01-01T00:00:00Z"}
+                    ]}}});
+                    let terminal = serde_json::json!({"type":"result", "local_command":"usage", "total_cost_usd":if valid {0.0} else {0.01}, "modelUsage":{}});
+                    format!("{report}\n{terminal}\n")
+                } else {
+                    serde_json::json!({"type":"result", "is_error":false, "num_turns":0, "total_cost_usd":0,
+                        "usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},
+                        "result":"You are currently using your subscription to power your Claude Code usage"})
+                    .to_string()
+                };
+                Ok(proc::Proc {
+                    stdin: Box::new(tokio::io::sink()),
+                    stdout: Box::new(std::io::Cursor::new(output.into_bytes())),
+                    stderr: None,
+                    child: None,
+                    contained: None,
+                })
+            });
+            let cli = Cli { command: "node".into(), prefix: vec!["tool.js".into()] };
+            let result = reading(Vendor::Claude, &cli, fake, Path::new(".")).await;
+            if valid {
+                let (source, events) = result.unwrap();
+                assert!(source.contains("app claude_limits"));
+                assert_eq!(samples(events, 100.).len(), 2);
+            } else {
+                assert!(result.unwrap_err().contains("spending is unknown"));
+            }
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.len(), 2);
+            for args in calls.iter() {
+                assert_eq!(args.iter().filter(|s| s.as_str() == "tool.js").count(), 1);
+                assert!(!args.iter().any(|s| s == "ok"), "a real model probe must never run");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn cancellation_before_admission_never_reads_an_account_or_changes_spending() {

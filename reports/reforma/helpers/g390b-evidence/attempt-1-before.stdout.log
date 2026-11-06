@@ -1,0 +1,2 @@
+Build storage: 32.9 GB exceeds the 12 GB budget; active and protected caches were kept
+{"readings":[{"at":1793959586,"completedAt":1793959606,"error":"app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted","unknownCost":true,"vendor":"claude","windows":[]},{"at":1793959606,"completedAt":1793959606,"source":"app account/rateLimits/read","vendor":"codex","windows":[{"resetsAt":1794378933.0,"used":0.43,"window":"seven_day"}]}]}

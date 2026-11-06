@@ -1,0 +1,19 @@
+{
+  "quietIntervals": 10,
+  "quietMs": 601416,
+  "comparisonRuns": 2,
+  "skippedRequests": [
+    {
+      "plain": "claude",
+      "rows": 8
+    },
+    {
+      "plain": "codex",
+      "rows": 8
+    }
+  ],
+  "benchmarkUsd": 0,
+  "quotaSpending": "unverified",
+  "pairedQuotas": false,
+  "qualification": "blocked"
+}

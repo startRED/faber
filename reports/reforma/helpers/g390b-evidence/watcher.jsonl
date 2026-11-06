@@ -1,0 +1,18 @@
+{"time":"2026-11-06T09:57:12.345Z","at":1793959032223,"cpu":9.797396921376844,"game":false,"gameAt":0,"quietMs":60155}
+{"time":"2026-11-06T09:58:12.491Z","at":1793959092353,"cpu":13.013254048525368,"game":false,"gameAt":0,"quietMs":120285}
+{"time":"2026-11-06T09:59:12.638Z","at":1793959152503,"cpu":8.662176762052997,"game":false,"gameAt":0,"quietMs":180435}
+{"time":"2026-11-06T10:00:12.769Z","at":1793959212646,"cpu":5.906599661386003,"game":false,"gameAt":0,"quietMs":240578}
+{"time":"2026-11-06T10:01:12.906Z","at":1793959272783,"cpu":4.0989514936348055,"game":false,"gameAt":0,"quietMs":300715}
+{"time":"2026-11-06T10:02:13.039Z","at":1793959332919,"cpu":3.9243879110095303,"game":false,"gameAt":0,"quietMs":360851}
+{"time":"2026-11-06T10:03:13.176Z","at":1793959393053,"cpu":4.837283284282556,"game":false,"gameAt":0,"quietMs":420985}
+{"time":"2026-11-06T10:04:13.303Z","at":1793959453181,"cpu":4.134042116990722,"game":false,"gameAt":0,"quietMs":481113}
+{"time":"2026-11-06T10:05:13.478Z","at":1793959513311,"cpu":5.978582051937542,"game":false,"gameAt":0,"quietMs":541243}
+{"time":"2026-11-06T10:06:13.603Z","at":1793959573484,"cpu":7.938279432649054,"game":false,"gameAt":0,"quietMs":601416}
+{"time":"2026-11-06T10:06:13.722Z","event":"started","name":"attempt-1-before","pid":34644}
+{"time":"2026-11-06T10:06:47.316Z","event":"ended","name":"attempt-1-before","code":1,"signal":null,"reason":null}
+{"time":"2026-11-06T10:06:47.450Z","event":"started","name":"attempt-1-bench-claude","pid":12976}
+{"time":"2026-11-06T10:06:55.926Z","event":"ended","name":"attempt-1-bench-claude","code":1,"signal":null,"reason":null}
+{"time":"2026-11-06T10:06:56.048Z","event":"started","name":"attempt-1-bench-codex","pid":20148}
+{"time":"2026-11-06T10:07:04.295Z","event":"ended","name":"attempt-1-bench-codex","code":1,"signal":null,"reason":null}
+{"time":"2026-11-06T10:07:04.295Z","event":"skipped","phase":"after","reason":"quota spending unknown; no more readings"}
+{"time":"2026-11-06T10:07:04.296Z","event":"finished","result":"bench-codex exited 1; see attempt-1-bench-codex.stderr.log"}
