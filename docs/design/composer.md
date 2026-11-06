@@ -149,3 +149,7 @@ It removes only that empty blocker; copied attachments and GPU cache cleanup rem
   after the index is ready; the cold check starts sampling before engine initialization and asserts the index is still
   building immediately before first Up. Both use the same valid saved files, with 10,000 prompts and 10,000 replies;
   cold here describes the index, not an emptied operating-system disk cache.
+
+## Temporary Chat
+
+A temporary Chat adds one quiet, wrapping hint above the field: “Temporary chat: deleted when you leave it.” It is a status line, with no new motion, timer or setting. With no AI connected, the same line stays in the work area. Composer attachments and text, prompt edits, quick questions and queued edits remain in memory only; ordinary chats keep their existing saved drafts. The mark follows the conversation through its first send. `tests/ui/sidebar-exit.check.ts` covers starting, sending, private drafts, failed close and leaving.

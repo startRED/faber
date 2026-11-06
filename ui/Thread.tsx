@@ -879,6 +879,7 @@ function VersionArrows(props: { v: Versions; onGo: (to: VersionAt, by: number) =
 }
 
 function Mine(props: {
+  temporary?: boolean;
   editKey: string;
   m: Accessor<Message>;
   onBranch: OnBranch;
@@ -894,10 +895,10 @@ function Mine(props: {
   const key = () => props.editKey;
   onCleanup(() => release(key()));
   const original = props.m().text;
-  const [editing, setEditing] = createSignal<string | undefined>(kept(key()) || undefined);
+  const [editing, setEditing] = createSignal<string | undefined>(props.temporary ? undefined : kept(key()) || undefined);
   useDraft(() => editing() !== undefined);
   // Only text that differs from the message is a draft.
-  createEffect(() => keep(key(), editing() === original ? '' : (editing() ?? '')));
+  createEffect(() => !props.temporary && keep(key(), editing() === original ? '' : (editing() ?? '')));
   return (
     <Show
       when={editing() !== undefined}
@@ -935,7 +936,7 @@ function Mine(props: {
           const text = editing() ?? '';
           if (text.trim()) {
             props.onBranch(props.m().id, text);
-            keep(key(), '');
+            if (!props.temporary) keep(key(), '');
           }
         }}
       >
@@ -964,9 +965,9 @@ const empty = (m: Message) =>
 
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be and says so, with no buttons, and one that waits can be sent by hand.
-function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onRecovered?: (id: string, text: string) => void; onError?: (err: unknown) => void }) {
+function Queued(props: { conversationId: string; temporary?: boolean; q: QueuedTurn; busy: boolean; onRecovered?: (id: string, text: string) => void; onError?: (err: unknown) => void }) {
   const editKey = `queued-edit.${props.conversationId}.${props.q.id}`;
-  const [editing, setEditing] = createSignal<string | undefined>(kept(editKey) || undefined);
+  const [editing, setEditing] = createSignal<string | undefined>(props.temporary ? undefined : kept(editKey) || undefined);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal('');
   let editButton: HTMLButtonElement | undefined;
@@ -975,7 +976,7 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
   useDraft(() => editing() !== undefined);
   const write = (text: string) => {
     setEditing(text);
-    keep(editKey, text);
+    if (!props.temporary) keep(editKey, text);
   };
   const restoreFocus = () => queueMicrotask(() => {
     const target = editButton?.isConnected && !editButton.disabled ? editButton
@@ -985,7 +986,7 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
   const cancel = () => {
     if (saving()) return;
     setEditing(undefined);
-    keep(editKey, '');
+    if (!props.temporary) keep(editKey, '');
     setError('');
     restoreFocus();
   };
@@ -1003,12 +1004,12 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
       // A different mounted editor may now own newer words under this key.
       if (disposed) return;
       setEditing(undefined);
-      keep(editKey, '');
+      if (!props.temporary) keep(editKey, '');
       restoreFocus();
     } catch (err) {
       if (disposed) return;
       if (errorText(err) === 'error.queueChanged') {
-        const restored = recoverQueuedDraft(props.conversationId, props.q.id);
+        const restored = props.temporary ? text : recoverQueuedDraft(props.conversationId, props.q.id);
         setEditing(undefined);
         if (restored !== undefined) props.onRecovered?.(props.conversationId, restored);
       } else setError(failureText(err));
@@ -1093,7 +1094,7 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
+export function Thread(props: Shared & { messages: Message[]; temporary?: boolean; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
   const shown = keepForExit(open);
@@ -1172,6 +1173,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
                 {(editKey) => (
                   <Mine
                     editKey={editKey}
+                    temporary={props.temporary}
                     m={m}
                     onBranch={props.onBranch}
                     messageIndex={(props.earlier ?? 0) + at()}
@@ -1196,7 +1198,7 @@ export function Thread(props: Shared & { messages: Message[]; earlier?: number; 
           const queued = () => props.queued?.find((q) => q.id === id) ?? initial;
           const origin = () => ['wake.asked', 'wake.childDone'].includes(queued().wake?.why ?? '') ? queued().wake : undefined;
           return <Show when={origin()} fallback={<Queued conversationId={conversationId} q={queued()}
-            busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />}>
+            temporary={props.temporary} busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />}>
             {(wake) => <p class="woke"><Icon name="loop" small /><span>{fromEngine(wake().why)}</span>
               <Show when={!queued().sending && !props.busy && props.messages.at(-1)?.status !== 'streaming'}>
                 <span class="actions">

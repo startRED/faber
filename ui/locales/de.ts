@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const de: Messages = {
+  "side.newMenu": "Gesprächsoptionen",
+  "chat.temporary": "Temporäres Gespräch",
+  "chat.temporaryLine": "Temporäres Gespräch: wird beim Verlassen gelöscht.",
+
   'set.blockedHosts': 'Gesperrte Websites',
   'set.blockedHostsHint': 'Diese Websites bleiben in Fabers Browser gesperrt.',
   'set.blockedHostsMore': 'Trage bis zu 50 Website-Namen wie bank.example ein, ohne https://, Port oder Pfad. Unterdomains werden ebenfalls gesperrt. Das gilt für Fabers Browser, nicht für andere Apps oder die Webwerkzeuge der KI.',

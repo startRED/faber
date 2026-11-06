@@ -1,6 +1,10 @@
 import type { Messages } from './en.ts';
 
 export const es: Messages = {
+  "side.newMenu": "Opciones de conversación",
+  "chat.temporary": "Conversación temporal",
+  "chat.temporaryLine": "Conversación temporal: se borra al salir de ella.",
+
   'set.blockedHosts': 'Sitios bloqueados',
   'set.blockedHostsHint': 'Evita que estos sitios se abran en el navegador de Faber.',
   'set.blockedHostsMore': 'Añade hasta 50 nombres de sitios, como banco.example, sin https://, puerto ni ruta. También se bloquean sus subdominios. Solo afecta al navegador de Faber, no a otras aplicaciones ni a las herramientas web de la IA.',
