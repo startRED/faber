@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 export const ID = '11111111-1111-4111-8111-111111111111';
 export const TEXT = 'Keep this conversation through the update';
 export const NEXT = 'Continued after the self-update';
+export function previewVersion(tag) {
+  assert.match(tag, /^v\d+\.\d+\.\d+-preview\.\d+$/);
+  return tag.slice(1);
+}
 export const SETTINGS = { language: 'en', previews: true, setup: 'done', tutorialDone: true, appearance: { base: 'sala' } };
 export function sample() {
   return { id: ID, title: 'Self-update conversation', area: 'chat', createdAt: 1, updatedAt: 1,
@@ -57,6 +61,9 @@ async function main(scenario) {
   mkdirSync(out, { recursive: true });
   const artifacts = path.join(process.env.RUNNER_TEMP, 'install-update-artifacts');
   const folder = path.join(process.env.RUNNER_TEMP, 'installed-faber');
+  const from = previewVersion(process.env.FABER_PROOF_FROM ?? 'v0.3.18-preview.89');
+  const to = previewVersion(process.env.FABER_PROOF_TO ?? 'v0.3.18-preview.90');
+  process.env.FABER_PROOF_FOLDER = folder;
   const data = path.join(process.env.APPDATA, 'Faber');
   const ps = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
   process.env.PSModulePath = path.join(path.dirname(ps), 'Modules');
@@ -67,6 +74,8 @@ async function main(scenario) {
   };
   const run = (exe, args) => execFileSync(exe, args, { shell: false, windowsHide: true, encoding: 'utf8', timeout: 120000 });
   const powershell = (source) => run(ps, ['-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(`$ProgressPreference='SilentlyContinue'; Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; ${source}`, 'utf16le').toString('base64')]);
+  const ownedProcesses = () => JSON.parse(powershell(`$owned=@(Get-CimInstance Win32_Process -Filter "Name='faber.exe' OR Name='faber-sidecar.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:FABER_PROOF_FOLDER,[StringComparison]::OrdinalIgnoreCase) } | Select-Object ProcessId,ParentProcessId,ExecutablePath); ConvertTo-Json -InputObject @($owned) -Compress`));
+  let oldProcesses;
   const call = (cmd, args = {}) => JSON.parse(run(path.join(folder, 'bin/faber.exe'), ['--json', '--no-start', '--data', data, ...(cmd === 'status' ? ['status'] : ['call', cmd, JSON.stringify(args)])]));
   async function until(label, check, ms = 90000) {
     const end = Date.now() + ms;
@@ -153,7 +162,7 @@ $json = ConvertTo-Json -InputObject @($rows) -Depth 4 -Compress
     assert.ok(!existsSync(data), 'The runner must have no pre-existing Faber data');
     assert.ok(!process.env.FABER_HIDDEN && !process.env.FABER_DATA_DIR, 'Both overrides disable the Tauri self-updater');
     mkdirSync(folder);
-    const version = scenario === 'tauri' ? '0.3.17-preview.84' : scenario === 'electron' ? '0.3.18-preview.89' : '0.3.18-preview.90';
+    const version = scenario === 'tauri' ? '0.3.17-preview.84' : scenario === 'electron' ? from : to;
     // The only installer we invoke is the baseline. The target of either update is fetched and installed by Faber itself.
     run(path.join(artifacts, `Faber_${version}_x64-setup.exe`), ['/S', `/D=${folder}`]);
     record('baseline-installed', version);
@@ -187,6 +196,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
  if (message.type !== 'user') return;
  fs.writeFileSync(again ? ${JSON.stringify(path.join(out, 'provider-resumed'))} : mark, JSON.stringify({pid:process.pid,at:Date.now(),args:process.argv.slice(2)}));
  if (!again) return;
+ emit({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:${JSON.stringify(NEXT)}}}});
  emit({type:'assistant',message:{id:'continued',role:'assistant',content:[{type:'text',text:${JSON.stringify(NEXT)}}],model:'claude-sonnet-4-6',usage:{input_tokens:1,output_tokens:1}}});
  emit({type:'result',subtype:'success',is_error:false,result:${JSON.stringify(NEXT)},session_id:'22222222-2222-4222-8222-222222222222',total_cost_usd:0,usage:{input_tokens:1,output_tokens:1}});
 }).on('close', () => process.exit(0));
@@ -207,7 +217,7 @@ setInterval(()=>{},1000);
       powershell(`$ErrorActionPreference='Stop'; $cert=Get-Item -LiteralPath 'Cert:\\LocalMachine\\My\\${thumbprint}'; Export-PfxCertificate -Cert $cert -FilePath $env:FABER_PROOF_CERT -Password (ConvertTo-SecureString 'disposable-proof' -AsPlainText -Force) | Out-Null; $root=New-Object Security.Cryptography.X509Certificates.X509Store('Root','LocalMachine'); $root.Open('ReadWrite'); $root.Add($cert); $root.Close()`);
       record('certificate-trusted', true);
       const manifest = readFileSync(path.join(artifacts, 'latest.json'));
-      assert.equal(JSON.parse(manifest).version, '0.3.18-preview.90');
+      assert.equal(JSON.parse(manifest).version, to);
       const installerUrl = new URL(JSON.parse(manifest).platforms['windows-x86_64'].url);
       assert.equal(installerUrl.hostname, 'github.com');
       const installerFile = path.join(artifacts, path.basename(installerUrl.pathname));
@@ -253,6 +263,9 @@ setInterval(()=>{},1000);
         assert.equal(atRestart.state, 'working');
         assert.ok(!atRestart.messages.some((m) => m.text.includes(NEXT)), 'No continuation may predate the restart');
         record('conversation-at-restart', atRestart);
+        oldProcesses = ownedProcesses();
+        assert.ok(oldProcesses.length > 0);
+        record('old-app-processes', oldProcesses);
         record('old-app-update-restart-requested', true);
         ui('Update ready, restart');
       }
@@ -281,13 +294,13 @@ setInterval(()=>{},1000);
         assert.ok(readFileSync(path.join(folder, 'previous/faber-tauri.exe')).equals(originalExe));
         record('backup-verified', backup);
       }
-      await until('The app installed Electron preview.90 itself', () => {
+      await until(`The app installed Electron ${to} itself`, () => {
         const exe = readFileSync(path.join(folder, 'faber.exe'));
         if (scenario === 'tauri' && exe.equals(originalExe)) return false;
         // `status.version` is the channel crate's workspace version, not the packaged app release.
         const version = packageVersion(path.join(folder, 'resources/app.asar'));
         record('installed-package-version', version);
-        if (version !== '0.3.18-preview.90') return false;
+        if (version !== to) return false;
         return call('status');
       }, 240000);
       record('self-update-version', call('status'));
@@ -298,6 +311,10 @@ setInterval(()=>{},1000);
       assert.ok(observations.some((o) => o.stage === 'updater-request' && o.detail.endsWith('/latest.json')));
       assert.ok(observations.some((o) => o.stage === 'updater-request' && o.detail.endsWith('_x64-setup.exe')));
       if (scenario === 'electron') {
+        const currentProcesses = ownedProcesses();
+        record('new-app-processes', currentProcesses);
+        assert.ok(oldProcesses.every((old) => !currentProcesses.some((current) => current.ProcessId === old.ProcessId)), 'All old app processes must exit before the new host answers');
+        record('old-app-processes-ended', true);
         await until('A new provider session receives the resumed user input', () => existsSync(path.join(out, 'provider-resumed')));
         const first = JSON.parse(readFileSync(path.join(out, 'provider-started')));
         const resumed = JSON.parse(readFileSync(path.join(out, 'provider-resumed')));
@@ -311,6 +328,12 @@ setInterval(()=>{},1000);
         });
         retained(continued, call('settings'));
         record('conversation-continued-after', continued);
+        const reopened = await until('The same conversation and continued reply are visible after restart', () => {
+          const rows = ui();
+          return rows.some((row) => row.name?.includes(TEXT)) && rows.some((row) => row.name?.includes(NEXT)) && rows;
+        });
+        writeFileSync(path.join(out, 'conversation-open-after.json'), JSON.stringify(reopened, null, 2));
+        record('conversation-open-after', true);
       }
     }
     writeFileSync(path.join(out, 'result.json'), JSON.stringify({ scenario, pass: true, observations }, null, 2));

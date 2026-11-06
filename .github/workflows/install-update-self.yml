@@ -2,6 +2,15 @@ name: install-update-self
 
 on:
   workflow_dispatch:
+    inputs:
+      from:
+        description: Published Electron preview tag to update from
+        default: v0.3.18-preview.89
+        required: true
+      to:
+        description: Published preview tag to install
+        default: v0.3.18-preview.90
+        required: true
   release:
     types: [published]
   # Releases published with GITHUB_TOKEN do not emit another workflow's release event.
@@ -18,6 +27,9 @@ jobs:
     name: ${{ matrix.scenario }}
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      FABER_PROOF_FROM: ${{ inputs.from || 'v0.3.18-preview.89' }}
+      FABER_PROOF_TO: ${{ inputs.to || 'v0.3.18-preview.90' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,14 +51,17 @@ jobs:
         run: |
           $artifacts = Join-Path $env:RUNNER_TEMP 'install-update-artifacts'
           New-Item -ItemType Directory $artifacts | Out-Null
-          $tags = @('v0.3.18-preview.90')
+          foreach ($tag in @($env:FABER_PROOF_FROM, $env:FABER_PROOF_TO)) {
+            if ($tag -cnotmatch '^v\d+\.\d+\.\d+-preview\.\d+$') { throw "Invalid preview tag: $tag" }
+          }
+          $tags = @($env:FABER_PROOF_TO)
           if ($env:SCENARIO -eq 'tauri') { $tags += 'v0.3.17-preview.84' }
-          if ($env:SCENARIO -eq 'electron') { $tags += 'v0.3.18-preview.89' }
+          if ($env:SCENARIO -eq 'electron') { $tags += $env:FABER_PROOF_FROM }
           foreach ($tag in $tags) {
             gh release download $tag --pattern '*x64-setup.exe' --dir $artifacts
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
-          gh release download v0.3.18-preview.90 --pattern latest.json --dir $artifacts
+          gh release download $env:FABER_PROOF_TO --pattern latest.json --dir $artifacts
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Run installed applications on a private, never activated desktop
         shell: pwsh
