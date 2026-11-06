@@ -19,7 +19,7 @@ request's token delta at its context tier; a multi-request turn does not inherit
 Incomplete meters show a lower bound and cannot teach weights or plan size. Idle account movement is flagged as foreign,
 even below the two-point resolution of the numerical outside-use estimate. Own-cost learning accepts only explained,
 non-overlapping stretches; the weekly shape continues to describe the whole account. The spec's R89/R90 sections are
-in `docs/superpowers/specs/2026-10-11-auto-quota-pacing-design.md`.
+in `docs/history/superpowers/specs/2026-10-11-auto-quota-pacing-design.md`.
 
 When included quota runs out, Auto tries another eligible profile once, carrying the conversation and partial reply;
 long histories use a bounded, tool-free summary. It waits only for a usable reset within six hours, with guarded
@@ -179,4 +179,4 @@ Existing hidden-screen memory proofs passed: Task 11 measured 108-110 MB idle, 1
 1,000 messages. These measurements used the fake CLI and are not a real pulse memory measurement. With
 `CARGO_TARGET_DIR=target/proofs`, testkit artifacts and screenshots live in `target/proofs/faber-test`; no junction is
 needed. The locale keys, review disposition and implementation limits are listed in
-`docs/superpowers/auto-quota-pacing-report.md`.
+`docs/history/superpowers/auto-quota-pacing-report.md`.

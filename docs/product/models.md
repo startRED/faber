@@ -61,7 +61,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   never leaves the PC, and a missing or damaged file means nothing learned. The answer says so in its pace line ("Auto
   chose a stronger model here because you often retry this kind of task"), and Settings > Accounts and limits has an
   "Auto" card with one "What Auto learned" row and a Forget button.
-- **Quota pacing** (built; [spec](../superpowers/specs/2026-10-11-auto-quota-pacing-design.md)). Auto
+- **Quota pacing** (built; [spec](../history/superpowers/specs/2026-10-11-auto-quota-pacing-design.md)). Auto
   reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
   shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest

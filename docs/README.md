@@ -1,6 +1,6 @@
 # Faber's documents
 
-Which page answers which question, and which pages are history. When a living page and a dated one disagree, the living
+Which page answers which question; dated pages live in history/. When a living page and a dated one disagree, the living
 page wins; when two living pages disagree, one of them is wrong: fix it in the same commit or name it in the commit body.
 
 ## Living pages
@@ -15,7 +15,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [../AGENTS.md](../AGENTS.md) | Always: rules for every agent, the order of work, proof commands, commits |
 | [product-rules.md](product-rules.md) | Before a change a person sees: where a new thing goes, the taste cards it must not break |
 | [product-map.md](product-map.md) | Before a change a person sees, sets or calls: words, screens, settings, stored state, shell commands, features and their checks, known incoherences. Read whole on purpose: it is how a second way to do the same thing is found |
-| [decisions.md](decisions.md) | To check a change against the decisions in force (R-numbers). Search it for the words of your change; never read it whole |
+| [decisions.md](decisions.md) | To check a change against the decisions in force (R-numbers; the rest are in [history/decisions.md](history/decisions.md)). Search it for the words of your change |
 | [product/README.md](product/README.md) | Before changing scope: what Faber is, principles, goals, phases and non-goals |
 | [product/models.md](product/models.md) | Auto, model choice, or how the CLIs are driven |
 | [product/areas.md](product/areas.md) | Chat and Projects, the toolbox, guardrails |
@@ -68,7 +68,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
-| [dev/workflow.md](dev/workflow.md) | Lane claims, the task queue, a red base and the numbers given at landing |
+| [dev/workflow.md](dev/workflow.md) | The lanes (how many, how big, how reviewed), lane claims, the task queue, a red base and the numbers given at landing |
 | [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
 | [dev/sentinel.md](dev/sentinel.md) | The UX sentinel, the visual critique and the first-user review |
@@ -79,57 +79,14 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [Antigravity driver](tasks/later/010-antigravity-driver.md), [Antigravity in the app](tasks/later/020-antigravity-in-the-app.md), [several models at once](tasks/later/060-several-models-at-once.md), [switch vendor mid-conversation](tasks/later/070-switch-vendor-mid-conversation.md) | The T3 Code study tasks, waiting until after 1.0; its needs-you-first list, readable turns and palette ideas went to the rework of the thread, endings and command layer |
 | [brand/](brand/) | Logo sources |
 
-## Dated pages
-
-They record one moment. Never read one to learn how Faber works today: its behaviour, once built, lives in the living
-pages above. Only a page in progress is still updated (its boxes and `Status:` line, below); a finished or abandoned
-one is never touched again, and its boxes say nothing.
+## In progress and history
 
 | Page | Status |
 | :--- | :--- |
-| [superpowers/specs/2026-10-22-faber-framework/README.md](superpowers/specs/2026-10-22-faber-framework/README.md) | Proposal revision 3, nothing built: company/community research, Faber context audit, adaptive composition, twelve capability candidates, BMAD/Core/Pi audit, evidence-backed progress and fair qualification; companion pages linked from its README |
-| [superpowers/specs/2026-10-24-cli-tools-live-manifest.md](superpowers/specs/2026-10-24-cli-tools-live-manifest.md) | In progress locally: offline signature boundary checked and independently reviewed; publication, schema, compatibility and executable delivery remain unbuilt |
-| [superpowers/specs/2026-10-24-cli-nightly-qualification.md](superpowers/specs/2026-10-24-cli-nightly-qualification.md) | In progress: nightly candidate interface checks; authenticated compatibility and production publication remain unfinished |
-| superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
-| superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
-| superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |
-| superpowers/specs/2026-10-12-self-development-mvp-design.md, plans/2026-10-12-self-development-mvp.md | Superseded by R202: self-development runs through the project conversation ([dev/self-development.md](dev/self-development.md)); the mission engine was retired with task 060 (R215) |
-| superpowers/specs/2026-10-12-faber-rework-design.md | Proposal, nothing built |
-| superpowers/specs/2026-10-12-generated-pipelines-design.md, 2026-10-12-tool-selection-rework-design.md | Proposals, partly superseded by the rework design |
-| superpowers/specs/2026-10-12-ux-sentinel-design.md, plans/2026-10-13-ux-sentinel-s0.md | Slice S0 shipped (dev/sentinel.md); the rest is a proposal |
-| superpowers/specs/2026-10-14-test-system-rework-design.md, plans/2026-10-14-test-system-rework.md | In progress: step 0, R189's waits, parallel scenarios and build skip, and the meter (`faber-bench`) landed; the shared app shelved (R395); the measured report and the real-work tier still to come |
-| superpowers/plans/2026-10-22-real-work-bench.md | In progress: step 1 done (how TL-ADE is fed a recorded answer and its quota); the real-work tier of R113, 7 tasks through each app's screen inside the meter |
-| superpowers/specs/2026-10-16-browser-preview.md | Proposal, nothing built (recommends yes, after a week of visual critiques) |
-| superpowers/plans/2026-10-14-parallel-work-loop.md | The development loop (R128, R129); its rounds table is kept current |
-| superpowers/specs/2026-10-16-own-lessons-into-faber.md | Superseded by the own-work-method spec (R435), which says what became of each row |
-| superpowers/specs/2026-10-17-built-in-verifier.md | Approved (R190), in progress: V0 measured ([research/2026-10-17-verifier-v0-measurements.md](research/2026-10-17-verifier-v0-measurements.md)), V1 built (the `verify` tool, R203, and its memory cap; its events move to V5), V4 (one shared test app) measured and shelved (decision of 2026-10-21). Faber's own verifier in the engine, checks in seconds on the PC, GitHub only confirms |
-| superpowers/specs/2026-10-22-panes-tabs-and-space.md | Proposal, queued as tasks 010 to 060: column views sized by kind, a browser with tabs that remembers, the quick question as a side chat, state Faber keeps, words and keys |
-| superpowers/specs/2026-10-17-agent-pane-webview-spike.md | Spike done: go for step 7 of "Watching the agent work", with the five rules in its Recommendation |
-| [superpowers/specs/2026-10-26-independent-plan-review.md](superpowers/specs/2026-10-26-independent-plan-review.md) | Planned for Phase 4 at the owner's request; not implemented. AI implementation proposal: incremental project knowledge, independent plan review, delivery-to-plan checks and a measured Faber pilot |
-| [superpowers/specs/2026-10-27-electron-rust-shell-design.md](superpowers/specs/2026-10-27-electron-rust-shell-design.md) | Decided by the owner (R459); plan proposed by AI, nothing built. Move from Tauri to Electron with the engine, shell logic, test runner, markdown, updater and scripts in Rust; phase 1 measures and can stop it |
-| superpowers/specs/2026-10-19-legible-agent-runs-design.md | Approved (Erick, 2026-10-19), tasks 019 and 020 landed (#224, #226). Design: a finished reply looks finished, a done card, the plan, status and closing-box tools, one block per Keep going run, plain words with a technical tab |
-| superpowers/specs/2026-10-20-rewind-design.md | Approved (Erick's three answers, 2026-10-20; seventh fresh review), task 090 landed (#191): go back to before a message, files, conversation or both, with redo |
-| superpowers/specs/2026-10-21-look-around.md | In progress, steps 1 and 2 landed (R369), step 3 landed (R386), step 4 counting built (R403), the week of use and the decision still to come: after a fix, the same mistake looked for elsewhere and asked about, scoped to the close of a fix and a red-to-green sign, never a rule for every turn |
-| superpowers/specs/2026-11-04-review-rounds.md | Chosen by the owner, being built: Review in Projects becomes rounds where two AIs score the changes, only problems both raise go back to the agent, and it climbs to a target or a round limit |
-| superpowers/specs/2026-10-22-own-work-method.md | Replaced by Faber Method 2 (R484); its queued tasks 900 to 935 go on under the new spec |
-| superpowers/specs/2026-10-30-faber-method-2.md | Approved (R484), tasks 041 to 049 plus the kept tasks 900 to 935, nothing built yet: one method for Faber and every project, replacing R435 and Faber Flow; work as a graph run in waves with a join, packets instead of histories, progress derived and never written, hard read limits, every part switched on the bench |
-| research/2026-10-21/catalog-list.md | Catalog step 2 curation completed locally; proof results and remaining native validation |
-| research/2026-10-22/benchmark-light.md | First run of the light benchmark: Faber against plain Claude Code on 5 requests; Codex rows wait for its quota |
-| research/2026-11-02-super-agent/faber-fit.md | Super-agent research (DeepSeek dsh-superagent prototype, PandaCode, Cline Desktop, ClinePass) against Faber: what exists, gaps, what not to copy |
-| research/settings-exit-snapshot-2026-10-24.md | Locally reproduced and corrected native-select exit snapshot; focused RED/GREEN and paired visual evidence, with integration and resource limits retained |
-| [research/2026-10-29-faber-diagnosis/README.md](research/2026-10-29-faber-diagnosis/README.md) | Diagnosis of 2026-10-29: lag from whole-conversation saves, silent waits and loops, the stacked status lines, English helper titles and leftover jargon, with what T3 Code, Claude and Grok do better; tasks 100 to 160 |
-| [research/first-user-2026-10-25.md](research/first-user-2026-10-25.md) | Accepted newcomer round and incorporated Projects repair; mixed outcomes and historical/native-picker limits preserved |
-| [research/first-user-2026-10-24-history.md](research/first-user-2026-10-24-history.md) | Historical first-user reports retained verbatim; scope, archived artifacts and evidentiary limits |
-| [research/motion-verdicts-2026-10-25.md](research/motion-verdicts-2026-10-25.md) | Accepted eight-surface motion critique and incorporated sidebar correction; bounded scores and observation limits preserved |
-| [research/2026-10-27-native-ui-spike/report.md](research/2026-10-27-native-ui-spike/report.md) | Chat screen rebuilt in GPUI and measured against the current screen on the same PC: about 4× less memory with GPU memory counted, but no screen-reader text and no way for the screen runner to drive it; no-go for now, R459 stands |
-| [research/2026-10-24-frontend-interaction.md](research/2026-10-24-frontend-interaction.md) | UX/UI/IxD references, clean behavioral comparison, partial implementation receipts and remaining gaps; no human user study |
-| [research/2026-11-01-landing-in-user-repos.md](research/2026-11-01-landing-in-user-repos.md) | Proposal, nothing built: how Faber lands its agents' work in a person's own GitHub repository (profiles per repository, file claims, trains, GitHub's merge queue), with three questions for the owner |
-| research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
-| [superpowers/plans/2026-11-05-lean-faber.md](superpowers/plans/2026-11-05-lean-faber.md) | In progress: D1 fast lane (R556) and D2 paperwork (R557) landed; the rest proposed: measured overengineering in process, product and code, a direct landing lane with checks after, and steps that close each weak point against DeepSeek's super-agent; five questions for the owner |
-| superpowers/plans/2026-10-22-frontend-excellence.md | Completed selected changes: original frontend skills, reliability repairs and scoped proofs; initial 243-item audit and unverified criteria retained |
+| [superpowers/plans/2026-11-05-lean-faber.md](superpowers/plans/2026-11-05-lean-faber.md) | In progress: the lean plan. D1 fast lane (R556), D2 paperwork (R557), D3 documentation diet and D4 fewer lanes landed; the rest is proposed |
 
-A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the
-top (proposal, in progress, shipped, superseded by …), and gets a row here. While it is in progress, each landed step
-ticks its box and updates the `Status:` line, so a fresh session resumes from the file instead of from memory. When it
-ships, its behaviour moves into product-map.md and the design/ or product/ page it belongs to, and its row says shipped.
-Default searches skip `superpowers/` and `research/` (`.ignore`); name the path to search them.
+[history/](history/): history, never a source for how Faber works today. Dated specs, plans and research (under
+`history/superpowers/` and `history/research/`) and the decisions no longer in force ([history/decisions.md](history/decisions.md)).
+A search skips it (`.ignore`); name the path to read it. A new spec or plan goes to `superpowers/specs` or
+`superpowers/plans` with the date in its name and a `Status:` line at the top; once it ships or is dropped it moves to
+`history/` with `git mv`, its behaviour already in product-map.md and the design/ or product/ page it belongs to.

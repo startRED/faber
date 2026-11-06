@@ -4,9 +4,9 @@ Status: in progress; offline signature and payload validation are implemented. C
 
 ## Existing contract
 
-Extends the Catalog and CLI installation entries in [the product map](../../product-map.md), the
-[catalog architecture](../../product/architecture.md#curated-catalog-and-live-manifest) and
-[distribution](../../product/distribution.md). Catalog remains the only browsing and management surface.
+Extends the Catalog and CLI installation entries in [the product map](../../../product-map.md), the
+[catalog architecture](../../../product/architecture.md#curated-catalog-and-live-manifest) and
+[distribution](../../../product/distribution.md). Catalog remains the only browsing and management surface.
 The official CLIs and tools are downloaded from their original sources, never bundled. No account profile,
 credential, session token or chat website participates in discovery, qualification or publication.
 

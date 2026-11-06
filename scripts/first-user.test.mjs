@@ -226,7 +226,7 @@ test('same-day review runs keep separate screenshots and default reports, includ
     assert.notEqual(first.out, second.out);
     assert.equal(readFileSync(join(first.shots, 'primeira-abertura-1.png'), 'utf8'), 'first run');
     assert.equal(dirname(first.shots), join(target, 'faber-test', 'first-user'));
-    assert.equal(first.out, join(root, 'docs', 'research', `first-user-${basename(first.shots)}.md`));
+    assert.equal(first.out, join(root, 'docs', 'history', 'research', `first-user-${basename(first.shots)}.md`));
     const explicit = firstUser.runPaths(root, target, '2026-10-23', 'custom-report.md');
     assert.equal(explicit.out, join(root, 'custom-report.md'));
     assert.notEqual(explicit.shots, second.shots);

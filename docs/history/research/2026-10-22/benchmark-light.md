@@ -1,6 +1,6 @@
 # Light benchmark, first run (2026-10-22)
 
-Erick's order: "Montar e rodar uma versão leve tipo 5 pedidos" (R410). Faber (the engine, Auto, Claude Code only) against plain Claude Code on 5 requests of the plan in [product/README.md](../../product/README.md#goals). How to run it: [dev/benchmark.md](../../dev/benchmark.md). One run, five requests, one judging pass each: a first look, not a measurement with an error bar.
+Erick's order: "Montar e rodar uma versão leve tipo 5 pedidos" (R410). Faber (the engine, Auto, Claude Code only) against plain Claude Code on 5 requests of the plan in [product/README.md](../../../product/README.md#goals). How to run it: [dev/benchmark.md](../../../dev/benchmark.md). One run, five requests, one judging pass each: a first look, not a measurement with an error bar.
 
 ## What was run
 

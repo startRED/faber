@@ -10,7 +10,7 @@ prerequisites below are proved. The sign-in dependency is deliberate: the CLI's 
 ACP. The sign-in task must cover the chosen ACP component's own official flow, not just CLI discovery.
 
 Read R160, R470, R472 and R482 in `docs/decisions.md`, `010-antigravity-driver.md`, and the dated follow-up in
-`docs/research/2026-10-29-t3code-study.md`. `docs/dev/antigravity-cli.md` records the direct CLI format; it is not an ACP
+`docs/history/research/2026-10-29-t3code-study.md`. `docs/dev/antigravity-cli.md` records the direct CLI format; it is not an ACP
 contract. Direct-print fixtures cannot prove ACP questions, permissions, cancellation or resume.
 
 Evidence on 2026-10-30: direct `agy` 1.4.11 print mode skipped an explicit `ask_question` without an answerable payload.

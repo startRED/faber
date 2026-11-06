@@ -1,4 +1,4 @@
-// TL-ADE's side of the real-work benchmark (docs/superpowers/plans/2026-10-22-real-work-bench.md): one task per run,
+// TL-ADE's side of the real-work benchmark (docs/history/superpowers/plans/2026-10-22-real-work-bench.md): one task per run,
 // started by the meter. It starts `ade serve` on a temporary repo and home, and a headless Chrome on its panel, drives the
 // panel over DevTools the way Faber's scenario drives Faber, and writes what it noted as JSON to `--notes`.
 //

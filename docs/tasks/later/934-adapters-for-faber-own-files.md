@@ -5,7 +5,7 @@ Files: engine/src/project/memory.rs, engine/src/store.rs, engine/src/engine.rs, 
 Depends: adoption-in-the-card
 Size: about 400 changed lines
 
-Why: slice 4 of `docs/superpowers/specs/2026-10-22-own-work-method.md`, "Adopt before create". Until the adapters exist an
+Why: slice 4 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`, "Adopt before create". Until the adapters exist an
 adopted kind is loaded and never written. Each adapter keeps the format's own IDs, dates and structure and does only its
 format's own operations: Faber's R-numbered table (`docs/decisions.md`: append a row), its taste-card table
 (`docs/product-rules.md`: append a card), and its `docs/tasks/` folder (add a task file, and delete it when the work

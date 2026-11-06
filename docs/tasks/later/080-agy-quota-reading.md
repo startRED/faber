@@ -10,7 +10,7 @@ Claude's and Codex's counters are read by commands that answer locally and cost 
 `account/rateLimits/read`), on a debounced schedule per vendor (`engine/src/cadence.rs`), recorded in `ledger.rs`, turned into pace
 by `budget.rs`, and exposed to the agent by the `quota` tool (`engine/src/toolbox.rs`). Auto "requires billing confirmed as a
 subscription before any request" and denies unknown billing. For Antigravity: `agy --help` shows no usage command and a `/usage`
-turn is a model turn (checked); the 2026-10-14 plan (`docs/superpowers/plans/2026-10-14-parallel-work-loop.md`) notes an Antigravity "Claude/GPT bucket", so Antigravity's Claude and GPT models seem to share a bucket apart from
+turn is a model turn (checked); the 2026-10-14 plan (`docs/history/superpowers/plans/2026-10-14-parallel-work-loop.md`) notes an Antigravity "Claude/GPT bucket", so Antigravity's Claude and GPT models seem to share a bucket apart from
 Gemini's. Whether any zero-token source exists is a question of `docs/dev/antigravity-cli.md` (task `agy-recorded-runs`, item 8).
 
 Build, depending on that answer. If a zero-token reading exists: a reader like the other two (short-lived, hidden, idle priority

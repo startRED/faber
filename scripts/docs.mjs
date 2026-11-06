@@ -1,6 +1,6 @@
 // Keeps the living documents small enough to read whole, findable from docs/README.md, and linked correctly (R187).
 // An agent reads only the pages its task names, so each page answers one kind of question; a page past the limit splits
-// by topic instead of growing. Dated history (docs/superpowers/, docs/research/) and the logo sources are left alone.
+// by topic instead of growing. Dated history (docs/history/, docs/superpowers/) and the logo sources are left alone.
 //
 //   node scripts/docs.mjs        (npm run docs)
 //
@@ -26,7 +26,7 @@ export const LARGE = {
  */
 export const READ_FIRST = { 'AGENTS.md': 14_000, task: 6_000 };
 
-const HISTORY = ['docs/superpowers/', 'docs/research/', 'docs/brand/'];
+const HISTORY = ['docs/history/', 'docs/superpowers/', 'docs/brand/'];
 
 /** A task of the queue: a brief that leaves with the pull request that does it, listed by docs/tasks/README.md. */
 const isTask = (file) => file.startsWith('docs/tasks/') && file !== 'docs/tasks/README.md';

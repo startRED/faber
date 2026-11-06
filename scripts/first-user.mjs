@@ -12,7 +12,7 @@
 //
 // Faber runs as the hidden, sandboxed test build that `testkit/examples/ux_audit.rs` drives (C006: the window lives on a
 // desktop no monitor shows), with no real CLI connected, so no subscription is spent inside it; the reviewer's own calls are
-// its only cost. Builds request low priority. Findings go to `docs/research/first-user-<date>-<suffix>.md`, screenshots
+// its only cost. Builds request low priority. Findings go to `docs/history/research/first-user-<date>-<suffix>.md`, screenshots
 // to `<target>/faber-test/first-user/<date>-<suffix>/`. Each run keeps its own evidence. Nothing is fixed by the review.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -48,7 +48,7 @@ export function runPaths(root, target, date, output) {
   const parent = join(target, 'faber-test', 'first-user');
   mkdirSync(parent, { recursive: true });
   const shots = mkdtempSync(join(parent, `${date}-`));
-  return { shots, out: resolve(root, output ?? `docs/research/first-user-${basename(shots)}.md`) };
+  return { shots, out: resolve(root, output ?? `docs/history/research/first-user-${basename(shots)}.md`) };
 }
 
 /** What a newcomer is asked to do, in order, in the same app: each task starts where the last one ended. */

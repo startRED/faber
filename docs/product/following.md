@@ -39,7 +39,7 @@ something finishes.
   Failed or unknown state queries also suppress the toast. Delivery never opens, flashes or focuses a window.
 - macOS and Linux send a toast and the chime; full-screen detection comes later. Sound uses Windows' `PlaySound`,
   macOS' `afplay`, or Linux's `paplay` with `aplay` as a fallback. These players come from the system, never the bundle.
-- The [notification review](../research/2026-10-12-notifications-review.md) records the verified findings and the detection limits.
+- The [notification review](../history/research/2026-10-12-notifications-review.md) records the findings and limits.
 
 ## Visual answers
 
@@ -196,7 +196,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
   as one summary for the person's return. Nothing opens a window or takes focus.
 - **Cost first.** Faber idles near 110 MB today against the 400 MB test (R125). Steps 1 to 6 add no process and only
   the rows on screen. A second webview is the big cost: one live view at a time. The Windows spike measured it
-  (2026-10-17, [the spike note](../superpowers/specs/2026-10-17-agent-pane-webview-spike.md)): a child webview of the one
+  (2026-10-17, [the spike note](../history/superpowers/specs/2026-10-17-agent-pane-webview-spike.md)): a child webview of the one
   window adds about 30 MB on a simple page and 70 to 80 MB on a real site, uses 8 to 14% of one core while acting and
   nothing while idle, and gives fresh pictures whether the window is never shown, minimized or in the tray, with no
   window seen and no focus taken. It leaves the screen by moving out of the window's area, never by being hidden,

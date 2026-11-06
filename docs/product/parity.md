@@ -8,7 +8,7 @@ A row leaves this page in the commit that builds it, and what was built goes int
 Sources (2026-10-19): the clean-room inventories of the Claude desktop app, the ChatGPT and Codex desktop app and the
 Codex CLI source (`E:\Dev\re-corpus`, behaviour only, never code), the public docs of Claude Code, claude.ai and ChatGPT,
 and the 2026-10-18 study of how answers become screens
-(`docs/research/2026-10-18-harness-output-ui/`, its candidate list cited here as "cand. A1").
+(`docs/history/research/2026-10-18-harness-output-ui/`, its candidate list cited here as "cand. A1").
 Everything is an AI proposal until the owner orders it; direction and taste go to the owner first.
 
 ## How a gap closes

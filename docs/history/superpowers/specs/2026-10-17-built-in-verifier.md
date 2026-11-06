@@ -26,10 +26,10 @@ The aim is the fastest and lightest verification possible, not a copy of a hoste
 | Fact | Source |
 | :--- | :--- |
 | The repository is public, so GitHub's standard runners cost no minutes. The limit is how many jobs run at once. | `gh repo view`, 2026-10-17 |
-| CI already runs only the suites a change needs (R163, R165), and a pull request runs only the lints (R186). | [dev/testing.md](../../dev/testing.md#screen-tests), [dev/workflow.md](../../dev/workflow.md#merge-on-green) |
+| CI already runs only the suites a change needs (R163, R165), and a pull request runs only the lints (R186). | [dev/testing.md](../../../dev/testing.md#screen-tests), [dev/workflow.md](../../../dev/workflow.md#merge-on-green) |
 | A queued run still holds about 18 jobs (one test-app build, one `ui` part, eight `screen` parts, lints and `rust` on Windows and macOS); five runs at once left screen parts waiting up to 226 s for a runner. | R186 |
-| Local `cargo t` peaks near 8 GB, and lanes waited 441 minutes for a build slot on 2026-10-16 and 17, so the heavy suites moved to CI (R183). | [dev/testing.md](../../dev/testing.md#build-slots) |
-| Missions already have a serial proof, review and fast-forward queue (R96), short check output (R155), and the rule that Faber, not the Writer, decides "done" (R146). | [product/building.md](../../product/building.md) |
+| Local `cargo t` peaks near 8 GB, and lanes waited 441 minutes for a build slot on 2026-10-16 and 17, so the heavy suites moved to CI (R183). | [dev/testing.md](../../../dev/testing.md#build-slots) |
+| Missions already have a serial proof, review and fast-forward queue (R96), short check output (R155), and the rule that Faber, not the Writer, decides "done" (R146). | [product/building.md](../../../product/building.md) |
 | The test-system rework (R113, R115, R116) already plans one engine test program, event waits, skipping unchanged builds and one shared running app for the screen scenarios. | [spec](2026-10-14-test-system-rework-design.md) |
 
 So the verifier is not a new idea next to these. It is the engine that runs them: `cargo t`'s plan, the mission proof

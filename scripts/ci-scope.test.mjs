@@ -37,7 +37,7 @@ test('each path picks the suites of the table testkit tests too (testkit/src/pla
 });
 
 test('docs/ and .md files are words, except the map a test reads', () => {
-  for (const file of ['docs/roadmap.md', 'docs/research/probe.json', 'README.md', 'ui/locales/README.md']) assert.ok(isWords(file), file);
+  for (const file of ['docs/roadmap.md', 'docs/history/research/probe.json', 'README.md', 'ui/locales/README.md']) assert.ok(isWords(file), file);
   for (const file of ['docs/product-map.md', 'ui/App.tsx', 'package.json', 'mdfile', 'docs.rs']) assert.ok(!isWords(file), file);
 });
 

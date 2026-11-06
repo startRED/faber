@@ -5,7 +5,7 @@ Files: engine/src/engine/plan.rs, engine/src/engine/copies.rs, engine/src/engine
 Depends: waves-start-workers-from-the-leaders-commit
 Size: about 400 changed lines
 
-Why: slice 2 of `docs/superpowers/specs/2026-10-30-faber-method-2.md`, step 4. Declared files only schedule: two workers
+Why: slice 2 of `docs/history/superpowers/specs/2026-10-30-faber-method-2.md`, step 4. Declared files only schedule: two workers
 can both find they must change a shared export or a lockfile. Faber never merges (R201); the leader brings the work in.
 Faber decides what is safe to bring in and whether the result holds.
 

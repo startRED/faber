@@ -1,6 +1,6 @@
-// The fair benchmark of R113 (docs/superpowers/specs/2026-10-14-test-system-rework-design.md, section 3): runs each
+// The fair benchmark of R113 (docs/history/superpowers/specs/2026-10-14-test-system-rework-design.md, section 3): runs each
 // measurement of Faber and of TL-ADE through the meter (`faber-bench`, one job object per run, an idle PC) once to warm up
-// and then `--runs` times, appends every run to docs/research/bench/<date>.jsonl and prints the medians as a table.
+// and then `--runs` times, appends every run to docs/history/research/bench/<date>.jsonl and prints the medians as a table.
 // Compilation is never measured (R115): the warm-up run builds what the measured ones reuse.
 //
 //   node scripts/bench/run.mjs [--only suites|matched|real-work] [--runs 3] [--tlade <folder>] [--bench <faber-bench.exe>]
@@ -26,7 +26,7 @@ export const MATCHED = [
   { id: 8, behaviour: 'An npm .cmd shim resolves to the real program', tlade: ['tests/doctor.test.ts', 'tests/parity/windows-durability.test.ts'], faber: ['engine::cli_lookup_follows_npm_cmd_shims'] },
 ];
 
-/** The real-work tasks (docs/superpowers/plans/2026-10-22-real-work-bench.md) Faber has a scenario for. */
+/** The real-work tasks (docs/history/superpowers/plans/2026-10-22-real-work-bench.md) Faber has a scenario for. */
 export const REAL_WORK = [
   { id: 1, task: 'Sit idle on a new conversation for 60 s' },
   { id: 2, task: 'One chat turn that streams an answer' },
@@ -123,7 +123,7 @@ function main() {
   const standin = join(target, 'debug', 'faber-standin.exe');
   if (!existsSync(bench)) throw new Error(`no meter at ${bench}: cargo build -p faber-testkit --bin faber-bench`);
   if (!existsSync(join(tlade, 'node_modules', 'vitest'))) throw new Error(`no TL-ADE with its dependencies at ${tlade}`);
-  const folder = join(root, 'docs', 'research', 'bench');
+  const folder = join(root, 'docs', 'history', 'research', 'bench');
   mkdirSync(folder, { recursive: true });
   const out = join(folder, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   const lines = [];

@@ -5,7 +5,7 @@ Files: engine/src/helper.rs, engine/src/engine/helpers.rs, engine/src/progress.r
 Depends: size-raised-by-permissions, receipt-from-checked-hashes
 Size: about 400 changed lines
 
-Why: slice 4 of `docs/superpowers/specs/2026-10-22-own-work-method.md` and guardrail 5 of `docs/product/areas.md`: the
+Why: slice 4 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md` and guardrail 5 of `docs/product/areas.md`: the
 writer never reviews its own work; the reviewer is the other vendor when its quota allows, with the same-vendor
 fallback of R146 and "not reviewed" when none can start. The areas page marks `review.request` as not built. Today the
 person's Review buttons in Changes (R279) send a prompt through the conversation and the helper, and nothing makes a

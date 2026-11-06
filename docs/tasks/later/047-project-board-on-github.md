@@ -5,7 +5,7 @@ Files: engine/src/project/, engine/src/engine/plan.rs, ui/ProjectSettings.tsx, u
 Depends: project-progress-line, follow-ups-as-task-files
 Size: about 350 changed lines
 
-Why: slice 1 of `docs/superpowers/specs/2026-10-30-faber-method-2.md`. Faber's own repository already has its board
+Why: slice 1 of `docs/history/superpowers/specs/2026-10-30-faber-method-2.md`. Faber's own repository already has its board
 (docs/dev/workflow.md#board): BOARD.md, the only file of a parentless commit on the branch `board`, rebuilt from state and
 never edited. A person's project gets the same.
 

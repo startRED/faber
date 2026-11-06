@@ -5,7 +5,7 @@ Files: engine/src/store.rs, engine/src/project/memory.rs, engine/src/project/rul
 Depends: start-card-in-sessions
 Size: about 400 changed lines
 
-Why: the spec's "Adopt before create" (`docs/superpowers/specs/2026-10-22-own-work-method.md`): when a project keeps
+Why: the spec's "Adopt before create" (`docs/history/superpowers/specs/2026-10-22-own-work-method.md`): when a project keeps
 decisions, taste or tasks its own way (Faber's own `docs/decisions.md`, a style guide, `docs/tasks/`), Faber uses that
 place and never makes a second copy in `.faber/`. The data-folder component is built and read-only
 (`faber-trust/adoptions.json`; `Store` `adopted_files_` and `adopted_task_approvals_`; `memory::read_adopted_source` and

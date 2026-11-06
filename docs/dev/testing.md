@@ -196,8 +196,8 @@ The program is `faber-test`, run as `cargo t`.
 5. **The benchmark of ~40 real requests** that measures the goals against plain Claude Code and plain Codex before
    each version. Its light version (5 requests, `cargo run -p faber-engine --example bench`) is compiled by `cargo t` and the lint suite but never run by them or by CI, since it spends real quota ([benchmark](benchmark.md)).
 6. **Faster and lighter than TL-ADE's suite, measured fairly** (R113, R115, R116, owner;
-   [spec](../superpowers/specs/2026-10-14-test-system-rework-design.md),
-   [plan](../superpowers/plans/2026-10-14-test-system-rework.md)). The floor is 5x less time and processes and 3x less
+   [spec](../history/superpowers/specs/2026-10-14-test-system-rework-design.md),
+   [plan](../history/superpowers/plans/2026-10-14-test-system-rework.md)). The floor is 5x less time and processes and 3x less
    memory and CPU, with no ceiling; no test is weakened. Landed: one engine test program, the `rust-lld` linker, lighter
    debug info and below-normal priority (2026-10-14), then in-page waits, parallel scenarios and skipping an unchanged
    screen build (R189); the shared running app was measured and shelved (R395).

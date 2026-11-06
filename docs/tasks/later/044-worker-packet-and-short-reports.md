@@ -5,7 +5,7 @@ Files: engine/src/engine/siblings.rs, engine/src/engine/helpers.rs, engine/src/h
 Depends: plan-steps-files-and-waits
 Size: about 350 changed lines
 
-Why: slice 3 of `docs/superpowers/specs/2026-10-30-faber-method-2.md`, "The packet". A worker should start with what it
+Why: slice 3 of `docs/history/superpowers/specs/2026-10-30-faber-method-2.md`, "The packet". A worker should start with what it
 needs and nothing else, and the leader's context should grow by a few lines per step, not by every worker's transcript.
 
 Build:

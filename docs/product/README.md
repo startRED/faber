@@ -93,7 +93,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 | 1a (R96) | Self-development | the project conversation that builds Faber ([self-development](../dev/self-development.md)): separate copies, conversations the agent starts, Keep going, following its pull request, the built-in verifier and Faber's own checks; the missions plan it replaced is history |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber (built, a file of Faber's own every session can read), search, moving a chat to a project, Auto learning from approvals (built) and reporting failed writes of conversation and project files (built) |
 | 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, watching the agent work (living sentences, side chat, Faber's browser and app pane), the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
-| 4 | Excellent software | generalize the self-development workflow; risk-sized independent plan review and delivery-to-plan checks, starting with a measured Faber pilot ([implementation proposal](../superpowers/specs/2026-10-26-independent-plan-review.md)); nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |
+| 4 | Excellent software | generalize the self-development workflow; risk-sized independent plan review and delivery-to-plan checks, starting with a measured Faber pilot ([implementation proposal](../history/superpowers/specs/2026-10-26-independent-plan-review.md)); nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |
 | 5 | First public version | |
 | 6 | Image and design | creative drafts, blind judging and comparison views |
 | 7 | Phone and routines | the phone as a remote control, messaging channels and routines |
@@ -106,10 +106,10 @@ symbol.
 
 ### Proposed work-method extension
 
-The [Faber Flow revision 3 proposal](../superpowers/specs/2026-10-22-faber-framework/README.md) researches company and
+The [Faber Flow revision 3 proposal](../history/superpowers/specs/2026-10-22-faber-framework/README.md) researches company and
 community practices and extends the approved R435 method without replacing its records or changing the phase order.
-Its [capability backlog](../superpowers/specs/2026-10-22-faber-framework/features.md) and
-[implementation slices](../superpowers/specs/2026-10-22-faber-framework/roadmap.md) cover current-input identity,
+Its [capability backlog](../history/superpowers/specs/2026-10-22-faber-framework/features.md) and
+[implementation slices](../history/superpowers/specs/2026-10-22-faber-framework/roadmap.md) cover current-input identity,
 complete task packets, evidence-linked outcomes, adaptive support for light/frontier models, constrained composition,
 recovery, calibrated review, domain checks, readable progress and measured workflow improvement. Reusable work becoming
 scheduled routines remains in phase 7. These are proposed capabilities, not approved implementation or measured gains;

@@ -1,11 +1,11 @@
 # Measure what the start card costs in tokens before it stays
 
 Area: none
-Files: engine/examples/bench.rs, bench/requests/, docs/dev/benchmark.md, docs/superpowers/specs/2026-10-22-own-work-method.md
+Files: engine/examples/bench.rs, bench/requests/, docs/dev/benchmark.md, docs/history/superpowers/specs/2026-10-22-own-work-method.md
 Depends: start-card-in-sessions
 Size: about 350 changed lines
 
-Why: the spec's "Cost" section (`docs/superpowers/specs/2026-10-22-own-work-method.md`) makes a token gate for the card,
+Why: the spec's "Cost" section (`docs/history/superpowers/specs/2026-10-22-own-work-method.md`) makes a token gate for the card,
 declared before any run. Compare identical Faber configurations with and without the card on the five R410 requests
 (`bench/requests/`, run by `cargo run -p faber-engine --example bench`, see `docs/dev/benchmark.md`), three paired runs
 each, on both CLIs, in cold, warm and resumed sessions; report input, cached input, output and extra model calls apart,

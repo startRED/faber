@@ -29,7 +29,7 @@ often right.
 
 ## Why the gap is small
 
-- Both copies keep [product-rules.md](../product-rules.md), whose placement table, taste cards and named past failures
+- Both copies keep [product-rules.md](../../product-rules.md), whose placement table, taste cards and named past failures
   ("Redo with…", the three names for connecting an account) already answer most of these traps. The test isolates the
   map, by design, so this is the map's marginal value over the rules.
 - The agent reads the code well: about eight searches per plan found the existing setting, search box, shared menu or

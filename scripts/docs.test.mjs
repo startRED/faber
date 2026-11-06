@@ -40,7 +40,7 @@ test('a page missing from the index fails, history does not', () => {
     'docs/a.md': '# A\n',
     'docs/design/b.md': '# B\n',
     'docs/dev/c.md': '# C\n',
-    'docs/research/old.md': '# Old\n'.repeat(500),
+    'docs/history/research/old.md': '# Old\n'.repeat(500),
   });
   assert.deepEqual(found, ['docs/dev/c.md: not in docs/README.md; add a row that says when to read it']);
 });

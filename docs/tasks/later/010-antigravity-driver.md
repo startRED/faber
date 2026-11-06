@@ -1,7 +1,7 @@
 # Antigravity driver: a third vendor
 
 Owner asked for Antigravity (`agy`) support (R482 in `docs/next/t3code-study.json`, replaces the "only Claude and
-Codex" part of R4). Read `docs/research/2026-10-29-t3code-study.md` (Antigravity) and `03-providers-gemini.md` in
+Codex" part of R4). Read `docs/history/research/2026-10-29-t3code-study.md` (Antigravity) and `03-providers-gemini.md` in
 `E:\Dev\re-corpus\t3code\notes\`.
 
 Already probed (details in the research page): resume by `--conversation` works; several turns in one process work with

@@ -5,5 +5,5 @@ graft/.cache/
 graft/.graph/
 # Dated specs, plans and research are history (docs/README.md): default searches skip them so an agent does not take
 # an old design for today's behaviour. A search that names the path still reads them.
+docs/history/
 docs/superpowers/
-docs/research/

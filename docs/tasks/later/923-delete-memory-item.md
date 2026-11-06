@@ -5,7 +5,7 @@ Files: engine/src/project/memory.rs, engine/src/store.rs, engine/src/engine.rs, 
 Depends: taste-lesson-records
 Size: about 250 changed lines
 
-Why: slice 3 of `docs/superpowers/specs/2026-10-22-own-work-method.md`, "Staying small and current": one click in Memory
+Why: slice 3 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`, "Staying small and current": one click in Memory
 deletes any stored item and its record goes with it; `rules.md` is built, so Memory shows it for reading only. Today
 `memory::edit` already deletes an entry (`Edit.text` of `None`, with a revision guard), but the hash left in
 `decisions-kept.json` (and, after task taste-lesson-records, in the taste and lesson record) stays behind.

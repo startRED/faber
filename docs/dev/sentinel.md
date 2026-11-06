@@ -6,7 +6,7 @@ The screen sentinel and the visual critique.
 
 The sentinel (`testkit/src/sentinel.rs`, `testkit/src/probe.js`, `testkit/src/screen/sentinel.rs`) judges what a person
 would see, not what the page says. It is a set of screen scenarios, so it runs hidden, sandboxed and audited like the
-rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`; this is slice S0.
+rest. The design is in `docs/history/superpowers/specs/2026-10-12-ux-sentinel-design.md`; this is slice S0.
 
 - **Probe and rules.** The probe is injected over the DevTools port. It only measures: box, opacity and presence of every
   `data-surface` element on each frame (exit copies in shadow roots included), and every animation that starts. The
@@ -87,7 +87,7 @@ script refuses one inside the repository. Builds run at idle priority, the revie
 CLI runs inside Faber, so its only cost is the reviewer's own calls (about 40 small Haiku turns).
 
 Each run gets a unique `<date>-<suffix>` name, including repeat runs with the same configuration. The findings go to
-`docs/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
+`docs/history/research/first-user-<date>-<suffix>.md`, most serious first, each with what it tried, where it got stuck and the
 step's screenshot in `target/faber-test/first-user/<date>-<suffix>/` (local only). `--out` overrides only the report;
 screenshots still get their own folder. Each actual control list is saved beside its screenshot before the reviewer receives
 it, using exclusive creation so a previous step's evidence cannot be replaced. The run also records streamed SHA-256

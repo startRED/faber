@@ -1,11 +1,11 @@
 # Let the engine's loop enforce "Done means", then shrink AGENTS.md and measure the method
 
 Area: none
-Files: AGENTS.md, docs/dev/workflow.md, engine/examples/bench.rs, docs/dev/benchmark.md, docs/superpowers/specs/2026-10-22-own-work-method.md
+Files: AGENTS.md, docs/dev/workflow.md, engine/examples/bench.rs, docs/dev/benchmark.md, docs/history/superpowers/specs/2026-10-22-own-work-method.md
 Depends: independent-review-gate, adapters-for-faber-own-files, start-card-token-benchmark
 Size: about 250 changed lines
 
-Why: slice 4 of `docs/superpowers/specs/2026-10-22-own-work-method.md`, "Faber's own development": once the engine's loop
+Why: slice 4 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`, "Faber's own development": once the engine's loop
 (contract, checks, review gate, receipt) enforces what AGENTS.md "Done means" says by hand, AGENTS.md keeps only the
 repo-specific lines (landing, lanes, what's-new) and points at the spec. The spec also asks that slice 4 reports the
 whole method's added cost (reviews, folding and the other extra calls) on the same scenarios as the card benchmark, with

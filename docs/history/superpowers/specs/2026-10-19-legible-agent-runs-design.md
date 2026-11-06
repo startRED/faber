@@ -7,7 +7,7 @@ and how far it got. In his words, today it is "muito texto bruto". Sources: the 
 and Faber's code at `origin/phase-1-base` on 2026-10-19.
 
 Status: approved by Erick on 2026-10-19 ("pode aprovar, ficou bem melhor assim"). The tasks in
-[../../tasks/](../../tasks/README.md) numbered 016 to 020 build it, in that order.
+[../../tasks/](../../../tasks/README.md) numbered 016 to 020 build it, in that order.
 
 ## What went wrong in that conversation
 

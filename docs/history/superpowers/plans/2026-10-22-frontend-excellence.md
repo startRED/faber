@@ -269,7 +269,7 @@ A temporary Projects-only cache omission failed after the real restart, at the s
 app bytes were restored before an identified run passed both Chat and Projects, zero failed/not run/skipped. Sampled
 tree peaks were 168.0/176.5 MB against the unchanged 400 MB limit; measured post-launch flow CPU was 1,281/1,455 ms
 for Chat and 1,250/1,484 ms for Projects, including navigation, scrolling and screenshots. One run per area on a busy
-PC does not establish isolated overhead, general speed or performance equivalence. The [reading page](../../design/reading.md)
+PC does not establish isolated overhead, general speed or performance equivalence. The [reading page](../../../design/reading.md)
 retains the scoped measurements. This is additional verification, not an application behavior change, another
 generated-design evaluation or proof of other platforms, smooth motion, remote projects or assistive technology.
 

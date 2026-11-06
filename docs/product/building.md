@@ -64,7 +64,7 @@ shows the author, and "Keep" on an AI decision stores, outside the project, that
 ## Running many workers
 
 Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; research in
-[projects-orchestration.md](../research/2026-10-14/projects-orchestration.md)).
+[projects-orchestration.md](../history/research/2026-10-14/projects-orchestration.md)).
 
 - **The lead routes every message.** A quick question is answered in place; new work goes to a new worker or to the
   worker already in that area; several tasks in one message become several workers. It can list suggested workers
@@ -103,7 +103,7 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 ## Self-development (R96, through the project conversation)
 
 R96 put a minimal Projects slice for self-development before Full Chat. It was first planned as missions (a lead,
-roles, a board and a serial proof queue; [spec](../superpowers/specs/2026-10-12-self-development-mvp-design.md)), and
+roles, a board and a serial proof queue; [spec](../history/superpowers/specs/2026-10-12-self-development-mvp-design.md)), and
 R202 replaces that shape: self-development is the project conversation of R160 and R161, and the mission machinery
 stays in the engine only for what still uses it, with no way to start one. How to start it, step by step:
 [dev/self-development.md](../dev/self-development.md). The local development instance never touches the installed
@@ -127,7 +127,7 @@ Partly built (R190): the engine's `verify` tool runs a project's declared checks
 keeps the full output, with no extra process while idle. Faber's landing workflow also checks its exact queued tree
 locally and posts that coverage to GitHub. The wider evidence-bound review and completion contract remains planned;
 the existing checks tool does not enforce it ([current inventory](areas.md#toolbox),
-[spec](../superpowers/specs/2026-10-17-built-in-verifier.md)).
+[spec](../history/superpowers/specs/2026-10-17-built-in-verifier.md)).
 
 ## Coherence of a project's work (R146)
 
@@ -160,6 +160,6 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
 Roadmap direction requested by the owner; not implemented. Phase 4 starts with a measured Faber pilot, then expands
 only if the evidence supports it. Extend the existing project conversation, helpers, contracts and verifier rather
 than introducing a separate workflow screen or bundling a third-party plugin. Read the
-[implementation proposal](../superpowers/specs/2026-10-26-independent-plan-review.md) for the sequence, prerequisites,
+[implementation proposal](../history/superpowers/specs/2026-10-26-independent-plan-review.md) for the sequence, prerequisites,
 review independence, incremental project knowledge, delivery-to-plan checks and acceptance evidence. Its technical
 choices remain AI proposals; scheduling the work does not approve every detail or claim a measured benefit.

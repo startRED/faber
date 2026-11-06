@@ -1,6 +1,23 @@
 # Workflow
 
-How work lands: lane claims, merge on green, the task queue, the process freeze, the direction check, the red base and the numbers given at landing.
+How work is organised and lands: the lanes, lane claims, the fast lane and merge on green, the task queue, the process freeze, the direction check, the red base and the numbers given at landing.
+
+## Lanes
+
+Since 2026-11-06 (lean plan, D4) work runs in few lanes that finish:
+
+- At most three lanes at a time, one per area (a row or heading of [product-map.md](../product-map.md)). No manager of
+  leads and no conversations sending each other work: the owner, or the one session he names, writes the task list; a lane
+  that finds a follow-up tells that session instead of writing a task.
+- A lane takes the biggest coherent slice (one feature or fix with its tests, often 300 to 1,000 changed lines), ships it
+  with `node scripts/ship.mjs` ([fast lane](landing.md#fast-lane)), checks it working in the app built from the base, and
+  only then takes the next task (`node scripts/tasks.mjs next`). A lane blocked on another lane ships what it has, hands
+  the rest over in a note and stops; it never sits waiting.
+- Reviews follow the risk. A change to engine state, stored data, permissions, processes or security gets a review from a
+  fresh session that did not write it: the other vendor when it is available, the same vendor in a new read-only session
+  when its quota is poor (R146); security changes get two. Words, docs, tests and screen-only changes ship on their proofs.
+  A change a person sees is also walked as a newcomer and a heavy user, and checked against the taste cards
+  ([product-rules.md](../product-rules.md)).
 
 ## Lane claims
 
@@ -29,7 +46,7 @@ that finishes the pull requests queued before it.
 
 ## Task queue
 
-A session that finished a task takes the next one by itself, without asking, the way it does when the owner says "I am
+A session that shipped a task and saw it working takes the next one by itself, without asking, the way it does when the owner says "I am
 going to sleep, keep going" (R185). The list is `docs/tasks/`: one file per task, `<order>-<name>.md`, lowest order
 first, with a `# Title` line and the brief a fresh session needs. One file each means adding, reordering or finishing a
 task never touches another's lines. The owner decides what goes there, directly or through the session he names; the list holds

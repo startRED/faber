@@ -5,7 +5,7 @@ Files: engine/src/progress.rs, engine/src/engine/plan.rs, ui/Plan.tsx, ui/Projec
 Depends: plan-steps-files-and-waits
 Size: about 300 changed lines
 
-Why: slice 1 of `docs/superpowers/specs/2026-10-30-faber-method-2.md`, "What a person sees". A person who does not
+Why: slice 1 of `docs/history/superpowers/specs/2026-10-30-faber-method-2.md`, "What a person sees". A person who does not
 program should see where the work is without opening every conversation, and nobody should keep that status by hand.
 
 Build:

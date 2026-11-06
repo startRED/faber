@@ -5,7 +5,7 @@ Files: engine/src/progress.rs, engine/src/model.rs, engine/src/engine/plan.rs, u
 Depends: taste-lesson-records
 Size: about 400 changed lines
 
-Why: slice 3 of `docs/superpowers/specs/2026-10-22-own-work-method.md`. The agent proposes a taste line when the person
+Why: slice 3 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`. The agent proposes a taste line when the person
 corrects the same kind of thing a second time, or once with "always" or "never"; it proposes a lesson at close. Both
 show on the closing box (`WrapUp` in `engine/src/model.rs`, the `wrap_up` tool in `engine/src/progress.rs`), and the
 person's yes makes the engine write them (task taste-lesson-records).

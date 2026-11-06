@@ -1,155 +1,58 @@
 # Faber: guide for agents
 
 Faber is a source-available desktop app (FSL-1.1-ALv2) with a Chat area and a Projects area that run the official AI CLIs
-with the user's own subscriptions. [docs/README.md](docs/README.md) lists every living page and when to read it: read the
-pages your task needs, never a whole folder. Before changing scope read [docs/product/](docs/product/README.md); before
-changing anything a person sees, sets or calls, search [docs/product-map.md](docs/product-map.md) for its words (never
-read the map or [docs/decisions.md](docs/decisions.md) whole: together they are ~150k tokens). Dated specs, plans and
-research are history, never a source for how Faber works today. This file stays short: each line prevents a real
-mistake, and a rule a test enforces leaves it.
+with the user's own subscriptions. [docs/README.md](docs/README.md) lists the living pages: read what your task needs, never
+a folder; `docs/history/` and dated specs are never a source. Before changing scope read [docs/product/](docs/product/README.md);
+before changing what a person sees, sets or calls follow [docs/product-rules.md](docs/product-rules.md) and search
+[docs/product-map.md](docs/product-map.md) and [docs/decisions.md](docs/decisions.md) for its words, never reading them whole.
 
 ## Rules
 
-- Write code, comments, docs and commit messages in English.
-- Original code only. Never copy code from TL-ADE, TL-Control or TL-Orchestrator; reusing their ideas is fine.
-- Never read, copy, store or forward CLI credentials or session tokens (`~/.claude`, `~/.codex`, Gemini OAuth). Users
-  sign in through each CLI's own flow, and the CLI binaries run unmodified.
-- Never bundle third-party tools, skills, models or MCP servers in the app or the repo. They come from the curated
-  catalog and are downloaded from their original source.
-- Do not use vendor names (Claude, Anthropic, Codex, OpenAI, ChatGPT, Gemini, Google) in product, feature or package
-  names. Plain-text statements such as "runs Claude Code" are fine.
-- Child processes never go through a shell. On Windows, npm's `.cmd` shims cannot start without one, so the engine
-  resolves the real executable (`engine/src/cli.rs`). Anything that does build a shell line (`host/src/terminal.rs`)
-  checks every piece first.
-- Every text on screen lives in `ui/locales/`. Each language is written by hand, never machine-translated; English
-  (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
-  (`error.*`, `reason.*`) instead of sentences.
-- What's-new entries are written once a week, before the Wednesday stable, never per change (R557): one session lists
-  what landed since the last stable (`node scripts/release-notes.mjs --pending`), folds changes to one thing into one
-  line and writes each line by hand in every language ([how](docs/dev/whats-new.md)), shipped as one commit. After an
-  update the screen shows what is newer than the last entry seen, and the release body is built from the English
-  entries (R142).
-- Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
-  400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
-  it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
-  reason and a measurement ([architecture](docs/product/architecture.md#architecture)).
-- Telemetry stays off by default.
-- One commit per coherent change, the biggest slice one AI does well (one feature or fix with its tests, often 300 to
-  1,000 lines), never a string of 100-line steps of one idea. It lands through the fast lane (R556):
-  `node scripts/ship.mjs` squashes the work into one commit on the newest `phase-1-base`, numbers it, runs the quick
-  proofs on that tree and pushes it there directly. CI checks it after: `main`, which updates installed copies, moves
-  only to a commit whose `gate` is green, and a red `gate` whose parent was green is reverted on its own, with a comment
-  on the commit (and on its pull request, whose number ship.mjs writes in a `Pull-request:` trailer) that wakes its
-  author; the fix ships again with `ship.mjs` ([landing](docs/dev/landing.md#fast-lane)). Never push to `phase-1-base`
-  by hand, never force. Pull requests queued before 2026-11-05 finish through `land.mjs` and the queue.
-- A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
-  and its `pre-push` hook refuses a push onto it ([workflow](docs/dev/workflow.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
-  the fix.
-- In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
-  ([workflow](docs/dev/workflow.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
-- When a task is done (its pull request queued), take the next with `node scripts/tasks.mjs next` and start it without
-  asking ([workflow](docs/dev/workflow.md#task-queue)). Only the owner, or the session he names, adds tasks, and the list
-  holds at most 15. Ask the owner only what is theirs (direction, taste, money), in a short card, and go on with the
-  next task meanwhile; stop when no task is free.
-- Until 2026-11-14 the process machinery is frozen (`scripts/land.mjs`, `scripts/tasks.mjs`, `testkit/`, `.github/`):
-  change it only to fix a red base or a landing that is blocked, or for the owner's lean plan
-  (`docs/superpowers/plans/2026-11-05-lean-faber.md`), which removes machinery ([workflow](docs/dev/workflow.md#process-freeze)).
-- Never wait idle on a helper, another session or a run: hand out only pieces your next step does not need, keep
-  working, and read each result when its notice comes; notices wake the session, so a turn ends only when nothing is
-  left (R181). Research and collecting go to a cheap model; reviews go to the other vendor (R146).
+- Code, comments, docs and commit messages in English. Original code only: never copy TL-ADE, TL-Control or TL-Orchestrator.
+- Never read, copy, store or forward CLI credentials or session tokens (`~/.claude`, `~/.codex`, Gemini OAuth). Users sign
+  in through each CLI's own flow, and the CLI binaries run unmodified.
+- Never bundle third-party tools, skills, models or MCP servers: the curated catalog downloads them from their source.
+- No vendor names (Claude, Anthropic, Codex, OpenAI, ChatGPT, Gemini, Google) in product, feature or package names.
+- Child processes never go through a shell (`engine/src/cli.rs` resolves npm's real executable); code that builds a shell
+  line (`host/src/terminal.rs`) checks every piece first. Unit tests never spawn processes, touch real git or call a real CLI.
+- Every text on screen lives in `ui/locales/`, each language written by hand, never machine-translated; English (`en.ts`)
+  is the source and a native speaker reviews each new language. The engine returns keys (`error.*`, `reason.*`).
+- What's-new entries are written once a week by one session, never per change ([how](docs/dev/whats-new.md), R557). A decision
+  row is only for a direction the owner chose or a rule that changes what a person gets; one that goes against a row goes to him.
+- Memory is a feature: with no CLI running Faber stays under 500 MB and the end-to-end test fails above 400 MB (R125). Aim
+  for the lightest result; a change to processes, long-lived state or how much the screen keeps drawn states its memory and
+  processor cost in the commit body; a process or big DOM kept alive needs a reason and a measurement. Telemetry is off by default.
+- At most three lanes at once, one per area ([lanes](docs/dev/workflow.md#lanes)); no manager of leads, no conversations
+  sending each other work. Only the owner, or the session he names, adds tasks (at most 15); ask him only what is his
+  (direction, taste, money) and go on meanwhile.
+- A lane takes the biggest coherent slice (one feature or fix with its tests, often 300 to 1,000 lines), ships it, checks it
+  in the app built from the base, then takes the next task (`node scripts/tasks.mjs next`). Never wait idle on a helper,
+  another session or a run: hand out only pieces your next step does not need and read each result when its notice comes (R181).
+- Review by risk: engine state, stored data, permissions, processes and security changes get a fresh session that did not
+  write them, from the other vendor when available (else a new read-only session; two for security, R146); the rest ships on proofs.
+- Done means a check fails without the change, and the product map and the design page of what changed follow in the same commit.
+- One commit per coherent change, landed with `node scripts/ship.mjs` (R556): it squashes onto the newest `phase-1-base`,
+  runs the quick proofs and pushes. CI checks after; `main` moves only to a green commit; a red one is reverted for its
+  author to ship again ([landing](docs/dev/landing.md#fast-lane)). Never push to `phase-1-base` by hand or force; a red
+  base comes first ([red base](docs/dev/workflow.md#red-base)). A `feat`, `fix` or `perf` commit that touches what ships
+  becomes a patch release once green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 
-## Before a change a person will see or use
-
-Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map.md](docs/product-map.md) first, then:
-
-- Look in the product map for what already exists, in either area: the same setting, screen, control, words, layout,
-  stored value or shell command. Extend it; a second way to do the same thing is a bug. Check its "Known incoherences"
-  before touching those parts.
-- Place it with the table in product-rules.md. A setting never lands on a work screen, and a new first-run step needs a
-  reason no default covers.
-- Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
-- Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
-  reduced motion, the longest language. `node scripts/first-user.mjs` has a fresh AI that sees only the screen take a
-  first newcomer pass.
-- Something that goes against a decision ([docs/decisions.md](docs/decisions.md): search it for the words of the change)
-  or a card goes to the owner first.
-- How it looks and moves: [docs/design/](docs/design/README.md) (its README and the page of the part you change) and the
-  checklist in `.claude/skills/faber-ui/SKILL.md` (Claude loads it as a skill; other agents read the file).
-
-## Done means
-
-- The local proofs below pass, the landed commit's `gate` is green in CI (`main` follows only then), and a check fails
-  without the change (the product map names the check per feature).
-- The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen file, stored value or shell
-  command appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), in one or two short lines
-  per row (edge cases live in code and tests), and deletes the "Known incoherences" lines it fixed; the
-  [docs/design/](docs/design/README.md) page of a screen whose look changed follows. A decision row
-  (`docs/next/<branch>.json`, `R-next`) is only for a direction the owner chose or a rule that changes what a person
-  gets; a choice inside one feature stays in its commit body (R557). A finished spec or plan gets its status in
-  [docs/README.md](docs/README.md). A living page that would pass its
-  size limit splits by topic instead (`npm run docs` says so).
-- The commit type is a release decision: a `feat`, `fix` or `perf` commit that touches what ships becomes a patch release
-  by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
-- A change to processes, long-lived state or how much the screen keeps drawn states its memory and processor cost in
-  the commit body; other changes say nothing about it. CI measures every landed commit and fails above the R125 limit.
-- A change to engine state, stored data, permissions, processes or security gets a review from a fresh session that
-  did not write it: the other vendor when it is available, the same vendor in a new read-only session when its quota is
-  poor (R146); security changes get two. Words, docs, tests and screen-only changes land on their proofs. Every review
-  follows the review rules of product-rules.md, and a change a person sees also gets its coherence review.
-
-## Stack
-
-- `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
-  about windows.
-- `host/`: the commands Faber answers, in one table every front end calls (R459): the window, the command line,
-  tests; `sidecar/` (`faber-sidecar`) runs it behind stdin and stdout for the Electron shell. What needs a window is a method of its
-  `Shell` trait.
-- `channel/`: the local channel (user-only named pipe or Unix socket, per-run secret and conversation tokens) between the
-  command line and `host/`.
-- `cli/`: the `faber` command line ([cli](docs/product/cli.md)).
-- `electron/`: the Electron shell and browser views. `src-tauri/` remains the shipped shell until the release switch and is retired after an Electron release.
-- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs).
-  The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
-  `pane/native.rs`);
-  everything else forbids it.
-- `ui/`: the screen in SolidJS + TypeScript, built by Vite into `dist/`.
-- `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI
-  replays (`tests/fixtures/`). The engine's own tests replay the same fixtures (`engine/tests/`).
-- `testkit/`: Faber's own test runner (`cargo t`) and the fake CLI. It runs only the tests that depend on what changed,
-  launches a hidden test build inside a sandbox and audits every run ([testing](docs/dev/testing.md#screen-tests)).
+Stack: `engine/` (Rust: drives the CLIs, JSON files, no windows); `host/` (the one command table every front end calls, R459)
+with `sidecar/`, `channel/`, `cli/`; `electron/` (the shell; `src-tauri/` ships until the release switch); `winproc/` (unsafe
+process calls); `ui/` (SolidJS + TypeScript); `tests/` (screen checks); `testkit/` (`cargo t`). [Memory and processes](docs/product/architecture.md#architecture).
 
 ## Proof commands
 
-All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute. Inside
-Faber, run them with Faber's `verify` tool (fast while working, full before the commit), not one by one:
+All exit 0 before shipping (`ship.mjs` runs the same quick proofs on the exact tree); inside Faber use its `verify` tool.
 
 ```bash
-npm run lint
-npm run typecheck
-npm run docs
-npm run build
-cargo fmt --all --check
-npm run test:scripts
-node scripts/cargo.mjs t --claims
+npm run lint && npm run typecheck && npm run docs && npm run build && cargo fmt --all --check && npm run test:scripts && node scripts/cargo.mjs t --claims
 ```
 
-`cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. `ship.mjs` runs the
-same quick proofs on the exact tree it pushes. The heavy proofs run in CI on the landed commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
-memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
---features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
-[testing](docs/dev/testing.md#what-a-run-prints)). A red one is reverted and wakes the lane ([landing](docs/dev/landing.md#fast-lane)).
-Run a suite on the PC only to see a new check fail before the change (`cargo t --filter <name>`) or to look closer at a
-failure CI reported; it runs only the tests that depend on the files you changed and prints only failures, measurements
-and a summary (every line in `target/faber-test/run.log`). A command that may take over two minutes (`cargo t`, a
-build) runs in the background while you keep working; wait for its notice or the Monitor tool, never a `sleep` or
-`until` loop, and never poll CI (the app watches it). `npm run dev` opens the app from source with live reload. Unit
-tests never spawn processes, touch real git or call a real CLI.
-
-Local compiling commands go through `node scripts/cargo.mjs <cargo arguments>`: it reuses three caches across worktrees
-and cleans owned temporary files. `npm run dev` and `npm run dist` already use it; direct Cargo bypasses the storage
-policy. See [testing](docs/dev/testing.md#build-folder-budget).
-
-On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
+Heavy suites (`cargo t --all`, Clippy, macOS) run in CI on the landed commit, not on the PC ([testing](docs/dev/testing.md)). A
+command over two minutes runs in the background: wait for its notice, never a `sleep` or `until` loop, never poll CI. Compile
+through `node scripts/cargo.mjs <cargo arguments>`. On the maintainer's PC, Rust lives outside the default folders; export
+before any `cargo` or `npm run dev`:
 
 ```bash
 export RUSTUP_HOME='E:\Apps\rust\rustup' CARGO_HOME='E:\Apps\rust\cargo' PATH="/e/Apps/zig:/e/Apps/rust/cargo/bin:$PATH"

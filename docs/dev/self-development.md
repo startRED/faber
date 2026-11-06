@@ -25,7 +25,7 @@ from there. Faber's own checks need the Rust paths too, from the project folder'
 | The conversation works away from the owner's checkout | Separate copy on a `faber/…` branch (R201) | product map, Separate copy |
 | It picks work | The task queue, `docs/tasks/` (R185) | [workflow](workflow.md#task-queue) |
 | It splits work it can run in parallel | Conversations the agent starts, at most 3 per project (R198) | product map, Conversation started by the agent |
-| It knows in seconds whether a change works | The `verify` tool and the Checks Faber runs itself when a turn changed files (R203; product map, Checks) | product map, Checks; [spec](../superpowers/specs/2026-10-17-built-in-verifier.md) |
+| It knows in seconds whether a change works | The `verify` tool and the Checks Faber runs itself when a turn changed files (R203; product map, Checks) | product map, Checks; [spec](../history/superpowers/specs/2026-10-17-built-in-verifier.md) |
 | Someone else reviews it | The helper from the other AI (R161, R146) | product map, Helper from the other AI |
 | It lands | A pull request queued with `node scripts/land.mjs <number>` (R182) | [workflow](workflow.md#merge-on-green) |
 | A red check wakes it | Follow (a pull request) (R200) | product map, Follow |

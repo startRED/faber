@@ -1,9 +1,9 @@
 # Lean Faber: cut the overengineering, close the weak points, beat the super-agent
 
-Status: In progress. Proposed by AI (2026-11-05) at the owner's request. Done the same day with his yes: D1 fast lane (R556, `1950ced1`, its first full run green) and D2 paperwork (R557; product map 416 KB to 103 KB). The other steps marked **Owner** still wait for Erick's yes.
+Status: In progress. Proposed by AI (2026-11-05) at the owner's request. Done the same day with his yes: D1 fast lane (R556, `1950ced1`, its first full run green) and D2 paperwork (R557; product map 416 KB to 103 KB). D3 documentation diet (dated pages and 474 decisions moved to `docs/history/`, AGENTS.md at 59 lines) and D4 fewer lanes (rule text in AGENTS.md and `docs/dev/workflow.md#lanes`) landed 2026-11-06. The other steps marked **Owner** still wait for Erick's yes.
 It builds on the W9 audit of 2026-10-31 (`reports/reforma/workflow-audit.md`, outside the repository), measures again
 what changed since, and turns the comparison with DeepSeek's super-agent prototype
-([research](../../research/2026-11-02-super-agent/faber-fit.md)) into concrete steps.
+([research](../../history/research/2026-11-02-super-agent/faber-fit.md)) into concrete steps.
 
 ## 1. What the numbers say
 

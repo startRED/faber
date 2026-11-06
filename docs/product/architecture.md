@@ -35,7 +35,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   stdin and stdout), and what needs a window is a method of the host's `Shell` trait. The tray, the notifications,
   keeping the PC awake and starting with the system are decided in the host too: the sidecar sends them as `order`
   lines and the shell only carries them out. The browser pane's rules are in the host too (`host/src/pane/`); the Electron shell only owns its views (`electron/pane.ts`), ordered over the same lines (`pane` orders, answered by `paneAnswer` and `paneEvent` notes), while the Tauri shell still answers the pane's commands itself; the plan and its phases are in
-  `docs/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
+  `docs/history/superpowers/specs/2026-10-27-electron-rust-shell-design.md`.
 - **One command table for the screen, the command line and the AI's tools.** The table in `host/src/table.rs` serves the
   window (`Host::dispatch`), the `faber` command line (`cli/`) and the AI's tools (`Host::dispatch_as`). The command line
   reaches the running Faber over a local channel (`channel/`: a user-only named pipe on Windows or Unix socket, guarded by
@@ -99,7 +99,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   (R118) (`src-tauri/src/update.rs`).
 - **The CLIs.** Faber installs the newest release of Claude Code and Codex. Holding one back to a version GitHub tested
   overnight comes with the live manifest, not built yet
-  ([spec](../superpowers/specs/2026-10-24-cli-tools-live-manifest.md)).
+  ([spec](../history/superpowers/specs/2026-10-24-cli-tools-live-manifest.md)).
 - **Catalog tools** never update on their own. Faber suggests an update at a good moment, which is when nothing is
   running or when the update fixes something the user is using, and never in the middle of work. If the user agrees,
   Faber runs the update and the check. Before updating, it shows what changed, checks safety and keeps the old version.
@@ -130,7 +130,7 @@ one catalog id. Commit and whole-folder digest pins cover the original source an
 their pinned version and digest. The existing store lock, ledger, selection, journal and Undo govern the parent as one
 item, including recovery and launch-time checks. Faber runs no shipped plugin scripts. Hooks, binaries, postinstall,
 dependencies, unsupported delivery and unchecked parts keep the whole candidate out. The twenty original candidates
-remain excluded with individual evidence in [the audit](../research/2026-10-21/catalog-list.md).
+remain excluded with individual evidence in [the audit](../history/research/2026-10-21/catalog-list.md).
 
 Claude Projects receives commands and agents alongside skills in its existing private session plugin when supported.
 Codex uses its existing skill delivery and per-session agent configuration pointing to checked role TOML files;

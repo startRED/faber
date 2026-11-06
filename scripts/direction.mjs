@@ -54,7 +54,7 @@ ${queueLines}
 
 docs/product/ says what Faber should be (scope and goals). docs/product-map.md says what exists today, and its "Known
 incoherences" section lists known gaps. docs/decisions.md is the owner's decision ledger: a later row overrides an
-earlier one. Dated specs, plans and research (docs/superpowers/, docs/research/) are history, never a source for how
+earlier one. Dated specs, plans and research (docs/history/, docs/superpowers/) are history, never a source for how
 Faber works today. You may open code to confirm whether a feature exists, but keep to what the pages need.
 
 Answer three questions:

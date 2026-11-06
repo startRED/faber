@@ -24,7 +24,7 @@ English and French. Green when no finding is blocker or high:
 - [ ] Endings: concluded shows the AI's summary; ended without a conclusion, interrupted (after a forced close) and
       stuck each show their true state and the way on.
 - [ ] Quota for both AIs; Settings by keyboard alone; Catalog; Ctrl+K; What's new.
-      Evidence (2026-11-04): first-user pass (hidden Tauri test build, fake CLIs, Haiku reviewer) ran at 720x480 in pt-BR, English and French and at 1280x800 in the same three: no critical, high or medium finding confirmed against the screenshots; two low (French experience step shows no selected cue, French Projects text omits the local folder; French "Nouvelle conver..." button label truncated at 720x480). Reports in docs/research/first-user-2026-11-04-*.md. NOT yet done: the `ux_audit --codex` walkthrough on the release commit, account cards and health-check fixes, and Electron-shell first-user runs. Repeat on the release commit.
+      Evidence (2026-11-04): first-user pass (hidden Tauri test build, fake CLIs, Haiku reviewer) ran at 720x480 in pt-BR, English and French and at 1280x800 in the same three: no critical, high or medium finding confirmed against the screenshots; two low (French experience step shows no selected cue, French Projects text omits the local folder; French "Nouvelle conver..." button label truncated at 720x480). Reports in docs/history/research/first-user-2026-11-04-*.md. NOT yet done: the `ux_audit --codex` walkthrough on the release commit, account cards and health-check fixes, and Electron-shell first-user runs. Repeat on the release commit.
 
 ## Real use (the owner's PC, real subscriptions)
 

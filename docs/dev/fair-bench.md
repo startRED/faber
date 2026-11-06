@@ -13,14 +13,14 @@ memory and CPU). The goal and what landed are in [testing](testing.md#fabers-own
 - `node scripts/bench/run.mjs [--only suites|matched|real-work] [--runs 3]` runs both sides through it. TL-ADE is the folder
   beside the repository, or `--tlade` (needed from a worktree). The sides are `vitest run` against `cargo t --all`, and the 8 matched scenarios
   of the spec, Faber one test module at a time (`--filter`), summed, which can only favour TL-ADE. Each gets one warm-up run, kept apart, so compilation is never measured
-  (R115), then three runs. Every run goes to `docs/research/bench/<date>.jsonl`, and the medians print as a table.
+  (R115), then three runs. Every run goes to `docs/history/research/bench/<date>.jsonl`, and the medians print as a table.
   A run that exits with an error stops the benchmark, since it measured something other than the work. The one
   exception is TL-ADE's suite: at its commit 9c883376 it fails 62 of its 3446 tests on its own and exits 1 after
   running them all (`exits` in `plan`). So in a worktree,
-  `.faber-lane` claims `docs/research/bench/` first; otherwise `cargo t` refuses the new result files and every Faber
+  `.faber-lane` claims `docs/history/research/bench/` first; otherwise `cargo t` refuses the new result files and every Faber
   run fails at once.
 - The real-work tier is 7 tasks through each app's screen with the CLI's answers replayed
-  ([plan](../superpowers/plans/2026-10-22-real-work-bench.md)). Faber's are screen scenarios named "real work N", in the
+  ([plan](../history/superpowers/plans/2026-10-22-real-work-bench.md)). Faber's are screen scenarios named "real work N", in the
   suite only when `--filter` names them. TL-ADE's driver (`scripts/bench/tlade.mjs`) starts its panel and a headless
   Chrome on a temporary repo and home, with only the stand-in CLI (`faber-standin`, as `claude.exe`) on its PATH. The
   times each side noted go to `<date>.notes.jsonl`.

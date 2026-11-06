@@ -5,7 +5,7 @@ through PR 373; the demonstrated narrow-sidebar visibility correction and its ch
 2026-10-25. PR 372 is its original source, not another required incorporation. This note does not approve the whole
 current application. No other implementation or timing change follows from an unobserved motion.
 
-The rules remain [looks](../design/looks.md#motion), the `faber-ui` checklist and the eight-line `visual-critique`
+The rules remain [looks](../../design/looks.md#motion), the `faber-ui` checklist and the eight-line `visual-critique`
 rubric. A still composition score is not a verdict on continuous movement. Approximate samples are bracketed by
 DOM observations, rather than represented as exact video frames. Quarter playback alone does not prove that a
 screenshot contains an intermediate animation state.

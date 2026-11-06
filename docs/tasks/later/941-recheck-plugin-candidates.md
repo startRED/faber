@@ -1,13 +1,13 @@
 # Look again at plugin candidates under the delivery preflight
 
 Area: Catalog
-Files: docs/research/2026-10-21/catalog-list.md, engine/src/tools.json, engine/tests/plugins.rs, tests/ui/plugins.check.ts
+Files: docs/history/research/2026-10-21/catalog-list.md, engine/src/tools.json, engine/tests/plugins.rs, tests/ui/plugins.check.ts
 Depends: none
 Size: about 200 changed lines
 
 Why: the catalog has checked plugin delivery (`engine/src/tools/plugins.rs`, `plugin_delivery.rs`) but no plugin ships:
 the twenty original candidates were all excluded, each with its own evidence in
-`docs/research/2026-10-21/catalog-list.md` ("Plugin delivery preflight"). The owner wants plugins in the first stable
+`docs/history/research/2026-10-21/catalog-list.md` ("Plugin delivery preflight"). The owner wants plugins in the first stable
 catalog (2026-10-23). A plugin groups checked skills, slash-command prompts, subagent definitions and R253-portable npm
 servers under one catalog id; hooks, binaries, postinstall, dependencies, unsupported delivery and unchecked parts keep
 the whole candidate out, and a rejection is never reversed by packaging alone.

@@ -2,7 +2,7 @@
 
 Proposal, nothing built. AI, 2026-11-01, for the owner to decide (the three questions at the end). It asks whether what
 sped up Faber's own landing should also work for people whose repositories Faber's agents change. Faber's own
-automation (`scripts/land.mjs`, `.github/workflows/ci.yml` and `queue.yml`, [landing.md](../dev/landing.md)) is used
+automation (`scripts/land.mjs`, `.github/workflows/ci.yml` and `queue.yml`, [landing.md](../../dev/landing.md)) is used
 only as a source of ideas. People's repositories differ, so nothing here copies it as it is.
 
 ## Why

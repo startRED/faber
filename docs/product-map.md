@@ -471,7 +471,7 @@ A plugin groups only parts the existing store can check: skills, slash-command p
 R253-portable pinned npm servers. One parent catalog id owns the source commit, whole-folder digest, part digests,
 server package pins, ledger, lock, On/Off, journal and Undo; there is no second installation path. The installer never
 runs shipped scripts. Hooks, binaries, postinstall, dependencies, unsupported native parts and source-wide unsafe files
-reject the whole candidate. No plugin currently ships; [the twenty-candidate audit](research/2026-10-21/catalog-list.md)
+reject the whole candidate. No plugin currently ships; [the twenty-candidate audit](history/research/2026-10-21/catalog-list.md)
 keeps original-source pin records separate from approval and explains each rejection.
 
 Claude Projects uses the existing checked private session plugin for skills, commands and agents. A CLI without its
