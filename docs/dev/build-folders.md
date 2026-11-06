@@ -26,8 +26,10 @@ with `lstat` that the namespace is a real directory owned by the current user wi
 It also checks every ancestor up to `/`: each must be a real directory owned by root or the current user, and any
 group- or other-writable directory must have the sticky bit. Unsafe namespaces or ancestors are refused with an error
 and never deleted. Windows keeps the canonical-path and link checks. Successful and failed
-commands remove their temporary tree. Later invocations retry abandoned cleanup only after a day and when both the
-recorded launcher and child are gone. Legacy receipts without a recorded path clean only their cache's
+commands remove their temporary tree. Later invocations retry abandoned cleanup when both the recorded launcher and child are gone and
+the build's tree is provably gone too: on Windows the build runs inside a kill-on-close job object (`scripts/job-run.rs`),
+elsewhere its process group must be empty. Without that proof, only after a day. If the build output shows the compiler
+cache server died, the one invocation is retried once without it (`RUSTC_WRAPPER` empty). Legacy receipts without a recorded path clean only their cache's
 `.faber-tmp/run-<id>` with directory and link checks, without checking ownership or POSIX permissions on that legacy path.
 A missing temporary folder releases its receipt and slot.
 Recorded folders are deleted only at their canonical path under the current system temp's own cache-hash folder or

@@ -64,6 +64,16 @@ function dead(pid) {
   try { process.kill(pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
 }
 
+// A dead child proves its whole tree is gone when it ran in a kill-on-close job (Windows), or when its process group,
+// which outlives the leader while any member runs, no longer exists (other systems). shortcut: a process that left its
+// group with setsid is not seen; the day guard still applies to receipts without proof.
+function treeGone(owner) {
+  if (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 0) return false;
+  if (owner.contained === 'job') return process.platform === 'win32';
+  if (owner.contained !== 'group' || process.platform === 'win32') return false;
+  try { process.kill(-owner.childPid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+}
+
 async function removeTemp(parent, name) {
   if (!/^run-[a-zA-Z0-9-]+$/.test(name)) throw new Error('Invalid owned temporary directory');
   await directory(parent);
@@ -86,11 +96,13 @@ async function reap(target) {
   }
   try {
     const stat = await lstat(lease);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || Date.now() - stat.mtimeMs < DAY) return;
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
     const receipt = path.join(lease, 'owner.json');
     if (!(await lstat(receipt)).isFile() || (await lstat(receipt)).isSymbolicLink()) return;
     const owner = JSON.parse(await readFile(receipt, 'utf8'));
-    if (!Number.isFinite(owner.createdAt) || Date.now() - owner.createdAt < DAY || !dead(owner.pid) || !dead(owner.childPid)) return;
+    if (!Number.isFinite(owner.createdAt) || !dead(owner.pid) || !dead(owner.childPid)) return;
+    // Without proof that no descendant survives, an orphaned compiler may still write the cache, so only a day settles it.
+    if ((Date.now() - stat.mtimeMs < DAY || Date.now() - owner.createdAt < DAY) && !treeGone(owner)) return;
     if (await overlapsLease(target)) return;
     if (typeof owner.tempName !== 'string' || !/^run-[a-zA-Z0-9-]+$/.test(owner.tempName)) return;
     const legacy = path.join(target, '.faber-tmp');
@@ -253,8 +265,8 @@ export async function acquireTarget(root, env, signal) {
       return {
         target,
         env: { ...env, CARGO_TARGET_DIR: target, CARGO_INCREMENTAL: env.CARGO_INCREMENTAL ?? '0', TEMP: temp, TMP: temp, TMPDIR: temp },
-        async child(pid) { owner.childPid = pid; await save(); },
-        async interrupt() { owner.childPid = null; await save(); },
+        async child(pid, contained) { owner.childPid = pid; owner.contained = contained; await save(); },
+        async interrupt() { owner.childPid = null; delete owner.contained; await save(); },
         async release() {
           // Keep the receipt when cleanup fails, so a later invocation can retry safely.
           await removeTemp(tempParent(target), owner.tempName);
@@ -299,7 +311,7 @@ function forwardSignals(controller, getChild, getLease, getReceipt) {
       await getLease().interrupt();
       try {
         await stopTree(child, signal);
-        await getLease().child(child.pid);
+        await getLease().child(child.pid, child.contained);
         interrupted = false;
       } catch (error) {
         console.error(`Interrupted build: temporary files and cache reservation were preserved because the process tree could not be confirmed stopped: ${error.message}`);
@@ -324,29 +336,49 @@ function forwardSignals(controller, getChild, getLease, getReceipt) {
   };
 }
 
-export async function runChild(root, command, args, env, cwd = root, copy = null) {
+// The compiler cache server (sccache) can die mid-build; the build then fails before any test ran.
+export const CACHE_SERVER_DIED = /sccache[^\n]*(?:10054|connection|server)/i;
+
+export async function runChild(root, command, args, env, cwd = root, copy = null, jobRunner = null) {
   const controller = new AbortController();
   let child;
   let lease;
   let receiptSaved = Promise.resolve();
   const signals = forwardSignals(controller, () => child, () => lease, () => receiptSaved);
   let finished = false;
+  // Stderr is read to spot a dead cache server and passed through unchanged; stdout and stdin stay the caller's.
+  const attempt = async (childEnv) => {
+    finished = false;
+    child = spawn(jobRunner ?? command, jobRunner ? [command, ...args] : args, { cwd, env: childEnv, stdio: ['inherit', 'inherit', 'pipe'], shell: false, windowsHide: true, detached: process.platform !== 'win32' });
+    child.contained = jobRunner ? 'job' : process.platform === 'win32' ? undefined : 'group';
+    let tail = '';
+    child.stderr.on('data', (chunk) => { process.stderr.write(chunk); tail = (tail + chunk).slice(-16384); });
+    const result = new Promise((resolve, reject) => {
+      child.once('error', (error) => { finished = true; reject(error); });
+      // A background server the build started can keep the pipe open, so the last output is only given a moment.
+      child.once('exit', (code, signal) => {
+        finished = true;
+        Promise.race([new Promise((done) => child.stderr.once('end', done)), setTimeout(300)]).then(() => resolve({ code: code ?? (signal === 'SIGINT' ? 130 : 143), tail }));
+      });
+    });
+    let receiptError;
+    if (child.pid) {
+      receiptSaved = lease.child(child.pid, child.contained);
+      try { await receiptSaved; } catch (error) { receiptError = error; }
+    }
+    const outcome = await result;
+    if (receiptError) throw receiptError;
+    return outcome;
+  };
   try {
     lease = await acquireTarget(root, env, controller.signal);
     if (copy) await adoptTarget(lease.target, copy);
     controller.signal.throwIfAborted();
-    child = spawn(command, args, { cwd, env: lease.env, stdio: 'inherit', shell: false, windowsHide: true, detached: process.platform !== 'win32' });
-    const result = new Promise((resolve, reject) => {
-      child.once('error', (error) => { finished = true; reject(error); });
-      child.once('exit', (code, signal) => { finished = true; resolve(code ?? (signal === 'SIGINT' ? 130 : 143)); });
-    });
-    let receiptError;
-    if (child.pid) {
-      receiptSaved = lease.child(child.pid);
-      try { await receiptSaved; } catch (error) { receiptError = error; }
+    let { code, tail } = await attempt(lease.env);
+    if (code !== 0 && !signals.interrupted && lease.env.RUSTC_WRAPPER !== '' && CACHE_SERVER_DIED.test(tail)) {
+      console.error('The compiler cache server died; running this build once more without it.');
+      ({ code } = await attempt({ ...lease.env, RUSTC_WRAPPER: '' }));
     }
-    const code = await result;
-    if (receiptError) throw receiptError;
     return signals.exitCode ?? code;
   } finally {
     await signals.stop();
@@ -365,14 +397,15 @@ export function validateCargoArgs(args, tauri = false) {
   }
 }
 
-export async function maintainStorage(root, ownTarget) {
+const sourceRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+// A small Rust helper compiled once per source digest into the shared tools cache, and reused by every checkout.
+async function compiledTool(root, name, source, extraSources = []) {
   const tools = path.join(root, 'target', '.faber-tools');
   await directory(tools);
-  const sourceRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-  const source = path.join(sourceRoot, 'scripts', 'storage-sweep.rs');
   const hash = createHash('sha256').update(process.platform).update(process.arch);
-  for (const file of [source, path.join(sourceRoot, 'testkit', 'src', 'sweep.rs')]) hash.update(await readFile(file));
-  const program = path.join(tools, `storage-sweep-${hash.digest('hex').slice(0, 16)}${process.platform === 'win32' ? '.exe' : ''}`);
+  for (const file of [source, ...extraSources]) hash.update(await readFile(file));
+  const program = path.join(tools, `${name}-${hash.digest('hex').slice(0, 16)}${process.platform === 'win32' ? '.exe' : ''}`);
   let existing;
   try { existing = await lstat(program); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (existing && (!existing.isFile() || existing.isSymbolicLink())) throw new Error(`Refusing linked build maintenance helper: ${program}`);
@@ -411,7 +444,7 @@ export async function maintainStorage(root, ownTarget) {
         if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code) || !winner?.isFile() || winner.isSymbolicLink()) throw error;
       }
     } catch (error) {
-      throw new Error(`Build storage maintenance could not be compiled; rustc must be installed and available: ${error.message}`);
+      throw new Error(`Build helper ${name} could not be compiled; rustc must be installed and available: ${error.message}`);
     } finally {
       await signals.stop();
       if (lease && !signals.interrupted && (!compiler || finished)) {
@@ -419,6 +452,11 @@ export async function maintainStorage(root, ownTarget) {
       }
     }
   }
+  return program;
+}
+
+export async function maintainStorage(root, ownTarget) {
+  const program = await compiledTool(root, 'storage-sweep', path.join(sourceRoot, 'scripts', 'storage-sweep.rs'), [path.join(sourceRoot, 'testkit', 'src', 'sweep.rs')]);
   const result = await execute(program, [root, ownTarget], { cwd: sourceRoot, windowsHide: true });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -440,7 +478,9 @@ async function main() {
   const env = { ...process.env };
   if (env.CARGO_TARGET_DIR) env.CARGO_TARGET_DIR = path.resolve(cwd, env.CARGO_TARGET_DIR);
   await maintainStorage(root, env.CARGO_TARGET_DIR ?? path.join(root, 'target'));
-  process.exitCode = await runChild(root, tauri ? process.execPath : 'cargo', tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args, env, cwd, copy);
+  // Windows has no process groups, so the build runs inside a kill-on-close job: a dead launcher then proves no compiler survives.
+  const jobRunner = process.platform === 'win32' ? await compiledTool(root, 'job-run', path.join(sourceRoot, 'scripts', 'job-run.rs')) : null;
+  process.exitCode = await runChild(root, tauri ? process.execPath : 'cargo', tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args, env, cwd, copy, jobRunner);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

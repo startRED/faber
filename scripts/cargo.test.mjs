@@ -673,3 +673,69 @@ test('a cache is never marked adopted when the workspace cannot be read or its s
   await assert.rejects(launcher.adoptTarget(target, glob), /linked or unusual cache stamp/);
   assert.equal(existsSync(path.join(target, 'debug', '.fingerprint', 'faber-0123456789abcdef')), true);
 });
+
+test('a young claim whose dead child provably left no tree is reaped; without proof or with a survivor it is kept', async (t) => {
+  const root = await fixture(t);
+  const proof = process.platform === 'win32' ? 'job' : 'group';
+  const gone = { pid: 2147483647, childPid: 2147483646, createdAt: Date.now(), contained: proof, tempName: 'run-gone' };
+  const slot = await claim(root, 1, gone);
+  const unproven = await claim(root, 2, { ...gone, contained: undefined, tempName: 'run-unproven' });
+  const unknown = await claim(root, 3, { ...gone, childPid: null, tempName: 'run-unknown' });
+  const first = await launcher.acquireTarget(root, {});
+  assert.equal(first.target, slot);
+  assert.ok(!existsSync(path.join(slot, '.faber-reap')));
+  for (const kept of [unproven, unknown]) assert.ok(existsSync(path.join(kept, '.faber-lease', 'owner.json')));
+  const controller = new AbortController();
+  const waiting = launcher.acquireTarget(root, {}, controller.signal);
+  const timeout = setTimeout(() => controller.abort(), 100);
+  t.after(() => clearTimeout(timeout));
+  await assert.rejects(waiting, /abort/i);
+  await first.release();
+});
+
+test('a young claim whose dead leader left a live process group is kept', { skip: process.platform === 'win32' }, async (t) => {
+  const root = await fixture(t);
+  const leader = childProcess.spawn('sh', ['-c', 'sleep 30 & echo $! ; exit 0'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const survivor = Number(await new Promise((resolve) => leader.stdout.once('data', (data) => resolve(String(data).trim()))));
+  await new Promise((resolve) => leader.once('exit', resolve));
+  t.after(() => { try { process.kill(survivor); } catch {} });
+  const slot = await claim(root, 1, { pid: 2147483647, childPid: leader.pid, createdAt: Date.now(), contained: 'group', tempName: 'run-live-group' });
+  for (const i of [2, 3]) await claim(root, i, { pid: process.pid, childPid: null, createdAt: Date.now(), tempName: `run-busy-${i}` });
+  const controller = new AbortController();
+  const waiting = launcher.acquireTarget(root, {}, controller.signal);
+  const timeout = setTimeout(() => controller.abort(), 100);
+  t.after(() => clearTimeout(timeout));
+  await assert.rejects(waiting, /abort/i);
+  assert.ok(existsSync(path.join(slot, '.faber-lease', 'owner.json')));
+});
+
+test('on Windows the job helper takes every descendant down with it', { skip: process.platform !== 'win32' }, async (t) => {
+  const root = await fixture(t);
+  const helper = path.join(root, 'job-run.exe');
+  childProcess.execFileSync('rustc', ['--edition=2024', '-O', path.join(import.meta.dirname, 'job-run.rs'), '-o', helper], { windowsHide: true });
+  const grandchild = "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)";
+  const run = childProcess.spawn(helper, [process.execPath, '-e', grandchild], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const survivor = Number(await new Promise((resolve) => run.stdout.once('data', (data) => resolve(String(data).trim()))));
+  t.after(() => { try { process.kill(survivor); } catch {} });
+  run.kill('SIGKILL');
+  await new Promise((resolve) => run.once('exit', resolve));
+  const until = Date.now() + 5000;
+  while (Date.now() < until) {
+    try { process.kill(survivor, 0); } catch { return; }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail('the grandchild survived its job');
+});
+
+test('a build whose compiler cache server died is run once more without it', async (t) => {
+  const root = await fixture(t);
+  const script = 'require("node:fs").appendFileSync(process.argv[1], `${process.env.RUSTC_WRAPPER}\n`);if(process.env.RUSTC_WRAPPER==="")process.exit(0);console.error("sccache: error: connection reset (os error 10054)");process.exit(1)';
+  const log = path.join(root, 'attempts');
+  assert.equal(await launcher.runChild(root, process.execPath, ['-e', script, log], { ...process.env, RUSTC_WRAPPER: 'sccache' }), 0);
+  assert.equal(await readFile(log, 'utf8'), 'sccache\n\n');
+  const other = path.join(root, 'other');
+  const failing = 'require("node:fs").appendFileSync(process.argv[1], "x");console.error("error[E0425]: unresolved name");process.exit(3)';
+  assert.equal(await launcher.runChild(root, process.execPath, ['-e', failing, other], { ...process.env, RUSTC_WRAPPER: 'sccache' }), 3);
+  assert.equal(await readFile(other, 'utf8'), 'x');
+  assert.ok(!existsSync(path.join(root, 'target', 'build-1', '.faber-lease')));
+});
