@@ -1,6 +1,6 @@
 # Lean Faber: cut the overengineering, close the weak points, beat the super-agent
 
-Status: Proposed by AI (2026-11-05) at the owner's request; nothing built. Steps marked **Owner** wait for Erick's yes.
+Status: In progress. Proposed by AI (2026-11-05) at the owner's request. The owner approved D1 the same day: the fast lane landed as `1950ced1` (R556). The other steps marked **Owner** still wait for Erick's yes.
 It builds on the W9 audit of 2026-10-31 (`reports/reforma/workflow-audit.md`, outside the repository), measures again
 what changed since, and turns the comparison with DeepSeek's super-agent prototype
 ([research](../../research/2026-11-02-super-agent/faber-fit.md)) into concrete steps.
