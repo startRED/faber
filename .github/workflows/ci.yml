@@ -536,7 +536,7 @@ jobs:
     outputs:
       runner_unavailable: ${{ steps.runner.outputs.unavailable }}
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         id: runner
         with:
           script: |
@@ -766,7 +766,7 @@ jobs:
     steps:
       - name: Retry missing runner once, never blame riders
         if: needs.gate.outputs.runner_unavailable == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RUNNER_RETRY: ${{ inputs.runner_retry }}
         with:
