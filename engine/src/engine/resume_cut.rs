@@ -22,13 +22,14 @@ impl Engine {
                 let Some(last) = conv.messages.last().filter(|m| m.role == Role::Assistant && m.closed) else { continue };
                 let last_id = last.id.clone();
                 let queued: Vec<_> = conv.queued.iter().map(|q| q.id.clone()).collect();
-                // Once per request, whatever Faber wrote in between: a resume, a conclusion ask and a second cut waits.
+                // Once per cut: only a resume that was itself cut waits for the person. An earlier resume of the same request,
+                // hours and turns back, says nothing about this cut.
                 let resumed = conv
                     .messages
-                    .iter()
-                    .rev()
-                    .take_while(|m| m.role != Role::User || m.wake.is_some())
-                    .any(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed"));
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|i| conv.messages.get(i))
+                    .is_some_and(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed"));
                 conv.ended = Some(Ended { at: now(), kind: EndKind::Interrupted, work_ms: 0, line: ended::conclusion_line(conv) });
                 c.save(&row.id);
                 c.turn_ended(&row.id);

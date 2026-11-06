@@ -2670,6 +2670,7 @@ export const es: Messages = {
   'notes.434.fixed': 'Si falla al salir, Faber conserva la ventana y su icono para reintentarlo; pulsar Salir dos veces ya no interrumpe el guardado.',
   'notes.435.fixed': 'Tus mensajes y archivos siguen disponibles si falla el guardado o el envío, incluso al cerrar la ventana o salir de un chat temporal.',
   'notes.436.new': 'Los Ajustes tienen ahora un botón para buscar una versión nueva de Faber al instante.',
+  'notes.437.fixed': 'Una conversación que Faber vuelve a cortar al cerrarse se reanuda sola, aunque ya se hubiera reanudado antes ese mismo día. Si la propia reanudación se cortó, espera por ti.',
   'update.checking': 'Buscando una actualización…',
   'set.updateCheck': "Buscar actualizaciones",
   'set.updateCheckHint': "Busca una versión nueva ahora, sin esperar la próxima búsqueda automática.",

@@ -2657,6 +2657,7 @@ export const ptBR: Messages = {
   'notes.434.fixed': 'Se falhar ao sair, o Faber continua acessível pelo ícone perto do relógio; repetir Sair não interrompe o salvamento.',
   'notes.435.fixed': 'Suas mensagens e anexos ficam disponíveis quando salvar ou enviar falha, mesmo ao fechar a janela ou sair de uma conversa temporária.',
   'notes.436.new': 'Nas Configurações há agora um botão para procurar uma versão nova do Faber na hora.',
+  'notes.437.fixed': 'Uma conversa cortada de novo pelo fechamento do Faber volta sozinha, mesmo que já tenha voltado antes no mesmo dia. Se o próprio retorno foi cortado, ela espera por você.',
   'update.checking': 'Procurando atualização…',
   'set.updateCheck': "Procurar atualizações",
   'set.updateCheckHint': "Procura uma versão nova agora, sem esperar a próxima busca automática.",

@@ -2670,6 +2670,7 @@ export const de: Messages = {
   'notes.434.fixed': 'Schlägt das Beenden fehl, bleiben Fenster und Infobereich erreichbar; du kannst es erneut versuchen. Mehrfaches Beenden unterbricht das Speichern nicht mehr.',
   'notes.435.fixed': 'Deine Nachrichten und Anhänge bleiben bei Speicher- oder Sendefehlern erhalten, auch beim Schließen des Fensters oder Verlassen eines temporären Chats.',
   'notes.436.new': 'In den Einstellungen gibt es jetzt eine Schaltfläche, um sofort nach einer neuen Version von Faber zu suchen.',
+  'notes.437.fixed': 'Eine Unterhaltung, die Faber beim Schließen erneut unterbricht, macht von selbst weiter, auch wenn sie am selben Tag schon einmal weitergemacht hat. Wurde das Weitermachen selbst unterbrochen, wartet sie auf dich.',
   'update.checking': 'Suche nach einem Update…',
   'set.updateCheck': "Nach Updates suchen",
   'set.updateCheckHint': "Sucht jetzt nach einer neuen Version, ohne auf die nächste automatische Suche zu warten.",

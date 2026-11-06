@@ -2670,6 +2670,7 @@ export const fr: Messages = {
   'notes.434.fixed': 'Si quitter échoue, Faber reste accessible pour réessayer ; demander à quitter plusieurs fois n’interrompt plus l’enregistrement.',
   'notes.435.fixed': 'Vos messages et pièces jointes restent disponibles si l’enregistrement ou l’envoi échoue, même en fermant la fenêtre ou en quittant une conversation temporaire.',
   'notes.436.new': 'Les Réglages ont maintenant un bouton pour chercher tout de suite une nouvelle version de Faber.',
+  'notes.437.fixed': 'Une conversation de nouveau coupée par la fermeture de Faber reprend toute seule, même si elle avait déjà repris plus tôt dans la journée. Si la reprise elle-même a été coupée, elle vous attend.',
   'update.checking': 'Recherche d’une mise à jour…',
   'set.updateCheck': "Rechercher des mises à jour",
   'set.updateCheckHint': "Cherche une nouvelle version maintenant, sans attendre la prochaine recherche automatique.",

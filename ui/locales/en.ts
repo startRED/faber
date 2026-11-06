@@ -2550,6 +2550,7 @@ export const en = {
   'notes.434.fixed': 'If Quit fails, Faber keeps its window and tray so you can try again; pressing Quit twice no longer interrupts saving.',
   'notes.435.fixed': 'Your messages and attachments stay available after failed saves or sends, including when closing the window or leaving a temporary chat.',
   'notes.436.new': 'Settings now has a button to look for a new version of Faber right away.',
+  'notes.437.fixed': 'A conversation Faber closed on again picks itself back up, even when it was already picked up earlier the same day. One whose pick-up was itself cut still waits for you.',
   'update.checking': 'Looking for an update…',
   'set.updateCheck': "Check for updates",
   'set.updateCheckHint': "Looks for a new version now, without waiting for the next automatic check.",
