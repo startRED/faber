@@ -105,36 +105,33 @@ that bypasses the switches is not seen. The audit sees only requests that reach 
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
 
-### Checks that fail by chance
+### Quarantine
 
-Nobody keeps a list (D5). On CI a failed `rust`, `ui` or `screen` check runs once more, alone (never a lint, a build
-that failed, or more than eight failures); passing the second time makes it `FLAKY` and the run stays green, failing twice
-keeps the `gate` red. Parts write `flaky-report.json`; the `gate` job gathers them and
-`scripts/flaky.mjs` keeps the list on the branch `ci-state`, which later runs read (`FABER_FLAKY_FILE`). A listed check
-still runs, but its failure is `QUARANTINED` (counted, not red) except in the daily run, which counts clean nights: after
-5 in a row it leaves the list; a failure or a second try starts the count again; 14 days unseen drop it. The gate summary and
-one open `flaky` issue name the listed checks and close when none is left. Without it every failure counts.
+Put a check that failed and later passed on the same commit in `testkit/quarantine.txt`, with its reason, date and run or pull request. It still runs everywhere. On GitHub Actions outside the nightly schedule, a listed failure is reported and counted but does not fail the run. Locally and nightly it fails as usual. The person fixing the check removes it from the list once fixed.
 
 ### Parallel scenarios
 
-The pane-memory scenario measures offline HTML; its real Mermaid CDN step runs only with `FABER_LIVE_CDN=1`. That run needs internet and fails if the
-pinned library cannot draw; other screen suites do not.
+The pane-memory scenario always measures offline HTML. Its real Mermaid CDN renderer and cost step runs only with
+`FABER_LIVE_CDN=1`; otherwise the log says Mermaid Live was not measured. That opt-in lead run requires internet and
+fails if the pinned library cannot draw; ordinary screen suites do not depend on CDN availability.
 
 On a person's PC the screen suite runs several scenarios at once, so a full run takes a fraction of the time it took one
-after the other (1432 s to 497 s with four workers, 2026-10-17). `FABER_SCREEN_WORKERS` sets how many
+after the other (1432 s before, 497 s after with four workers, on the maintainer's PC, 2026-10-17). `FABER_SCREEN_WORKERS` sets how many
 (a number above zero); without it a PC uses 4 workers and GitHub Actions uses 1, since each CI part already shares a small
 machine. Each worker takes the next scenario when it is free, the slowest first (by `testkit/screen-costs.json`), and
 each scenario has what it had before: its own sandbox, its own DevTools port (the runner never hands one port to two
 scenarios), its own job object and process tree (the audit looks only at the processes its scenario recorded), and a
 fake release server of its own. `--shard` still picks the scenarios of a part; the workers run what it picked. A
-screenshot is written beside its name and renamed into place, so two scenarios that name one checkpoint never mix them. Outcomes print as they end; the summary keeps the scenarios' order.
+screenshot is written beside its name and renamed into place, so two scenarios that name one checkpoint never mix them. The
+outcomes print as they end, but the list and the summary keep the order of the scenarios.
 
 Scenarios whose result depends on the machine being quiet run alone, one at a time, after the parallel batch, with
-nothing else running (`SOLO` in `testkit/src/screen/mod.rs`, each with its reason). They read the
+nothing else running (`SOLO` in `testkit/src/screen/mod.rs`, each with its reason). They are the ones that read the
 processor or memory of the app, count frames or time a motion, depend on which window is shown or has the focus, wait
-for the quota (a background reading at idle priority, which a busy processor starves) or use the PC's one clipboard. When unsure, it goes in that list. A test fails when a scenario whose name says "memory", "processor", "CPU", "MB",
+for the quota (a background reading at idle priority, which a busy processor starves) or use the PC's one clipboard. When
+unsure, a scenario goes in that list. A test fails when a scenario whose name says "memory", "processor", "CPU", "MB",
 "budget", "frame", "focused", "quota" or "usage limits" is not in it, and when a name in the list is no scenario any more.
-A scenario that fails only in parallel joins that list, or its race is fixed.
+A scenario that fails only in parallel is added to the list, or its race is fixed.
 
 ### Build folder budget
 
@@ -143,14 +140,14 @@ exact proof artifacts outside disposable caches.
 
 ### Build slots
 
-Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Lanes once spent 441 minutes waiting for a
-slot (2026-10-16), so the suites now run in CI on the queued commit and a lane runs `cargo t --claims` before a commit, which builds
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. On 2026-10-16 and 17 lanes spent 441 minutes waiting for a
+slot, so the suites now run in CI on the queued commit and a lane runs `cargo t --claims` before a commit, which builds
 only the runner, takes no slot and checks the claims and the red base (R183). Before building, a run takes one of three slots
 (`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
 another PC (R129, E3). Idle priority gives the processor away but not the memory, so before its slot a run also waits
 while a full-screen app is in front and the keyboard or mouse was used in the last ten minutes (a game, a
-presentation; a borderless window is not seen; a locked PC reads as full-screen, R464) or while less memory is free
+presentation; a borderless window is not seen; the lock screen of a PC left alone reads as full-screen, R464) or while less memory is free
 than one run takes (8 GB), at most ten minutes for memory, with one `Waiting:` line per reason (R440).
 CI never waits. `FABER_TEST_SHELL=electron` drives the Electron shell (R459).
 
@@ -158,16 +155,17 @@ CI never waits. `FABER_TEST_SHELL=electron` drives the Electron shell (R459).
 
 A run prints only what needs a look (R154): each failure with its reason, each pass that measures memory or processor
 (R125), and one summary line. A failed Rust test shows its panic from the `file:line` on; a compiler error shows as
-`file:line:col: error[code]: message`, with the compiler's suggested fix as one `help:` line under it. A reason over
-15 lines keeps its first line and its error lines. Every line, every pass and Cargo's whole output included, goes
-to `target/faber-test/run.log`, which CI keeps with the screenshots. Cargo's output is read as it comes. The run also times itself: the summary ends with one `Time:` line (the whole run,
+`file:line:col: error[code]: message`, with the compiler's suggested fix as one `help:` line under it. A reason longer
+than 15 lines keeps its first line and its error lines. Every line, every pass and Cargo's whole output included, goes
+to `target/faber-test/run.log`, which CI keeps with the screenshots. Cargo's output is read as it comes, so a long
+build shows in the log while it runs. The run also times itself: the summary ends with one `Time:` line (the whole run,
 then build, lint, rust, ui and screen), `run.log` gets a `time` line per scenario with its steps (launch, process lists,
 page waits, pauses, audit, cleanup) and one line with the totals of every step, and `target/faber-test/timing.json`
 keeps the same numbers for a script (`testkit/src/timing.rs`). `cargo test` runs with `--no-fail-fast`, so one run
 lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the same way, and a test keeps them equal to
 CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
 also prints one line per error. `cargo t --failed` runs again only what failed in the last run, read from the `FAIL` lines of
-`run.log` (screen scenarios and Rust tests by exact name, the `ui` and `lint` suites whole).
+`run.log` (screen scenarios and Rust tests by exact name, the `ui` and `lint` suites whole); with none recorded it says so and runs nothing.
 
 On Windows the lint suite adds a third proof: Clippy for macOS (`aarch64-apple-darwin`) on the engine and the runner, so
 code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R166,
@@ -177,10 +175,10 @@ Cargo calls the runner as `CC` and `AR` and the runner hands the call to zig. It
 Objective-C needs Apple's SDK; CI's Mac still checks everything.
 
 A mission reads its checks the same way (R155, `engine/src/project/proof/output.rs`, which `cargo t` also uses for
-Cargo). The roles get each failure with its `file:line` and fix, the measurements and one summary line, at
+Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
 most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,
 rustc and Clippy, `cargo test`, `cargo fmt --check`, tsc and oxlint; any other format gives its last 20 lines when the
-check fails (a new format is one more parser in that file). Lines that look like a secret are withheld first.
+check fails. A new format is one more parser in that file's list. Lines that look like a secret are withheld first.
 
 ## Faber's own test system
 
@@ -201,8 +199,8 @@ The program is `faber-test`, run as `cargo t`.
    [spec](../history/superpowers/specs/2026-10-14-test-system-rework-design.md),
    [plan](../history/superpowers/plans/2026-10-14-test-system-rework.md)). The floor is 5x less time and processes and 3x less
    memory and CPU, with no ceiling; no test is weakened. Landed: one engine test program, the `rust-lld` linker, lighter
-   debug info and below-normal priority, in-page waits, parallel scenarios and skipping an unchanged
-   screen build (R189).
+   debug info and below-normal priority (2026-10-14), then in-page waits, parallel scenarios and skipping an unchanged
+   screen build (R189); the shared running app was measured and shelved (R395).
    How it is measured: [the fair benchmark](fair-bench.md).
 7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
    Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at

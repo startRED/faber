@@ -229,10 +229,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       - run: npm run build
-      # The checks that failed by chance (D5): the runner does not fail on them, except in the nightly run.
-      - if: contains(matrix.part, 'rust') || contains(matrix.part, 'ui')
-        shell: bash
-        run: node scripts/flaky.mjs fetch target/flaky.json
       # bash stops at the first failing line; PowerShell would only report the last one.
       - if: contains(matrix.part, 'lints')
         shell: bash
@@ -269,7 +265,6 @@ jobs:
           path: |
             target/faber-test/shots/
             target/faber-test/run.log
-            target/faber-test/flaky-report.json
           if-no-files-found: ignore
 
   # The Windows test app is built once and handed to the ui part and the eight screen parts (R163).
@@ -448,8 +443,6 @@ jobs:
           path: target
       # `rustup run` hands the runner what `cargo t` would (RUSTUP_HOME, the toolchain): the sandbox has its own home, and a
       # mission proof (the canary) runs cargo inside it.
-      - shell: bash
-        run: node scripts/flaky.mjs fetch target/flaky.json
       - if: matrix.part == 'ui'
         run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt
       - if: matrix.part != 'ui'
@@ -466,7 +459,6 @@ jobs:
           path: |
             target/faber-test/shots/
             target/faber-test/run.log
-            target/faber-test/flaky-report.json
           if-no-files-found: ignore
 
   # A warm run (R165) builds on main what the lint/app jobs build and saves it as that kind's Rust cache, which every
@@ -541,8 +533,6 @@ jobs:
     permissions:
       actions: read
       checks: read
-      contents: write
-      issues: write
     outputs:
       runner_unavailable: ${{ steps.runner.outputs.unavailable }}
     steps:
@@ -604,31 +594,6 @@ jobs:
             ok "$ELECTRON" "$PLAN_APP" || { echo "::error::electron: $ELECTRON"; exit 1; }
           fi
           echo "Every required part the plan chose passed."
-      # Checks that failed, then passed when run again, join the list the next runs read; the nightly run counts the clean
-      # nights that bring them back to the gate (D5, scripts/flaky.mjs). Bookkeeping only: it never changes the verdict above.
-      - if: always() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base'))
-        continue-on-error: true
-        uses: actions/checkout@v7
-        with:
-          sparse-checkout: scripts/flaky.mjs
-          sparse-checkout-cone-mode: false
-      - if: always() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base'))
-        continue-on-error: true
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - if: always() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base'))
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          pattern: log-*
-          path: target/flaky-logs
-      - if: always() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base'))
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: node scripts/flaky.mjs update target/flaky-logs
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.
