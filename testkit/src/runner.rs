@@ -7,7 +7,7 @@ use crate::base;
 use crate::checks;
 use crate::cross;
 use crate::lanes;
-use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, parse_failed, select};
+use crate::plan::{Failed, Options, Suite, changed_paths, jobs, parse_args, parse_failed, select};
 use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
@@ -15,6 +15,7 @@ use crate::sweep;
 use crate::testbuild::{build_for_run, build_side_by_side, cargo_command, prebuilt, streamed};
 use crate::timing;
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -173,24 +174,39 @@ fn lint(command: Command, root: &Path, proof: &[&str], jobs: usize, log: &mut Lo
 struct Log {
     path: PathBuf,
     file: Option<File>,
-    quarantine: Vec<&'static str>,
+    /// The checks that fail by chance (`FABER_FLAKY_FILE`, kept by the gate job).
+    quarantine: Vec<String>,
     tolerate: bool,
+    /// Whether a failed check runs once more (CI only): a person at a PC wants the failure shown, not tried again.
+    retry: bool,
 }
 
 impl Log {
     fn create(path: PathBuf) -> Log {
         let file = path.parent().and_then(|dir| std::fs::create_dir_all(dir).ok()).and_then(|()| File::create(&path).ok());
-        let quarantine = crate::quarantine::names(include_str!("../quarantine.txt"));
-        let tolerate = crate::quarantine::tolerated(
-            std::env::var("GITHUB_ACTIONS").ok().as_deref(),
-            std::env::var("GITHUB_EVENT_NAME").ok().as_deref(),
-        );
-        Log { path, file, quarantine, tolerate }
+        let actions = std::env::var("GITHUB_ACTIONS").ok();
+        let listed = std::env::var_os("FABER_FLAKY_FILE").and_then(|file| std::fs::read_to_string(file).ok()).unwrap_or_default();
+        let quarantine = crate::quarantine::names(&listed);
+        let tolerate = crate::quarantine::tolerated(actions.as_deref(), std::env::var("GITHUB_EVENT_NAME").ok().as_deref());
+        Log { path, file, quarantine, tolerate, retry: actions.as_deref() == Some("true") }
     }
 
     fn write(&mut self, text: &str) {
         if let Some(file) = &mut self.file {
             let _ = writeln!(file, "{}", text.trim_end());
+        }
+    }
+
+    /// What the gate job learns about flaky checks. One job runs `cargo t` once per suite, so each run adds to the file.
+    fn write_flaky_report(&self, paths: &Paths, outcomes: &[Outcome]) {
+        if !self.retry {
+            return;
+        }
+        let report = crate::quarantine::Report::of(outcomes, &self.quarantine);
+        let file = paths.target.join("flaky-report.json");
+        let before = crate::quarantine::Report::parse(&std::fs::read_to_string(&file).unwrap_or_default());
+        if !report.is_empty() {
+            let _ = std::fs::write(file, before.merge(report).to_json());
         }
     }
 
@@ -263,6 +279,80 @@ fn changed(root: &Path) -> Result<Vec<String>, String> {
         return Err(format!("git status failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
     Ok(changed_paths(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// What the suites need besides their names.
+struct Run<'a> {
+    paths: &'a Paths,
+    opts: &'a Options,
+    jobs: usize,
+    costs: &'a screen::Costs,
+}
+
+/// Runs the chosen suites once. `failed` narrows them to the tests a last run lost (`--failed`, or the second try).
+fn execute(run: &Run, suites: &BTreeSet<Suite>, filter: Option<&str>, failed: Option<&Failed>, log: &mut Log) -> Vec<Outcome> {
+    let Run { paths, opts, jobs, costs } = *run;
+    let mut outcomes: Vec<Outcome> = Vec::new();
+    if suites.contains(&Suite::Lint) {
+        let found = run_lint(&paths.root, jobs, log);
+        log.show(&found);
+        outcomes.extend(found);
+    }
+    if suites.contains(&Suite::Rust) {
+        // A failed build or a dead test program names no test, so the whole suite runs again.
+        let exact: &[String] = failed.as_ref().filter(|f| !f.rust_whole).map_or(&[], |f| f.rust.as_slice());
+        let found = run_rust(&paths.root, jobs, filter, exact, log);
+        log.show(&found);
+        outcomes.extend(found);
+    }
+    let (wants_ui, wants_screen) = (suites.contains(&Suite::Ui), suites.contains(&Suite::Screen));
+    // Without WebView2's DevTools port, `screen` is skipped, and the app is only built if `ui` needs it.
+    let screen_runs = wants_screen && cfg!(windows);
+    if wants_ui || wants_screen {
+        if wants_screen && !screen_runs {
+            let skipped = Outcome::skipped(Suite::Screen, "screen", "needs WebView2's DevTools port, which only Windows has");
+            log.show(std::slice::from_ref(&skipped));
+            outcomes.push(skipped);
+        }
+        if wants_ui || screen_runs {
+            let built = if opts.prebuilt { prebuilt(paths) } else { build_for_run(paths, jobs) };
+            match built {
+                Err(message) => {
+                    for suite in [Suite::Ui, Suite::Screen].into_iter().filter(|s| suites.contains(s) && (*s == Suite::Ui || screen_runs)) {
+                        let not_run = Outcome::not_run(suite, "the test app", &message);
+                        log.show(std::slice::from_ref(&not_run));
+                        outcomes.push(not_run);
+                    }
+                }
+                Ok(()) => {
+                    if wants_ui {
+                        let _ui = timing::span("ui", "checks");
+                        let found = checks::run(paths, filter);
+                        log.show(&found);
+                        outcomes.extend(found);
+                    }
+                    if screen_runs {
+                        let _screen = timing::span("screen", "scenarios");
+                        // Each scenario is logged as it ends, and a failure shows at once: the suite takes minutes.
+                        let only = failed.as_ref().map(|f| f.screen.as_slice());
+                        let found =
+                            screen::run_all(paths, filter, only, opts.shard, costs, &mut |outcome| log.show(std::slice::from_ref(outcome)));
+                        // A name the log holds that no scenario has any more (it was renamed) is never a quiet pass.
+                        let missing: Vec<Outcome> = only
+                            .into_iter()
+                            .flatten()
+                            .filter(|name| !found.iter().any(|o| &o.name == *name))
+                            .map(|name| Outcome::not_run(Suite::Screen, name, "no scenario has this name any more"))
+                            .collect();
+                        log.show(&missing);
+                        outcomes.extend(found);
+                        outcomes.extend(missing);
+                    }
+                }
+            }
+        }
+    }
+    outcomes
 }
 
 /// With `--filter`, a run in which no suite had a test of that name is a mistake, never a pass.
@@ -373,74 +463,24 @@ fn run_suites(args: &[String], log_out: &mut Option<Log>) -> i32 {
     });
     let log = log_out.insert(Log::create(paths.target.join("run.log")));
     let filter = opts.filter.as_deref();
-    let mut outcomes: Vec<Outcome> = Vec::new();
-    if suites.contains(&Suite::Lint) {
-        let found = run_lint(&paths.root, jobs, log);
-        log.show(&found);
-        outcomes.extend(found);
-    }
-    if suites.contains(&Suite::Rust) {
-        // A failed build or a dead test program names no test, so the whole suite runs again.
-        let exact: &[String] = failed.as_ref().filter(|f| !f.rust_whole).map_or(&[], |f| f.rust.as_slice());
-        let found = run_rust(&paths.root, jobs, filter, exact, log);
-        log.show(&found);
-        outcomes.extend(found);
-    }
-    let (wants_ui, wants_screen) = (suites.contains(&Suite::Ui), suites.contains(&Suite::Screen));
-    // Without WebView2's DevTools port, `screen` is skipped, and the app is only built if `ui` needs it.
-    let screen_runs = wants_screen && cfg!(windows);
-    if wants_ui || wants_screen {
-        if wants_screen && !screen_runs {
-            let skipped = Outcome::skipped(Suite::Screen, "screen", "needs WebView2's DevTools port, which only Windows has");
-            log.show(std::slice::from_ref(&skipped));
-            outcomes.push(skipped);
-        }
-        if wants_ui || screen_runs {
-            let built = if opts.prebuilt { prebuilt(&paths) } else { build_for_run(&paths, jobs) };
-            match built {
-                Err(message) => {
-                    for suite in [Suite::Ui, Suite::Screen].into_iter().filter(|s| suites.contains(s) && (*s == Suite::Ui || screen_runs)) {
-                        let not_run = Outcome::not_run(suite, "the test app", &message);
-                        log.show(std::slice::from_ref(&not_run));
-                        outcomes.push(not_run);
-                    }
-                }
-                Ok(()) => {
-                    if wants_ui {
-                        let _ui = timing::span("ui", "checks");
-                        let found = checks::run(&paths, filter);
-                        log.show(&found);
-                        outcomes.extend(found);
-                    }
-                    if screen_runs {
-                        let _screen = timing::span("screen", "scenarios");
-                        // Each scenario is logged as it ends, and a failure shows at once: the suite takes minutes.
-                        let only = failed.as_ref().map(|f| f.screen.as_slice());
-                        let found = screen::run_all(&paths, filter, only, opts.shard, &costs, &mut |outcome| {
-                            log.show(std::slice::from_ref(outcome))
-                        });
-                        // A name the log holds that no scenario has any more (it was renamed) is never a quiet pass.
-                        let missing: Vec<Outcome> = only
-                            .into_iter()
-                            .flatten()
-                            .filter(|name| !found.iter().any(|o| &o.name == *name))
-                            .map(|name| Outcome::not_run(Suite::Screen, name, "no scenario has this name any more"))
-                            .collect();
-                        log.show(&missing);
-                        outcomes.extend(found);
-                        outcomes.extend(missing);
-                    }
-                }
-            }
-        }
-    }
+    let run = Run { paths: &paths, opts: &opts, jobs, costs: &costs };
+    let mut outcomes = execute(&run, &suites, filter, failed.as_ref(), log);
     if nothing_matched(&outcomes, filter) {
         println!("No test name contains {:?}. Nothing ran.", filter.unwrap_or_default());
         return 1;
     }
+    if let Some(again) = log.retry.then(|| crate::quarantine::retry(&outcomes)).flatten() {
+        // A failure by chance passes the second time; one that fails twice is real and still fails the run.
+        log.write("-- the failed checks run once more --");
+        let second = execute(&run, &again.suites(), None, Some(&again), log);
+        outcomes = crate::quarantine::settle(outcomes, &second);
+        let flaky: Vec<Outcome> = outcomes.iter().filter(|o| o.status == Status::Flaky).cloned().collect();
+        log.show(&flaky);
+    }
     let outcomes: Vec<_> = outcomes.iter().map(|o| crate::quarantine::judge(o, &log.quarantine, log.tolerate)).collect();
     let total = summary(&outcomes);
     log.write(&total);
+    log.write_flaky_report(&paths, &outcomes);
     let every = if log.file.is_some() { format!(". Every line: {}", log.path.display()) } else { String::new() };
     println!("\n{total}{every}");
     if outcomes.iter().any(|o| matches!(o.status, Status::Fail | Status::Quarantined) && matches!(o.suite, Suite::Ui | Suite::Screen)) {

@@ -9,6 +9,8 @@ pub enum Status {
     Pass,
     Fail,
     Quarantined,
+    /// Failed, then passed when run again in the same run: a failure by chance (`quarantine::settle`). It does not fail the run.
+    Flaky,
     /// The suite could not start (the build failed), which is never reported as a pass.
     NotRun,
     Skipped,
@@ -56,10 +58,13 @@ pub fn line(outcome: &Outcome) -> String {
     if outcome.status == Status::Quarantined {
         return format!("QUARANTINED {}: {}", outcome.name, outcome.message.lines().next().unwrap_or_default());
     }
+    if outcome.status == Status::Flaky {
+        return format!("FLAKY {}: {}", outcome.name, outcome.message.lines().next().unwrap_or_default());
+    }
     let word = match outcome.status {
         Status::Pass => "pass",
         Status::Fail => "FAIL",
-        Status::Quarantined => unreachable!(),
+        Status::Quarantined | Status::Flaky => unreachable!(),
         Status::NotRun => "----",
         Status::Skipped => "skip",
     };
@@ -114,13 +119,15 @@ pub fn quiet(outcome: &Outcome) -> Option<String> {
 
 pub fn summary(outcomes: &[Outcome]) -> String {
     let count = |status| outcomes.iter().filter(|o| o.status == status).count();
+    let flaky = count(Status::Flaky);
     format!(
-        "{} passed, {} failed, {} not run, {} skipped, quarantined failures: {}",
+        "{} passed, {} failed, {} not run, {} skipped, quarantined failures: {}{}",
         count(Status::Pass),
         count(Status::Fail),
         count(Status::NotRun),
         count(Status::Skipped),
-        count(Status::Quarantined)
+        count(Status::Quarantined),
+        if flaky > 0 { format!(", flaky: {flaky}") } else { String::new() }
     )
 }
 
