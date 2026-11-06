@@ -25,6 +25,7 @@ English and French. Green when no finding is blocker or high:
       stuck each show their true state and the way on.
 - [ ] Quota for both AIs; Settings by keyboard alone; Catalog; Ctrl+K; What's new.
       Evidence (2026-11-04): first-user pass (hidden Tauri test build, fake CLIs, Haiku reviewer) ran at 720x480 in pt-BR, English and French and at 1280x800 in the same three: no critical, high or medium finding confirmed against the screenshots; two low (French experience step shows no selected cue, French Projects text omits the local folder; French "Nouvelle conver..." button label truncated at 720x480). Reports in docs/history/research/first-user-2026-11-04-*.md. NOT yet done: the `ux_audit --codex` walkthrough on the release commit, account cards and health-check fixes, and Electron-shell first-user runs. Repeat on the release commit.
+${I}Evidence (2026-11-06, candidate 0adba5bb): full hidden first-user walks pt-BR 720x480 and English 1280x800 finished clean: no blocker or high finding (g390n.result.md). Real sign-in, project tools and subagents stay with the owner.
 
 ## Real use (the owner's PC, real subscriptions)
 
@@ -36,25 +37,33 @@ English and French. Green when no finding is blocker or high:
 
 ## Numbers
 
-- [ ] Memory with no CLI running under the R125 test limit, measured by CI on the release commit (name the run).
+- [x] Memory with no CLI running under the R125 test limit, measured by CI on the release commit (name the run).
       Evidence (2026-11-04): CI run 41760708119 (commit bf6b8640): the Electron screen test "with no CLI running, Faber stays within its memory budget" passed at 107 MB idle. Re-measure on the release commit.
+${I}Evidence (2026-11-06): CI 42190658930 (candidate 0adba5bb, gate green, 165 screen + 866 Electron + 899 Tauri ui tests): Electron with no CLI running used 114 MB, limit 400.
 - [ ] No idle processor use with the window hidden (CI's idle check).
       Evidence (2026-11-04): same run: one core, focused 3.9%, unfocused 0.3%. Re-measure on the release commit.
+${I}Evidence (2026-11-06): CI 42190658930 (candidate 0adba5bb): focused 4.7%, unfocused 0.3% of one core. The test does not measure a hidden window separately; the unfocused state is the nearest proof.
 - [ ] A 300-message conversation opens and scrolls without a visible stall (W1's measurement).
       Evidence (2026-11-04): frame gaps measured by requestAnimationFrame in the hidden test build (two runs): longest open 79.4 ms, longest scroll 287.2 ms; the old timer-based check read 489 ms of timer delay, a different metric. A 287 ms scroll gap is a visible hitch, so this stays open until W1 accepts it or it is reduced.
+${I}Evidence (2026-11-06, candidate 0adba5bb, local replay of the CI test builds): Electron longest open 58.3 ms, longest scroll 112.6 ms; Tauri 87.7 ms and 108.4 ms (was 287.2 ms on 2026-11-04). The check has no threshold; the scroll gap is below the earlier hitch but still the owner's call to accept.
 
 ## Install and update
 
 - [ ] A clean Windows user installs from the release page, signs in through each CLI's own flow and sends a message.
       Evidence (2026-11-04): run 41800600209: the installed .90 reaches the first-run subscription connection screen (hidden, repeated passes). Real sign-in and a sent message are not covered.
+${I}Evidence (2026-11-06): run 42194923871 clean install of .20 reached the first-run subscription screen. Real sign-in and a sent subscription message are still the owner's day of use.
 - [ ] The current Tauri install updates itself to the Electron build without losing a conversation or a setting.
       Evidence (2026-11-04): run 41800600209 (windows-latest, `install-update-self.yml`): the real preview.84 app downloaded, signature-checked and ran the preview.90 installer itself; the new app read the sample conversation and setting through its API and the backup holds both files. Not proved: the automatic relaunch of the new app from .84 (the harness starts it). Harness details: a local HTTPS fixture serves the original signed .90.
-- [ ] 1.0 updates itself to a 1.0.1 built for the test, while a conversation is open, and the conversation goes on.
+${I}Evidence (2026-11-06): run 42194923871 Tauri .84 to Electron .20 passed (conversation, language and appearance read back, backup holds both). Still not proved: the automatic relaunch of the new app from .84 (the harness starts it).
+- [x] 1.0 updates itself to a 1.0.1 built for the test, while a conversation is open, and the conversation goes on.
       Evidence (2026-11-04): FAILED in run 41800600209 with preview.89 to .90: after the real restart button the old Electron processes stay alive, the installed package stays .89 (a shutdown race in `update/src/updater.rs` and `sidecar/src/main.rs`, same code on base). Task 460 fixes it.
-- [ ] macOS and Linux builds pass CI and ship marked as preview.
+${I}Evidence (2026-11-06): PASSED. Run 42194923871 (harness 961830c6, preview.19 to preview.20, the candidate 0adba5bb): the old app downloaded, signature-checked and ran the .20 installer itself while the conversation was working; old processes ended, the same conversation resumed and answered. Earlier run 42159232370 (.16 to .17) also passed. Details: reports/reforma/helpers/g390k.result.md, g390n.result.md.
+- [x] macOS and Linux builds pass CI and ship marked as preview.
       Evidence (2026-11-04): release v0.3.18-preview.90 (Pre-release) ships mac dmg/zip, Linux .deb and AppImage, Windows setup; CI run 41760708119 passed `check (macos-latest, ...)`. Linux: the "Linux engine and runner compile guard" step of the docs job in the same run passed (a compile check, not a full app build); the packages come from the release build.
+${I}Evidence (2026-11-06): v0.3.19-preview.20 (the release candidate's own build) ships Windows setup, macOS and Linux packages with checksums (release run 42193359478); CI 42190658930 green on mac lints and all builds.
 
 ## Sign-off
 
 - [ ] Two reviews from fresh sessions of the other vendor on the release diff since the last stable (security included).
+      Evidence (2026-11-06): three fresh read-only gpt-6.1-sol reviews, none written by this lane: security of v0.3.17..e4828567 (no blockers; scripts can still bypass credential-name matching, an accepted limit); correctness and data loss of the same range (2 high and 1 medium on failed-write paths, all fixed in #711 and re-reviewed twice, last NO BLOCKERS); and what changed from e4828567 to the candidate 0adba5bb (no blockers). Reviewers ran no code and tested no real Electron; the CI gate did. Claude is this lane's vendor; Codex is the other.
 - [ ] The owner's OK, given through the manager, recorded as a decision row.
