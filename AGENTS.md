@@ -24,11 +24,11 @@ mistake, and a rule a test enforces leaves it.
 - Every text on screen lives in `ui/locales/`. Each language is written by hand, never machine-translated; English
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
   (`error.*`, `reason.*`) instead of sentences.
-- Every change a person would notice adds a what's-new entry in every language, in the same pull request: one short
-  sentence in plain words, written by hand ([how](docs/dev/whats-new.md)), in its own `docs/next/<branch>.json` (never in the locale files, whose
-  shared lines conflict). The id only grows, never depends on the version, and is given when the change lands, with
-  the decision numbers ([workflow](docs/dev/workflow.md#numbers)). After an update the screen shows what is newer than the
-  last entry seen, and the release body is built from the English entries (R142, `scripts/release-notes.mjs`).
+- What's-new entries are written once a week, before the Wednesday stable, never per change (R557): one session lists
+  what landed since the last stable (`node scripts/release-notes.mjs --pending`), folds changes to one thing into one
+  line and writes each line by hand in every language ([how](docs/dev/whats-new.md)), shipped as one commit. After an
+  update the screen shows what is newer than the last entry seen, and the release body is built from the English
+  entries (R142).
 - Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
   400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
@@ -80,18 +80,18 @@ Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map
 
 - The local proofs below pass, the landed commit's `gate` is green in CI (`main` follows only then), and a check fails
   without the change (the product map names the check per feature).
-- The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
-  feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
-  "Known incoherences" lines it fixed, and updates the [docs/design/](docs/design/README.md) page of a screen whose look
-  or behaviour changed. A new decision is a `R-next` row in the branch's `docs/next/<branch>.json`, numbered when it
-  lands; a finished spec or plan gets its status in [docs/README.md](docs/README.md). A living page that would pass its
+- The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen file, stored value or shell
+  command appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), in one or two short lines
+  per row (edge cases live in code and tests), and deletes the "Known incoherences" lines it fixed; the
+  [docs/design/](docs/design/README.md) page of a screen whose look changed follows. A decision row
+  (`docs/next/<branch>.json`, `R-next`) is only for a direction the owner chose or a rule that changes what a person
+  gets; a choice inside one feature stays in its commit body (R557). A finished spec or plan gets its status in
+  [docs/README.md](docs/README.md). A living page that would pass its
   size limit splits by topic instead (`npm run docs` says so).
 - The commit type is a release decision: a `feat`, `fix` or `perf` commit that touches what ships becomes a patch release
   by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
-- For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
-  it does not fit>`.
-- The commit body states the memory and processor cost, or why there is none (docs, tests only). CI measures it on
-  the landed commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
+- A change to processes, long-lived state or how much the screen keeps drawn states its memory and processor cost in
+  the commit body; other changes say nothing about it. CI measures every landed commit and fails above the R125 limit.
 - A change to engine state, stored data, permissions, processes or security gets a review from a fresh session that
   did not write it: the other vendor when it is available, the same vendor in a new read-only session when its quota is
   poor (R146); security changes get two. Words, docs, tests and screen-only changes land on their proofs. Every review

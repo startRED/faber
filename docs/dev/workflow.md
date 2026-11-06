@@ -132,6 +132,9 @@ a branch (R164, R179): lanes that each took "the next one" collided at every mer
 end of the decisions table and of the five locales' entries conflicted at every merge. On 2026-10-16 and 17 that loop
 (merge the base in, wait for CI, find the base moved again) cost 590 session-minutes, more than any other step.
 
+Since R557 a decision row is only for a direction the owner chose or a rule that changes what a person gets, and
+what's-new entries are written once a week ([whats-new](whats-new.md)), so most changes carry neither.
+
 So a branch never touches those shared lines. Its entry and its decision rows go in a file of its own,
 `docs/next/<branch>.json` (a branch named `a/b` writes `a-b.json`):
 

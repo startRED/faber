@@ -1,7 +1,12 @@
 # Writing a what's-new entry
 
-How to write the line a person reads on the "what's new" screen after an update (R142) and in the release body. Where the
-entry goes and how it gets its id is in [workflow.md](workflow.md#numbers); this page is only about the words.
+How to write the line a person reads on the "what's new" screen after an update (R142) and in the release body.
+
+Entries are written once a week, before the Wednesday stable, by one session, never per change (R557).
+`node scripts/release-notes.mjs --pending` lists the `feat`, `fix` and `perf` commits on `main` since the newest stable
+tag; the session folds changes to one thing into one line (rule 7), writes each line in every language as
+`notes.next.<kind>` entries or in a `docs/next/<branch>.json` fragment ([numbers](workflow.md#numbers)), and ships them
+as one commit with `node scripts/ship.mjs`, which gives the ids.
 
 A person reads the screen once, in a few seconds, between an update and their work. Each line has to answer two
 questions on its own: what changed for me, and what do I do differently now (often: nothing).

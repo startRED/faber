@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { body, entries } from './release-notes.mjs';
+import { body, entries, newestStable, noticeable } from './release-notes.mjs';
 
 const single = "  'notes.1.new': 'Faber can work on projects.',\n  'notes.2.fixed': 'Answers recover.',\n";
 const double = '  "notes.1.new": "Faber can work on projects.",\n  "notes.2.fixed": "Answers recover.",\n';
@@ -35,4 +35,11 @@ test('the real English file has entries the script can read', () => {
   const found = (real.match(/^\s*['"]notes\.\d+\.(new|better|fixed)['"]:/gm) ?? []).length;
   assert.ok(found > 0);
   assert.equal(entries(real).length, found, 'every numbered entry line is read, so a reformat cannot silently empty the body');
+});
+
+test('the weekly list starts at the newest stable tag and keeps what a person may notice', () => {
+  assert.equal(newestStable(['v0.3.9', 'v0.3.19-preview.17', 'v0.3.10', 'v0.2.30']), 'v0.3.10');
+  assert.equal(newestStable(['v0.1.0-preview.1']), undefined);
+  assert.deepEqual(noticeable(['feat(ui): a', 'fix: b', 'perf(engine)!: c', 'docs: d', 'ci(scripts): e', 'chore: f']),
+    ['feat(ui): a', 'fix: b', 'perf(engine)!: c']);
 });
