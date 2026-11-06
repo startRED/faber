@@ -56,3 +56,9 @@ The message menu's confirmation and its saved-message notice, in Chat and Projec
 - A conversation with an interrupted restore cannot be deleted, even after confirming the loss of its separate copy.
   The existing error display asks the person to finish the restore first, so recovery keeps the conversation it needs.
   Saving ordinary history may briefly delay deletion, but never replaces the question about unsaved work with a busy error.
+- Deleting a conversation immediately removes its private restore points and completed redo copies. Other conversations'
+  shared copies and files in chosen folders or projects stay intact. A failed conversation deletion keeps its history. If removing the
+  history fails after deletion, the existing error display says the conversation was deleted but its copies remain;
+  the next startup retries their cleanup. An unreadable conversation record is retained, never treated as absent.
+  Dismissing a damaged copy keeps the original record and its history. Deletion waits for in-flight captures and seals
+  before collecting objects, including an unpublished seal in another folder.

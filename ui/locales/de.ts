@@ -2099,6 +2099,7 @@ export const de: Messages = {
   "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",
   "error.chat.saveFailed": "Faber konnte diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und Faber versucht es bei deiner nächsten Änderung erneut. Schließe Faber noch nicht.",
   "error.chat.saveFull": "Der Datenträger ist voll, deshalb konnte Faber diese Unterhaltung nicht speichern. Sie bleibt sicher, solange Faber geöffnet ist, und wird bei deiner nächsten Änderung gespeichert, sobald wieder Platz ist. Schließe Faber noch nicht.",
+  "error.chat.historyKept": "Das Gespräch wurde gelöscht, aber seine gespeicherten Dateiversionen konnten nicht entfernt werden. Starte Faber neu, um es erneut zu versuchen.",
   "error.chat.deleteFailed": "Faber konnte diese Unterhaltung nicht löschen, deshalb bleibt sie, wo sie ist. Versuche es gleich noch einmal.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Am letzten gespeicherten Prüfpunkt pausiert.",
@@ -2664,6 +2665,7 @@ export const de: Messages = {
   'notes.432.new': 'In den technischen Details sehen Sie, was dem Agenten über Ihr Projekt gesagt wurde.',
   'notes.433.fixed': 'Deine Entwürfe und Anhänge bleiben in der neuen Windows-App erhalten; Faber wartet beim Beenden auf das Speichern und erholt sich nach Unterbrechungen.',
   'notes.434.fixed': 'Schlägt das Beenden fehl, bleiben Fenster und Infobereich erreichbar; du kannst es erneut versuchen. Mehrfaches Beenden unterbricht das Speichern nicht mehr.',
+  'notes.435.better': 'Wenn du ein Gespräch löschst, werden seine gespeicherten Dateiversionen jetzt sofort entfernt, statt bis zu 30 Tage aufbewahrt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

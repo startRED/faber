@@ -1,7 +1,6 @@
 - Deliver original frontend-craft and frontend-proof instructions lazily through the existing first-party guide path; retain external catalog skills and each project's own visual system. [by AI]
 - Per-answer file review reads the existing private rewind before/after objects in bounded pages; retain one snapshot system and the existing restore confirmation, conflict choices, retention and recovery. [by AI]
 - Extend the existing composer draft keys with native IndexedDB Blob attachments, preserving synchronous text writes and explicit storage-failure recovery; a draft save does not establish delivery to the engine. [by AI]
-
 - Admit human sends only after their current intent is saved, restoring draft, archive, follow-up and routing state on refusal. A later research-mode write failure leaves that durable message accepted with a failed reply and ends Keep going without dropping human queued messages or starting the AI. [by AI]
 - Keep at most 100 recent conversation reading anchors (message id, index fallback and viewport offset) in browser storage, enough for routine switching while bounding metadata; reuse message windows, run grouping and the existing resize observer without a timer or setting. [by AI]
 - After restoring a negative control, verify the executable or served bundle actually tested as well as the source bytes; restore with a fresh write or invalidate stale build inputs so preserved timestamps cannot make an old artifact stand in for the corrected version. [by AI]
@@ -14,7 +13,6 @@
 - The task 998 offline publication boundary uses built-in Ed25519 verification with pinned public keys, a 1 MiB envelope limit and exact authenticated UTF-8 bytes; signature verification alone never authorizes installation. [by AI]
 - Store person-approved project file locations in `faber-trust/adoptions.json`, under the existing protected approval-record family. Bind each location to its project folder and reopen it safely on every read; approving the location does not approve its words or permit writes. [by AI]
 - Nested agent tasks must open independently, show what each task is doing, and let the person return to the task that delegated the work. [by person]
-
 - Side panes must close by sliding their real content away without a fade or a teleport; reduced motion closes them immediately. [by person]
 - Visible helper history is stored outside conversation JSON in bounded atomic pages and loaded in bounded windows only by the existing helper reader, preserving older-page selection during new work. [by AI]
 - Keep direct windows-core updates on 0.62 patch releases while WebView2 0.39 requires its COM types; lift the Dependabot version exclusion only with a coordinated WebView2/Tauri type migration. [by AI]
@@ -23,12 +21,10 @@
 - Messages received from other AI conversations identify their agent origin and are delivered automatically, without appearing as the person's queued messages or requiring Send now. [by person]
 - Creative text comparisons reuse isolated internal sessions with no tools or history, opposite A/B order, distinct models, bounded output and durable full receipts; they do not replace code review or visual proof. [by AI]
 - Windows automatic worker admission adds FIFO memory checks to the existing count limits: measured private working sets below half physical RAM and at least 2 GiB available; one fresh sample per admission, no termination of active work. Unix keeps count limits until an identity-safe native sampler is implemented. [by AI]
-
 - The project agent settings tool accepts only web_search off/cached/live. It reuses the ordinary settings save, its own consent and audit, and existing full trust only for this bounded preference. The saved response is queued after durable persistence and before stricter settings stop replies; no delivery acknowledgement or stop exemption is introduced. [by AI]
 - Manual benchmark admission requires fresh unchanged quota readings between paid stages, after the existing reporting lag for its own work. Missing evidence pauses admission; this is observed quiet, not proof of who used an account. Completed sides are checkpointed before admission and a run-local CANCEL file ends a pause. [by AI]
 - Nightly CLI candidate contracts run only in disposable runners without sign-in; passing help/schema checks remain explicitly unqualified and cannot publish metadata, promote releases or authorize installation. [by AI]
 - Roadmap direction: schedule the discussed EGM-inspired project knowledge, independent plan review and delivery-to-plan checks; implementation details remain proposals. Owner's request, verbatim: "Coloque no plano/roadmap para implementar isso do melhor jeito possivel". [by person]
-
 - Engine construction returns a startup error before Store, catalog or background work when its data directory cannot be opened. Windows keeps its no-follow directory chain open through engine teardown; this entry check does not replace handle-relative I/O, a write sandbox or Chat-workspace relocation. [by AI]
 - Bind each saved project start card to its native session id and exact sent text; changed or unknown context starts a fresh native session with the existing conversation history, while compaction keeps its original card. [by AI]
 - Capture existing contained inline-code file references only at explicit decision consent; recheck their safe existence for each new start card without rewriting approvals or inferring references in older records. [by AI]
@@ -38,3 +34,4 @@
 - A conversation counts as done only when its AI concluded it (wrap_up with done); a turn that ends without that shows as ended without a conclusion, and Faber asks the AI once for its closing summary. [by AI]
 - Conversations speak in the AI's own voice: Faber's added instructions keep the language, safety and evidence rules but no longer make the AI talk as Faber. [by AI]
 - Composer attachments are limited to 8 MiB total per message before browser file reads and sending, including restored drafts and pending reads; this fits the existing 16 MiB Electron/host transport without widening it. [by AI]
+- YES, purge the restore points of a deleted chat at once. [by person]

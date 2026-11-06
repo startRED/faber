@@ -2099,6 +2099,7 @@ export const es: Messages = {
   "error.store.full": "El disco está lleno. No se aprobó nada.",
   "error.chat.saveFailed": "Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto, y Faber lo intenta de nuevo en tu próximo cambio. No cierres Faber todavía.",
   "error.chat.saveFull": "El disco está lleno, así que Faber no pudo guardar esta conversación. Está a salvo mientras Faber siga abierto y se guarda de nuevo en tu próximo cambio, cuando haya espacio. No cierres Faber todavía.",
+  "error.chat.historyKept": "La conversación se borró, pero sus copias de restauración siguen en el disco. Reinicia Faber para intentar eliminarlas.",
   "error.chat.deleteFailed": "Faber no pudo borrar esta conversación, así que sigue donde estaba. Inténtalo de nuevo en un momento.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado en el último punto de control guardado.",
@@ -2664,6 +2665,7 @@ export const es: Messages = {
   'notes.432.new': 'Puedes ver qué se le dijo al agente sobre tu proyecto en Detalles técnicos.',
   'notes.433.fixed': 'Tus borradores y archivos adjuntos siguen en la nueva aplicación de Windows; Faber espera al guardado al cerrar y se recupera de interrupciones.',
   'notes.434.fixed': 'Si falla al salir, Faber conserva la ventana y su icono para reintentarlo; pulsar Salir dos veces ya no interrumpe el guardado.',
+  'notes.435.better': 'Al borrar una conversación, sus copias de restauración se eliminan al momento, en vez de conservarse hasta 30 días.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

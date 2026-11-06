@@ -2096,6 +2096,7 @@ export const ptBR: Messages = {
   "error.store.full": "O disco está cheio. Nada foi aprovado.",
   "error.chat.saveFailed": "O Faber não conseguiu salvar esta conversa. Ela fica segura enquanto o Faber estiver aberto, e o Faber tenta de novo na sua próxima alteração. Não feche o Faber ainda.",
   "error.chat.saveFull": "O disco está cheio, então o Faber não conseguiu salvar esta conversa. Ela fica segura enquanto o Faber estiver aberto e é salva de novo na sua próxima alteração, assim que houver espaço. Não feche o Faber ainda.",
+  "error.chat.historyKept": "A conversa foi apagada, mas suas cópias de restauração ficaram no disco. Reinicie o Faber pra tentar apagar essas cópias.",
   "error.chat.deleteFailed": "O Faber não conseguiu apagar esta conversa, então ela continua onde está. Tente de novo daqui a pouco.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado no último checkpoint salvo.",
@@ -2651,6 +2652,7 @@ export const ptBR: Messages = {
   'notes.432.new': 'Você pode ver o que foi dito ao agente sobre seu projeto em Detalhes técnicos.',
   'notes.433.fixed': 'Seus rascunhos e anexos continuam no novo app do Windows; o Faber também espera o salvamento ao fechar e se recupera de interrupções.',
   'notes.434.fixed': 'Se falhar ao sair, o Faber continua acessível pelo ícone perto do relógio; repetir Sair não interrompe o salvamento.',
+  'notes.435.better': 'Excluir uma conversa agora apaga suas cópias de restauração na hora, em vez de guardá-las por até 30 dias.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

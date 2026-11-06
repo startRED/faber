@@ -5836,6 +5836,7 @@ impl Core {
             self.list_changed();
             return Err(FAILED.into());
         }
+        self.purge_rewind(id);
         self.titles.remove(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.saves.completed.lock().unwrap_or_else(|e| e.into_inner()).remove(id);

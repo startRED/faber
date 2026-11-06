@@ -846,6 +846,68 @@ impl History {
         result
     }
 
+    pub(crate) fn has_conversation(&self, conversation: &str) -> bool {
+        self.points.values().any(|p| p.conversation == conversation) || self.journals.values().any(|j| j.conversation == conversation)
+    }
+
+    /// Conversation deletion releases only its private records; surviving references retain their objects.
+    pub(crate) fn purge_conversation(&mut self, conversation: &str) -> Result<(), String> {
+        if !self.pending_acknowledgements(conversation).is_empty() {
+            return Err("error.rewind.deleteRecovery".into());
+        }
+        let records: Vec<_> = self
+            .journals
+            .values()
+            .filter(|j| j.conversation == conversation)
+            .map(|j| ("journals", j.id.clone(), j.folder.clone()))
+            .chain(self.points.values().filter(|p| p.conversation == conversation).map(|p| ("points", p.info.id.clone(), p.folder.clone())))
+            .collect();
+        if records.is_empty() {
+            return Ok(());
+        }
+        let mut failed = None;
+        for (kind, id, folder) in records {
+            let path = format!("{folder}/{kind}/{id}.json");
+            let result = self.delete(&path);
+            // Retirement may succeed before unlink fails; a late seal must not recreate that manifest.
+            if result.is_ok() || self.root.open_file(&path).is_err_and(|e| e.kind() == io::ErrorKind::NotFound) {
+                if kind == "points" {
+                    self.points.remove(&id);
+                } else {
+                    self.journals.remove(&id);
+                }
+            }
+            if let Err(error) = result {
+                failed.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.collect_unreferenced() {
+            failed.get_or_insert(error);
+        }
+        if let Some(error) = failed {
+            self.healthy = false;
+            *self.budget.borrow_mut() = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Missing records recover a deletion interrupted after its conversation was removed.
+    pub(crate) fn purge_unknown(&mut self, known: impl Fn(&str) -> bool) -> Result<(), String> {
+        let owners: BTreeSet<_> =
+            self.points.values().map(|p| p.conversation.clone()).chain(self.journals.values().map(|j| j.conversation.clone())).collect();
+        let mut failed = None;
+        for owner in owners {
+            if !known(&owner)
+                && self.pending_acknowledgements(&owner).is_empty()
+                && let Err(error) = self.purge_conversation(&owner)
+            {
+                failed.get_or_insert(error);
+            }
+        }
+        failed.map_or(Ok(()), Err)
+    }
+
     fn clean(&mut self, at: u64) -> Result<(), String> {
         // Unfinished journals and open baselines are pinned. Archive/retirement never changes ownership of history.
         let expired: Vec<_> =
