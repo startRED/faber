@@ -1,0 +1,2 @@
+Build storage: 27.7 GB exceeds the 12 GB budget; active and protected caches were kept
+{"readings":[{"at":1793970862,"completedAt":1793970863,"source":"app account/rateLimits/read","vendor":"codex","windows":[{"resetsAt":1794378933.0,"used":0.44,"window":"seven_day"}]}]}

@@ -1,0 +1,123 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "plan-an-app"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": null,
+        "reply": "I’d start with a simple “What do I take today?” app, with a warning before medicines run out. Your mum shouldn’t have to learn anything complicated.\n\nHere’s a first plan to react to:\n\n- Today: big, clear medicine names, amounts and times, with a “Taken” button.\n- Reminders: an alert when something is due. If she hasn’t confirmed taking it, it stays marked as unconfirmed rather than assuming she took it.\n- Supplies: enter how many tablets are left. Confirmed doses reduce the count, and the app warns when she’s getting low. Adding a new box tops it up.\n\nFor now, I’d leave out extras like scanning prescriptions or connecting to pharmacies. The first version should do those three jobs well.\n\nThree things would help me shape it:\n\n1. Does she use an iPhone or Android, and is she comfortable using apps?\n2. Would she manage it herself, or would you enter her medicines and help keep things updated?\n3. Are her medicines mostly the same amount at fixed times every day, or are there things like weekly doses, changing amounts or “only when needed”?\n\nYou don’t need to share medicine names or private health details; a rough description is enough.\n\nNothing’s built or tested yet; reminders and stock estimates would need checking before she relies on them.",
+        "secs": 31.083,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 24518,
+          "output": 563
+        },
+        "usage_incomplete": true,
+        "wall_secs": 33.7971487
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.029756,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 13715,
+        "output": 143
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0379372,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": null,
+        "reply": "I’d start with a simple app that answers three questions for your mum: “What do I take next?”, “Have I taken it?”, and “Do I need another box?”\n\nMy first plan for you to react to:\n\n- A “Today” screen with large text, showing each medicine, the amount to take, and the time. A clear “Taken” button records it, so she can check later.\n- Reminders at the times you enter, with an option to snooze. An unanswered reminder stays visible; the app shouldn’t assume she took anything.\n- A supply counter: enter how many tablets are left, subtract them when she records a dose, and show a refill reminder before they run out. You can correct the count whenever needed.\n\nAdding a medicine would mean entering its name, the instructions from her prescription, its schedule, and the remaining quantity. We should check whether she has medicines taken only when needed, because those need slightly different handling.\n\nI’ve asked who’ll use it and what phone she has, along with what’s hardest right now. Those answers will help us decide whether this should be mainly her daily checklist or something you manage together.\n\nI’d leave pharmacy connections and prescription scanning out of the first version. The main limitation is that the supply estimate depends on doses being recorded accurately.",
+        "secs": 28.3190139,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 40832,
+          "cache_write": 0,
+          "input": 14492,
+          "output": 487
+        },
+        "usage_incomplete": false,
+        "wall_secs": 28.3190139
+      },
+      "request": "plan-an-app",
+      "skipped": null,
+      "title": "Plan an app in conversation",
+      "verdict": {
+        "pick": "B",
+        "reason": "B gives a clear first plan and asks practical questions the user can answer without technical knowledge. A offers a useful plan but never actually asks its questions and claims to have already asked them.",
+        "score_a": 7.0,
+        "score_b": 9.0
+      },
+      "winner": "faber"
+    }
+  ],
+  "runId": "attempt-1-plan-an-app-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 49792,
+      "cache_write": 0,
+      "input": 52725,
+      "output": 1193
+    },
+    "usd": 0.0676932
+  },
+  "subscriptionOnly": true
+}

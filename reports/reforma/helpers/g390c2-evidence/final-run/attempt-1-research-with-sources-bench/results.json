@@ -1,0 +1,171 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "research-with-sources"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "7 links",
+              "name": "the answer cites at least four distinct links",
+              "ok": true
+            },
+            {
+              "detail": "7 of 7 links checked",
+              "name": "every cited link was checked",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "checked links open or return 401, 403 or 429",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no placeholder links",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "As of November 6, 2026, the latest LTS line is Node.js 26 (“Lithium”), with end of life scheduled for April 30, 2029. Node.js 24 is still supported, but is now in Maintenance LTS until April 30, 2028; Node.js 22 reaches end of life April 30, 2027. [Official release status](https://nodejs.org/en/about/previous-releases), [official support schedule](https://raw.githubusercontent.com/nodejs/Release/main/schedule.json).\n\nFor backend services, these are my five highest-impact changes from 22 to 24. I’m including changes introduced during the 24.x line, not just 24.0; availability can differ across minor versions and backports.\n\n1. More capable JavaScript, especially resource cleanup. Node.js 24 launched with V8 13.6, including explicit resource management (`using` / `await using`), `RegExp.escape()` and `Error.isError()`. The practical wins are predictable cleanup for resources that support disposal and safer construction of regular expressions from literal text. [Node.js 24 release notes](https://nodejs.org/en/blog/release/v24.0.0).\n\n2. More efficient request-context tracking. `AsyncLocalStorage` switched to `AsyncContextFrame` by default. This matters for request IDs, logging and tracing that must follow a request across asynchronous operations. It’s an implementation improvement, not a requirement to rewrite your context code; measure your own service rather than assuming a particular speedup. [Official explanation](https://nodejs.org/en/blog/release/v24.0.0#asynclocalstorage-defaults-to-asynccontextframe).\n\n3. Better outbound HTTP and built-in proxy support. Node.js 24 includes Undici 7, the HTTP client behind built-in `fetch()`. Environment-proxy support arrived for `fetch()` in 24.0 and for built-in `http`/`https` clients in 24.5. That can remove custom proxy plumbing in corporate deployments, but proxy handling requires opt-in, such as `NODE_USE_ENV_PROXY=1`. [24.0 HTTP changes](https://nodejs.org/en/blog/release/v24.0.0#undici-7), [24.5 proxy details](https://nodejs.org/en/blog/release/v24.5.0).\n\n4. Updated TLS foundations and certificate control. Version 24.5 upgraded to OpenSSL 3.5.1 and added `tls.setDefaultCACertificates()`. Services connecting to internal HTTPS endpoints can configure their default trusted certificate authorities centrally. This is also a reason to exercise real database and HTTPS connections during migration, especially with custom certificates. [Official 24.5 release notes](https://nodejs.org/en/blog/release/v24.5.0).\n\n5. Legacy APIs become a more immediate migration concern. In 24.0, `url.parse()` became runtime-deprecated, and previously deprecated `tls.createSecurePair()` was removed. Passing an argument array to `spawn()` or `execFile()` with `shell: true` also became runtime-deprecated because arguments aren’t safely escaped. Prioritize URL handling and subprocess calls when reviewing older services. [Official deprecation reference](https://nodejs.org/download/release/v24.0.0/docs/api/deprecations.html).\n\nI checked official documentation, not an application migration. Compatibility and performance still need verification against your dependencies and workload.",
+        "secs": 54.005,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 150784,
+          "cache_write": 0,
+          "input": 42262,
+          "output": 1309
+        },
+        "usage_incomplete": true,
+        "wall_secs": 57.0021297
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.033998,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 14766,
+        "output": 357
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.15135079999999998,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "8 links",
+              "name": "the answer cites at least four distinct links",
+              "ok": true
+            },
+            {
+              "detail": "8 of 8 links checked",
+              "name": "every cited link was checked",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "checked links open or return 401, 403 or 429",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no placeholder links",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "As of November 6, 2026, the latest Active LTS line is Node.js 26 “Lithium,” with end of life scheduled for April 30, 2029. Node.js 24 remains supported in Maintenance LTS until April 30, 2028; Node.js 22 until April 30, 2027. See the official [release schedule](https://github.com/nodejs/Release#release-schedule) and [Node.js 26 LTS announcement](https://nodejs.org/en/blog/release/v26.13.0).\n\nFor backend services, these are my five picks for the most consequential changes from 22 to 24, including improvements made during the 24.x line:\n\n1. More efficient request-context tracking. Node.js 24 switches `AsyncLocalStorage` to `AsyncContextFrame` by default. This matters for services that carry request IDs, tracing information, or tenant context across asynchronous calls. The public API stays familiar, but the implementation is more efficient. [Node.js 24 release notes](https://nodejs.org/en/blog/release/v24.0.0)\n\n2. New JavaScript features for cleanup and safer string handling. The launch version moves from Node.js 22’s V8 12.4 to V8 13.6, adding explicit resource management (`using` / `await using`), `RegExp.escape()`, and `Error.isError()`. For backend code, these help with resource cleanup, constructing regular expressions from input, and recognizing errors. Cleanup requires resources that implement the disposal protocol. [Node.js 22 release notes](https://nodejs.org/en/blog/release/v22.0.0), [Node.js 24 release notes](https://nodejs.org/en/blog/release/v24.0.0)\n\n3. Built-in TypeScript execution becomes stable in 24.12. You can run supported `.ts` files directly, potentially simplifying small services and operational scripts. This strips types without checking them, ignores `tsconfig.json`, and doesn’t provide full TypeScript support. It also isn’t exclusive to 24: Node.js 22.18 enabled stripping by default, but its documentation still labels it release candidate. [Node.js 24 TypeScript documentation](https://nodejs.org/docs/latest-v24.x/api/typescript.html), [Node.js 22 TypeScript documentation](https://nodejs.org/docs/latest-v22.x/api/typescript.html)\n\n4. The HTTP client underneath `fetch()` moves to Undici 7. That makes upgrading Node relevant even if your outbound HTTP code doesn’t change. For services that call other APIs, I’d prioritize checking connection handling, streaming responses, and failure behavior during migration. The bundled client and a separately installed `undici` package can have different versions. [Node.js 24 release notes](https://nodejs.org/en/blog/release/v24.0.0), [official Undici documentation](https://github.com/nodejs/undici#undici-vs-fetch)\n\n5. Older APIs create migration work. Node.js 24 introduces runtime deprecation warnings for `url.parse()` and `SlowBuffer`, and removes `tls.createSecurePair()`. Older dependencies can trigger these too. Replace legacy URL parsing with the WHATWG `URL` API and check dependencies before rollout. [Official deprecations and removals](https://nodejs.org/en/blog/release/v24.0.0#deprecations-and-removals)\n\nI checked official documentation, not application benchmarks; performance gains and compatibility still need verification against your service.",
+        "secs": 45.5965136,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 95488,
+          "cache_write": 0,
+          "input": 64901,
+          "output": 1200
+        },
+        "usage_incomplete": false,
+        "wall_secs": 45.5965136
+      },
+      "request": "research-with-sources",
+      "skipped": null,
+      "title": "Research with sources",
+      "verdict": {
+        "pick": "B",
+        "reason": "B gives backend developers more actionable coverage through proxy configuration, certificate management, and the subprocess deprecation. Both provide five relevant changes, LTS dates, and sufficient official sources, but A’s HTTP-client discussion is less specific.",
+        "score_a": 8.0,
+        "score_b": 9.0
+      },
+      "winner": "faber"
+    }
+  ],
+  "runId": "attempt-1-research-with-sources-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 255232,
+      "cache_write": 0,
+      "input": 121929,
+      "output": 2866
+    },
+    "usd": 0.18534879999999998
+  },
+  "subscriptionOnly": true
+}

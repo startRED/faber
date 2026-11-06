@@ -1,0 +1,146 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "summarize-sales"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "original CSV preserved and summarized",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh categories, refunds, rounding and empty export",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid headers, quoting and amounts fail",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "",
+        "secs": 0.01212,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.01212
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.07589080000000001,
+        "error": null,
+        "folder": "E:\\Documentos\\ProjetosIA\\faber\\.claude\\worktrees\\bench-1-0\\reports\\reforma\\helpers\\g390c2-evidence\\attempt-1-summarize-sales-bench\\summarize-sales\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "original CSV preserved and summarized",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh categories, refunds, rounding and empty export",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid headers, quoting and amounts fail",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Created summarize.mjs and tests. All checks passed; sales.csv is byte-for-byte unchanged.\n\nRun:\n```sh\nnode summarize.mjs sales.csv\n```\n\nOutput:\n```json\n{\"Food\":1025,\"Office, supplies\":230,\"Client \\\"A\\\"\":100}\n```\n\nNo dependencies added. Large-file memory usage wasn’t tested; the script reads the whole file into memory.",
+        "secs": 53.2499747,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 128128,
+          "cache_write": 0,
+          "input": 22444,
+          "output": 1819
+        },
+        "usage_incomplete": false,
+        "wall_secs": 53.2499747
+      },
+      "request": "summarize-sales",
+      "skipped": null,
+      "title": "Summarize a CSV export without changing the source",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-summarize-sales-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 128128,
+      "cache_write": 0,
+      "input": 22444,
+      "output": 1819
+    },
+    "usd": 0.07589080000000001
+  },
+  "subscriptionOnly": true
+}

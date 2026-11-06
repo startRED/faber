@@ -1,0 +1,3 @@
+Created migrate.mjs and migrated settings.json to version 2. Tests passed: nested preferences preserved, invalid inputs unchanged, and version 2 unchanged byte-for-byte on rerun. notes.txt is unchanged.
+
+No dependencies added. Disk-failure scenarios weren’t simulated.

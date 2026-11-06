@@ -1,0 +1,161 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "summarize-sales"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-summarize-sales-bench\\summarize-sales\\faber\\state\\copies\\d6bc86a5-085a-4bc0-92cb-5fd9fee3f21d",
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "original CSV preserved and summarized",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh categories, refunds, rounding and empty export",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid headers, quoting and amounts fail",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "\n\nDone: summarize.mjs is saved, the automated checks pass, and running it on sales.csv produces the expected totals. sales.csv is byte-for-byte unchanged. Nothing requested remains unfinished.\n\nVery large totals stay exact in the output, though downstream JSON readers may round them.",
+        "secs": 83.253,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 253440,
+          "cache_write": 0,
+          "input": 36200,
+          "output": 2544
+        },
+        "usage_incomplete": true,
+        "wall_secs": 94.1763602
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.033628,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 15596,
+        "output": 154
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.06986160000000001,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-summarize-sales-bench\\summarize-sales\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "original CSV preserved and summarized",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh categories, refunds, rounding and empty export",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid headers, quoting and amounts fail",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Created summarize.mjs with no dependencies. Tests passed, and sales.csv is byte-for-byte unchanged.\n\n```sh\nnode summarize.mjs sales.csv\n```\n\nOutput:\n```json\n{\"Food\":1025,\"Office, supplies\":230,\"Client \\\"A\\\"\":100}\n```\n\nLarge totals stay exact in the output; JavaScript consumers using JSON.parse may round integers beyond its safe range.",
+        "secs": 53.4359412,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 97536,
+          "cache_write": 0,
+          "input": 20324,
+          "output": 1946
+        },
+        "usage_incomplete": false,
+        "wall_secs": 53.4359412
+      },
+      "request": "summarize-sales",
+      "skipped": null,
+      "title": "Summarize a CSV export without changing the source",
+      "verdict": {
+        "pick": "Tie",
+        "reason": "Both implementations meet the requirements, preserve sales.csv, and pass the automatic checks. Their parsing and exact integer-cent totals are functionally equivalent.",
+        "score_a": 10.0,
+        "score_b": 10.0
+      },
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-summarize-sales-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 359936,
+      "cache_write": 0,
+      "input": 72120,
+      "output": 4644
+    },
+    "usd": 0.10348960000000001
+  },
+  "subscriptionOnly": true
+}

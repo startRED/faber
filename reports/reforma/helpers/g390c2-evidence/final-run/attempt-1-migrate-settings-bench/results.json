@@ -1,0 +1,171 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "migrate-settings"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-migrate-settings-bench\\migrate-settings\\faber\\state\\copies\\8b83bdea-d5b3-457a-9a13-307b7982fc0c",
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "notes preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "supplied settings migrated without data loss",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh preferences preserved and migration is idempotent",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid input fails without overwriting bytes",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "\n\nDone and verified: `migrate.mjs` uses no dependencies, the supplied settings are migrated, and `notes.txt` is unchanged. Checks passed for nested preferences, unchanged repeat runs, and invalid inputs leaving the file untouched.\n\nDisk-write failures weren’t simulated.",
+        "secs": 84.896,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 251136,
+          "cache_write": 0,
+          "input": 36194,
+          "output": 2354
+        },
+        "usage_incomplete": true,
+        "wall_secs": 95.6026285
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.034236,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 15415,
+        "output": 251
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.076416,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-migrate-settings-bench\\migrate-settings\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "notes preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "supplied settings migrated without data loss",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh preferences preserved and migration is idempotent",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid input fails without overwriting bytes",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Created migrate.mjs without dependencies and migrated settings.json to version 2. notes.txt is unchanged.\n\nTests passed for nested preferences, invalid inputs leaving bytes untouched, and version 2 remaining byte-for-byte unchanged.\n\nDisk failure scenarios weren’t simulated.",
+        "secs": 53.6127575,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 124800,
+          "cache_write": 0,
+          "input": 22773,
+          "output": 1839
+        },
+        "usage_incomplete": false,
+        "wall_secs": 53.6127575
+      },
+      "request": "migrate-settings",
+      "skipped": null,
+      "title": "Migrate preferences without losing existing data",
+      "verdict": {
+        "pick": "Tie",
+        "reason": "Both deliver the requested migration, preserve notes.txt, leave version 2 bytes untouched, and pass all automatic checks. Both share a minor limitation: parsing and rewriting version 1 can change unknown numeric values beyond JavaScript’s safe precision.",
+        "score_a": 9.0,
+        "score_b": 9.0
+      },
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-migrate-settings-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 384896,
+      "cache_write": 0,
+      "input": 74382,
+      "output": 4444
+    },
+    "usd": 0.110652
+  },
+  "subscriptionOnly": true
+}

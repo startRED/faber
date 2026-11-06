@@ -12,9 +12,19 @@ export const QUIET_MS = 10 * POLL_MS;
 export const LIMIT_MS = 14 * 60 * POLL_MS;
 export const CAP_USD = 25;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidence = path.join(root, 'reports/reforma/helpers/g390b-evidence');
+const codexOnly = process.argv.includes('--codex-only');
+// The engine correctly refuses workspaces under credential-folder names, including this .claude worktree.
+export const CODEX_EVIDENCE = path.join(os.tmpdir(), 'faber-g390c2-final-evidence');
+const evidence = codexOnly ? CODEX_EVIDENCE : path.join(root, 'reports/reforma/helpers/g390b-evidence');
 const release = '0adba5bb';
-const billed = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)|OPENAI_API_KEY|CODEX_API_KEY|OPENAI_BASE_URL)$/i;
+const billed = /API_KEY|AUTH_TOKEN|ACCESS_TOKEN|BEARER_TOKEN|SECRET_ACCESS_KEY|ACCESS_KEY_ID|SESSION_TOKEN|BILLING|BASE_URL|^OPENAI_(ORG_ID|PROJECT_ID|ORGANIZATION|PROJECT)$|^CLAUDE_CODE_USE_|^AWS_PROFILE$|^GOOGLE_APPLICATION_CREDENTIALS$/i;
+
+export function codexWeekly(receipt) {
+  if (!verifiedQuota(receipt, ['codex'])) throw new Error('Codex quota receipt missing or invalid');
+  const windows = receipt.readings[0].windows.filter((w) => w.window === 'seven_day');
+  if (windows.length !== 1) throw new Error('Codex weekly quota missing or duplicated');
+  return windows[0].used;
+}
 
 export function subscriptionEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !billed.test(key)));
@@ -71,8 +81,8 @@ export function killArgs(pid) {
   return ['/PID', String(pid), '/T', '/F'];
 }
 
-export function verifiedQuota(receipt) {
-  return Array.isArray(receipt?.readings) && receipt.readings.length === 2 && ['claude', 'codex'].every((vendor) =>
+export function verifiedQuota(receipt, vendors = ['claude', 'codex']) {
+  return Array.isArray(receipt?.readings) && receipt.readings.length === vendors.length && vendors.every((vendor) =>
     receipt.readings.filter((r) => r.vendor === vendor).length === 1 && receipt.readings.some((r) =>
       r.vendor === vendor && !r.unknownCost && !r.error && typeof r.source === 'string' &&
       Array.isArray(r.windows) && r.windows.length > 0 && r.windows.every((w) =>
@@ -141,6 +151,8 @@ function gameRunning() {
 
 async function main() {
   if (process.platform !== 'win32') throw new Error('This release watcher requires Windows');
+  // Sanitize before git, the guard, tasklist and taskkill too; descendants inherit this environment.
+  for (const key of Object.keys(process.env)) if (billed.test(key)) delete process.env[key];
   await mkdir(evidence, { recursive: true });
   const lock = await open(path.join(evidence, 'watcher.lock'), 'wx');
   await lock.writeFile(String(process.pid));
@@ -150,6 +162,7 @@ async function main() {
   let stopping = null;
   let gameAt = 0;
   let interrupted = false;
+  let codexStopped = false;
   const killOwned = () => {
     if (!active || active.exitCode !== null || active.signalCode !== null) return;
     // taskkill sees only the PID returned by our own spawn; never /IM or another session's process.
@@ -157,6 +170,7 @@ async function main() {
   };
   const onGame = (reason = 'game') => {
     gameAt = Date.now();
+    if (codexOnly && attempts.length > 0) codexStopped = true;
     if (active) {
       stopping = reason;
       try { killOwned(); } catch { stopping = 'owned process tree termination failed'; }
@@ -189,6 +203,7 @@ async function main() {
     guard = await gameGuard(onGame);
     const invoke = async (args, name, deadline) => {
       guard.check();
+      if (codexStopped) return { reason: 'stopped: cs2 started during the admitted attempt' };
       if (interrupted) return { reason: 'interrupted' };
       if (Date.now() >= deadline) return { reason: '14-hour limit' };
       if (gameRunning()) return { reason: 'game' };
@@ -228,6 +243,35 @@ async function main() {
       run: async (deadline) => {
         const attempt = attempts.length + 1;
         attempts.push({ attempt });
+        if (codexOnly) {
+          const requests = ['organize-folder', 'plan-an-app', 'todo-app', 'research-with-sources', 'everyday-question', 'fix-invoice', 'migrate-settings', 'summarize-sales'];
+          for (const request of requests) {
+            let benchOutcome;
+            for (const phase of ['before', 'bench', 'after']) {
+              const name = `attempt-${attempt}-${request}-${phase}`;
+              const quota = phase !== 'bench';
+              const args = quota ? ['--quota-only', '--codex-only'] : ['--codex-only', '--only', request,
+                '--cap-usd', String(CAP_USD), '--per-run-usd', String(CAP_USD), '--dir', evidence, '--run-id', name];
+              const outcome = await invoke(args, name, deadline);
+              if (outcome.reason) return outcome.reason === 'game' ? 'stopped: cs2 started' : outcome.reason;
+              if (quota) {
+                const output = await readFile(path.join(evidence, `${name}.stdout.log`), 'utf8');
+                const receipt = JSON.parse(output.trim().split(/\r?\n/).findLast((line) => line.startsWith('{"readings":')) ?? 'null');
+                receipts.push({ attempt, request, phase, ...receipt });
+                const used = codexWeekly(receipt);
+                record({ event: 'weekly-quota', request, phase, used });
+                if (outcome.code !== 0) return `Codex quota reader exited ${outcome.code}`;
+                if (used > 0.70) return `stopped: Codex weekly ${(used * 100).toFixed(1)}% used exceeds 70%`;
+              } else {
+                benchOutcome = outcome;
+              }
+            }
+            if (benchOutcome.code !== 0) return `${request} benchmark exited ${benchOutcome.code}; see stderr log`;
+            const saved = JSON.parse(await readFile(path.join(evidence, `attempt-${attempt}-${request}-bench`, 'results.json'), 'utf8'));
+            if (!saved.rows?.some((r) => r.plain && r.faber)) return `${request}: no comparison result`;
+          }
+          return 'finished';
+        }
         let failure = quotaUnknown ? 'quota spending unverified; no more readings' : null;
         for (const phase of ['before', 'bench-claude', 'bench-codex', 'after']) {
           const name = `attempt-${attempt}-${phase}`;
@@ -260,7 +304,8 @@ async function main() {
     guard?.close();
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
-    const summary = { result, started: new Date(started).toISOString(), ended: new Date().toISOString(), capUsd: CAP_USD, attempts, receipts };
+    const summary = { result, started: new Date(started).toISOString(), ended: new Date().toISOString(), codexOnly,
+      capUsd: codexOnly ? null : CAP_USD, weeklyStopUsed: codexOnly ? 0.70 : null, attempts, receipts };
     await writeFile(path.join(evidence, 'summary.json'), JSON.stringify(summary, null, 2));
     record({ event: 'finished', result });
     await new Promise((resolve) => events.end(resolve));

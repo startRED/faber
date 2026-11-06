@@ -1,0 +1,241 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "todo-app"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-todo-app-bench\\todo-app\\faber\\state\\copies\\1167c00d-2ba3-450d-bc32-c77c70b2178b",
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "exit 0, 5 passing",
+              "name": "the tests it wrote pass with node --test",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "todo.js exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "list on no tasks exits 0",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "add succeeds twice",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] buy milk | 2. [ ] call mum",
+              "name": "list numbers the tasks from 1 with an empty box",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "done marks the first task",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "remove deletes the first task and the rest shifts down",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] call mum",
+              "name": "exactly one task is left",
+              "ok": true
+            },
+            {
+              "detail": "[\n  {\n    \"text\": \"call mum\",\n    \"done\": false\n  }\n]\n",
+              "name": "tasks.json is valid JSON and holds the task",
+              "ok": true
+            },
+            {
+              "detail": "1,1,1,1,1,1",
+              "name": "a bad number, a missing text and an unknown command exit non-zero with a message",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a README exists",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "\n\nDone: the tool, tests, and README are saved. I reran `node --test`; all 5 tests passed. Nothing requested remains unfinished.\n\nSimultaneous edits to the same task file are unsupported and weren’t tested.",
+        "secs": 96.947,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 217856,
+          "cache_write": 0,
+          "input": 36050,
+          "output": 3042
+        },
+        "usage_incomplete": true,
+        "wall_secs": 107.8607889
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.038606,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 17825,
+        "output": 206
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0962652,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-todo-app-bench\\todo-app\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "exit 0, 5 passing",
+              "name": "the tests it wrote pass with node --test",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "todo.js exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "list on no tasks exits 0",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "add succeeds twice",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] buy milk | 2. [ ] call mum",
+              "name": "list numbers the tasks from 1 with an empty box",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "done marks the first task",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "remove deletes the first task and the rest shifts down",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] call mum",
+              "name": "exactly one task is left",
+              "ok": true
+            },
+            {
+              "detail": "[\n  {\n    \"text\": \"call mum\",\n    \"done\": false\n  }\n]\n",
+              "name": "tasks.json is valid JSON and holds the task",
+              "ok": true
+            },
+            {
+              "detail": "1,1,1,1,1,1",
+              "name": "a bad number, a missing text and an unknown command exit non-zero with a message",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a README exists",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Implemented `todo.js`, `todo.test.js`, and a README with usage instructions. All four commands work, with persistent storage and clear validation errors.\n\nRan `node --test`: all 5 tests passed.\n\nNo dependencies added. Simultaneous edits to the same task file aren’t supported; run commands one at a time.",
+        "secs": 93.3696403,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 161152,
+          "cache_write": 0,
+          "input": 21930,
+          "output": 3629
+        },
+        "usage_incomplete": false,
+        "wall_secs": 93.3696403
+      },
+      "request": "todo-app",
+      "skipped": null,
+      "title": "A small complete app with tests",
+      "verdict": {
+        "pick": "A",
+        "reason": "Both deliver the requested tool, README, and passing tests. A also validates single-line task text, while B accepts embedded newlines that break the required one-line-per-task listing.",
+        "score_a": 10.0,
+        "score_b": 9.0
+      },
+      "winner": "faber"
+    }
+  ],
+  "runId": "attempt-1-todo-app-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 387968,
+      "cache_write": 0,
+      "input": 75805,
+      "output": 6877
+    },
+    "usd": 0.1348712
+  },
+  "subscriptionOnly": true
+}

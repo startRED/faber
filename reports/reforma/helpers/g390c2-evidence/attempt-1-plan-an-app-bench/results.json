@@ -1,0 +1,108 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "plan-an-app"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": null,
+        "reply": "",
+        "secs": 0.0112567,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0112567
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0489516,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": null,
+        "reply": "I’d start with a simple app that answers three things for your mum: “What do I take next?”, “Have I taken it?”, and “When will I need another box?”\n\nTo shape it, tell me:\n\n1. Does she use an iPhone or an Android phone, and is she comfortable using apps?\n2. Will she manage it herself, or will you help set it up and keep it updated?\n3. Are her medicines taken at fixed times every day, or do some change by day or get taken only when needed?\n\nHere’s a first plan to react to. I’m assuming she’ll use it on her phone.\n\n- **Today:** A clear list of what to take and when, with large text and a “Taken” button.\n- **Reminders:** A notification when something is due, with an option to remind her again later. An unanswered reminder stays unconfirmed.\n- **Medicine list:** The medicine name, instructions from her prescription, schedule, and how many tablets are left.\n- **Running low:** Each confirmed dose reduces the count. The app estimates how many days remain and warns her before she runs out. Adding a new box or correcting the count should be easy.\n\nFor setup, you could enter everything together, then she’d mostly use the Today screen.\n\nI’ve left pharmacy ordering and other extras out of this first version. The stock estimate depends on recording doses and new boxes accurately.",
+        "secs": 23.5942978,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 7296,
+          "cache_write": 0,
+          "input": 21841,
+          "output": 454
+        },
+        "usage_incomplete": false,
+        "wall_secs": 23.5942978
+      },
+      "request": "plan-an-app",
+      "skipped": null,
+      "title": "Plan an app in conversation",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-plan-an-app-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 7296,
+      "cache_write": 0,
+      "input": 21841,
+      "output": 454
+    },
+    "usd": 0.0489516
+  },
+  "subscriptionOnly": true
+}

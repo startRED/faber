@@ -1,0 +1,36 @@
+Build storage: 29.5 GB exceeds the 12 GB budget; active and protected caches were kept
+run attempt-1-fix-invoice-bench: 1 request(s), Faber on ["codex"] (Auto) against plain codex (gpt-6.1-sol medium), judge strongest measured profile (profile effort) (automatic vendor selection), cap US$25 or 3000000 first-time tokens
+  1. fix-invoice [Project] proof Some("invoice"), A is Plain
+[1/1] fix-invoice
+  plain: ok true, 36s, US$Some(0.061475199999999994), 
+  faber: ok true, 61s, US$None, 
+  proofs: faber Some(true), plain Some(true)
+  judge: Some(Tie) -> None; Both provide the same correct implementation, preserve README.md, and include runnable regression tests with no dependencies. B tests a few additional input combinations, but both fully cover the requested behavior and pass the automatic checks.
+
+| Request | Kind | Judge (blind) | Faber proof | Plain proof | Faber s | Plain s | Faber tokens | Plain tokens | Faber US$ | Plain US$ |
+| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| fix-invoice | Project | tie | pass (3/3) | pass (3/3) | 61 | 36 | 38532 (212096 cached) partial | 21732 (95232 cached) | unknown | 0.061 |
+
+| Request | Judge vendor/model/effort | Independent of plain | Independent of Faber |
+| :--- | :--- | :--- | :--- |
+| fix-invoice | codex / gpt-6.1-sol / high | false | false |
+
+Cross-vendor qualified verdicts: 0 (Faber wins 0, plain wins 0, ties 0). These describe independent opinions; they alone do not prove the quality targets.
+
+Projects: 0/1 Faber wins or ties with independent review and executable proof (target 9/10). The denominator includes every recorded Project request, including failures and skips. This is not full-version qualification; Chat source accuracy and coverage of the full request set remain separate.
+
+| Totals | Faber | Plain |
+| :--- | ---: | ---: |
+| Judge wins (ties 1) | 0 | 0 |
+| Time (s) | 61 | 36 |
+| First-time tokens (input, output, cache writes) | 38532 | 21732 |
+| Cache-read tokens | 212096 | 95232 |
+| API-equivalent US$ | unknown | 0.061 |
+
+Spend of the whole run: US$unknown for the sides, US$0.032 for the judge; cap US$25.00 or 3000000 first-time tokens (74979 used).
+
+Whole-run cost unknown; reported dollars are only a lower bound. No further paid work was admitted.
+
+Faber tokens are partial: routing and auxiliary token counters are unavailable; their costs are included through the ledger. Token totals are lower bounds.
+
+results: E:\Temp\faber-g390c2-final-evidence\attempt-1-fix-invoice-bench\results.json

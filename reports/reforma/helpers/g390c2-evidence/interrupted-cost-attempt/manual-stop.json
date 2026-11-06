@@ -1,0 +1,9 @@
+{
+  "partialTokens": true,
+  "time": "2026-11-06T15:06:54.6517701Z",
+  "lastWeeklyUsed": 0.47,
+  "reason": "Owner-authorized subscription mode was still interrupted by the harness internal API-equivalent cost guard; stopped only this owned watcher tree to correct the flag propagation",
+  "watcherPid": 21776,
+  "harness": "engine/examples/bench.rs:425",
+  "afterReading": "unpaired at interruption"
+}

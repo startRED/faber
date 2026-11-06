@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "shortcuts": {
+    "save": "Ctrl+S"
+  },
+  "zoom": 0,
+  "experimental": {
+    "enabled": false
+  },
+  "appearance": {
+    "theme": "dark"
+  }
+}

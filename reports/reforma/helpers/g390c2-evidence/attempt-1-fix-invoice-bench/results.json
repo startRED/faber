@@ -1,0 +1,146 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "fix-invoice"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "README preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invoice contract and invalid inputs",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a runnable regression test was supplied",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "",
+        "secs": 0.0109741,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0109741
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.12204519999999999,
+        "error": null,
+        "folder": "E:\\Documentos\\ProjetosIA\\faber\\.claude\\worktrees\\bench-1-0\\reports\\reforma\\helpers\\g390c2-evidence\\attempt-1-fix-invoice-bench\\fix-invoice\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "README preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invoice contract and invalid inputs",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a runnable regression test was supplied",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Fixed `total(lines)`: zero quantity charges zero, invalid quantities/prices throw, and empty invoices return zero. The named export and integer-cent return value are preserved.\n\nAdded `invoice.test.mjs`; both tests pass with:\n\n```sh\nnode --test\n```\n\nREADME.md is unchanged. No dependencies added. Arithmetic overflow beyond safe-integer totals wasn’t addressed.",
+        "secs": 39.4602005,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 63872,
+          "cache_write": 0,
+          "input": 52259,
+          "output": 1114
+        },
+        "usage_incomplete": false,
+        "wall_secs": 39.4602005
+      },
+      "request": "fix-invoice",
+      "skipped": null,
+      "title": "Fix an invoice calculation without changing its interface",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-fix-invoice-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 63872,
+      "cache_write": 0,
+      "input": 52259,
+      "output": 1114
+    },
+    "usd": 0.12204519999999999
+  },
+  "subscriptionOnly": true
+}

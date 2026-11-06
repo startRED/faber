@@ -1,0 +1,8 @@
+Build storage: 30.2 GB exceeds the 12 GB budget; active and protected caches were kept
+Build folder E:/Documentos/ProjetosIA/faber\target: 30.5 GB is above the 12 GB cap, and nothing else is idle to remove
+BASE  phase-1-base is red since 10:17 UTC: feat(permissions): permission cards show what is being approved in pl… (6f4840f), https://github.com/startRED/faber/actions/runs/42201535907
+BASE    screen (1/8): FAIL screen settings keyboard traversal reaches every control with a visible ring at 720 px (17.2 s)
+BASE    still running: ci (c35f096); if it is the fix, wait for it
+BASE  Fix the base first, or keep your commits until it is green: a push onto it only waits behind the failure.
+Claims hold; nothing was built. The suites run in CI on the queued commit.
+Time: 16.7 s in all

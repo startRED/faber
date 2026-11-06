@@ -1,0 +1,4 @@
+
+> faber@0.3.2 typecheck
+> tsc --noEmit && tsc -p electron --noEmit
+

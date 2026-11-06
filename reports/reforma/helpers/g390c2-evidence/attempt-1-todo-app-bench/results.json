@@ -1,0 +1,226 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "todo-app"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "exit 0, 3 passing",
+              "name": "the tests it wrote pass with node --test",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "todo.js exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "list on no tasks exits 0",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "add succeeds twice",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] buy milk | 2. [ ] call mum",
+              "name": "list numbers the tasks from 1 with an empty box",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "done marks the first task",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "remove deletes the first task and the rest shifts down",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] call mum",
+              "name": "exactly one task is left",
+              "ok": true
+            },
+            {
+              "detail": "[\n  {\n    \"text\": \"call mum\",\n    \"done\": false\n  }\n]\n",
+              "name": "tasks.json is valid JSON and holds the task",
+              "ok": true
+            },
+            {
+              "detail": "1,1,1,1,1,1",
+              "name": "a bad number, a missing text and an unknown command exit non-zero with a message",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a README exists",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "",
+        "secs": 0.0105266,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0105266
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.106166,
+        "error": null,
+        "folder": "E:\\Documentos\\ProjetosIA\\faber\\.claude\\worktrees\\bench-1-0\\reports\\reforma\\helpers\\g390c2-evidence\\attempt-1-todo-app-bench\\todo-app\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "exit 0, 3 passing",
+              "name": "the tests it wrote pass with node --test",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "todo.js exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "list on no tasks exits 0",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "add succeeds twice",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] buy milk | 2. [ ] call mum",
+              "name": "list numbers the tasks from 1 with an empty box",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "done marks the first task",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "remove deletes the first task and the rest shifts down",
+              "ok": true
+            },
+            {
+              "detail": "1. [ ] call mum",
+              "name": "exactly one task is left",
+              "ok": true
+            },
+            {
+              "detail": "[\n  {\n    \"text\": \"call mum\",\n    \"done\": false\n  }\n]\n",
+              "name": "tasks.json is valid JSON and holds the task",
+              "ok": true
+            },
+            {
+              "detail": "1,1,1,1,1,1",
+              "name": "a bad number, a missing text and an unknown command exit non-zero with a message",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a README exists",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Implemented all four commands in `todo.js`, persistent storage, clear error messages, and a short README.\n\nRan `node --test`: all 3 tests passed, covering task operations, invalid arguments, and damaged storage.\n\nConcurrent writes aren’t supported; run commands one at a time.",
+        "secs": 113.1754555,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 133120,
+          "cache_write": 0,
+          "input": 23122,
+          "output": 4661
+        },
+        "usage_incomplete": false,
+        "wall_secs": 113.1754555
+      },
+      "request": "todo-app",
+      "skipped": null,
+      "title": "A small complete app with tests",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-todo-app-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 133120,
+      "cache_write": 0,
+      "input": 23122,
+      "output": 4661
+    },
+    "usd": 0.106166
+  },
+  "subscriptionOnly": true
+}

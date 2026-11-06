@@ -1,0 +1,18 @@
+{
+  "time": "2026-11-06T10:32:56.0907133Z",
+  "processes": [
+    {
+      "cpuSeconds": 0.3125,
+      "bytes": 65835008,
+      "name": "node",
+      "pid": 25784
+    },
+    {
+      "cpuSeconds": 10.890625,
+      "bytes": 81133568,
+      "name": "powershell",
+      "pid": 19244
+    }
+  ],
+  "cores": 16
+}

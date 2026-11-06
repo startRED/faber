@@ -1,0 +1,13 @@
+Created summarize.mjs and tests. All checks passed; sales.csv is byte-for-byte unchanged.
+
+Run:
+```sh
+node summarize.mjs sales.csv
+```
+
+Output:
+```json
+{"Food":1025,"Office, supplies":230,"Client \"A\"":100}
+```
+
+No dependencies added. Large-file memory usage wasn’t tested; the script reads the whole file into memory.

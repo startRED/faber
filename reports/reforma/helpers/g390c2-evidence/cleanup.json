@@ -1,0 +1,321 @@
+{
+  "matchingPids": [
+    {
+      "ProcessId": 26748,
+      "ParentProcessId": 35732,
+      "Name": "node.exe",
+      "CreationDate": "2026-11-06T11:23:44.411304-03:00"
+    }
+  ],
+  "note": "PID reuse is distinguished by creation time; only recorded watcher and top-level child IDs are checked, not unrelated sessions",
+  "watchedRecords": [
+    {
+      "pid": 50428,
+      "time": "2026-11-06T13:11:20.779Z",
+      "name": "attempt-1-organize-folder-before"
+    },
+    {
+      "pid": 11108,
+      "time": "2026-11-06T13:11:57.009Z",
+      "name": "attempt-1-organize-folder-bench"
+    },
+    {
+      "pid": 30108,
+      "time": "2026-11-06T13:13:22.37Z",
+      "name": "attempt-1-organize-folder-after"
+    },
+    {
+      "pid": 43408,
+      "time": "2026-11-06T13:13:32.077Z",
+      "name": "attempt-1-plan-an-app-before"
+    },
+    {
+      "pid": 46512,
+      "time": "2026-11-06T13:13:41.532Z",
+      "name": "attempt-1-plan-an-app-bench"
+    },
+    {
+      "pid": 50660,
+      "time": "2026-11-06T13:14:13.812Z",
+      "name": "attempt-1-plan-an-app-after"
+    },
+    {
+      "pid": 44288,
+      "time": "2026-11-06T13:14:23.56Z",
+      "name": "attempt-1-todo-app-before"
+    },
+    {
+      "pid": 39068,
+      "time": "2026-11-06T13:14:33.356Z",
+      "name": "attempt-1-todo-app-bench"
+    },
+    {
+      "pid": 52188,
+      "time": "2026-11-06T13:16:42.317Z",
+      "name": "attempt-1-todo-app-after"
+    },
+    {
+      "pid": 45168,
+      "time": "2026-11-06T13:16:52.15Z",
+      "name": "attempt-1-research-with-sources-before"
+    },
+    {
+      "pid": 48512,
+      "time": "2026-11-06T13:17:01.8Z",
+      "name": "attempt-1-research-with-sources-bench"
+    },
+    {
+      "pid": 42776,
+      "time": "2026-11-06T13:18:28.468Z",
+      "name": "attempt-1-research-with-sources-after"
+    },
+    {
+      "pid": 52012,
+      "time": "2026-11-06T13:18:38.4Z",
+      "name": "attempt-1-everyday-question-before"
+    },
+    {
+      "pid": 45552,
+      "time": "2026-11-06T13:18:48.063Z",
+      "name": "attempt-1-everyday-question-bench"
+    },
+    {
+      "pid": 26748,
+      "time": "2026-11-06T13:19:13.384Z",
+      "name": "attempt-1-everyday-question-after"
+    },
+    {
+      "pid": 37552,
+      "time": "2026-11-06T13:19:23.247Z",
+      "name": "attempt-1-fix-invoice-before"
+    },
+    {
+      "pid": 20492,
+      "time": "2026-11-06T13:19:33.131Z",
+      "name": "attempt-1-fix-invoice-bench"
+    },
+    {
+      "pid": 34856,
+      "time": "2026-11-06T13:20:22.857Z",
+      "name": "attempt-1-fix-invoice-after"
+    },
+    {
+      "pid": 48152,
+      "time": "2026-11-06T13:20:32.917Z",
+      "name": "attempt-1-migrate-settings-before"
+    },
+    {
+      "pid": 33684,
+      "time": "2026-11-06T13:20:42.959Z",
+      "name": "attempt-1-migrate-settings-bench"
+    },
+    {
+      "pid": 21216,
+      "time": "2026-11-06T13:21:55.45Z",
+      "name": "attempt-1-migrate-settings-after"
+    },
+    {
+      "pid": 42572,
+      "time": "2026-11-06T13:22:07.091Z",
+      "name": "attempt-1-summarize-sales-before"
+    },
+    {
+      "pid": 32160,
+      "time": "2026-11-06T13:22:17.432Z",
+      "name": "attempt-1-summarize-sales-bench"
+    },
+    {
+      "pid": 13580,
+      "time": "2026-11-06T13:23:21.674Z",
+      "name": "attempt-1-summarize-sales-after"
+    },
+    {
+      "pid": 25784,
+      "name": "watcher",
+      "root": "reports/reforma/helpers/g390c2-evidence"
+    },
+    {
+      "pid": 43280,
+      "time": "2026-11-06T15:00:31.59Z",
+      "name": "attempt-1-organize-folder-before"
+    },
+    {
+      "pid": 2300,
+      "time": "2026-11-06T15:02:00.51Z",
+      "name": "attempt-1-organize-folder-bench"
+    },
+    {
+      "pid": 29744,
+      "time": "2026-11-06T15:03:24.184Z",
+      "name": "attempt-1-organize-folder-after"
+    },
+    {
+      "pid": 12884,
+      "time": "2026-11-06T15:03:40.084Z",
+      "name": "attempt-1-plan-an-app-before"
+    },
+    {
+      "pid": 26540,
+      "time": "2026-11-06T15:03:48.643Z",
+      "name": "attempt-1-plan-an-app-bench"
+    },
+    {
+      "pid": 29744,
+      "time": "2026-11-06T15:04:28Z",
+      "name": "attempt-1-plan-an-app-after"
+    },
+    {
+      "pid": 43796,
+      "time": "2026-11-06T15:04:35.808Z",
+      "name": "attempt-1-todo-app-before"
+    },
+    {
+      "pid": 9560,
+      "time": "2026-11-06T15:04:43.552Z",
+      "name": "attempt-1-todo-app-bench"
+    },
+    {
+      "pid": 21776,
+      "name": "watcher",
+      "root": "E:/Temp/faber-g390c2-evidence"
+    },
+    {
+      "pid": 44792,
+      "time": "2026-11-06T15:30:15.88Z",
+      "name": "attempt-1-organize-folder-before"
+    },
+    {
+      "pid": 50076,
+      "time": "2026-11-06T15:30:28.375Z",
+      "name": "attempt-1-organize-folder-bench"
+    },
+    {
+      "pid": 30608,
+      "time": "2026-11-06T15:32:48.695Z",
+      "name": "attempt-1-organize-folder-after"
+    },
+    {
+      "pid": 48548,
+      "time": "2026-11-06T15:32:57.189Z",
+      "name": "attempt-1-plan-an-app-before"
+    },
+    {
+      "pid": 20736,
+      "time": "2026-11-06T15:33:05.187Z",
+      "name": "attempt-1-plan-an-app-bench"
+    },
+    {
+      "pid": 48480,
+      "time": "2026-11-06T15:34:21.62Z",
+      "name": "attempt-1-plan-an-app-after"
+    },
+    {
+      "pid": 41284,
+      "time": "2026-11-06T15:34:29.08Z",
+      "name": "attempt-1-todo-app-before"
+    },
+    {
+      "pid": 42768,
+      "time": "2026-11-06T15:34:35.892Z",
+      "name": "attempt-1-todo-app-bench"
+    },
+    {
+      "pid": 14668,
+      "time": "2026-11-06T15:38:22.667Z",
+      "name": "attempt-1-todo-app-after"
+    },
+    {
+      "pid": 47188,
+      "time": "2026-11-06T15:38:31.735Z",
+      "name": "attempt-1-research-with-sources-before"
+    },
+    {
+      "pid": 48576,
+      "time": "2026-11-06T15:38:39.188Z",
+      "name": "attempt-1-research-with-sources-bench"
+    },
+    {
+      "pid": 23296,
+      "time": "2026-11-06T15:41:05.212Z",
+      "name": "attempt-1-research-with-sources-after"
+    },
+    {
+      "pid": 24036,
+      "time": "2026-11-06T15:41:11.896Z",
+      "name": "attempt-1-everyday-question-before"
+    },
+    {
+      "pid": 22316,
+      "time": "2026-11-06T15:41:18.187Z",
+      "name": "attempt-1-everyday-question-bench"
+    },
+    {
+      "pid": 44556,
+      "time": "2026-11-06T15:42:21.558Z",
+      "name": "attempt-1-everyday-question-after"
+    },
+    {
+      "pid": 41024,
+      "time": "2026-11-06T15:42:27.876Z",
+      "name": "attempt-1-fix-invoice-before"
+    },
+    {
+      "pid": 36772,
+      "time": "2026-11-06T15:42:34.356Z",
+      "name": "attempt-1-fix-invoice-bench"
+    },
+    {
+      "pid": 26504,
+      "time": "2026-11-06T15:44:38.993Z",
+      "name": "attempt-1-fix-invoice-after"
+    },
+    {
+      "pid": 37676,
+      "time": "2026-11-06T15:44:45.952Z",
+      "name": "attempt-1-migrate-settings-before"
+    },
+    {
+      "pid": 2112,
+      "time": "2026-11-06T15:44:52.464Z",
+      "name": "attempt-1-migrate-settings-bench"
+    },
+    {
+      "pid": 46976,
+      "time": "2026-11-06T15:47:42.236Z",
+      "name": "attempt-1-migrate-settings-after"
+    },
+    {
+      "pid": 42804,
+      "time": "2026-11-06T15:47:48.722Z",
+      "name": "attempt-1-summarize-sales-before"
+    },
+    {
+      "pid": 16800,
+      "time": "2026-11-06T15:47:55.242Z",
+      "name": "attempt-1-summarize-sales-bench"
+    },
+    {
+      "pid": 10388,
+      "time": "2026-11-06T15:50:41.416Z",
+      "name": "attempt-1-summarize-sales-after"
+    },
+    {
+      "pid": 49480,
+      "name": "watcher",
+      "root": "E:/Temp/faber-g390c2-final-evidence"
+    }
+  ],
+  "checkedAt": "2026-11-06T16:02:57.7646517Z",
+  "pidReuse": [
+    {
+      "pid": 26748,
+      "currentCreated": "2026-11-06T11:23:44.411304-03:00",
+      "originalSpawns": [
+        "2026-11-06T13:19:13.384Z"
+      ],
+      "owned": false
+    }
+  ],
+  "ownedWatchersRemaining": 0,
+  "ownedRecordedChildrenRemaining": 0
+}

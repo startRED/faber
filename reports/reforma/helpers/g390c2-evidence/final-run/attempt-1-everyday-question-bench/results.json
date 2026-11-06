@@ -1,0 +1,151 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "everyday-question"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "140 words",
+              "name": "at most 180 words",
+              "ok": true
+            },
+            {
+              "detail": "3 items",
+              "name": "exactly three list items",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Cold slows the chemical reactions inside your phone’s battery, making it harder to deliver power. That can make the percentage drop faster or even cause a shutdown. Usually, this is temporary: performance returns as the phone warms up. [Apple explains the cold-weather effect here.](https://support.apple.com/en-us/118431)\n\n1. Keep it close to your body. An inside coat pocket is better than an outside pocket or a freezing car.\n\n2. Use less power outdoors. Turn on Battery Saver or Low Power Mode, lower screen brightness, and save long gaming or video sessions for indoors.\n\n3. Warm it gently before charging. Let it reach room temperature naturally. Don’t use a radiator, hair dryer, or heating pad: direct heat can damage it.\n\nI haven’t checked your particular phone. Fast draining that continues at room temperature may have another cause, such as an aging battery.",
+        "secs": 23.831,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 31744,
+          "cache_write": 0,
+          "input": 21355,
+          "output": 321
+        },
+        "usage_incomplete": true,
+        "wall_secs": 26.4031195
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.029522,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 13578,
+        "output": 147
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0326092,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "149 words",
+              "name": "at most 180 words",
+              "ok": true
+            },
+            {
+              "detail": "3 items",
+              "name": "exactly three list items",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Cold weather slows the chemical reactions inside your phone’s battery, so it can’t deliver power as easily. Your battery percentage may drop faster, and the phone might shut down even when charge remains. This is usually temporary: it should improve when the phone warms up.\n\n1. Keep it warm. Carry your phone in an inside coat pocket, close to your body, instead of an outer pocket or cold bag.\n\n2. Use less power outside. Turn on Low Power Mode or Battery Saver, lower screen brightness, and keep camera sessions short.\n\n3. Let it warm up before charging. If it’s very cold, bring it indoors and let it reach room temperature naturally. Don’t use a heater or hair dryer, and don’t charge it while it’s freezing cold.\n\nI haven’t checked your specific phone. If the drain continues at room temperature, an aging battery or an app could also be responsible.",
+        "secs": 20.1760044,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 13312,
+          "cache_write": 0,
+          "input": 14359,
+          "output": 256
+        },
+        "usage_incomplete": false,
+        "wall_secs": 20.1760044
+      },
+      "request": "everyday-question",
+      "skipped": null,
+      "title": "An everyday question with limits",
+      "verdict": {
+        "pick": "Tie",
+        "reason": "Both give an accurate, plain-language explanation and exactly three practical tips under 180 words. Their minor differences don’t meaningfully change how useful they are.",
+        "score_a": 9.0,
+        "score_b": 9.0
+      },
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-everyday-question-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 54016,
+      "cache_write": 0,
+      "input": 49292,
+      "output": 724
+    },
+    "usd": 0.0621312
+  },
+  "subscriptionOnly": true
+}

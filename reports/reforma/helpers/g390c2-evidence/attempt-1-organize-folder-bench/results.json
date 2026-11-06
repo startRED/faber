@@ -1,0 +1,196 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "organize-folder"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "30 files",
+              "name": "every original file is still there, content unchanged",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no file was copied instead of moved",
+              "ok": true
+            },
+            {
+              "detail": "loose: INDEX.md",
+              "name": "only INDEX.md is left loose in the top folder",
+              "ok": true
+            },
+            {
+              "detail": "9: Backups, Finance, Images, Logs, Notes, Photos, Scripts, Spreadsheets, Travel",
+              "name": "between 3 and 10 folders",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no folder is empty",
+              "ok": true
+            },
+            {
+              "detail": "largest 7 of 30",
+              "name": "no folder holds most of the files",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md names every folder",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "",
+        "secs": 0.0099642,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0099642
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0926824,
+        "error": null,
+        "folder": "E:\\Documentos\\ProjetosIA\\faber\\.claude\\worktrees\\bench-1-0\\reports\\reforma\\helpers\\g390c2-evidence\\attempt-1-organize-folder-bench\\organize-folder\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "30 files",
+              "name": "every original file is still there, content unchanged",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no file was copied instead of moved",
+              "ok": true
+            },
+            {
+              "detail": "loose: INDEX.md",
+              "name": "only INDEX.md is left loose in the top folder",
+              "ok": true
+            },
+            {
+              "detail": "9: Backups, Finance, Images, Logs, Notes, Photos, Scripts, Spreadsheets, Travel",
+              "name": "between 3 and 10 folders",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no folder is empty",
+              "ok": true
+            },
+            {
+              "detail": "largest 7 of 30",
+              "name": "no folder holds most of the files",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md names every folder",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Done. Sorted all 30 files into nine folders and added INDEX.md at the top explaining each folder.\n\nVerified every file’s contents stayed identical. Nothing was deleted or renamed, and all backups were kept.\n\nScripts weren’t run; references to their old locations may need updating.",
+        "secs": 75.5259676,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 186624,
+          "cache_write": 0,
+          "input": 23325,
+          "output": 2737
+        },
+        "usage_incomplete": false,
+        "wall_secs": 75.5259676
+      },
+      "request": "organize-folder",
+      "skipped": null,
+      "title": "Organize a messy folder",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-organize-folder-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 186624,
+      "cache_write": 0,
+      "input": 23325,
+      "output": 2737
+    },
+    "usd": 0.0926824
+  },
+  "subscriptionOnly": true
+}

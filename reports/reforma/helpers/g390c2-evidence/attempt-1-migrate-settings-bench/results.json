@@ -1,0 +1,156 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "migrate-settings"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "notes preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "supplied settings migrated without data loss",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh preferences preserved and migration is idempotent",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid input fails without overwriting bytes",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "",
+        "secs": 0.0124613,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0124613
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.048569600000000004,
+        "error": null,
+        "folder": "E:\\Documentos\\ProjetosIA\\faber\\.claude\\worktrees\\bench-1-0\\reports\\reforma\\helpers\\g390c2-evidence\\attempt-1-migrate-settings-bench\\migrate-settings\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "notes preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "supplied settings migrated without data loss",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "fresh preferences preserved and migration is idempotent",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invalid input fails without overwriting bytes",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Created migrate.mjs and migrated settings.json to version 2. Tests passed: nested preferences preserved, invalid inputs unchanged, and version 2 unchanged byte-for-byte on rerun. notes.txt is unchanged.\n\nNo dependencies added. Disk-failure scenarios weren’t simulated.",
+        "secs": 60.8103392,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 171776,
+          "cache_write": 0,
+          "input": 6571,
+          "output": 1825
+        },
+        "usage_incomplete": false,
+        "wall_secs": 60.8103392
+      },
+      "request": "migrate-settings",
+      "skipped": null,
+      "title": "Migrate preferences without losing existing data",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-migrate-settings-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 171776,
+      "cache_write": 0,
+      "input": 6571,
+      "output": 1825
+    },
+    "usd": 0.048569600000000004
+  },
+  "subscriptionOnly": true
+}

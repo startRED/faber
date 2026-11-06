@@ -1,0 +1,335 @@
+{
+  "result": "finished",
+  "started": "2026-11-06T15:09:10.191Z",
+  "ended": "2026-11-06T15:50:48.462Z",
+  "codexOnly": true,
+  "capUsd": null,
+  "weeklyStopUsed": 0.7,
+  "attempts": [
+    {
+      "attempt": 1
+    }
+  ],
+  "receipts": [
+    {
+      "attempt": 1,
+      "request": "organize-folder",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979026,
+          "completedAt": 1793979027,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "organize-folder",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979175,
+          "completedAt": 1793979176,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "plan-an-app",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979183,
+          "completedAt": 1793979184,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "plan-an-app",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979267,
+          "completedAt": 1793979268,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "todo-app",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979274,
+          "completedAt": 1793979275,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "todo-app",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979510,
+          "completedAt": 1793979511,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "research-with-sources",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979517,
+          "completedAt": 1793979518,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "research-with-sources",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979670,
+          "completedAt": 1793979671,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "everyday-question",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979676,
+          "completedAt": 1793979677,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "everyday-question",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979746,
+          "completedAt": 1793979747,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "fix-invoice",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979752,
+          "completedAt": 1793979753,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "fix-invoice",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793979883,
+          "completedAt": 1793979885,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "migrate-settings",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793979891,
+          "completedAt": 1793979891,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "migrate-settings",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793980067,
+          "completedAt": 1793980068,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "summarize-sales",
+      "phase": "before",
+      "readings": [
+        {
+          "at": 1793980073,
+          "completedAt": 1793980074,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "attempt": 1,
+      "request": "summarize-sales",
+      "phase": "after",
+      "readings": [
+        {
+          "at": 1793980247,
+          "completedAt": 1793980248,
+          "source": "app account/rateLimits/read",
+          "vendor": "codex",
+          "windows": [
+            {
+              "resetsAt": 1794378933,
+              "used": 0.47,
+              "window": "seven_day"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

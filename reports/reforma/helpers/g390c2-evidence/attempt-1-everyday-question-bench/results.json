@@ -1,0 +1,136 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "everyday-question"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": false,
+          "vendors": []
+        },
+        "cost_usd": null,
+        "error": "permission denied",
+        "folder": null,
+        "models": [],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "0 words",
+              "name": "at most 180 words",
+              "ok": true
+            },
+            {
+              "detail": "0 items",
+              "name": "exactly three list items",
+              "ok": false
+            }
+          ],
+          "pass": false
+        },
+        "reply": "",
+        "secs": 0.0095433,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 0.0095433
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.044958,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "141 words",
+              "name": "at most 180 words",
+              "ok": true
+            },
+            {
+              "detail": "3 items",
+              "name": "exactly three list items",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Cold slows the chemical reactions inside your phone’s battery, so it can’t deliver power as easily. That can make the charge drop faster or cause the phone to shut down even when it shows battery remaining. Much of this is temporary: performance usually improves once the phone warms up.\n\n1. Keep it comfortably warm. Carry it in an inside coat pocket, close to your body. Don’t leave it in a cold car.\n\n2. Use less power outdoors. Turn on battery saver, lower screen brightness, and keep screen time short.\n\n3. Let it warm up before charging. Bring it indoors and let it reach room temperature naturally. Don’t use a radiator, hair dryer, or other direct heat, which can damage the battery.\n\nI haven’t checked your phone’s battery health; if it also drains quickly indoors, cold may not be the only cause.",
+        "secs": 16.352262,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 8320,
+          "cache_write": 0,
+          "input": 20713,
+          "output": 270
+        },
+        "usage_incomplete": false,
+        "wall_secs": 16.352262
+      },
+      "request": "everyday-question",
+      "skipped": null,
+      "title": "An everyday question with limits",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-everyday-question-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 8320,
+      "cache_write": 0,
+      "input": 20713,
+      "output": 270
+    },
+    "usd": 0.044958
+  },
+  "subscriptionOnly": true
+}

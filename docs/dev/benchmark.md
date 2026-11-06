@@ -23,6 +23,7 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
 | `--quota-only` | off | Read both subscriptions with the app's local quota readers; print sources, windows and times, without model work |
 | `--require-hard-cap` | off | Refuse model work and save all selected rows as skipped when an absolute dollar ceiling is required; the current harness cannot guarantee one |
+| `--codex-only` | off | Subscription-only Codex for both sides, judge and quota reader; unpaired quota readings, token admission only, API-equivalent costs retained as evidence |
 
 For the Windows 1.0 gate, `node scripts/bench-when-quiet.mjs` waits up to 14 hours, polling local processor counters
 and CS2 presence every 60 seconds. Ten uninterrupted minutes below 15% processor use admit an attempt. A hidden
@@ -34,6 +35,17 @@ The two plain-vendor comparisons run sequentially, with both vendors' quota rece
 also requires a hard ceiling: until the Codex and auxiliary in-flight bounds exist, both comparisons stop before paid
 work and write the blocker for each request. This is a blocked qualification, never a successful benchmark.
 An exclusive receipt lock prevents a second watcher from overwriting the run or restarting its budget.
+
+For owner-authorized C2, `node scripts/bench-when-quiet.mjs --codex-only` uses the same quiet window and PID guard,
+runs each of the eight requests separately against plain Codex, and records the app's Codex weekly quota before and
+after each request in the system temporary folder's `faber-g390c2-final-evidence/`; the final report preserves the receipts
+under `reports/reforma/helpers/g390c2-evidence/`. Runtime workspaces must stay outside `.claude` ancestors: the engine
+correctly rejects credential-folder paths, including checkouts nested there. A reading above 70% stops the whole run. Missing or
+invalid weekly readings also stop admission. This mode starts no Claude reader, answer or judge, requires no dollar
+hard cap, accepts unpaired readings and partial tokens, and stops permanently if CS2 starts during a child invocation.
+Billing variables are removed before every watcher child, including git, the process guard and termination commands.
+Dollar estimates and unknown costs remain evidence, not subscription billing or dollar admission or interruption limits. Token limits
+still apply per request. Same-vendor verdicts do not prove independent quality qualification.
 
 ## What a run does
 

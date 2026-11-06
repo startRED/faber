@@ -1,0 +1,2552 @@
+[
+  {
+    "name": "ApplicationFrameHost",
+    "cpu": 7.171875,
+    "pid": 22916
+  },
+  {
+    "name": "audiodg",
+    "cpu": 6350.8125,
+    "pid": 29980
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0625,
+    "pid": 968
+  },
+  {
+    "name": "bash",
+    "cpu": 0.453125,
+    "pid": 1284
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 3256
+  },
+  {
+    "name": "bash",
+    "cpu": 0.234375,
+    "pid": 3640
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 9224
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 12904
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 13108
+  },
+  {
+    "name": "bash",
+    "cpu": 1.09375,
+    "pid": 14884
+  },
+  {
+    "name": "bash",
+    "cpu": 0.046875,
+    "pid": 15076
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 15464
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 21000
+  },
+  {
+    "name": "bash",
+    "cpu": 0.078125,
+    "pid": 21976
+  },
+  {
+    "name": "bash",
+    "cpu": 0.046875,
+    "pid": 22304
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 22612
+  },
+  {
+    "name": "bash",
+    "cpu": 0.15625,
+    "pid": 23192
+  },
+  {
+    "name": "bash",
+    "cpu": 0.03125,
+    "pid": 23388
+  },
+  {
+    "name": "bash",
+    "cpu": 17.5625,
+    "pid": 23488
+  },
+  {
+    "name": "bash",
+    "cpu": 0.1875,
+    "pid": 24684
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 25884
+  },
+  {
+    "name": "bash",
+    "cpu": 0.046875,
+    "pid": 26268
+  },
+  {
+    "name": "bash",
+    "cpu": 34.921875,
+    "pid": 27828
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 27840
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 28568
+  },
+  {
+    "name": "bash",
+    "cpu": 0.21875,
+    "pid": 28732
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 28960
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 30100
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 34060
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 34312
+  },
+  {
+    "name": "bash",
+    "cpu": 44.484375,
+    "pid": 36956
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 38664
+  },
+  {
+    "name": "bash",
+    "cpu": 0.046875,
+    "pid": 39948
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 44324
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 45068
+  },
+  {
+    "name": "bash",
+    "cpu": 0.0,
+    "pid": 46408
+  },
+  {
+    "name": "bash",
+    "cpu": 0.03125,
+    "pid": 46732
+  },
+  {
+    "name": "bash",
+    "cpu": 0.078125,
+    "pid": 47028
+  },
+  {
+    "name": "bash",
+    "cpu": 0.09375,
+    "pid": 49836
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 51640
+  },
+  {
+    "name": "bash",
+    "cpu": 0.015625,
+    "pid": 51876
+  },
+  {
+    "name": "cargo",
+    "cpu": 0.015625,
+    "pid": 3116
+  },
+  {
+    "name": "cargo",
+    "cpu": 0.53125,
+    "pid": 25108
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 59.390625,
+    "pid": 7984
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 14.8125,
+    "pid": 11076
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.21875,
+    "pid": 11928
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 9.4375,
+    "pid": 13260
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.09375,
+    "pid": 23464
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.25,
+    "pid": 25048
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 161.0,
+    "pid": 25168
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.0,
+    "pid": 28108
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 12.75,
+    "pid": 29988
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.015625,
+    "pid": 31352
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.0625,
+    "pid": 31640
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 43.703125,
+    "pid": 35724
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.84375,
+    "pid": 35836
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.296875,
+    "pid": 36232
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 0.078125,
+    "pid": 44068
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 3.46875,
+    "pid": 47420
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 205.21875,
+    "pid": 48620
+  },
+  {
+    "name": "ChatGPT",
+    "cpu": 12.859375,
+    "pid": 51108
+  },
+  {
+    "name": "chrome-native-host",
+    "cpu": 0.015625,
+    "pid": 30948
+  },
+  {
+    "name": "claude",
+    "cpu": 1660.171875,
+    "pid": 2700
+  },
+  {
+    "name": "claude",
+    "cpu": 14375.4375,
+    "pid": 3392
+  },
+  {
+    "name": "claude",
+    "cpu": 54.5,
+    "pid": 4416
+  },
+  {
+    "name": "claude",
+    "cpu": 241.75,
+    "pid": 6136
+  },
+  {
+    "name": "claude",
+    "cpu": 14.9375,
+    "pid": 7412
+  },
+  {
+    "name": "claude",
+    "cpu": 15771.234375,
+    "pid": 8152
+  },
+  {
+    "name": "claude",
+    "cpu": 8.34375,
+    "pid": 13144
+  },
+  {
+    "name": "claude",
+    "cpu": 85.90625,
+    "pid": 13864
+  },
+  {
+    "name": "claude",
+    "cpu": 7670.171875,
+    "pid": 14320
+  },
+  {
+    "name": "claude",
+    "cpu": 68.140625,
+    "pid": 15532
+  },
+  {
+    "name": "claude",
+    "cpu": 105.8125,
+    "pid": 15580
+  },
+  {
+    "name": "claude",
+    "cpu": 1826.4375,
+    "pid": 15596
+  },
+  {
+    "name": "claude",
+    "cpu": 6.3125,
+    "pid": 17504
+  },
+  {
+    "name": "claude",
+    "cpu": 0.75,
+    "pid": 18000
+  },
+  {
+    "name": "claude",
+    "cpu": 31.15625,
+    "pid": 18324
+  },
+  {
+    "name": "claude",
+    "cpu": 23.84375,
+    "pid": 18528
+  },
+  {
+    "name": "claude",
+    "cpu": 32.3125,
+    "pid": 20360
+  },
+  {
+    "name": "claude",
+    "cpu": 45.078125,
+    "pid": 22832
+  },
+  {
+    "name": "claude",
+    "cpu": 32.6875,
+    "pid": 23616
+  },
+  {
+    "name": "claude",
+    "cpu": 7.203125,
+    "pid": 24596
+  },
+  {
+    "name": "claude",
+    "cpu": 40.34375,
+    "pid": 25780
+  },
+  {
+    "name": "claude",
+    "cpu": 44.5625,
+    "pid": 27260
+  },
+  {
+    "name": "claude",
+    "cpu": 20.234375,
+    "pid": 28220
+  },
+  {
+    "name": "claude",
+    "cpu": 277.734375,
+    "pid": 30036
+  },
+  {
+    "name": "claude",
+    "cpu": 15.0,
+    "pid": 30880
+  },
+  {
+    "name": "claude",
+    "cpu": 2.9375,
+    "pid": 31600
+  },
+  {
+    "name": "claude",
+    "cpu": 25.953125,
+    "pid": 31724
+  },
+  {
+    "name": "claude",
+    "cpu": 5763.921875,
+    "pid": 33552
+  },
+  {
+    "name": "claude",
+    "cpu": 600.984375,
+    "pid": 37064
+  },
+  {
+    "name": "claude",
+    "cpu": 76.203125,
+    "pid": 44484
+  },
+  {
+    "name": "claude",
+    "cpu": 56.625,
+    "pid": 46216
+  },
+  {
+    "name": "claude",
+    "cpu": 6.71875,
+    "pid": 47904
+  },
+  {
+    "name": "claude",
+    "cpu": 91.203125,
+    "pid": 49720
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.046875,
+    "pid": 8244
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.03125,
+    "pid": 18780
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.015625,
+    "pid": 22112
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.03125,
+    "pid": 25540
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.09375,
+    "pid": 26208
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.015625,
+    "pid": 28092
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.015625,
+    "pid": 29748
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.046875,
+    "pid": 30936
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.03125,
+    "pid": 31496
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.03125,
+    "pid": 35776
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.03125,
+    "pid": 38732
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.046875,
+    "pid": 38796
+  },
+  {
+    "name": "cmd",
+    "cpu": 0.0,
+    "pid": 38916
+  },
+  {
+    "name": "codex",
+    "cpu": 5.984375,
+    "pid": 4316
+  },
+  {
+    "name": "codex",
+    "cpu": 12.4375,
+    "pid": 33088
+  },
+  {
+    "name": "codex",
+    "cpu": 106.3125,
+    "pid": 35732
+  },
+  {
+    "name": "codex",
+    "cpu": 13.21875,
+    "pid": 37564
+  },
+  {
+    "name": "codex",
+    "cpu": 5.046875,
+    "pid": 44796
+  },
+  {
+    "name": "codex-code-mode-host",
+    "cpu": 0.828125,
+    "pid": 13388
+  },
+  {
+    "name": "codex-code-mode-host",
+    "cpu": 0.4375,
+    "pid": 41940
+  },
+  {
+    "name": "codex-code-mode-host",
+    "cpu": 0.578125,
+    "pid": 49092
+  },
+  {
+    "name": "codex-computer-use-swift",
+    "cpu": 1.171875,
+    "pid": 43596
+  },
+  {
+    "name": "codex-windows-sandbox-service",
+    "cpu": null,
+    "pid": 6644
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 1812
+  },
+  {
+    "name": "conhost",
+    "cpu": null,
+    "pid": 2672
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 2756
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.46875,
+    "pid": 3312
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 3700
+  },
+  {
+    "name": "conhost",
+    "cpu": null,
+    "pid": 5948
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.140625,
+    "pid": 6684
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 7084
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 8740
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.140625,
+    "pid": 8804
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 8888
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 9044
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.203125,
+    "pid": 9764
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 10044
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.484375,
+    "pid": 10944
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 11000
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 11200
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 11440
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.125,
+    "pid": 12136
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 13132
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 13764
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 13988
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 14024
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 14208
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.15625,
+    "pid": 14220
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 14292
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.09375,
+    "pid": 14840
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 14912
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 15120
+  },
+  {
+    "name": "conhost",
+    "cpu": 2.109375,
+    "pid": 15252
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.109375,
+    "pid": 15512
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 16172
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 16316
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 16516
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 16920
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.078125,
+    "pid": 17092
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 17608
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 18004
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.09375,
+    "pid": 18012
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 19140
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 20052
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 20112
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 21244
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 21352
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 21616
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 21748
+  },
+  {
+    "name": "conhost",
+    "cpu": 1.234375,
+    "pid": 22012
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 22236
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 22788
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.15625,
+    "pid": 23168
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 23920
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 23952
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 24376
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.15625,
+    "pid": 25384
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 25800
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 25992
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.40625,
+    "pid": 26200
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 26228
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.15625,
+    "pid": 26376
+  },
+  {
+    "name": "conhost",
+    "cpu": 1.6875,
+    "pid": 27080
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 27196
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 27820
+  },
+  {
+    "name": "conhost",
+    "cpu": 1.109375,
+    "pid": 28788
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 29384
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.28125,
+    "pid": 30012
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 30148
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 30304
+  },
+  {
+    "name": "conhost",
+    "cpu": 1.09375,
+    "pid": 30424
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 30728
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 31016
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 31800
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.5625,
+    "pid": 32032
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 32056
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.171875,
+    "pid": 32512
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 32684
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 32792
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 33072
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 33648
+  },
+  {
+    "name": "conhost",
+    "cpu": 1.359375,
+    "pid": 34248
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 34696
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 35060
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 35156
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 35236
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 35528
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 35816
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 35984
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 36184
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0625,
+    "pid": 36200
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 36424
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.109375,
+    "pid": 37532
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.171875,
+    "pid": 37592
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 38504
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 39456
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 40572
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 40964
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 41104
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 41160
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.5625,
+    "pid": 41404
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 41480
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.09375,
+    "pid": 43176
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.078125,
+    "pid": 43440
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 44100
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.40625,
+    "pid": 44604
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 45364
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 46124
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 47396
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 47444
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 48332
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 48632
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 48980
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 49144
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 49364
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.046875,
+    "pid": 50048
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 50352
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 50368
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.0,
+    "pid": 51492
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 51664
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.015625,
+    "pid": 51824
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 51860
+  },
+  {
+    "name": "conhost",
+    "cpu": 0.03125,
+    "pid": 52204
+  },
+  {
+    "name": "crashhelper",
+    "cpu": 0.125,
+    "pid": 42836
+  },
+  {
+    "name": "CrossDeviceResume",
+    "cpu": 3.328125,
+    "pid": 9420
+  },
+  {
+    "name": "csclient-service",
+    "cpu": null,
+    "pid": 3132
+  },
+  {
+    "name": "csrss",
+    "cpu": null,
+    "pid": 1164
+  },
+  {
+    "name": "csrss",
+    "cpu": null,
+    "pid": 1264
+  },
+  {
+    "name": "ctfmon",
+    "cpu": 271.4375,
+    "pid": 13852
+  },
+  {
+    "name": "cua-driver",
+    "cpu": 89.96875,
+    "pid": 14152
+  },
+  {
+    "name": "cut",
+    "cpu": 0.34375,
+    "pid": 27036
+  },
+  {
+    "name": "DefenderAiPlatformHost",
+    "cpu": null,
+    "pid": 10308
+  },
+  {
+    "name": "DefenderSessionHelper",
+    "cpu": 0.625,
+    "pid": 8380
+  },
+  {
+    "name": "dllhost",
+    "cpu": 0.3125,
+    "pid": 2668
+  },
+  {
+    "name": "dllhost",
+    "cpu": 2.953125,
+    "pid": 7456
+  },
+  {
+    "name": "dllhost",
+    "cpu": 0.484375,
+    "pid": 24856
+  },
+  {
+    "name": "dllhost",
+    "cpu": 0.59375,
+    "pid": 42248
+  },
+  {
+    "name": "dllhost",
+    "cpu": 1.0,
+    "pid": 45144
+  },
+  {
+    "name": "dwm",
+    "cpu": null,
+    "pid": 1852
+  },
+  {
+    "name": "Everything",
+    "cpu": null,
+    "pid": 4080
+  },
+  {
+    "name": "explorer",
+    "cpu": 675.859375,
+    "pid": 17968
+  },
+  {
+    "name": "faber-test",
+    "cpu": 1.625,
+    "pid": 41944
+  },
+  {
+    "name": "firefox",
+    "cpu": 75.296875,
+    "pid": 464
+  },
+  {
+    "name": "firefox",
+    "cpu": 137.46875,
+    "pid": 9640
+  },
+  {
+    "name": "firefox",
+    "cpu": 3.390625,
+    "pid": 11712
+  },
+  {
+    "name": "firefox",
+    "cpu": 201.5,
+    "pid": 12236
+  },
+  {
+    "name": "firefox",
+    "cpu": 41.40625,
+    "pid": 13588
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.34375,
+    "pid": 16428
+  },
+  {
+    "name": "firefox",
+    "cpu": 59.140625,
+    "pid": 24064
+  },
+  {
+    "name": "firefox",
+    "cpu": 2682.921875,
+    "pid": 24232
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.09375,
+    "pid": 25620
+  },
+  {
+    "name": "firefox",
+    "cpu": 16.96875,
+    "pid": 26156
+  },
+  {
+    "name": "firefox",
+    "cpu": 5.796875,
+    "pid": 27764
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.546875,
+    "pid": 28372
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.5625,
+    "pid": 32744
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.046875,
+    "pid": 32820
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.03125,
+    "pid": 34296
+  },
+  {
+    "name": "firefox",
+    "cpu": 48.671875,
+    "pid": 35968
+  },
+  {
+    "name": "firefox",
+    "cpu": 3.90625,
+    "pid": 39140
+  },
+  {
+    "name": "firefox",
+    "cpu": 12.875,
+    "pid": 39156
+  },
+  {
+    "name": "firefox",
+    "cpu": 94.265625,
+    "pid": 39620
+  },
+  {
+    "name": "firefox",
+    "cpu": 12.09375,
+    "pid": 42884
+  },
+  {
+    "name": "firefox",
+    "cpu": 3631.46875,
+    "pid": 44000
+  },
+  {
+    "name": "firefox",
+    "cpu": 0.046875,
+    "pid": 44772
+  },
+  {
+    "name": "fontdrvhost",
+    "cpu": null,
+    "pid": 1660
+  },
+  {
+    "name": "fontdrvhost",
+    "cpu": null,
+    "pid": 1668
+  },
+  {
+    "name": "grep",
+    "cpu": 144.640625,
+    "pid": 24204
+  },
+  {
+    "name": "grep",
+    "cpu": 0.515625,
+    "pid": 33740
+  },
+  {
+    "name": "helperservice",
+    "cpu": null,
+    "pid": 2244
+  },
+  {
+    "name": "HidHideWatchdog",
+    "cpu": null,
+    "pid": 3080
+  },
+  {
+    "name": "Idle",
+    "cpu": null,
+    "pid": 0
+  },
+  {
+    "name": "job-run-bfc567f02a90c95b",
+    "cpu": 0.0,
+    "pid": 44932
+  },
+  {
+    "name": "lsass",
+    "cpu": null,
+    "pid": 1488
+  },
+  {
+    "name": "MpDefenderCoreService",
+    "cpu": null,
+    "pid": 4196
+  },
+  {
+    "name": "MsMpEng",
+    "cpu": null,
+    "pid": 4168
+  },
+  {
+    "name": "NisSrv",
+    "cpu": null,
+    "pid": 3492
+  },
+  {
+    "name": "node",
+    "cpu": 0.828125,
+    "pid": 528
+  },
+  {
+    "name": "node",
+    "cpu": 4.234375,
+    "pid": 2428
+  },
+  {
+    "name": "node",
+    "cpu": 3.3125,
+    "pid": 2624
+  },
+  {
+    "name": "node",
+    "cpu": 3.828125,
+    "pid": 3444
+  },
+  {
+    "name": "node",
+    "cpu": 3.734375,
+    "pid": 5564
+  },
+  {
+    "name": "node",
+    "cpu": 0.125,
+    "pid": 6860
+  },
+  {
+    "name": "node",
+    "cpu": 0.34375,
+    "pid": 7820
+  },
+  {
+    "name": "node",
+    "cpu": 0.078125,
+    "pid": 8396
+  },
+  {
+    "name": "node",
+    "cpu": 4.859375,
+    "pid": 10676
+  },
+  {
+    "name": "node",
+    "cpu": 4.8125,
+    "pid": 12132
+  },
+  {
+    "name": "node",
+    "cpu": 0.234375,
+    "pid": 12732
+  },
+  {
+    "name": "node",
+    "cpu": 6.0,
+    "pid": 15836
+  },
+  {
+    "name": "node",
+    "cpu": 1.03125,
+    "pid": 15860
+  },
+  {
+    "name": "node",
+    "cpu": 4.0,
+    "pid": 17084
+  },
+  {
+    "name": "node",
+    "cpu": 3.921875,
+    "pid": 17104
+  },
+  {
+    "name": "node",
+    "cpu": 1.0,
+    "pid": 17924
+  },
+  {
+    "name": "node",
+    "cpu": 0.328125,
+    "pid": 19064
+  },
+  {
+    "name": "node",
+    "cpu": 2.140625,
+    "pid": 19400
+  },
+  {
+    "name": "node",
+    "cpu": 3.875,
+    "pid": 19700
+  },
+  {
+    "name": "node",
+    "cpu": 0.90625,
+    "pid": 19868
+  },
+  {
+    "name": "node",
+    "cpu": 0.8125,
+    "pid": 21232
+  },
+  {
+    "name": "node",
+    "cpu": 22.15625,
+    "pid": 21548
+  },
+  {
+    "name": "node",
+    "cpu": 19.125,
+    "pid": 22688
+  },
+  {
+    "name": "node",
+    "cpu": 0.34375,
+    "pid": 23236
+  },
+  {
+    "name": "node",
+    "cpu": 6.203125,
+    "pid": 23588
+  },
+  {
+    "name": "node",
+    "cpu": 0.546875,
+    "pid": 23904
+  },
+  {
+    "name": "node",
+    "cpu": 0.359375,
+    "pid": 25784
+  },
+  {
+    "name": "node",
+    "cpu": 3.4375,
+    "pid": 26708
+  },
+  {
+    "name": "node",
+    "cpu": 3.421875,
+    "pid": 27012
+  },
+  {
+    "name": "node",
+    "cpu": 3.4375,
+    "pid": 28176
+  },
+  {
+    "name": "node",
+    "cpu": 18.859375,
+    "pid": 29028
+  },
+  {
+    "name": "node",
+    "cpu": 0.71875,
+    "pid": 29088
+  },
+  {
+    "name": "node",
+    "cpu": 0.953125,
+    "pid": 30472
+  },
+  {
+    "name": "node",
+    "cpu": 0.515625,
+    "pid": 31280
+  },
+  {
+    "name": "node",
+    "cpu": 0.375,
+    "pid": 31760
+  },
+  {
+    "name": "node",
+    "cpu": 0.328125,
+    "pid": 33284
+  },
+  {
+    "name": "node",
+    "cpu": 3.078125,
+    "pid": 33464
+  },
+  {
+    "name": "node",
+    "cpu": 5.953125,
+    "pid": 34764
+  },
+  {
+    "name": "node",
+    "cpu": 3.890625,
+    "pid": 35376
+  },
+  {
+    "name": "node",
+    "cpu": 4.25,
+    "pid": 35856
+  },
+  {
+    "name": "node",
+    "cpu": 4.453125,
+    "pid": 36436
+  },
+  {
+    "name": "node",
+    "cpu": 11.0,
+    "pid": 36440
+  },
+  {
+    "name": "node",
+    "cpu": 415.46875,
+    "pid": 36488
+  },
+  {
+    "name": "node",
+    "cpu": 6.140625,
+    "pid": 37576
+  },
+  {
+    "name": "node",
+    "cpu": 0.359375,
+    "pid": 38472
+  },
+  {
+    "name": "node",
+    "cpu": 3.921875,
+    "pid": 39016
+  },
+  {
+    "name": "node",
+    "cpu": 0.96875,
+    "pid": 39608
+  },
+  {
+    "name": "node",
+    "cpu": 17.890625,
+    "pid": 39676
+  },
+  {
+    "name": "node",
+    "cpu": 18.640625,
+    "pid": 40296
+  },
+  {
+    "name": "node",
+    "cpu": 3.734375,
+    "pid": 40428
+  },
+  {
+    "name": "node",
+    "cpu": 3.140625,
+    "pid": 40824
+  },
+  {
+    "name": "node",
+    "cpu": 0.078125,
+    "pid": 42240
+  },
+  {
+    "name": "node",
+    "cpu": 0.734375,
+    "pid": 43160
+  },
+  {
+    "name": "node",
+    "cpu": 0.578125,
+    "pid": 43700
+  },
+  {
+    "name": "node",
+    "cpu": 0.078125,
+    "pid": 44892
+  },
+  {
+    "name": "node",
+    "cpu": 1.609375,
+    "pid": 45216
+  },
+  {
+    "name": "node",
+    "cpu": 6.109375,
+    "pid": 45892
+  },
+  {
+    "name": "node",
+    "cpu": 5.109375,
+    "pid": 46292
+  },
+  {
+    "name": "node",
+    "cpu": 0.9375,
+    "pid": 46768
+  },
+  {
+    "name": "node",
+    "cpu": 0.109375,
+    "pid": 47672
+  },
+  {
+    "name": "node",
+    "cpu": 3.609375,
+    "pid": 48720
+  },
+  {
+    "name": "node",
+    "cpu": 0.421875,
+    "pid": 49020
+  },
+  {
+    "name": "node",
+    "cpu": 0.875,
+    "pid": 49376
+  },
+  {
+    "name": "node",
+    "cpu": 18.8125,
+    "pid": 50288
+  },
+  {
+    "name": "node",
+    "cpu": 0.15625,
+    "pid": 50364
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 2864
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 11480
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.03125,
+    "pid": 12344
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.046875,
+    "pid": 13436
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.03125,
+    "pid": 19968
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 26072
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.03125,
+    "pid": 27876
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.03125,
+    "pid": 30364
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 32568
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 33720
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 34108
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 35360
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.03125,
+    "pid": 36516
+  },
+  {
+    "name": "node_repl",
+    "cpu": 0.015625,
+    "pid": 39448
+  },
+  {
+    "name": "nvcontainer",
+    "cpu": null,
+    "pid": 3280
+  },
+  {
+    "name": "nvcontainer",
+    "cpu": null,
+    "pid": 7420
+  },
+  {
+    "name": "nvcontainer",
+    "cpu": 7325.28125,
+    "pid": 8400
+  },
+  {
+    "name": "nvcontainer",
+    "cpu": 981.5625,
+    "pid": 8444
+  },
+  {
+    "name": "NVDisplay.Container",
+    "cpu": null,
+    "pid": 2848
+  },
+  {
+    "name": "NVDisplay.Container",
+    "cpu": null,
+    "pid": 4644
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 601.140625,
+    "pid": 10516
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 547.078125,
+    "pid": 10996
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 116.171875,
+    "pid": 11276
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 19.125,
+    "pid": 11504
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 69.96875,
+    "pid": 12292
+  },
+  {
+    "name": "NVIDIA Overlay",
+    "cpu": 0.84375,
+    "pid": 26472
+  },
+  {
+    "name": "nvsphelper64",
+    "cpu": 32.84375,
+    "pid": 10464
+  },
+  {
+    "name": "pg_ctl",
+    "cpu": null,
+    "pid": 4136
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 2652
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 4860
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 5776
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6540
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6604
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6612
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6620
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6628
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 6652
+  },
+  {
+    "name": "postgres",
+    "cpu": null,
+    "pid": 8184
+  },
+  {
+    "name": "powershell",
+    "cpu": 29657.609375,
+    "pid": 13960
+  },
+  {
+    "name": "powershell",
+    "cpu": 20.8125,
+    "pid": 19244
+  },
+  {
+    "name": "pwsh",
+    "cpu": 110.3125,
+    "pid": 3660
+  },
+  {
+    "name": "pwsh",
+    "cpu": 7.421875,
+    "pid": 11164
+  },
+  {
+    "name": "pwsh",
+    "cpu": 2.9375,
+    "pid": 14056
+  },
+  {
+    "name": "pwsh",
+    "cpu": 1.015625,
+    "pid": 15152
+  },
+  {
+    "name": "pwsh",
+    "cpu": 25.4375,
+    "pid": 19876
+  },
+  {
+    "name": "pwsh",
+    "cpu": 4.40625,
+    "pid": 22320
+  },
+  {
+    "name": "pwsh",
+    "cpu": 2.9375,
+    "pid": 29040
+  },
+  {
+    "name": "pwsh",
+    "cpu": 0.40625,
+    "pid": 32516
+  },
+  {
+    "name": "pwsh",
+    "cpu": 65.75,
+    "pid": 33024
+  },
+  {
+    "name": "pwsh",
+    "cpu": 33.6875,
+    "pid": 34512
+  },
+  {
+    "name": "pwsh",
+    "cpu": 3.75,
+    "pid": 45572
+  },
+  {
+    "name": "pwsh",
+    "cpu": 42.21875,
+    "pid": 46344
+  },
+  {
+    "name": "pwsh",
+    "cpu": 2.5625,
+    "pid": 47572
+  },
+  {
+    "name": "pwsh",
+    "cpu": 39.15625,
+    "pid": 48088
+  },
+  {
+    "name": "pwsh",
+    "cpu": 0.40625,
+    "pid": 48368
+  },
+  {
+    "name": "Registry",
+    "cpu": null,
+    "pid": 272
+  },
+  {
+    "name": "RuntimeBroker",
+    "cpu": 18.0625,
+    "pid": 11068
+  },
+  {
+    "name": "RuntimeBroker",
+    "cpu": 35.3125,
+    "pid": 15268
+  },
+  {
+    "name": "RuntimeBroker",
+    "cpu": 0.078125,
+    "pid": 20988
+  },
+  {
+    "name": "RuntimeBroker",
+    "cpu": 0.65625,
+    "pid": 48812
+  },
+  {
+    "name": "saida-celular",
+    "cpu": 10.859375,
+    "pid": 44764
+  },
+  {
+    "name": "SearchHost",
+    "cpu": 33.671875,
+    "pid": 20324
+  },
+  {
+    "name": "SearchIndexer",
+    "cpu": null,
+    "pid": 1496
+  },
+  {
+    "name": "SecurityHealthService",
+    "cpu": null,
+    "pid": 14472
+  },
+  {
+    "name": "services",
+    "cpu": null,
+    "pid": 1476
+  },
+  {
+    "name": "ShellExperienceHost",
+    "cpu": 151.03125,
+    "pid": 51092
+  },
+  {
+    "name": "ShellHost",
+    "cpu": 1.0,
+    "pid": 14168
+  },
+  {
+    "name": "sihost",
+    "cpu": 44.140625,
+    "pid": 8476
+  },
+  {
+    "name": "skin-sniper",
+    "cpu": 41.015625,
+    "pid": 32176
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.015625,
+    "pid": 2292
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.0,
+    "pid": 5112
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.0,
+    "pid": 15448
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.0,
+    "pid": 34448
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.0,
+    "pid": 39796
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.015625,
+    "pid": 44108
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.0,
+    "pid": 47032
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.015625,
+    "pid": 48504
+  },
+  {
+    "name": "sleep",
+    "cpu": 0.015625,
+    "pid": 50692
+  },
+  {
+    "name": "smartscreen",
+    "cpu": 0.0,
+    "pid": 41360
+  },
+  {
+    "name": "smss",
+    "cpu": null,
+    "pid": 884
+  },
+  {
+    "name": "SnippingTool",
+    "cpu": 63.78125,
+    "pid": 21932
+  },
+  {
+    "name": "StartMenuExperienceHost",
+    "cpu": 11.875,
+    "pid": 25240
+  },
+  {
+    "name": "steam",
+    "cpu": 737.59375,
+    "pid": 41580
+  },
+  {
+    "name": "steamservice",
+    "cpu": null,
+    "pid": 49616
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 652.5625,
+    "pid": 2824
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 170.25,
+    "pid": 3496
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 17.171875,
+    "pid": 10512
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 32.875,
+    "pid": 26580
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 5.28125,
+    "pid": 36880
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 3.53125,
+    "pid": 37352
+  },
+  {
+    "name": "steamwebhelper",
+    "cpu": 181.34375,
+    "pid": 42172
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1100
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1112
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1152
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1420
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1520
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1608
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1628
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1756
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1932
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 1940
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2072
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2140
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2332
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2524
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2628
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2780
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 2928
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3096
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3232
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3472
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3480
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3564
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 3916
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 4496
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 5972
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 6092
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 6424
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 6432
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 7232
+  },
+  {
+    "name": "svchost",
+    "cpu": 7.78125,
+    "pid": 7440
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 7648
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 7656
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 7808
+  },
+  {
+    "name": "svchost",
+    "cpu": 69.46875,
+    "pid": 8592
+  },
+  {
+    "name": "svchost",
+    "cpu": 0.90625,
+    "pid": 8620
+  },
+  {
+    "name": "svchost",
+    "cpu": 15.28125,
+    "pid": 8924
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 9056
+  },
+  {
+    "name": "svchost",
+    "cpu": 3.890625,
+    "pid": 11140
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 16080
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 17820
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 19592
+  },
+  {
+    "name": "svchost",
+    "cpu": 0.265625,
+    "pid": 26332
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 31136
+  },
+  {
+    "name": "svchost",
+    "cpu": null,
+    "pid": 40000
+  },
+  {
+    "name": "System",
+    "cpu": null,
+    "pid": 4
+  },
+  {
+    "name": "tail",
+    "cpu": 0.4375,
+    "pid": 41268
+  },
+  {
+    "name": "tail",
+    "cpu": 158.515625,
+    "pid": 48640
+  },
+  {
+    "name": "tailscale-ipn",
+    "cpu": 8.953125,
+    "pid": 44400
+  },
+  {
+    "name": "tailscaled",
+    "cpu": null,
+    "pid": 4216
+  },
+  {
+    "name": "tailscaled",
+    "cpu": null,
+    "pid": 7096
+  },
+  {
+    "name": "taskhostw",
+    "cpu": 246.09375,
+    "pid": 8268
+  },
+  {
+    "name": "taskhostw",
+    "cpu": 2.109375,
+    "pid": 45332
+  },
+  {
+    "name": "TextInputHost",
+    "cpu": 60.390625,
+    "pid": 35240
+  },
+  {
+    "name": "vibranceGUI",
+    "cpu": 30.796875,
+    "pid": 26980
+  },
+  {
+    "name": "vmcompute",
+    "cpu": null,
+    "pid": 6468
+  },
+  {
+    "name": "vmms",
+    "cpu": null,
+    "pid": 2636
+  },
+  {
+    "name": "warp-svc",
+    "cpu": null,
+    "pid": 4184
+  },
+  {
+    "name": "WindowsPackageManagerServer",
+    "cpu": 2.0,
+    "pid": 50244
+  },
+  {
+    "name": "wininit",
+    "cpu": null,
+    "pid": 1256
+  },
+  {
+    "name": "winlogon",
+    "cpu": null,
+    "pid": 1356
+  },
+  {
+    "name": "WmiPrvSE",
+    "cpu": null,
+    "pid": 44840
+  },
+  {
+    "name": "WMIRegistrationService",
+    "cpu": null,
+    "pid": 4120
+  },
+  {
+    "name": "wslservice",
+    "cpu": null,
+    "pid": 4128
+  }
+]

@@ -1,0 +1,4 @@
+   Compiling faber-winproc v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\winproc)
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.44s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-2\debug\examples\bench.exe --codex-only --only todo-app --cap-usd 25 --per-run-usd 25 --dir 'E:\Temp\faber-g390c2-evidence' --run-id attempt-1-todo-app-bench`

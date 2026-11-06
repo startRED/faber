@@ -1,0 +1,7 @@
+{
+  "change": "Moved existing Rust documentation from the cost predicate back to settle; no executable line changed",
+  "actualRunSource": "final-run/harness/engine/examples/bench.rs",
+  "publishedSource": "engine/examples/bench.rs",
+  "publishedSha256": "f2f44e38bb57390f5352e11ebf406d6af8da10f25da5c190b0e04a51ba7d77ff",
+  "executableLinesIdentical": true
+}

@@ -1,0 +1,48 @@
+   Compiling syn v3.0.7
+   Compiling windows-link v0.1.3
+   Compiling fastrand v2.5.0
+   Compiling windows-result v0.3.4
+   Compiling windows-strings v0.4.2
+   Compiling windows-threading v0.1.0
+   Compiling tempfile v3.27.0
+   Compiling windows-core v0.61.2
+   Compiling windows-future v0.2.1
+   Compiling windows-collections v0.2.0
+   Compiling windows-numerics v0.2.0
+   Compiling windows v0.61.3
+   Compiling win32job v2.0.3
+   Compiling synstructure v0.14.0
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling tokio-macros v2.7.2
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling tokio v1.54.1
+   Compiling zerofrom v0.1.8
+   Compiling serde_derive v1.0.229
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling zerotrie v0.2.5
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.3.0
+   Compiling icu_locale_core v2.3.0
+   Compiling serde v1.0.229
+   Compiling icu_provider v2.3.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling hyper v1.12.0
+   Compiling tokio-rustls v0.26.6
+   Compiling tower v0.5.3
+   Compiling faber-winproc v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\winproc)
+   Compiling hyper-util v0.1.21
+   Compiling hyper-rustls v0.27.10
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling tower-http v0.6.11
+   Compiling reqwest v0.13.5
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.51s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-2\debug\examples\bench.exe --codex-only --only organize-folder --cap-usd 25 --per-run-usd 25 --dir 'E:\Temp\faber-g390c2-evidence' --run-id attempt-1-organize-folder-bench`
+faber: taskkill did not end the process tree of 11968: Ok(Ok(ExitStatus(ExitStatus(128))))

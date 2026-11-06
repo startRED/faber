@@ -1,0 +1,4 @@
+Build storage: 29.5 GB exceeds the 12 GB budget; active and protected caches were kept
+run attempt-1-todo-app-bench: 1 request(s), Faber on ["codex"] (Auto) against plain codex (gpt-6.1-sol medium), judge strongest measured profile (profile effort) (automatic vendor selection), cap US$25 or 3000000 first-time tokens
+  1. todo-app [Project] proof Some("todo"), A is Faber
+[1/1] todo-app

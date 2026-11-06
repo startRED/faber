@@ -1,0 +1,5 @@
+Done. Sorted all 30 files into nine folders and added INDEX.md at the top explaining each folder.
+
+Verified every file’s contents stayed identical. Nothing was deleted or renamed, and all backups were kept.
+
+Scripts weren’t run; references to their old locations may need updating.

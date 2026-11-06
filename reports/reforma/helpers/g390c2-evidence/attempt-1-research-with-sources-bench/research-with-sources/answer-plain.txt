@@ -1,0 +1,25 @@
+As of November 6, 2026, Node.js 26 “Lithium” is the latest Active LTS line, with end of life scheduled for April 30, 2029. Node.js 24 and 22 remain supported in Maintenance LTS until April 30, 2028 and April 30, 2027, respectively. [Official release schedule](https://github.com/nodejs/Release#release-schedule)
+
+For backend services, these are my five biggest changes from the Node.js 22 era to Node.js 24, including improvements added during 24.x:
+
+1. Native TypeScript execution became stable.
+
+   Node.js 24 can run TypeScript containing erasable syntax directly, and type stripping became stable in 24.12.0. That can simplify service startup and maintenance scripts. It doesn’t type-check or honor `tsconfig.json`, so keep your separate type checks and any required compilation. This isn’t exclusive to 24: type stripping started in 22.6 and became enabled by default in 22.18. [Node 24 TypeScript documentation](https://nodejs.org/docs/latest-v24.x/api/typescript.html), [Node 22 history](https://nodejs.org/docs/latest-v22.x/api/typescript.html)
+
+2. Request context tracking got a more efficient implementation.
+
+   Node.js 24 makes `AsyncContextFrame` the default implementation behind `AsyncLocalStorage`. This matters for services carrying request IDs, tenant information, or tracing context across asynchronous calls. Existing `AsyncLocalStorage` code benefits without adopting a new API; the actual performance benefit depends on your workload. [Node 24 release notes](https://nodejs.org/en/blog/release/v24.0.0#asynclocalstorage-defaults-to-asynccontextframe)
+
+3. Outbound HTTP gained built-in proxy support.
+
+   Node 24 supports environment-configured proxies for `fetch()`; 24.5 extends support to the built-in HTTP/HTTPS clients and agents. When explicitly enabled, it uses `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`. That can remove custom proxy plumbing in services deployed behind corporate firewalls. The HTTP proxy API is still marked as under active development. [Node 24.5 release notes](https://nodejs.org/en/blog/release/v24.5.0#built-in-proxy-support-in-request-and-agent), [HTTP documentation](https://nodejs.org/docs/latest-v24.x/api/http.html#built-in-proxy-support)
+
+4. JavaScript gained automatic resource cleanup.
+
+   V8 13.6 brings `using` and `await using` to Node 24. Resources implementing the disposal protocols can clean themselves up when their scope exits, including when an exception occurs. For backend code, that makes file handling less error-prone; file-handle asynchronous disposal became non-experimental in 24.2. It only works with resources that implement disposal. [Node 24 V8 changes](https://nodejs.org/en/blog/release/v24.0.0#v8-136), [File-handle disposal documentation](https://nodejs.org/docs/latest-v24.x/api/fs.html#filehandlesymbolasyncdispose)
+
+5. Legacy APIs became a more immediate migration concern.
+
+   Node 24 introduces runtime deprecation warnings for `url.parse()` and `SlowBuffer`, and removes `tls.createSecurePair()`. Older services and dependencies may therefore produce new warnings or fail if they use removed APIs. Audit legacy URL parsing and TLS dependencies before upgrading; use the WHATWG `URL` API for URL parsing. [Official deprecations and removals](https://nodejs.org/en/blog/release/v24.0.0#deprecations-and-removals)
+
+I checked official documentation, not application benchmarks or dependency compatibility; validate those against your service before deploying the upgrade.

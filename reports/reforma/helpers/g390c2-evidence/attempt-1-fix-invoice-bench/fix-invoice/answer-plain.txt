@@ -1,0 +1,9 @@
+Fixed `total(lines)`: zero quantity charges zero, invalid quantities/prices throw, and empty invoices return zero. The named export and integer-cent return value are preserved.
+
+Added `invoice.test.mjs`; both tests pass with:
+
+```sh
+node --test
+```
+
+README.md is unchanged. No dependencies added. Arithmetic overflow beyond safe-integer totals wasn’t addressed.

@@ -1,0 +1,9 @@
+Cold slows the chemical reactions inside your phone’s battery, so it can’t deliver power as easily. That can make the charge drop faster or cause the phone to shut down even when it shows battery remaining. Much of this is temporary: performance usually improves once the phone warms up.
+
+1. Keep it comfortably warm. Carry it in an inside coat pocket, close to your body. Don’t leave it in a cold car.
+
+2. Use less power outdoors. Turn on battery saver, lower screen brightness, and keep screen time short.
+
+3. Let it warm up before charging. Bring it indoors and let it reach room temperature naturally. Don’t use a radiator, hair dryer, or other direct heat, which can damage the battery.
+
+I haven’t checked your phone’s battery health; if it also drains quickly indoors, cold may not be the only cause.

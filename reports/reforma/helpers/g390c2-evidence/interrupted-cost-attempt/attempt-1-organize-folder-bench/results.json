@@ -1,0 +1,200 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "organize-folder"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "faber",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": "the last reply ended as Some(Some(Stopped))",
+        "folder": "E:\\Temp\\faber-g390c2-evidence\\attempt-1-organize-folder-bench\\organize-folder\\faber\\state\\copies\\cceee363-79e5-49b5-bd9b-e37c57b22f60",
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": false,
+        "proof": {
+          "checks": [
+            {
+              "detail": "30 files",
+              "name": "every original file is still there, content unchanged",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no file was copied instead of moved",
+              "ok": true
+            },
+            {
+              "detail": "loose: backup-photos.sh, budget-2026.csv, contacts.csv, export (1).csv, flight-confirmation-LIS.pdf, holiday beach.jpg, ideas.md, IMG_2041.jpg, IMG_2042.jpg, IMG_2043.jpg, installer-notes.log, Invoice_ACME_2026-03.pdf, Invoice_ACME_2026-04.pdf, laptop-backup-2024-12.zip, letter-to-landlord-draft.txt, logo-draft-v2.png, market-sales-q1.csv, meeting notes oct backup.txt, meeting notes oct.txt, meeting notes sept.txt, old-website-backup.zip, readme-first.txt, receipt_cafe_0412.pdf, resize.py, scrape-prices.js, Screenshot 2026-05-02 101500.png, Screenshot 2026-05-09 181142.png, shopping list.txt, tax-return-2025-draft.pdf, todo.md",
+              "name": "only INDEX.md is left loose in the top folder",
+              "ok": false
+            },
+            {
+              "detail": "0: ",
+              "name": "between 3 and 10 folders",
+              "ok": false
+            },
+            {
+              "detail": "",
+              "name": "no folder is empty",
+              "ok": true
+            },
+            {
+              "detail": "largest 0 of 30",
+              "name": "no folder holds most of the files",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md exists",
+              "ok": false
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md names every folder",
+              "ok": false
+            }
+          ],
+          "pass": false
+        },
+        "reply": "",
+        "secs": 8.9208509,
+        "side": "faber",
+        "stopped_by_cap": true,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 8.9208509
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.0653444,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-evidence\\attempt-1-organize-folder-bench\\organize-folder\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "30 files",
+              "name": "every original file is still there, content unchanged",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no file was copied instead of moved",
+              "ok": true
+            },
+            {
+              "detail": "loose: INDEX.md",
+              "name": "only INDEX.md is left loose in the top folder",
+              "ok": true
+            },
+            {
+              "detail": "9: Backups, Documents, Finance, Images, Logs, Notes, Photos, Scripts, Spreadsheets",
+              "name": "between 3 and 10 folders",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "no folder is empty",
+              "ok": true
+            },
+            {
+              "detail": "largest 6 of 30",
+              "name": "no folder holds most of the files",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md exists",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "INDEX.md names every folder",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Organized all 30 files into nine folders and added [INDEX.md](INDEX.md) explaining where everything is.\n\nVerified every original file’s contents are unchanged. Nothing was deleted, including duplicate backups.\n\nScripts weren’t run; they may need the appropriate working folder when used.",
+        "secs": 48.3705696,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 95104,
+          "cache_write": 0,
+          "input": 20332,
+          "output": 1517
+        },
+        "usage_incomplete": false,
+        "wall_secs": 48.3705696
+      },
+      "request": "organize-folder",
+      "skipped": null,
+      "title": "Organize a messy folder",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-organize-folder-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 95104,
+      "cache_write": 0,
+      "input": 20332,
+      "output": 1517
+    },
+    "usd": 0.0653444
+  },
+  "subscriptionOnly": true
+}

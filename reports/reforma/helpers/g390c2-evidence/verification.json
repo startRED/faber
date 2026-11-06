@@ -1,0 +1,72 @@
+{
+  "checks": [
+    {
+      "command": "npm run lint",
+      "exit": 0,
+      "finalLog": "complete-lint.log"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit": 0,
+      "finalLog": "complete-typecheck.log"
+    },
+    {
+      "command": "npm run docs",
+      "exit": 0,
+      "finalLog": "complete-docs.log"
+    },
+    {
+      "command": "npm run build",
+      "exit": 0,
+      "finalLog": "complete-build.log"
+    },
+    {
+      "command": "npm run test:scripts",
+      "exit": 0,
+      "tests": 335,
+      "pass": 330,
+      "skipped": 5,
+      "note": "Final full script suite after temporary-workspace correction",
+      "finalLog": "complete-test-scripts.log"
+    },
+    {
+      "command": "node scripts/cargo.mjs test -p faber-engine --example bench",
+      "exit": 0,
+      "tests": 40,
+      "pass": 40,
+      "note": "Final internal subscription guard regression included; complete log preserved",
+      "finalLog": "check-bench-final.log"
+    },
+    {
+      "command": "node scripts/cargo.mjs fmt --all --check",
+      "exit": 0,
+      "finalLog": "check-format-final.log"
+    },
+    {
+      "command": "node scripts/cargo.mjs t --claims",
+      "exit": 0,
+      "note": "Final complete-tree claims hold; no suite run",
+      "finalLog": "check-claims-complete.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "regression": "New Codex weekly test imports codexWeekly, which the unchanged watcher does not export; new harness tests cover billing rejection and subscription admission without hiding cost evidence. Credential-ancestor test rejects the initial .claude runtime-root mistake. Internal setup/settle cost guards ignore unknown dollar estimates only with no dollar allowance; bounded runs still refuse unknown cost.",
+  "notRun": [
+    "Heavy Rust/UI suites (CI only)",
+    "Live CS2 launch"
+  ],
+  "liveBenchmark": {
+    "requests": 8,
+    "answerSides": 16,
+    "verdicts": 8,
+    "proofsPassed": 14,
+    "quotaReceipts": 16,
+    "weeklyUsedBefore": 0.47,
+    "weeklyUsedAfter": 0.47,
+    "stoppedByGame": false,
+    "stoppedByQuota": false
+  }
+}

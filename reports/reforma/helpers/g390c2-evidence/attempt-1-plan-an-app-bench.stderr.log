@@ -1,0 +1,2 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --codex-only --only plan-an-app --cap-usd 25 --per-run-usd 25 --dir 'E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\reports\reforma\helpers\g390c2-evidence' --run-id attempt-1-plan-an-app-bench`

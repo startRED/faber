@@ -1,0 +1,112 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "plan-an-app"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": "the last reply ended as Some(Some(Stopped))",
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": false,
+        "proof": null,
+        "reply": "",
+        "secs": 5.5187834,
+        "side": "faber",
+        "stopped_by_cap": true,
+        "usage": {
+          "cache_read": 0,
+          "cache_write": 0,
+          "input": 0,
+          "output": 0
+        },
+        "usage_incomplete": true,
+        "wall_secs": 5.5187834
+      },
+      "judge": null,
+      "judge_attempted": false,
+      "judge_cost_usd": null,
+      "judge_usage": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 0,
+        "output": 0
+      },
+      "kind": "chat",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.044192,
+        "error": null,
+        "folder": null,
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": null,
+        "reply": "I’d start with a simple app that answers two questions for your mum: “What do I take next?” and “Do I need another box soon?” We can plan it together; you don’t need any programming knowledge.\n\nHere’s a first version to react to:\n\n- A “Today” screen showing each medicine, the prescribed amount, and the time to take it.\n- A reminder when it’s due, with big, clear buttons for “Taken” and “Skip.”\n- A stock count that goes down when she marks a dose as taken, plus a reminder before she runs out. When she gets another box, she adds it to the count.\n\nI’d leave pharmacy connections and other extras out of the first version. The stock estimate would depend on doses and new boxes being recorded.\n\nThree things will help shape the plan:\n\n1. Does your mum use an iPhone or Android phone?\n2. Would she manage it herself, would you set it up for her, or would you both need access?\n3. Are her medicines mostly taken at fixed times every day, or are there different days, changing amounts, or medicines taken only when needed?",
+        "secs": 25.9342927,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 8320,
+          "cache_write": 0,
+          "input": 19370,
+          "output": 462
+        },
+        "usage_incomplete": false,
+        "wall_secs": 25.9342927
+      },
+      "request": "plan-an-app",
+      "skipped": null,
+      "title": "Plan an app in conversation",
+      "verdict": null,
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-plan-an-app-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 8320,
+      "cache_write": 0,
+      "input": 19370,
+      "output": 462
+    },
+    "usd": 0.044192
+  },
+  "subscriptionOnly": true
+}

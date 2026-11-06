@@ -1,0 +1,4 @@
+Build storage: 29.8 GB exceeds the 12 GB budget; active and protected caches were kept
+Build folder E:/Documentos/ProjetosIA/faber\target: 29.8 GB is above the 12 GB cap, and nothing else is idle to remove
+Claims hold; nothing was built. The suites run in CI on the queued commit.
+Time: 7.2 s in all

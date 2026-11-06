@@ -1,0 +1,21 @@
+{
+  "kind": "Two fresh read-only sessions; same vendor because Claude quota is reserved",
+  "status": "No remaining concrete blocker after fixes",
+  "reviewers": [
+    "review_guard",
+    "review_isolation"
+  ],
+  "fixes": [
+    "Remove billing-routing environment names before every child",
+    "Reject billing environment names in standalone Codex-only harness before CLI discovery",
+    "Persist CS2 starts across phases and requests in an admitted C2 attempt",
+    "Use existing --dir flow with a system temporary work root outside credential-folder ancestors; leave product path guard intact",
+    "Subscription flag disables both internal setup and settle dollar checks; ordinary bounded runs retain unknown-cost rejection"
+  ],
+  "limits": [
+    "No real CLI/account commands used by reviewers",
+    "No live CS2 launch induced"
+  ],
+  "locationFixReview": "Both read-only reviewers rechecked; no remaining blocker",
+  "finalGuardReview": "Both read-only reviewers rechecked nullable allowance and cost predicate; no remaining blocker"
+}

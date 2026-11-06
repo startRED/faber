@@ -1,0 +1,3650 @@
+{
+  "files": [
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/.gitignore",
+      "bytes": 81,
+      "sha256": "17ab16dd6845e295dd0eb8d5235bef56cc270d77bd77366de026ab0736e0a085"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-after.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-after.stdout.log",
+      "bytes": 272,
+      "sha256": "8005dbc6ff0a72545520743c13c1ab1fa6c8c2a73805eb2670abeb6a4d094572"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-before.stderr.log",
+      "bytes": 184,
+      "sha256": "a0914135c8abe9faac020b8e2fca1c60bf7afc56c83241b2aa630d6a2fc1c19b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-before.stdout.log",
+      "bytes": 272,
+      "sha256": "60d2ea6e3522e335e3b15716c285451466cf6f422fc5a2cd9f92c20fa9afc0c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/everyday-question/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/everyday-question/answer-plain.txt",
+      "bytes": 818,
+      "sha256": "562a5424541a043b05d2e54e5c76442f9dad7b7bd755378f33b58042066020fd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/results.json",
+      "bytes": 3791,
+      "sha256": "8165ca218d95b6f082e15142f3c0d36c9325e6a7a19c02588960b8f2185c0967"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench/tables.md",
+      "bytes": 1557,
+      "sha256": "e2179fbf1349373dda129a2d2c22914282681ed2a21a6b438c1ffd02a435d79a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench.stderr.log",
+      "bytes": 376,
+      "sha256": "063d1e4b58e9beeedf985f721c7a6be6f6c8c9c5517a10ea092de6796c724283"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-everyday-question-bench.stdout.log",
+      "bytes": 2301,
+      "sha256": "3ccebfc005d4d527b958a23274c97217fa4da97a7ce075043574d9e516bc9c11"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-after.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-after.stdout.log",
+      "bytes": 272,
+      "sha256": "95023ec08a9dc3f60d0cbccd97309de3faa8a97a5054c6e2e27e8b6c5f7ef647"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-before.stderr.log",
+      "bytes": 184,
+      "sha256": "a0914135c8abe9faac020b8e2fca1c60bf7afc56c83241b2aa630d6a2fc1c19b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-before.stdout.log",
+      "bytes": 272,
+      "sha256": "0ac97ec0a272baf3017115c3e040daa4709d9349eed5165114482007c78b2033"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/fix-invoice/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/fix-invoice/answer-plain.txt",
+      "bytes": 363,
+      "sha256": "5e5e0d1e4b96dc325107e1cb452b636b4aa31d2b590c63b0303a10b6a76b5ade"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/results.json",
+      "bytes": 3811,
+      "sha256": "169c27a11e14872dea7b09ba053a876279f919999dc906d8d1adaee50ec3cd47"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench/tables.md",
+      "bytes": 1556,
+      "sha256": "91ea56c2a74147a79ccf529d3972171be013d217bec51a764b88d6bcebe57af7"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench.stderr.log",
+      "bytes": 364,
+      "sha256": "4fcf7abad3d10a4e0397e70bd422c618d548136a0466967195a6f9d37567beea"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-fix-invoice-bench.stdout.log",
+      "bytes": 2291,
+      "sha256": "7b227667ea14cecc83d37439d72e1ddc31a547c7bdf6dd8abdcc8f58da5ddb64"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-after.stderr.log",
+      "bytes": 184,
+      "sha256": "8f8d3f56f3c7d1710ab1a4a1f339a4fa9def9970e5a47a0c0ac8bba9784ad529"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-after.stdout.log",
+      "bytes": 272,
+      "sha256": "5a4d334c21c8a758ebe63aa7c0f79b6166d63495dd090ba31b4be04b47e0675f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-before.stderr.log",
+      "bytes": 184,
+      "sha256": "04fc024e2c8d868be6126d53b38761585702b7a34a1b89e0aabd6ab56dc79269"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-before.stdout.log",
+      "bytes": 272,
+      "sha256": "9e1208061213a65d15c51651cb84e81aa65307aa7742386e137aeecf1e3a973d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/migrate-settings/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/migrate-settings/answer-plain.txt",
+      "bytes": 270,
+      "sha256": "1cc3ad63b13d41d933b7dfba4ab5b4d68e5dfb74fee5729fd7aa2701167bf75d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/results.json",
+      "bytes": 4084,
+      "sha256": "8533727c4768e67feb6c8c6b034d323dd0e253840d474d48a7df2dff464c1ab3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench/tables.md",
+      "bytes": 1560,
+      "sha256": "e1df8ea4d26a76edd1a5503fcefebebe6e92c4891c6db64b7ce54713572bae16"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench.stderr.log",
+      "bytes": 374,
+      "sha256": "e24154bc874fdd57af9a3df567986f48ec62959950584a66cd7a91c1d308ef05"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-migrate-settings-bench.stdout.log",
+      "bytes": 2317,
+      "sha256": "e82bc5796a571c622cb342689b5fe4d2f66680a455cee50c23a31293283f1579"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-after.stderr.log",
+      "bytes": 184,
+      "sha256": "a0914135c8abe9faac020b8e2fca1c60bf7afc56c83241b2aa630d6a2fc1c19b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-after.stdout.log",
+      "bytes": 272,
+      "sha256": "110139639fa703ee39bfdebaa09b7957677ad00c6550016c28dabd6c960c18ab"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-before.stderr.log",
+      "bytes": 4205,
+      "sha256": "23684a0207e1f2220a9ef8dafdba3b1f7f6058267f256dd8195b8a5ac21902e8"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-before.stdout.log",
+      "bytes": 306,
+      "sha256": "155e111d820a3d017d832114bc8f43419960b61dce6cd01ed896698924e3076f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/organize-folder/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/organize-folder/answer-plain.txt",
+      "bytes": 285,
+      "sha256": "2d5d932f3895ab0c681ba801b62cb9675b73f30f10485fb41e73b400764de4e4"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/results.json",
+      "bytes": 5331,
+      "sha256": "5e07216b45b2a15e7b88ec17694074d367114ca0b216674acdb6d3b2a0466fe1"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench/tables.md",
+      "bytes": 1562,
+      "sha256": "937f2afe7ecc9da3382076f4636bc58cbf05b7eb70f1242309e2392589bd6318"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench.stderr.log",
+      "bytes": 372,
+      "sha256": "b47c246499a6913029e1d795e38ea94b6ed59411ae589f8b8ef147d1704747e2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-organize-folder-bench.stdout.log",
+      "bytes": 2338,
+      "sha256": "9c4ee61850e2dc7100138a4b5abcf4edaf674b07c924645785443923d5cdbc7f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-after.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-after.stdout.log",
+      "bytes": 272,
+      "sha256": "4692299e31e6ec4febbd8fa0460cbadab71be4c765725f3538b54e9e5b619700"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "87a9273f51e432e8093fa0ff8686129ee8ef2fad47ec3bf686187f0298ce6a39"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "fa064bf3da1d9cc3bc1010e2998134f6934394d4248b41f2efeb339c320c9ddb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/results.json",
+      "bytes": 3603,
+      "sha256": "ad503ad9952a63b02186ff017c8ec7832e29a7b6edecde8319c08506b4a1c98d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench/tables.md",
+      "bytes": 1539,
+      "sha256": "36e7ff7b37facbe70f4fb4753a182004ae1f7928240b43379ba3aa01e57e607d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench.stderr.log",
+      "bytes": 364,
+      "sha256": "5b1d2b19ed89cd712a216d2addbeaaa85f0fcfdb116f734ca15e8cb8304389bf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-plan-an-app-bench.stdout.log",
+      "bytes": 2238,
+      "sha256": "4b6176620f07701bab44537f52973496f1512ceecf640d1d54ff3be0a9548120"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-after.stderr.log",
+      "bytes": 184,
+      "sha256": "8f8d3f56f3c7d1710ab1a4a1f339a4fa9def9970e5a47a0c0ac8bba9784ad529"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-after.stdout.log",
+      "bytes": 272,
+      "sha256": "42fbb9c1dd898a2349976c7eb4f01fc1d91b5d4eb454d9bc55672888bff45ea0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-before.stderr.log",
+      "bytes": 184,
+      "sha256": "a0914135c8abe9faac020b8e2fca1c60bf7afc56c83241b2aa630d6a2fc1c19b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-before.stdout.log",
+      "bytes": 272,
+      "sha256": "e495ac35aaf698aed7c5f9663502983b8c48cd2fa89ee3be58b43ab863ce2fc4"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/research-with-sources/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/research-with-sources/answer-plain.txt",
+      "bytes": 3468,
+      "sha256": "a3dcad457e8e31788f2dc7593eb568e68bc39951411bcb7b04ece20a86ab2d3b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/results.json",
+      "bytes": 7106,
+      "sha256": "5dd48be45729335f3377ee84a487f8597204478e9e7d5c39888d912e8064b747"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench/tables.md",
+      "bytes": 1569,
+      "sha256": "d422752c35d2c1f1997dc5b35ae7c44454658521e28ab9a0841535c008f17e79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench.stderr.log",
+      "bytes": 384,
+      "sha256": "e6a81f4fea96d561045742de39f909e813a64672f90f4c2134189d0f545b0427"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-research-with-sources-bench.stdout.log",
+      "bytes": 2321,
+      "sha256": "306ea2e4498ce7dcaf7303877b14e6655c0fdb77079d4b88117e55422850bf12"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-after.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-after.stdout.log",
+      "bytes": 272,
+      "sha256": "db44034c7826a95b37b21711fa5e4fa5bd856e7e1f5be62a234e2ad3f7ea6bb0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-before.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-before.stdout.log",
+      "bytes": 272,
+      "sha256": "8cd11c3e4ab996fc5eeffea4a3cbb66238eac82bb29e3fe6958ded9b335e9e7a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/results.json",
+      "bytes": 3874,
+      "sha256": "6432342ec3645ebef016e8d4b8a17b19f5e2d22cf852c2f82e52ca0d9d234f4d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/summarize-sales/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/summarize-sales/answer-plain.txt",
+      "bytes": 321,
+      "sha256": "39fb1ce7c19d7f45dbaea691fc443274e807c8f3b30ac2ef14f8bf09f16bd5f9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench/tables.md",
+      "bytes": 1562,
+      "sha256": "49c2f4914d719ab57355ef04d4b9234a40e6ff5c5b76b2ba22b8f07ab8e15440"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench.stderr.log",
+      "bytes": 372,
+      "sha256": "644aec326642d8d94d04da023d88051cd4d669a9b4dbc8e9c1c975d1a3879cc4"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-summarize-sales-bench.stdout.log",
+      "bytes": 2311,
+      "sha256": "a853cbeed8891e78bc8a3b4e8aaaa7f5b47dd79e69bdd33f2cbcb8d92dbb8b06"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-after.stderr.log",
+      "bytes": 184,
+      "sha256": "04fc024e2c8d868be6126d53b38761585702b7a34a1b89e0aabd6ab56dc79269"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-after.stdout.log",
+      "bytes": 272,
+      "sha256": "547f2d431941ed5ddcde0d272be5887041114b64677182c89a2173ef314e55a0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "87a9273f51e432e8093fa0ff8686129ee8ef2fad47ec3bf686187f0298ce6a39"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "e8212c6d623eb1c6e10f0ca6f4ccfbf1239157ae86a5c87d009e30e06b4202da"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/results.json",
+      "bytes": 6263,
+      "sha256": "b5d31f173577d3b73c8dcf50e9cd058d59107056afbfdfc2443043d630e41f54"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/tables.md",
+      "bytes": 1561,
+      "sha256": "f06ec06f6006dfbb7c9b029d6007a458029519fa02284c0aa81e9d00062727cf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/todo-app/answer-faber.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench/todo-app/answer-plain.txt",
+      "bytes": 278,
+      "sha256": "a5a5885bc96983da43cf73da8237eb321cdfb2d60c5d7a08e1a5150a6bb1aafc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench.stderr.log",
+      "bytes": 358,
+      "sha256": "e258f7ce7b6d4be216b4d10544a8dbd75fd274e6ed2a0f9ace672f25ea225125"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/attempt-1-todo-app-bench.stdout.log",
+      "bytes": 2271,
+      "sha256": "f3c74bec2e0d877504884bd3a1be9b1274014471050d2e5161f5385a23b2bfdb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-bench-final.log",
+      "bytes": 8414,
+      "sha256": "9cdccac49aea37442acea7e073cb694865c9b2e6d654d4927ca08fee8d6a9db8"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-build.log",
+      "bytes": 4402,
+      "sha256": "b9b3eb2e963a7da62b170da252a44f9590dc1b6a634c86d6832ffb4f87b23971"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-claims-complete.log",
+      "bytes": 304,
+      "sha256": "7b15db37ba1d48ebc9547d919d24ef70b406adbba445b196d0fde2c5d66aef9c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-claims-final.log",
+      "bytes": 797,
+      "sha256": "e5e96714651d02d740fbcbc5150b763f5c4b405c5bda2ec62251712663aeee4b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-claims.log",
+      "bytes": 4647,
+      "sha256": "1746d2713b76dcca88434cc5d090ab3699ae3d63f2b76a234e1c274172a6c9ba"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-docs.log",
+      "bytes": 114,
+      "sha256": "2249ddada2e0fd3301e1a134a00961e93ec8ee21125dab86506bdd70a029ef13"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-format-final.log",
+      "bytes": 123,
+      "sha256": "a2389951f818fb51993c35ff2b37dc73fcbd4138fa063e3bb15ea6d872b3a577"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-lint.log",
+      "bytes": 2798,
+      "sha256": "87aea921344be6d5232b710ee4caff113244beb74cbb59d22c6e85aad9607146"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-test-scripts-final.log",
+      "bytes": 32467,
+      "sha256": "2aab0f53e6ad5e695168963deed4482c63a02a24ac8fe8b47e74865d561fa69c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-test-scripts.log",
+      "bytes": 32372,
+      "sha256": "39ca5db23fbe028bd7fa933c53a3264a5dce565b0813f532500e9d7130b5f865"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/check-typecheck.log",
+      "bytes": 73,
+      "sha256": "3032828270609933e595e2fecbb44aafebb4e62649b9ce6ae72fc9608d026a6e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/cleanup.json",
+      "bytes": 7820,
+      "sha256": "c21e9965578c44fbfc242cc0382f137ae9499a2001f6fa539a6b01b1f55f7434"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/complete-build.log",
+      "bytes": 4402,
+      "sha256": "4737ae96b0ed292eff2cd489f9342e5c62f4a26a74c6180da14b8c435eb2f116"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/complete-docs.log",
+      "bytes": 114,
+      "sha256": "2249ddada2e0fd3301e1a134a00961e93ec8ee21125dab86506bdd70a029ef13"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/complete-lint.log",
+      "bytes": 2798,
+      "sha256": "83317c9445570e404f7efedefa3cb5a9a305948949fee924af1c0167f005e6ee"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/complete-test-scripts.log",
+      "bytes": 32478,
+      "sha256": "a56eda7ebe8d19d2d87f28c7c03e46e619726700f12ed838e2ad018d05e3d826"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/complete-typecheck.log",
+      "bytes": 73,
+      "sha256": "3032828270609933e595e2fecbb44aafebb4e62649b9ce6ae72fc9608d026a6e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/copied-artifact-paths.json",
+      "bytes": 52537,
+      "sha256": "2607a1dc4f0609a9c181e7f8d28938d4081b48e163de8a396bd41c393ac7f5b3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/cpu-active-processes.json",
+      "bytes": 749,
+      "sha256": "eecc0a505eac14d258294e2493b0d1290304456ae8b90cd1a83d1d71cafd39fe"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/cpu-periodic-processes.json",
+      "bytes": 936,
+      "sha256": "aa87b739ba50bf3efe746ae31f55c0f3bb581845ffc081e99d97b5fcf43c4be7"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/cpu-processes-before.json",
+      "bytes": 37462,
+      "sha256": "7221d924d2f7fa9261565875753740170e4f81aee7e3e1c24f26063735e60e34"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/cpu-processes-delta.json",
+      "bytes": 662,
+      "sha256": "a9380aaf0ac2864977a41333838a270b9868a2afde0d6b87be01ad50b72a7780"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/faber/invoice.mjs",
+      "bytes": 465,
+      "sha256": "475c89fffe15edf9d6cd9aae244af0f323d7ca8615e5aa676523d11c19c19325"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/faber/invoice.test.mjs",
+      "bytes": 1510,
+      "sha256": "92c1d0bd0992f42084a56ff45b023763666e1639420c1b924e07a34718ba0ece"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/faber/README.md",
+      "bytes": 73,
+      "sha256": "ffc2417b54a1d1e35c73d79ba3ad5ba4b46fd9ae871a3c0fd0e21fcb55f1a344"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/plain/invoice.mjs",
+      "bytes": 465,
+      "sha256": "475c89fffe15edf9d6cd9aae244af0f323d7ca8615e5aa676523d11c19c19325"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/plain/invoice.test.mjs",
+      "bytes": 1250,
+      "sha256": "ecb9515e882e2cbb7c4790f70d709f0d66d793513fad979c48a1c0a0df15de66"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/fix-invoice/plain/README.md",
+      "bytes": 73,
+      "sha256": "ffc2417b54a1d1e35c73d79ba3ad5ba4b46fd9ae871a3c0fd0e21fcb55f1a344"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/faber/migrate.mjs",
+      "bytes": 1432,
+      "sha256": "1779d177a07be9b5199517983a4fb9d22d20bfd9a549e32dbd0a6b5148ac2319"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/faber/migrate.test.mjs",
+      "bytes": 1914,
+      "sha256": "aa4471fa85e37f41c90177431090b0c7966807018a287e105ecb43e7f3768b51"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/faber/notes.txt",
+      "bytes": 65,
+      "sha256": "326f5bf3097dda7577f54b54eb28dcdd70b12d04a152142e273cae67d7cc48aa"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/faber/settings.json",
+      "bytes": 164,
+      "sha256": "e26255e3cf5224278a53f3756db924c3cdc76681e16538a436c925a0b038dee5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/plain/migrate.mjs",
+      "bytes": 1176,
+      "sha256": "b8f93481880d5f0695753137116abb19fefcf20a4866f508a241f0d6b7960374"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/plain/migrate.test.mjs",
+      "bytes": 2000,
+      "sha256": "a283570286b6b333d12bea574986b397b38bc5a670587c2cc45c5753a30105f6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/plain/notes.txt",
+      "bytes": 65,
+      "sha256": "326f5bf3097dda7577f54b54eb28dcdd70b12d04a152142e273cae67d7cc48aa"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/migrate-settings/plain/settings.json",
+      "bytes": 164,
+      "sha256": "e26255e3cf5224278a53f3756db924c3cdc76681e16538a436c925a0b038dee5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Backups/laptop-backup-2024-12.zip",
+      "bytes": 343,
+      "sha256": "efcce2d9414a304be0889b995eacdf906fd502067affafdd5f8b6b5f3eaf6cb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Backups/meeting notes oct backup.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Backups/old-website-backup.zip",
+      "bytes": 329,
+      "sha256": "143333add7f8b5934cb012090a5bcff0184aa9e2c1d460ab6c4fe6a6be6bdb30"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Documents/flight-confirmation-LIS.pdf",
+      "bytes": 354,
+      "sha256": "004e9774d1312fa428df5e1c3610d06215bdb8680012e7715f398a96bf80324d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Documents/letter-to-landlord-draft.txt",
+      "bytes": 107,
+      "sha256": "f1ec8825658b2508edefbd53d29aff3c0759942d927af34c49e79b5e61a42359"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Documents/readme-first.txt",
+      "bytes": 68,
+      "sha256": "477e8abe1be66be44132933436b30fe224d05149b619ecd081784342ba1df418"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Finance/Invoice_ACME_2026-03.pdf",
+      "bytes": 358,
+      "sha256": "66020021393435467121b34ef76a595332eb2c0afe0bdd07e0ef17849c2432c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Finance/Invoice_ACME_2026-04.pdf",
+      "bytes": 356,
+      "sha256": "6fd9e4ebd81c3a9ef8c6bc55afc0f5ba7f5a802c78cb158212377bb811f70632"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Finance/receipt_cafe_0412.pdf",
+      "bytes": 345,
+      "sha256": "1e8821259c9d1d0394fb388f66868c5517b194edd71b6cf71244fd974124235b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Finance/tax-return-2025-draft.pdf",
+      "bytes": 345,
+      "sha256": "828dbfd2b2f1fe68eb1fd2e24054ae2bbdfcc939745e50e54ece62ec46023de3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Images/logo-draft-v2.png",
+      "bytes": 80,
+      "sha256": "467cd8a9f229c318b7a0071b53050cb79f25cf03c3ccc4b2773455c19d3ec232"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Images/Screenshot 2026-05-02 101500.png",
+      "bytes": 81,
+      "sha256": "81b72a999b79d8360dae299847bba0893ccbd2b9ea5e2785dd8fd107aa73f545"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Images/Screenshot 2026-05-09 181142.png",
+      "bytes": 81,
+      "sha256": "778a423c12c4a6e48a54cfb283aa91d2ae14914908be2f311fd4b341fc225766"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/INDEX.md",
+      "bytes": 899,
+      "sha256": "4b4bfbad872920390b871cd6e34f846ba1921336ace8abb0cdb683c41eacd0c2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Logs/installer-notes.log",
+      "bytes": 72,
+      "sha256": "666c9805d42a044325870485d5d6f3a20ce83f0f9d918658ec5e3032e1de8e2a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Notes/ideas.md",
+      "bytes": 112,
+      "sha256": "790fb79ff64871f622ac2fc27e48dfd264160345282d2be0040d8db69dfd1edf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Notes/meeting notes oct.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Notes/meeting notes sept.txt",
+      "bytes": 87,
+      "sha256": "4c2ff52b6bf536f07acfcc3c7869fc42b4bc887999f94c8b1420457eebef77f5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Notes/shopping list.txt",
+      "bytes": 46,
+      "sha256": "f519fe9295dba46589293e5cfc7715474e97cae2d05dddb4e3064786e6fd7753"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Notes/todo.md",
+      "bytes": 95,
+      "sha256": "f147708cec47ea9e4b93f112bf343d1ddfdec859f93f702f42f24c69bdafc65a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Photos/holiday beach.jpg",
+      "bytes": 83,
+      "sha256": "3ad687affc73557f75aec1c0482820965fb3440cd940dbdb1d64a0c718a1db86"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Photos/IMG_2041.jpg",
+      "bytes": 86,
+      "sha256": "e49be61448cbce8027691b909ac376837de1194ac29c6147e2b9b386d59709c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Photos/IMG_2042.jpg",
+      "bytes": 86,
+      "sha256": "e1a6b0f4117834034a477525741fc9149472c6a1276a8684e2ee9b915e197c4a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Photos/IMG_2043.jpg",
+      "bytes": 86,
+      "sha256": "19fcadb933e2a4519159b0d248497e588c34bb68a402640b6d65ff3c449747fb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Scripts/backup-photos.sh",
+      "bytes": 104,
+      "sha256": "d8f41df62b8aee5d4d5738aa75ed32c4b63b3ec8227e55f58097b5f34b477255"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Scripts/resize.py",
+      "bytes": 123,
+      "sha256": "1a2f4c9d38b94e0aa090687e2ba9b861f516fdb4620fb584a9b1f5b6df4fbebb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Scripts/scrape-prices.js",
+      "bytes": 98,
+      "sha256": "13725bfc660c330047fbe0af6343a98175773be369a29656072229a213db4063"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Spreadsheets/budget-2026.csv",
+      "bytes": 64,
+      "sha256": "93b3de8cfc8525ee1384907f24ae067b8832fcf8d3de31e6f777ee730f9ed795"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Spreadsheets/contacts.csv",
+      "bytes": 87,
+      "sha256": "d862c60961e1dd4fbe5e84cebf8e40f1b474afd0dcff48766a40cde37929cf80"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Spreadsheets/export (1).csv",
+      "bytes": 61,
+      "sha256": "fa5b84e07fa5de85fe7dc7c6421850ef2cbed6e47050ef8af51ea855a308e045"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/faber/Spreadsheets/market-sales-q1.csv",
+      "bytes": 41,
+      "sha256": "9a58ed4a5b96af3848d91518c7fa6dc59ab8e24106020da3d825df81f449bafd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Backups/laptop-backup-2024-12.zip",
+      "bytes": 343,
+      "sha256": "efcce2d9414a304be0889b995eacdf906fd502067affafdd5f8b6b5f3eaf6cb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Backups/meeting notes oct backup.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Backups/old-website-backup.zip",
+      "bytes": 329,
+      "sha256": "143333add7f8b5934cb012090a5bcff0184aa9e2c1d460ab6c4fe6a6be6bdb30"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Documents/flight-confirmation-LIS.pdf",
+      "bytes": 354,
+      "sha256": "004e9774d1312fa428df5e1c3610d06215bdb8680012e7715f398a96bf80324d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Documents/letter-to-landlord-draft.txt",
+      "bytes": 107,
+      "sha256": "f1ec8825658b2508edefbd53d29aff3c0759942d927af34c49e79b5e61a42359"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Finance/Invoice_ACME_2026-03.pdf",
+      "bytes": 358,
+      "sha256": "66020021393435467121b34ef76a595332eb2c0afe0bdd07e0ef17849c2432c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Finance/Invoice_ACME_2026-04.pdf",
+      "bytes": 356,
+      "sha256": "6fd9e4ebd81c3a9ef8c6bc55afc0f5ba7f5a802c78cb158212377bb811f70632"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Finance/receipt_cafe_0412.pdf",
+      "bytes": 345,
+      "sha256": "1e8821259c9d1d0394fb388f66868c5517b194edd71b6cf71244fd974124235b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Finance/tax-return-2025-draft.pdf",
+      "bytes": 345,
+      "sha256": "828dbfd2b2f1fe68eb1fd2e24054ae2bbdfcc939745e50e54ece62ec46023de3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Images/logo-draft-v2.png",
+      "bytes": 80,
+      "sha256": "467cd8a9f229c318b7a0071b53050cb79f25cf03c3ccc4b2773455c19d3ec232"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Images/Screenshot 2026-05-02 101500.png",
+      "bytes": 81,
+      "sha256": "81b72a999b79d8360dae299847bba0893ccbd2b9ea5e2785dd8fd107aa73f545"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Images/Screenshot 2026-05-09 181142.png",
+      "bytes": 81,
+      "sha256": "778a423c12c4a6e48a54cfb283aa91d2ae14914908be2f311fd4b341fc225766"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/INDEX.md",
+      "bytes": 881,
+      "sha256": "ffbfec52982c2a5b5fb5919c87f74d7c13e5490720b3e925e0277c2b6e7d24a2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Logs/installer-notes.log",
+      "bytes": 72,
+      "sha256": "666c9805d42a044325870485d5d6f3a20ce83f0f9d918658ec5e3032e1de8e2a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/ideas.md",
+      "bytes": 112,
+      "sha256": "790fb79ff64871f622ac2fc27e48dfd264160345282d2be0040d8db69dfd1edf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/meeting notes oct.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/meeting notes sept.txt",
+      "bytes": 87,
+      "sha256": "4c2ff52b6bf536f07acfcc3c7869fc42b4bc887999f94c8b1420457eebef77f5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/readme-first.txt",
+      "bytes": 68,
+      "sha256": "477e8abe1be66be44132933436b30fe224d05149b619ecd081784342ba1df418"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/shopping list.txt",
+      "bytes": 46,
+      "sha256": "f519fe9295dba46589293e5cfc7715474e97cae2d05dddb4e3064786e6fd7753"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Notes/todo.md",
+      "bytes": 95,
+      "sha256": "f147708cec47ea9e4b93f112bf343d1ddfdec859f93f702f42f24c69bdafc65a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Photos/holiday beach.jpg",
+      "bytes": 83,
+      "sha256": "3ad687affc73557f75aec1c0482820965fb3440cd940dbdb1d64a0c718a1db86"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Photos/IMG_2041.jpg",
+      "bytes": 86,
+      "sha256": "e49be61448cbce8027691b909ac376837de1194ac29c6147e2b9b386d59709c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Photos/IMG_2042.jpg",
+      "bytes": 86,
+      "sha256": "e1a6b0f4117834034a477525741fc9149472c6a1276a8684e2ee9b915e197c4a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Photos/IMG_2043.jpg",
+      "bytes": 86,
+      "sha256": "19fcadb933e2a4519159b0d248497e588c34bb68a402640b6d65ff3c449747fb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Scripts/backup-photos.sh",
+      "bytes": 104,
+      "sha256": "d8f41df62b8aee5d4d5738aa75ed32c4b63b3ec8227e55f58097b5f34b477255"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Scripts/resize.py",
+      "bytes": 123,
+      "sha256": "1a2f4c9d38b94e0aa090687e2ba9b861f516fdb4620fb584a9b1f5b6df4fbebb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Scripts/scrape-prices.js",
+      "bytes": 98,
+      "sha256": "13725bfc660c330047fbe0af6343a98175773be369a29656072229a213db4063"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Spreadsheets/budget-2026.csv",
+      "bytes": 64,
+      "sha256": "93b3de8cfc8525ee1384907f24ae067b8832fcf8d3de31e6f777ee730f9ed795"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Spreadsheets/contacts.csv",
+      "bytes": 87,
+      "sha256": "d862c60961e1dd4fbe5e84cebf8e40f1b474afd0dcff48766a40cde37929cf80"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Spreadsheets/export (1).csv",
+      "bytes": 61,
+      "sha256": "fa5b84e07fa5de85fe7dc7c6421850ef2cbed6e47050ef8af51ea855a308e045"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/organize-folder/plain/Spreadsheets/market-sales-q1.csv",
+      "bytes": 41,
+      "sha256": "9a58ed4a5b96af3848d91518c7fa6dc59ab8e24106020da3d825df81f449bafd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/faber/sales.csv",
+      "bytes": 123,
+      "sha256": "dc648230e3bb90107b5b20acead1391b3deebbd4d2918fb03e3e35a49c91751c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/faber/summarize.mjs",
+      "bytes": 1180,
+      "sha256": "a1eb1f8e9633e74c85e5476f786065bd2b3b80a485c3b60b8f63c6a52e7c0f70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/faber/summarize.test.mjs",
+      "bytes": 2150,
+      "sha256": "dc651d2e879b99aa79ff6e884ae4645764685cc39d4b93b8dff02edb5d5bab10"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/plain/sales.csv",
+      "bytes": 123,
+      "sha256": "dc648230e3bb90107b5b20acead1391b3deebbd4d2918fb03e3e35a49c91751c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/plain/summarize.mjs",
+      "bytes": 1193,
+      "sha256": "2f3788ff395d0a776ae3c212b4d5de2e339b079e0fb00e19404da2e48e0074fe"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/summarize-sales/plain/summarize.test.mjs",
+      "bytes": 1976,
+      "sha256": "b2f60ffe30b430ae2de7d861ac6662c8bf198009b128beec252cd45faebb00dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/faber/README.md",
+      "bytes": 1018,
+      "sha256": "cdc0670d1e390895d196bfecc3870365f552ac688fb52c82e88eca4b6f08ebeb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/faber/todo.js",
+      "bytes": 2479,
+      "sha256": "387dfba20ebf36737af3052624345383d4faefa1ea16a48e0a352b4ef3d466b7"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/faber/todo.test.js",
+      "bytes": 3538,
+      "sha256": "1c24942a9e0fd6fe51aa4d1f3abd2b9a8922394024cba4c59ff1ad195c905898"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/plain/README.md",
+      "bytes": 815,
+      "sha256": "d562f7a6a908c1c07b5b02a85a9af2441096ff2976d2a27c6129f11654ff56eb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/plain/todo.js",
+      "bytes": 2385,
+      "sha256": "7ea2143a7cb9d1b53fb68376599706ed8fc3668cf9097c9c9c1c327678671c5c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/artifacts/todo-app/plain/todo.test.js",
+      "bytes": 4238,
+      "sha256": "bac3786bfe38679a4b9c935e3ec6773fd44692d529f61ee835f24a57f6c72b39"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-after.stderr.log",
+      "bytes": 184,
+      "sha256": "32aa0ba57008584cf2809e7cd940a74a21ef892c84ea3860db1295967ae62022"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-after.stdout.log",
+      "bytes": 272,
+      "sha256": "90fececee5161101a605e475c85610734238aa7dcaa0242bbec0817d93965919"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-before.stderr.log",
+      "bytes": 184,
+      "sha256": "32aa0ba57008584cf2809e7cd940a74a21ef892c84ea3860db1295967ae62022"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-before.stdout.log",
+      "bytes": 272,
+      "sha256": "021e1bad707d79794518c6385eb4453912a9d3a73d8500885513512ab04bd4ed"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/results.json",
+      "bytes": 5255,
+      "sha256": "e018d5c26fdcafbd844020d20198c4fa47a48147158c11d9ea13be1d89b4fba0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench/tables.md",
+      "bytes": 1637,
+      "sha256": "92776ddf8317e8027bd6d26fdab74c59336c98d92ef89791c6f4072a9d26d04c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench.stderr.log",
+      "bytes": 586,
+      "sha256": "ee6a196e78e2df4cf382521c99d3582da60e5cfe8110e79b30c62a8ca250ddb4"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-everyday-question-bench.stdout.log",
+      "bytes": 2467,
+      "sha256": "759ded229ed894d66cfdf9451d693000d4db827693e07ab23ab91ad31c6d02b9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-after.stderr.log",
+      "bytes": 184,
+      "sha256": "a35c697339c2d7ea2f45dcbd3a70c8d79e93455bd5af5fa343cb4082acfed896"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-after.stdout.log",
+      "bytes": 272,
+      "sha256": "1d2b00a33eca867eb2bd01379debc390f50210379ba0d610d3165b98147fab9e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-before.stderr.log",
+      "bytes": 184,
+      "sha256": "ddbf19a8afac5794c55922794e4972b295a9d15c856830b1b68118788fa4ff38"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-before.stdout.log",
+      "bytes": 272,
+      "sha256": "eb188145d404d1a19a090bb9953f72a5cd9de7b28edf3cb5349ee97aff3e546a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/results.json",
+      "bytes": 4798,
+      "sha256": "68576276a8df85b65eb425aef9b39bc16bd4e12f6a2028a1a8ae815d73df761a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench/tables.md",
+      "bytes": 1630,
+      "sha256": "874382bf87d3ae4ee75e452b3365bc122087ac046e547585c243509083f02768"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench.stderr.log",
+      "bytes": 573,
+      "sha256": "e68e415ba98af99013b6536e1b06c1b721dbcf54453ee32af348a8a5876300a2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-fix-invoice-bench.stdout.log",
+      "bytes": 2525,
+      "sha256": "e3eaa97aa0c3bf3e3210dff765588baafab7f631b5e4c999cfc761ad3b52118c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-after.stderr.log",
+      "bytes": 184,
+      "sha256": "a35c697339c2d7ea2f45dcbd3a70c8d79e93455bd5af5fa343cb4082acfed896"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-after.stdout.log",
+      "bytes": 272,
+      "sha256": "07bc925139ded46b9c6e1e8f617f5880c6c3b29617d4d213e5ac6e7d5133465d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-before.stderr.log",
+      "bytes": 184,
+      "sha256": "32aa0ba57008584cf2809e7cd940a74a21ef892c84ea3860db1295967ae62022"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-before.stdout.log",
+      "bytes": 272,
+      "sha256": "9e11d5df5038df552cf7448cce19a5ea25fb4572c6a978600006b3717ba9ca4e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/results.json",
+      "bytes": 5031,
+      "sha256": "704fab454fcb7265f1a6baa4aa6f13f4ea93cf297b0cc15005fa2fdb57086d19"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench/tables.md",
+      "bytes": 1642,
+      "sha256": "cdd4fd098fff5362d25d5d2915910466a4380a7928f6caba030ab27d35c9cfb2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench.stderr.log",
+      "bytes": 584,
+      "sha256": "4630422b5bbb8706b7d96613850435a10b72d948559d79c213075a3a1009b44c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-migrate-settings-bench.stdout.log",
+      "bytes": 2557,
+      "sha256": "729e75ba453a1d71bcb752e8911733b7a2b90330d7590f27b108490f020d2c9e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-after.stderr.log",
+      "bytes": 184,
+      "sha256": "3814d06ff51d473c0c43431ab14e63f86651c8ed4232b265a76f0430419d28bc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-after.stdout.log",
+      "bytes": 272,
+      "sha256": "ef2763cdf44664e1515be1af10c1d7d8f58e1ef28651fb9140ace6ff7a91d5bf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-before.stderr.log",
+      "bytes": 285,
+      "sha256": "e78e7f881bd49b3e75ac1b4877fd987cc7e9b930fd25bbe7e99704a5771bd7ec"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-before.stdout.log",
+      "bytes": 272,
+      "sha256": "67607946845288cd483f74df85f32984365b50e76d262d5192934cb1dccb1a57"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/results.json",
+      "bytes": 6221,
+      "sha256": "a124be8c9fdbebdf641e9905c20c481bb5cdac488a0091b179d6424a4cbe8809"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench/tables.md",
+      "bytes": 1641,
+      "sha256": "d1d4eee1bdcbb1dfec0ecb29094d30cfd1631a429582451253a6b38e440852e7"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench.stderr.log",
+      "bytes": 581,
+      "sha256": "6d2e20626f8610fc70089e6a60a00f8abdf26da11228465d924cc6450c35f1ce"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-organize-folder-bench.stdout.log",
+      "bytes": 2477,
+      "sha256": "6034e92e7d49a00f0a3ea5837764d1eabc10ad1a41d108110fe24ba20bb2a955"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-after.stderr.log",
+      "bytes": 184,
+      "sha256": "6a484a909f04193f09487aa38db6e62a7007daec6dd25a0c45da20c70ec5c597"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-after.stdout.log",
+      "bytes": 272,
+      "sha256": "7bd6abae8196b82f7eb55feef808dfaad7c9b6514e57d7e3b4f222c95e0509ae"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "6a484a909f04193f09487aa38db6e62a7007daec6dd25a0c45da20c70ec5c597"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "6b2e787fa55235f8c208b6b6365ad1fe6c51273881bf0a6f142d0c4f3d690ae5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/results.json",
+      "bytes": 5459,
+      "sha256": "34e9be735f50b60fafe171f4c914ec6294e412838d84cd71deb94051470b27c1"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench/tables.md",
+      "bytes": 1607,
+      "sha256": "5bafaddf1789047bf57dfedca3182c19425acdf3a970c45886f524e9ffe05208"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench.stderr.log",
+      "bytes": 574,
+      "sha256": "8cd9351bfb02cb1c85cc03e64a57c7f6755f8f719f57402b60612818370872b8"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-plan-an-app-bench.stdout.log",
+      "bytes": 2429,
+      "sha256": "ae005d4f8b598fc8b53788b312e152df07f8cc284709b80215c21904d4db7e91"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-after.stderr.log",
+      "bytes": 184,
+      "sha256": "f0b85122d18281fe314bb02cbf14630724e533f6f37072b92098940a29bd9114"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-after.stdout.log",
+      "bytes": 272,
+      "sha256": "da0f16c19f4c5b02eba36ea0130c8e46882b7a0cf62beb7f42fe651f96aee63e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-before.stderr.log",
+      "bytes": 184,
+      "sha256": "a4937b91185d8e03280faf4f236b70d97ed3cc1f6e04932fef79477b5c0fc2a0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-before.stdout.log",
+      "bytes": 272,
+      "sha256": "b6898eceaf2c839d7e7c9c678f4e105478a297b8c65fafd8fb044d42feec41d2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/results.json",
+      "bytes": 10627,
+      "sha256": "6ab016c852f7244a5f698d07caaa031c02a9b3079d0ad14d432c5cadfd26f7f0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench/tables.md",
+      "bytes": 1650,
+      "sha256": "7d7a518ef2d44b5c62a0e70e1ba27bd0570d75a55ac4c3573bd6c6c769a048fd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench.stderr.log",
+      "bytes": 593,
+      "sha256": "2971cb3bc3699c9bbdfd81ce5d41d66e144a3e4c8b50816aee1a3b222458490c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-research-with-sources-bench.stdout.log",
+      "bytes": 2608,
+      "sha256": "c640b5f44f9ed0c7ce54c34df5c0a20dbe0aa8bbe5c772080dc0123916741c29"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-after.stderr.log",
+      "bytes": 184,
+      "sha256": "73940402fd9ad7e52b4eabd33eec43d4eaeca898f58241fb6dcc5894dd7ca5e1"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-after.stdout.log",
+      "bytes": 272,
+      "sha256": "01efc4fb24ded53974136d73242ce2dbbeb38b6b804cbd9a5444d30270f78813"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-before.stderr.log",
+      "bytes": 184,
+      "sha256": "32aa0ba57008584cf2809e7cd940a74a21ef892c84ea3860db1295967ae62022"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-before.stdout.log",
+      "bytes": 272,
+      "sha256": "f235965d42e03a1a2550d6b1d41786ad86d73704256ffccbfc7bcd768fc1edc9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/results.json",
+      "bytes": 4774,
+      "sha256": "fe849c47d40bf8a7266d0aa367ff9971a33c8e8b62de650ab9f02267693bd912"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench/tables.md",
+      "bytes": 1638,
+      "sha256": "6bbf8bd54e94913e1ddd92809f1e200f35420d8bf130b07a4be64df89de39ee9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench.stderr.log",
+      "bytes": 582,
+      "sha256": "73929785f88f97629c733ae0345ee8daf2478d1706f1efa660ac894e6d4e4915"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-summarize-sales-bench.stdout.log",
+      "bytes": 2468,
+      "sha256": "3fe0f5f0380f4e93f363f34fc47f8d02eb789cae40b07b5d22b7af8ac42910b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-after.stderr.log",
+      "bytes": 184,
+      "sha256": "96bee9471092e7a202e75b7613f2ef9ef60da053a8d6d986e7fbd784660fccd2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-after.stdout.log",
+      "bytes": 272,
+      "sha256": "b0f3a780bce828b26bb90bcad53814c474e8561b41b510ca47d124a2f1a0421b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "f0b85122d18281fe314bb02cbf14630724e533f6f37072b92098940a29bd9114"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "5ee037a162e6f5ed81cb2db9ecb7a6c4dec0b09b5031220c700b1525a6ff926b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/results.json",
+      "bytes": 7101,
+      "sha256": "b51a6a47b15f6f2c70d403e31c26dd2d3853b2fa3a0c6075d56f13478dcfa22d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench/tables.md",
+      "bytes": 1632,
+      "sha256": "f85300b74b9d9168ddc426374ba02df2f977e7bae75678910a84be6efd45afec"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench.stderr.log",
+      "bytes": 566,
+      "sha256": "2257f91b622de64ca0bda4d66a0e74e1001def92b38e2e15dd26529bc088384f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/attempt-1-todo-app-bench.stdout.log",
+      "bytes": 2445,
+      "sha256": "877855e441c79c96e7a61d6687e0e27eb88f7588ddda2756021cc13aa3ed20d6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/bench/account_quiet.rs",
+      "bytes": 11346,
+      "sha256": "3b5ea9683b64d2e84cb4642f1954190b3f7f54bacff9e44cdc26c0614e913545"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/bench/inputs.rs",
+      "bytes": 4444,
+      "sha256": "ea4ac29ce1e43a8824359d6133de3042488aeb24f0182bf5f142026a306cf480"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/bench/pure.rs",
+      "bytes": 51804,
+      "sha256": "4797c1b11b95b4a3e8ea19a0e5881e9491a68f6a3902c51bbc18b5b724b92983"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/engine/examples/bench.rs",
+      "bytes": 56266,
+      "sha256": "10fa7b7a345cde82d20eaaeeb1ca9b45f6f4afc0c523a40b9b2434fc4aa75c33"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/scripts/bench-when-quiet.mjs",
+      "bytes": 16944,
+      "sha256": "263dd3ae998117a89af61d943f9c30a99ec05f555e70d688132dc126ad78d0e7"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness/scripts/bench-when-quiet.test.mjs",
+      "bytes": 5138,
+      "sha256": "f373bdd3f7f10a042da30ee461d1918b6e9f9fe84c4373339d090be73a6228a8"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/harness-sha256.json",
+      "bytes": 581,
+      "sha256": "f0f1d425cd114114670d57e1a048b1807d23bde8e87c6531e75fcd54955565c1"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/provenance.json",
+      "bytes": 134,
+      "sha256": "cfedb54a60f8616416414ba745de1babb84c803a48b4e14dca588f626527630c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/summary.json",
+      "bytes": 7454,
+      "sha256": "c015c29c9ec42406a0413bbe2a8d8e49ccf47cea818e429d4e6532a4d48f026a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/watcher.jsonl",
+      "bytes": 10084,
+      "sha256": "46537f9a29245301fe9430562f0f2705a05f16f32d14ed8aec61acdcdbc130e6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/final-run/watcher.lock",
+      "bytes": 5,
+      "sha256": "c0dede02652b5335ebdcbd402b6e59154819e206ddf96cd2cf7adf3a395e8463"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/harness-sha256.json",
+      "bytes": 581,
+      "sha256": "60fbd231a9456d101988f9e90cf242033efcdc6bfb28d23f201b9fe00ce57d75"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/initial-attempt-status.json",
+      "bytes": 8841,
+      "sha256": "9a1727401a5a79afaeb818c9ba0d557c7b9252666983c5a5307491b690949270"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/initial-watcher.mjs",
+      "bytes": 16751,
+      "sha256": "40a5186f6aa81a2f30ef8981532efe0621e70a6f74727659024530f8e050d52a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/backup-photos.sh",
+      "bytes": 104,
+      "sha256": "d8f41df62b8aee5d4d5738aa75ed32c4b63b3ec8227e55f58097b5f34b477255"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/budget-2026.csv",
+      "bytes": 64,
+      "sha256": "93b3de8cfc8525ee1384907f24ae067b8832fcf8d3de31e6f777ee730f9ed795"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/contacts.csv",
+      "bytes": 87,
+      "sha256": "d862c60961e1dd4fbe5e84cebf8e40f1b474afd0dcff48766a40cde37929cf80"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/export (1).csv",
+      "bytes": 61,
+      "sha256": "fa5b84e07fa5de85fe7dc7c6421850ef2cbed6e47050ef8af51ea855a308e045"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/flight-confirmation-LIS.pdf",
+      "bytes": 354,
+      "sha256": "004e9774d1312fa428df5e1c3610d06215bdb8680012e7715f398a96bf80324d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/holiday beach.jpg",
+      "bytes": 83,
+      "sha256": "3ad687affc73557f75aec1c0482820965fb3440cd940dbdb1d64a0c718a1db86"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/ideas.md",
+      "bytes": 112,
+      "sha256": "790fb79ff64871f622ac2fc27e48dfd264160345282d2be0040d8db69dfd1edf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/IMG_2041.jpg",
+      "bytes": 86,
+      "sha256": "e49be61448cbce8027691b909ac376837de1194ac29c6147e2b9b386d59709c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/IMG_2042.jpg",
+      "bytes": 86,
+      "sha256": "e1a6b0f4117834034a477525741fc9149472c6a1276a8684e2ee9b915e197c4a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/IMG_2043.jpg",
+      "bytes": 86,
+      "sha256": "19fcadb933e2a4519159b0d248497e588c34bb68a402640b6d65ff3c449747fb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/installer-notes.log",
+      "bytes": 72,
+      "sha256": "666c9805d42a044325870485d5d6f3a20ce83f0f9d918658ec5e3032e1de8e2a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/Invoice_ACME_2026-03.pdf",
+      "bytes": 358,
+      "sha256": "66020021393435467121b34ef76a595332eb2c0afe0bdd07e0ef17849c2432c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/Invoice_ACME_2026-04.pdf",
+      "bytes": 356,
+      "sha256": "6fd9e4ebd81c3a9ef8c6bc55afc0f5ba7f5a802c78cb158212377bb811f70632"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/laptop-backup-2024-12.zip",
+      "bytes": 343,
+      "sha256": "efcce2d9414a304be0889b995eacdf906fd502067affafdd5f8b6b5f3eaf6cb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/letter-to-landlord-draft.txt",
+      "bytes": 107,
+      "sha256": "f1ec8825658b2508edefbd53d29aff3c0759942d927af34c49e79b5e61a42359"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/logo-draft-v2.png",
+      "bytes": 80,
+      "sha256": "467cd8a9f229c318b7a0071b53050cb79f25cf03c3ccc4b2773455c19d3ec232"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/market-sales-q1.csv",
+      "bytes": 41,
+      "sha256": "9a58ed4a5b96af3848d91518c7fa6dc59ab8e24106020da3d825df81f449bafd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/meeting notes oct backup.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/meeting notes oct.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/meeting notes sept.txt",
+      "bytes": 87,
+      "sha256": "4c2ff52b6bf536f07acfcc3c7869fc42b4bc887999f94c8b1420457eebef77f5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/old-website-backup.zip",
+      "bytes": 329,
+      "sha256": "143333add7f8b5934cb012090a5bcff0184aa9e2c1d460ab6c4fe6a6be6bdb30"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/readme-first.txt",
+      "bytes": 68,
+      "sha256": "477e8abe1be66be44132933436b30fe224d05149b619ecd081784342ba1df418"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/receipt_cafe_0412.pdf",
+      "bytes": 345,
+      "sha256": "1e8821259c9d1d0394fb388f66868c5517b194edd71b6cf71244fd974124235b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/resize.py",
+      "bytes": 123,
+      "sha256": "1a2f4c9d38b94e0aa090687e2ba9b861f516fdb4620fb584a9b1f5b6df4fbebb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/scrape-prices.js",
+      "bytes": 98,
+      "sha256": "13725bfc660c330047fbe0af6343a98175773be369a29656072229a213db4063"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/Screenshot 2026-05-02 101500.png",
+      "bytes": 81,
+      "sha256": "81b72a999b79d8360dae299847bba0893ccbd2b9ea5e2785dd8fd107aa73f545"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/Screenshot 2026-05-09 181142.png",
+      "bytes": 81,
+      "sha256": "778a423c12c4a6e48a54cfb283aa91d2ae14914908be2f311fd4b341fc225766"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/shopping list.txt",
+      "bytes": 46,
+      "sha256": "f519fe9295dba46589293e5cfc7715474e97cae2d05dddb4e3064786e6fd7753"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/tax-return-2025-draft.pdf",
+      "bytes": 345,
+      "sha256": "828dbfd2b2f1fe68eb1fd2e24054ae2bbdfcc939745e50e54ece62ec46023de3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/faber/todo.md",
+      "bytes": 95,
+      "sha256": "f147708cec47ea9e4b93f112bf343d1ddfdec859f93f702f42f24c69bdafc65a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Backups/laptop-backup-2024-12.zip",
+      "bytes": 343,
+      "sha256": "efcce2d9414a304be0889b995eacdf906fd502067affafdd5f8b6b5f3eaf6cb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Backups/meeting notes oct backup.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Backups/old-website-backup.zip",
+      "bytes": 329,
+      "sha256": "143333add7f8b5934cb012090a5bcff0184aa9e2c1d460ab6c4fe6a6be6bdb30"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Documents/flight-confirmation-LIS.pdf",
+      "bytes": 354,
+      "sha256": "004e9774d1312fa428df5e1c3610d06215bdb8680012e7715f398a96bf80324d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Documents/letter-to-landlord-draft.txt",
+      "bytes": 107,
+      "sha256": "f1ec8825658b2508edefbd53d29aff3c0759942d927af34c49e79b5e61a42359"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Finance/Invoice_ACME_2026-03.pdf",
+      "bytes": 358,
+      "sha256": "66020021393435467121b34ef76a595332eb2c0afe0bdd07e0ef17849c2432c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Finance/Invoice_ACME_2026-04.pdf",
+      "bytes": 356,
+      "sha256": "6fd9e4ebd81c3a9ef8c6bc55afc0f5ba7f5a802c78cb158212377bb811f70632"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Finance/receipt_cafe_0412.pdf",
+      "bytes": 345,
+      "sha256": "1e8821259c9d1d0394fb388f66868c5517b194edd71b6cf71244fd974124235b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Finance/tax-return-2025-draft.pdf",
+      "bytes": 345,
+      "sha256": "828dbfd2b2f1fe68eb1fd2e24054ae2bbdfcc939745e50e54ece62ec46023de3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Images/logo-draft-v2.png",
+      "bytes": 80,
+      "sha256": "467cd8a9f229c318b7a0071b53050cb79f25cf03c3ccc4b2773455c19d3ec232"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Images/Screenshot 2026-05-02 101500.png",
+      "bytes": 81,
+      "sha256": "81b72a999b79d8360dae299847bba0893ccbd2b9ea5e2785dd8fd107aa73f545"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Images/Screenshot 2026-05-09 181142.png",
+      "bytes": 81,
+      "sha256": "778a423c12c4a6e48a54cfb283aa91d2ae14914908be2f311fd4b341fc225766"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/INDEX.md",
+      "bytes": 851,
+      "sha256": "10befcbda5507f6b00bf6a0e03454998adae6fdae46dba62b7dc5924223c9044"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Logs/installer-notes.log",
+      "bytes": 72,
+      "sha256": "666c9805d42a044325870485d5d6f3a20ce83f0f9d918658ec5e3032e1de8e2a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/ideas.md",
+      "bytes": 112,
+      "sha256": "790fb79ff64871f622ac2fc27e48dfd264160345282d2be0040d8db69dfd1edf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/meeting notes oct.txt",
+      "bytes": 107,
+      "sha256": "7cb38b3df403cebcd1516d57953da654679626fc3fd663a002349ab54d4fe6d3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/meeting notes sept.txt",
+      "bytes": 87,
+      "sha256": "4c2ff52b6bf536f07acfcc3c7869fc42b4bc887999f94c8b1420457eebef77f5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/readme-first.txt",
+      "bytes": 68,
+      "sha256": "477e8abe1be66be44132933436b30fe224d05149b619ecd081784342ba1df418"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/shopping list.txt",
+      "bytes": 46,
+      "sha256": "f519fe9295dba46589293e5cfc7715474e97cae2d05dddb4e3064786e6fd7753"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Notes/todo.md",
+      "bytes": 95,
+      "sha256": "f147708cec47ea9e4b93f112bf343d1ddfdec859f93f702f42f24c69bdafc65a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Photos/holiday beach.jpg",
+      "bytes": 83,
+      "sha256": "3ad687affc73557f75aec1c0482820965fb3440cd940dbdb1d64a0c718a1db86"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Photos/IMG_2041.jpg",
+      "bytes": 86,
+      "sha256": "e49be61448cbce8027691b909ac376837de1194ac29c6147e2b9b386d59709c9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Photos/IMG_2042.jpg",
+      "bytes": 86,
+      "sha256": "e1a6b0f4117834034a477525741fc9149472c6a1276a8684e2ee9b915e197c4a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Photos/IMG_2043.jpg",
+      "bytes": 86,
+      "sha256": "19fcadb933e2a4519159b0d248497e588c34bb68a402640b6d65ff3c449747fb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Scripts/backup-photos.sh",
+      "bytes": 104,
+      "sha256": "d8f41df62b8aee5d4d5738aa75ed32c4b63b3ec8227e55f58097b5f34b477255"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Scripts/resize.py",
+      "bytes": 123,
+      "sha256": "1a2f4c9d38b94e0aa090687e2ba9b861f516fdb4620fb584a9b1f5b6df4fbebb"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Scripts/scrape-prices.js",
+      "bytes": 98,
+      "sha256": "13725bfc660c330047fbe0af6343a98175773be369a29656072229a213db4063"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Spreadsheets/budget-2026.csv",
+      "bytes": 64,
+      "sha256": "93b3de8cfc8525ee1384907f24ae067b8832fcf8d3de31e6f777ee730f9ed795"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Spreadsheets/contacts.csv",
+      "bytes": 87,
+      "sha256": "d862c60961e1dd4fbe5e84cebf8e40f1b474afd0dcff48766a40cde37929cf80"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Spreadsheets/export (1).csv",
+      "bytes": 61,
+      "sha256": "fa5b84e07fa5de85fe7dc7c6421850ef2cbed6e47050ef8af51ea855a308e045"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/artifacts/organize-folder/plain/Spreadsheets/market-sales-q1.csv",
+      "bytes": 41,
+      "sha256": "9a58ed4a5b96af3848d91518c7fa6dc59ab8e24106020da3d825df81f449bafd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-after.stderr.log",
+      "bytes": 388,
+      "sha256": "59be9aff13f855e0ba2c7c88b699def35016b303714bdda2cdd70826b8281a97"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-after.stdout.log",
+      "bytes": 272,
+      "sha256": "6af2d03078f194973d04af5f5b575568e410a480971bd5bda88f1404744c3b9a"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-before.stderr.log",
+      "bytes": 2892,
+      "sha256": "4c0a117bab31dbb3c139894e1d2b0093b61c14903eadd1fa53ec7ec109733244"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-before.stdout.log",
+      "bytes": 272,
+      "sha256": "e75d524b1ae36f05e20b42b2e8f49fb0f69870fdecbe624c1fa7b02101db7057"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/results.json",
+      "bytes": 6061,
+      "sha256": "e3a2dbdc52feb3b6cd50bce85f982f73c084be2d349d79da9d52a0e0da34b212"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench/tables.md",
+      "bytes": 1560,
+      "sha256": "464221be864e2bab4e6849873eb30cfd71481bd9db40b7a68673bcc5bbdbb179"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench.stderr.log",
+      "bytes": 1966,
+      "sha256": "bbc809a5758db33313da70c40be3b5c82f0e5d3024bc8cb052a542dd7cb2bcad"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-organize-folder-bench.stdout.log",
+      "bytes": 2294,
+      "sha256": "de058546d6d33dad441bae40f5459ad597afe0ed44565c55a3fef65e0a8126bd"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-after.stderr.log",
+      "bytes": 184,
+      "sha256": "4836ccba701afe8e3b1d21911542bfd463fe94ea0d2ae43bb277b56cc6518e70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-after.stdout.log",
+      "bytes": 272,
+      "sha256": "26f92b9a8c6a9c595c4c7bc26614865b3707effdc7ffe5879db5474e4f0123e9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "eca1510cb27a79c5cfa556c48539a9719bdb37448412c41a485434535916a79e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "53c3c5481e7448eb8ad0b531177c4678cdce2879697cb58b3335d9eb05a3c12c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/results.json",
+      "bytes": 3448,
+      "sha256": "d35476cb5612ba0861bd79ebef90124cecbbe23ed0699fc73ed7134005dcf8cf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench/tables.md",
+      "bytes": 1539,
+      "sha256": "bdcf570812914945573d66773799db2e04eca2b61e6203736985e58bea5e7cf6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench.stderr.log",
+      "bytes": 386,
+      "sha256": "67fb33e96e4a6c6a61e52e233d070a159bbd45618a82583ec54142fb0a032c17"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-plan-an-app-bench.stdout.log",
+      "bytes": 2194,
+      "sha256": "c60f9427f2d4909848d8c95f3702fc772f743999baf5d046220858739f3ab7df"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-before.stderr.log",
+      "bytes": 184,
+      "sha256": "87a9273f51e432e8093fa0ff8686129ee8ef2fad47ec3bf686187f0298ce6a39"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-before.stdout.log",
+      "bytes": 272,
+      "sha256": "f297bc00cea60d90c0483006b33cc4ae9917966fc412f356eab9eff1d50a75d5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/fixtures/invoice.mjs",
+      "bytes": 363,
+      "sha256": "d9352e501a92e81f9b8521fc6d8dd4db4321df565cccb10537b9799f501b45c5"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/fixtures/organize.mjs",
+      "bytes": 3957,
+      "sha256": "6cbda7340c0a31bd00c83df3aac58b0e8dca36d00ec70870be5ba086125c8637"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/fixtures/sales.mjs",
+      "bytes": 268,
+      "sha256": "3bd2073564820bd24e070ddacbd53bd9b17747122b82bbdb94a1d55c08a5da0f"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/fixtures/settings.mjs",
+      "bytes": 389,
+      "sha256": "ccb67ed8137322b9ed4a12bd68077a5f5eb9d188cf2508ef76900f1bf0856b79"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/invoice.mjs",
+      "bytes": 2198,
+      "sha256": "31ac86bd13123ada4c94bc53ffc51e61e70d508c3112e950adab27aab4641049"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/organize.mjs",
+      "bytes": 2980,
+      "sha256": "d9d59f9a9131946c8c7b6acebd90d4f8905589059ab2dacd877fc52a20e9448b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/sales.mjs",
+      "bytes": 2566,
+      "sha256": "8054e6c26da892319032913cfc219e446e127a625d2db69e2cd77a1f73dea012"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/settings.mjs",
+      "bytes": 2799,
+      "sha256": "3742f134b5bdffbf56ff20084a0edf7fdf96d4fbfe44fae343eccdbc54db1fa9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/sources.mjs",
+      "bytes": 1797,
+      "sha256": "5d5724a35c87ffe1e4b33aac0cc08c72cdff375930b922340f0473c5f725d7dc"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/todo.mjs",
+      "bytes": 3068,
+      "sha256": "92e964ea421fc3e2fbb8e4164ce0c247172b03bd14a861199cbb91f39e691b70"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/proofs/words.mjs",
+      "bytes": 940,
+      "sha256": "3afd2cb670629cae81b56472610b0bb3157112a55881c7cbd692fe97f223653b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/1-organize-folder.md",
+      "bytes": 442,
+      "sha256": "ef47745519c3eb725755bb6c631a14119efe1a09bc5941dfea46f890a99be241"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/2-plan-an-app.md",
+      "bytes": 339,
+      "sha256": "de4453bfaafc8eec884ac3ff37da1c9289e9c6202f2063461556976525ef9014"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/3-todo-app.md",
+      "bytes": 840,
+      "sha256": "af2e52b31b809c7033e23b556a2a111a52d55eac2f2830bae631bf545f06f7b6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/4-research-with-sources.md",
+      "bytes": 410,
+      "sha256": "4f5e7d54935b1f0b3d194190277e5aa182f3075d983355f58d1fd87636c39cdf"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/5-everyday-question.md",
+      "bytes": 273,
+      "sha256": "9144ee0835153931c89a03165d4b02ebe04ec5cb6d2dc14ceb6f7f9890a51fb6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/6-fix-invoice.md",
+      "bytes": 526,
+      "sha256": "1939c964c8eb2bcd9a59dbeff7bc9613516309949c163017ce1d009cb6c28b7d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/7-migrate-settings.md",
+      "bytes": 680,
+      "sha256": "033e79fc8a7b8844e914e4294a491f0148e83b5427063a6632f5c5cde9de730b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/inputs/requests/8-summarize-sales.md",
+      "bytes": 679,
+      "sha256": "4aba1aecb3aa40bd7bbc6a90c44d8f1524be0094d8f0a8a1ff4b09757b6bdfe9"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/results.json",
+      "bytes": 650,
+      "sha256": "bb3c070f383dcc2177e9de2704bc081eec747dffbc201eaa7e249914a3f977b1"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench/tables.md",
+      "bytes": 1143,
+      "sha256": "0d95c75fd224b9f44144d04e2ef1f963b48a26301ae54d5004308030982d11c4"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench.stderr.log",
+      "bytes": 493,
+      "sha256": "2234522b0d1585b7ad66b8b9fba8ec88336ce695764c26dce5c801ebdb32c7a6"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/attempt-1-todo-app-bench.stdout.log",
+      "bytes": 388,
+      "sha256": "639f1293a032859fb71bfd2c6bce53d2974bfea594e683a01f21bfdb63e5c3f3"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/harness-sha256.json",
+      "bytes": 581,
+      "sha256": "2972c567572f412c39dad84186460ff69684646f372982596000c41a25676354"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/initial-bench.rs",
+      "bytes": 55647,
+      "sha256": "d5683e2297cac6c5216e94d57d27b667e53f18295d3f3286809c9c8e9410a9f0"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/initial-watcher.mjs",
+      "bytes": 16938,
+      "sha256": "f33c4a71525f05e0282aeea1152e699fbd865de01dd611b1679d388f476b837d"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/manual-stop.json",
+      "bytes": 411,
+      "sha256": "306ee1bfec1412df7dda8a99e942b8f4c7539acd8892d0da9fbb410d2db2326b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/provenance.json",
+      "bytes": 134,
+      "sha256": "cfedb54a60f8616416414ba745de1babb84c803a48b4e14dca588f626527630c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/watcher.jsonl",
+      "bytes": 13603,
+      "sha256": "38a56ade8be82a83d7b7ac4a8c17300819c6adbd15faa45768126abd816af98b"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/interrupted-cost-attempt/watcher.lock",
+      "bytes": 5,
+      "sha256": "07c8fb7c5c39acb50fd98e1e8c38fbd5c3f8fe81a0f189e86e2aabcc350d3d07"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/post-run-source-note.json",
+      "bytes": 359,
+      "sha256": "41ce6cf4486f391976b294e333fefb8b2dda25e84f7168210b1c953fad0e8121"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/provenance.json",
+      "bytes": 134,
+      "sha256": "cfedb54a60f8616416414ba745de1babb84c803a48b4e14dca588f626527630c"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/resources-after.json",
+      "bytes": 322,
+      "sha256": "7e7ee78dfffb237b732ba078aecc5fb86f6b7283ab7b57cc9afbc9b68a8ba331"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/resources-before.json",
+      "bytes": 323,
+      "sha256": "23b55d485db9fd731bbddb3ad37386a070fe94db4e8e71e3be46ad74683aa515"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/review.json",
+      "bytes": 1044,
+      "sha256": "905e2d43ff200a956be6c3b378aa21a427b024688b0e5bf6f733367445c40c9e"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/summary-data.json",
+      "bytes": 118339,
+      "sha256": "7b44daf478009e5c7a6e9a95e00da1bba475545ecccfc1fe70a0e26e693a0019"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/summary.json",
+      "bytes": 7454,
+      "sha256": "3b1a4a2fa1f72e9d99ce32ed3777051d4e65e6ed441938e23d36c3b9c1ee0d75"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/verification.json",
+      "bytes": 2115,
+      "sha256": "1b49486ffbbaa941290a6cffa2f19f37dd89d63a20a8a71a9e3a2b3c28ba1f26"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/watcher.jsonl",
+      "bytes": 26963,
+      "sha256": "46169c2c6d8cb06f9f25544b4e02d2cd04248ae06482536dd41679193958c714"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/watcher.lock",
+      "bytes": 5,
+      "sha256": "e4013758d7f71f7ee346a24f5de89238f0972b7ab14d23aa0afbe04f7a5518d2"
+    },
+    {
+      "path": "reports/reforma/helpers/g390c2-evidence/.gitattributes",
+      "bytes": 106,
+      "sha256": "52112895d825c60a69938cff1b2d92272074eb3719d249900c68ccae39e42f7f"
+    }
+  ],
+  "note": "Inventory excludes itself. Runtime workspaces are preserved locally but not staged; selected original project outputs are copied under final-run/artifacts."
+}

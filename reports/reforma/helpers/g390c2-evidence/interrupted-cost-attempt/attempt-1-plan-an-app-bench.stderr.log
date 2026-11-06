@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running `E:\Documentos\ProjetosIA\faber\target\build-1\debug\examples\bench.exe --codex-only --only plan-an-app --cap-usd 25 --per-run-usd 25 --dir 'E:\Temp\faber-g390c2-evidence' --run-id attempt-1-plan-an-app-bench`
+faber: taskkill did not end the process tree of 35824: Ok(Ok(ExitStatus(ExitStatus(128))))

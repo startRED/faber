@@ -36,6 +36,16 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 type Failure = Box<dyn std::error::Error>;
 
+fn billing_environment(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    ["API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN", "BEARER_TOKEN", "SECRET_ACCESS_KEY", "ACCESS_KEY_ID", "SESSION_TOKEN", "BILLING", "BASE_URL"]
+        .iter()
+        .any(|part| name.contains(part))
+        || ["OPENAI_ORG_ID", "OPENAI_PROJECT_ID", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "AWS_PROFILE", "GOOGLE_APPLICATION_CREDENTIALS"]
+            .contains(&name.as_str())
+        || name.starts_with("CLAUDE_CODE_USE_")
+}
+
 const HARD_CAP_BLOCKER: &str = "hard dollar ceiling unavailable: plain Codex reports cost only after the invocation; Faber internal/auxiliary calls can overshoot (docs/dev/benchmark.md). No paid work started";
 
 /// One request on one side may take this long, whatever the cap says.
@@ -58,16 +68,21 @@ struct Options {
     cap: Cap,
     per_run_usd: f64,
     dry_run: bool,
+    codex_only: bool,
 }
 
 impl Options {
     fn read() -> Result<Options, Failure> {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        let codex_only = args.iter().any(|a| a == "--codex-only");
         let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         let vendor =
             |name: &str| Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"));
-        let plain = vendor(&value("--plain").unwrap_or_else(|| "claude".into()))?;
+        let plain = vendor(&value("--plain").unwrap_or_else(|| if codex_only { "codex" } else { "claude" }.into()))?;
         let vendors = value("--vendors").unwrap_or_else(|| plain.name().into()).split(',').map(vendor).collect::<Result<Vec<_>, _>>()?;
+        if codex_only && (plain != Vendor::Codex || vendors != [Vendor::Codex]) {
+            return Err("--codex-only excludes every other vendor".into());
+        }
         let number = |name: &str, default: f64| -> Result<f64, Failure> {
             let number = value(name).map_or(Ok(default), |v| v.parse::<f64>().map_err(|_| format!("{name} takes a number")))?;
             if number.is_finite() && number > 0.0 { Ok(number) } else { Err(format!("{name} takes a positive finite number").into()) }
@@ -91,7 +106,13 @@ impl Options {
             cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
             per_run_usd: number("--per-run-usd", 1.5)?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
+            codex_only,
         })
+    }
+
+    fn budget_spend(&self, spent: &Spend) -> Spend {
+        // Subscription-only admission uses tokens; preserve unknown API-equivalent costs in the evidence.
+        if self.codex_only { Spend { usd: 0.0, unknown_cost: false, ..*spent } } else { *spent }
     }
 }
 
@@ -393,15 +414,19 @@ mod cost_tests {
     }
 }
 
+fn cost_limit_reached(allowance: Option<f64>, cost: Option<f64>) -> bool {
+    allowance.is_some_and(|limit| cost.is_none_or(|cost| cost >= limit))
+}
+
 /// Waits for the reply to settle: it ended and Faber's checks on it ended (or a project has none to run), or it needs the
 /// person. Ledger costs arrive at completed work boundaries; internal and auxiliary calls already in flight can overshoot.
-async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64, baseline: (f64, u64)) -> (Option<Conversation>, bool) {
+async fn settle(engine: &Engine, id: &str, project: bool, allowance: Option<f64>, baseline: (f64, u64)) -> (Option<Conversation>, bool) {
     let started = Instant::now();
     let (mut quiet, mut capped): (Option<(String, Instant)>, bool) = (None, false);
     while started.elapsed() < RUN_LIMIT {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let Some(conversation) = engine.open(id) else { continue };
-        if !capped && pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger())).is_none_or(|cost| cost >= allowance) {
+        if !capped && cost_limit_reached(allowance, pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger()))) {
             capped = true;
             engine.interrupt(id);
         }
@@ -454,7 +479,14 @@ fn logging_spawner(log: PathBuf) -> proc::Spawner {
     })
 }
 
-async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work, root: &Path, allowance: f64, billed: bool) -> SideResult {
+async fn run_faber(
+    clis: &BTreeMap<Vendor, Cli>,
+    request: &Request,
+    work: &Work,
+    root: &Path,
+    allowance: Option<f64>,
+    billed: bool,
+) -> SideResult {
     let started = Instant::now();
     let state = root.join(&request.id).join("faber").join("state");
     let engine = match Engine::new(
@@ -501,7 +533,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
             engine.set_codex_models(list.iter().map(|m| m.id.clone()).collect(), recommended);
         }
-        if pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger())).is_none_or(|cost| cost >= allowance) {
+        if cost_limit_reached(allowance, pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger()))) {
             return Err("the budget is exhausted or setup cost is unknown; no request started".into());
         }
         let (area, project_id) = match request.kind {
@@ -848,10 +880,10 @@ fn hard_cap_admission(required: bool, root: &Path, requests: &[Request], options
     Err(HARD_CAP_BLOCKER.into())
 }
 
-async fn quota_receipt() -> serde_json::Value {
+async fn quota_receipt(codex_only: bool) -> serde_json::Value {
     let cwd = std::env::current_dir().unwrap_or_else(|_| repo_root());
     let mut readings = Vec::new();
-    for vendor in Vendor::RUNNABLE {
+    for vendor in Vendor::RUNNABLE.into_iter().filter(|v| !codex_only || *v == Vendor::Codex) {
         let mut receipt = json!({"vendor": vendor.name(), "at": chrono::Utc::now().timestamp(), "windows": []});
         if faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name)) {
             receipt["error"] = json!("billing environment is not isolated; no CLI started");
@@ -892,6 +924,8 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "only": options.only,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
+        "subscriptionOnly": options.codex_only,
+        "quotaPairing": if options.codex_only { "unpaired; watcher reads weekly before/after each request" } else { "quiet intervals" },
         "judgeOverrides": { "model": options.judge_model, "effort": options.judge_effort },
         "cap": { "usd": options.cap.max_usd, "freshTokens": options.cap.max_fresh_tokens, "perRunUsd": options.per_run_usd },
         "spent": spent,
@@ -910,8 +944,13 @@ fn write_checkpoint(run_dir: &Path, options: &Options, rows: &[Row], row: &Row, 
 
 #[tokio::main]
 async fn main() -> Result<(), Failure> {
+    if std::env::args().any(|arg| arg == "--codex-only")
+        && std::env::vars_os().any(|(name, _)| billing_environment(&name.to_string_lossy()))
+    {
+        return Err("subscription-only benchmark refuses billing environment variables; no CLI started".into());
+    }
     if std::env::args().any(|arg| arg == "--quota-only") {
-        let receipt = quota_receipt().await;
+        let receipt = quota_receipt(std::env::args().any(|arg| arg == "--codex-only")).await;
         println!("{receipt}");
         if receipt["readings"].as_array().is_some_and(|readings| readings.iter().any(|r| r["unknownCost"] == true)) {
             return Err("quota status could not verify zero model spending; no more readings or model work allowed".into());
@@ -955,7 +994,11 @@ async fn main() -> Result<(), Failure> {
     // Admission budgets are not a hard ceiling; fail before account/model work when one is required.
     hard_cap_admission(std::env::args().any(|arg| arg == "--require-hard-cap"), &root, &requests, &options)?;
     let node = find_cli("node").ok_or("node is not on the PATH (the fixtures and proofs are Node scripts)")?;
-    let judges: BTreeMap<_, _> = Vendor::RUNNABLE.into_iter().filter_map(|v| find_cli(v.name()).map(|cli| (v, cli))).collect();
+    let judges: BTreeMap<_, _> = Vendor::RUNNABLE
+        .into_iter()
+        .filter(|v| !options.codex_only || *v == Vendor::Codex)
+        .filter_map(|v| find_cli(v.name()).map(|cli| (v, cli)))
+        .collect();
     if judges.is_empty() {
         return Err("no judge CLI is installed".into());
     }
@@ -985,7 +1028,7 @@ async fn main() -> Result<(), Failure> {
     for (index, request) in requests.iter().enumerate() {
         let a = pure::a_side(&options.run_id, index);
         let mut row = pending_row(request, a);
-        if let Some(why) = options.cap.reached(&spent) {
+        if let Some(why) = options.cap.reached(&options.budget_spend(&spent)) {
             println!("stopping before {}: {why}", request.id);
             row.skipped = Some(format!("the cap was reached: {why}"));
             rows.push(row);
@@ -993,24 +1036,31 @@ async fn main() -> Result<(), Failure> {
         }
         println!("[{}/{}] {}", index + 1, requests.len(), request.id);
         let work = prepare(request, &root, &node.command, &inputs)?;
-        if let Err(error) = accounts.wait(&judges, &[options.plain], &mut spent).await {
+        if !options.codex_only
+            && let Err(error) = accounts.wait(&judges, &[options.plain], &mut spent).await
+        {
             write_checkpoint(&root, &options, &rows, &row, &spent)?;
             return Err(error.into());
         }
-        let mut plain = run_plain(&options, &plain_cli, request, &work, options.cap.allowance(&spent, options.per_run_usd)).await;
+        let mut plain =
+            run_plain(&options, &plain_cli, request, &work, options.cap.allowance(&options.budget_spend(&spent), options.per_run_usd))
+                .await;
         accounts.worked(&[options.plain]);
         spent.add(&plain.usage, plain.cost_usd);
         row.plain = Some(plain.clone());
         write_checkpoint(&root, &options, &rows, &row, &spent)?;
         println!("  plain: ok {}, {:.0}s, US${:?}, {}", plain.ok, plain.secs, plain.cost_usd, plain.error.as_deref().unwrap_or(""));
-        let mut faber = if let Some(why) = options.cap.reached(&spent) {
+        let mut faber = if let Some(why) = options.cap.reached(&options.budget_spend(&spent)) {
             not_run(Side::Faber, why)
         } else {
-            if let Err(error) = accounts.wait(&judges, &options.vendors, &mut spent).await {
+            if !options.codex_only
+                && let Err(error) = accounts.wait(&judges, &options.vendors, &mut spent).await
+            {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
-            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false).await
+            let allowance = (!options.codex_only).then(|| options.cap.allowance(&spent, options.per_run_usd));
+            run_faber(&clis, request, &work, &root, allowance, false).await
         };
         accounts.worked(&options.vendors);
         spent.add(&faber.usage, faber.cost_usd);
@@ -1026,7 +1076,7 @@ async fn main() -> Result<(), Failure> {
         println!("  proofs: faber {:?}, plain {:?}", proofs(&faber), proofs(&plain));
         if faber.reply.trim().is_empty() || plain.reply.trim().is_empty() {
             println!("  no judging: a side gave no reply");
-        } else if let Some(why) = options.cap.reached(&spent) {
+        } else if let Some(why) = options.cap.reached(&options.budget_spend(&spent)) {
             row.skipped = Some(format!("not judged, the cap was reached: {why}"));
         } else {
             let (first, second) = if a == Side::Faber { (&faber, &plain) } else { (&plain, &faber) };
@@ -1036,7 +1086,9 @@ async fn main() -> Result<(), Failure> {
             options.judge_vendor = vendor;
             options.judge_model = if judge_model.is_empty() { profile.model.into() } else { judge_model.clone() };
             options.judge_effort = if judge_effort.is_empty() { profile.effort.into() } else { judge_effort.clone() };
-            if let Err(error) = accounts.wait(&judges, &[vendor], &mut spent).await {
+            if !options.codex_only
+                && let Err(error) = accounts.wait(&judges, &[vendor], &mut spent).await
+            {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
@@ -1048,9 +1100,16 @@ async fn main() -> Result<(), Failure> {
                 independent_faber: faber.authors.independent_of(name),
             });
             row.judge_attempted = true;
-            let judged =
-                judge(&options, &judges[&vendor], request, first, second, &judge_dir, options.cap.allowance(&spent, options.per_run_usd))
-                    .await;
+            let judged = judge(
+                &options,
+                &judges[&vendor],
+                request,
+                first,
+                second,
+                &judge_dir,
+                options.cap.allowance(&options.budget_spend(&spent), options.per_run_usd),
+            )
+            .await;
             accounts.worked(&[vendor]);
             spent.add(&judged.usage, judged.cost_usd);
             row.judge_cost_usd = judged.cost_usd;
@@ -1083,6 +1142,45 @@ async fn main() -> Result<(), Failure> {
 #[cfg(test)]
 mod checkpoint_tests {
     use super::*;
+
+    #[test]
+    fn subscription_mode_disables_internal_dollar_guards_without_changing_bounded_runs() {
+        assert!(!cost_limit_reached(None, None));
+        assert!(!cost_limit_reached(None, Some(100.0)));
+        assert!(cost_limit_reached(Some(1.0), None));
+        assert!(cost_limit_reached(Some(1.0), Some(1.0)));
+        assert!(!cost_limit_reached(Some(1.0), Some(0.5)));
+    }
+
+    #[test]
+    fn subscription_mode_rejects_billing_names_without_reading_credentials() {
+        for name in [
+            "openai_api_key",
+            "CODEX_API_KEY",
+            "CODEX_BEARER_TOKEN",
+            "OPENAI_PROJECT_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "CLAUDE_CODE_USE_VERTEX",
+        ] {
+            assert!(billing_environment(name), "{name}");
+        }
+        for name in ["PATH", "RUSTUP_HOME", "CARGO_HOME", "TERM"] {
+            assert!(!billing_environment(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn subscription_admission_keeps_cost_evidence_and_the_token_limit() {
+        let mut options = Options::read().unwrap();
+        let spent = Spend { usd: 100.0, unknown_cost: true, ..Default::default() };
+        assert!(options.cap.reached(&options.budget_spend(&spent)).is_some());
+        options.codex_only = true;
+        assert!(options.cap.reached(&options.budget_spend(&spent)).is_none());
+        assert!(spent.unknown_cost);
+        assert_eq!(spent.usd, 100.0);
+        let spent = Spend { usage: Usage { input: options.cap.max_fresh_tokens, ..Default::default() }, ..spent };
+        assert!(options.cap.reached(&options.budget_spend(&spent)).is_some());
+    }
 
     #[test]
     fn a_required_hard_ceiling_records_every_unstarted_request_and_spends_nothing() {

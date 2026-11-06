@@ -1,0 +1,5 @@
+Implemented all four commands in `todo.js`, persistent storage, clear error messages, and a short README.
+
+Ran `node --test`: all 3 tests passed, covering task operations, invalid arguments, and damaged storage.
+
+Concurrent writes aren’t supported; run commands one at a time.

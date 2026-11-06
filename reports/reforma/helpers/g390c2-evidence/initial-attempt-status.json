@@ -1,0 +1,349 @@
+{
+  "status": "INVALID_COMPARISON",
+  "cause": "Every Faber Engine::new failed with permission denied because runtime folders were below the checkout .claude ancestor.",
+  "references": [
+    "engine/examples/bench.rs:485",
+    "engine/src/engine.rs:694",
+    "engine/src/permissions.rs:1113"
+  ],
+  "allEightPlainAnswersRecorded": true,
+  "allEightFaberModelCallsStarted": false,
+  "quality": "No blind verdict; no Faber qualification. A proof on a failed Faber side can point to the plain fallback folder and must not be treated as Faber proof.",
+  "proofFallback": "engine/examples/bench.rs:613",
+  "watcher": {
+    "result": "finished",
+    "started": "2026-11-06T10:25:47.503Z",
+    "ended": "2026-11-06T13:23:32.403Z",
+    "codexOnly": true,
+    "capUsd": null,
+    "weeklyStopUsed": 0.7,
+    "attempts": [
+      {
+        "attempt": 1
+      }
+    ],
+    "receipts": [
+      {
+        "attempt": 1,
+        "request": "organize-folder",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793970715,
+            "completedAt": 1793970716,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "organize-folder",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793970810,
+            "completedAt": 1793970811,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "plan-an-app",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793970820,
+            "completedAt": 1793970821,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "plan-an-app",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793970862,
+            "completedAt": 1793970863,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "todo-app",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793970871,
+            "completedAt": 1793970872,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "todo-app",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971010,
+            "completedAt": 1793971011,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "research-with-sources",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793971020,
+            "completedAt": 1793971021,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "research-with-sources",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971116,
+            "completedAt": 1793971117,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "everyday-question",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793971126,
+            "completedAt": 1793971127,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "everyday-question",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971161,
+            "completedAt": 1793971162,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "fix-invoice",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793971171,
+            "completedAt": 1793971172,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "fix-invoice",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971231,
+            "completedAt": 1793971232,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "migrate-settings",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793971241,
+            "completedAt": 1793971242,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "migrate-settings",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971325,
+            "completedAt": 1793971326,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "summarize-sales",
+        "phase": "before",
+        "readings": [
+          {
+            "at": 1793971335,
+            "completedAt": 1793971336,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "attempt": 1,
+        "request": "summarize-sales",
+        "phase": "after",
+        "readings": [
+          {
+            "at": 1793971410,
+            "completedAt": 1793971412,
+            "source": "app account/rateLimits/read",
+            "vendor": "codex",
+            "windows": [
+              {
+                "resetsAt": 1794378933,
+                "used": 0.44,
+                "window": "seven_day"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "nextRun": "External system temporary root, separate lock and receipts; original evidence retained."
+}

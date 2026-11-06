@@ -1,0 +1,161 @@
+{
+  "cap": {
+    "freshTokens": 3000000,
+    "perRunUsd": 25.0,
+    "usd": 25.0
+  },
+  "faberVendors": [
+    "codex"
+  ],
+  "inputs": "inputs",
+  "judgeOverrides": {
+    "effort": "",
+    "model": ""
+  },
+  "only": [
+    "fix-invoice"
+  ],
+  "plain": {
+    "cli": "codex",
+    "effort": "medium",
+    "model": "gpt-6.1-sol"
+  },
+  "quotaPairing": "unpaired; watcher reads weekly before/after each request",
+  "rows": [
+    {
+      "a": "plain",
+      "faber": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": null,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-fix-invoice-bench\\fix-invoice\\faber\\state\\copies\\dcf77229-bfc1-4b9b-8cde-390f36813236",
+        "models": [
+          "gpt-6.1-sol@medium (reason.autoOnly)"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "README preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invoice contract and invalid inputs",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a runnable regression test was supplied",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "\n\nDone and verified: zero quantities charge zero, invalid values throw, and empty invoices total zero. The named export and integer-cent return are preserved.\n\nAll 3 regression tests passed with `node --test`. README.md is unchanged; no dependencies added.\n\nNothing requested remains unfinished or unverified.",
+        "secs": 60.847,
+        "side": "faber",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 212096,
+          "cache_write": 0,
+          "input": 37048,
+          "output": 1484
+        },
+        "usage_incomplete": true,
+        "wall_secs": 72.250075
+      },
+      "judge": {
+        "effort": "high",
+        "independent_faber": false,
+        "independent_plain": false,
+        "model": "gpt-6.1-sol",
+        "vendor": "codex"
+      },
+      "judge_attempted": true,
+      "judge_cost_usd": 0.031566,
+      "judge_usage": {
+        "cache_read": 8960,
+        "cache_write": 0,
+        "input": 14560,
+        "output": 155
+      },
+      "kind": "project",
+      "plain": {
+        "authors": {
+          "complete": true,
+          "vendors": [
+            "codex"
+          ]
+        },
+        "cost_usd": 0.061475199999999994,
+        "error": null,
+        "folder": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-fix-invoice-bench\\fix-invoice\\plain",
+        "models": [
+          "gpt-6.1-sol"
+        ],
+        "ok": true,
+        "proof": {
+          "checks": [
+            {
+              "detail": "",
+              "name": "README preserved",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "invoice contract and invalid inputs",
+              "ok": true
+            },
+            {
+              "detail": "",
+              "name": "a runnable regression test was supplied",
+              "ok": true
+            }
+          ],
+          "pass": true
+        },
+        "reply": "Fixed `total(lines)`: zero quantity charges zero, empty invoices return zero, and invalid values throw. Named export and integer-cent output are preserved.\n\nAdded `invoice.test.mjs`; all 3 tests pass. Run:\n\n```sh\nnode --test\n```\n\nREADME.md is unchanged. No dependencies added. Totals exceeding JavaScript’s safe integer range also throw to prevent inaccurate charges.",
+        "secs": 35.5088484,
+        "side": "plain",
+        "stopped_by_cap": false,
+        "usage": {
+          "cache_read": 95232,
+          "cache_write": 0,
+          "input": 20671,
+          "output": 1061
+        },
+        "usage_incomplete": false,
+        "wall_secs": 35.5088484
+      },
+      "request": "fix-invoice",
+      "skipped": null,
+      "title": "Fix an invoice calculation without changing its interface",
+      "verdict": {
+        "pick": "Tie",
+        "reason": "Both provide the same correct implementation, preserve README.md, and include runnable regression tests with no dependencies. B tests a few additional input combinations, but both fully cover the requested behavior and pass the automatic checks.",
+        "score_a": 10.0,
+        "score_b": 10.0
+      },
+      "winner": null
+    }
+  ],
+  "runId": "attempt-1-fix-invoice-bench",
+  "spent": {
+    "unknown_cost": true,
+    "usage": {
+      "cache_read": 316288,
+      "cache_write": 0,
+      "input": 72279,
+      "output": 2700
+    },
+    "usd": 0.09304119999999999
+  },
+  "subscriptionOnly": true
+}

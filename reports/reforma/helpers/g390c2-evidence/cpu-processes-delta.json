@@ -1,0 +1,42 @@
+[
+  {
+    "pid": 35968,
+    "name": "firefox",
+    "cpuSeconds": 22.046875
+  },
+  {
+    "pid": 44000,
+    "name": "firefox",
+    "cpuSeconds": 17.875
+  },
+  {
+    "pid": 24232,
+    "name": "firefox",
+    "cpuSeconds": 8.21875
+  },
+  {
+    "pid": 13960,
+    "name": "powershell",
+    "cpuSeconds": 6.3125
+  },
+  {
+    "pid": 8400,
+    "name": "nvcontainer",
+    "cpuSeconds": 4.484375
+  },
+  {
+    "pid": 25168,
+    "name": "ChatGPT",
+    "cpuSeconds": 3.46875
+  },
+  {
+    "pid": 29980,
+    "name": "audiodg",
+    "cpuSeconds": 2.828125
+  },
+  {
+    "pid": 48620,
+    "name": "ChatGPT",
+    "cpuSeconds": 2.171875
+  }
+]
