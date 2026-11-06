@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { retained, sample, SETTINGS, packageVersion } from './install-update-self.mjs';
+import { retained, sample, SETTINGS, packageVersion, previewVersion } from './install-update-self.mjs';
+
+test('dispatch versions accept only published-preview tag syntax', () => {
+  assert.equal(previewVersion('v0.3.19-preview.17'), '0.3.19-preview.17');
+  for (const tag of ['v1.0.0', 'v0.3.19-preview.17; exit', '../preview.17', '']) assert.throws(() => previewVersion(tag));
+  const workflow = readFileSync(new URL('../.github/workflows/install-update-self.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /inputs\.from/);
+  assert.match(workflow, /inputs\.to/);
+  assert.match(workflow, /gh release download \$env:FABER_PROOF_TO --pattern latest.json/);
+});
 
 test('the installed package retains its exact preview label and rejects invalid archive ranges', () => {
   const folder = mkdtempSync(path.join(tmpdir(), 'faber-asar-version-'));
