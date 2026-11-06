@@ -99,7 +99,10 @@ export function main(args) {
       run(process.execPath, ['scripts/numbers.mjs', 'assign', '--amend'], { cwd: dir });
       const finalFiles = list(g('diff', '--name-only', '-z', base, 'HEAD'));
       // Every candidate tree is proven again: a base change in another file can still break this one.
-      for (const args of proofsFor(finalFiles)) if (!proof(args, dir)) return 1;
+      const proofs = proofsFor(finalFiles);
+      // Without installed packages lint and typecheck fail on files the change never touched; say why instead.
+      if (proofs.length > 1 && !existsSync('node_modules')) throw Error('node_modules is missing here: run `npm ci` first.');
+      for (const args of proofs) if (!proof(args, dir)) return 1;
       const sha = g('rev-parse', 'HEAD');
       if (dry) { console.log(`Dry run: ${sha} ${g('log', '-1', '--format=%s')}`); return 0; }
       try { g('push', 'origin', 'HEAD:refs/heads/phase-1-base'); }
