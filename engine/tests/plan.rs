@@ -75,6 +75,54 @@ fn start(dir: &crate::support::DataFolder, spawn: Spawner, ask: Option<Ask>) -> 
 const FIVE: Duration = Duration::from_millis(500);
 
 #[tokio::test]
+async fn a_signed_in_account_reads_current_limits_without_a_user_or_model_turn() {
+    let dir = support::DataFolder::new();
+    // Synthetic replay of SDK 0.3.312's get_usage contract, not an authenticated recording.
+    let f = fake(support::fixture("claude", "usage-control"));
+    let (auth, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
+    let quota = f.spawn.clone();
+    let spawn: Spawner =
+        Arc::new(move |bin, args, cwd| if args == ["auth", "status"] { auth(bin, args, cwd) } else { quota(bin, args, cwd) });
+    let (engine, _, _) = start(&dir, spawn, None);
+    engine.check_plans(FIVE).await;
+    let usage = engine.state().usage.remove(0);
+    assert_eq!(usage.plan.as_deref(), Some("max"));
+    assert_eq!(usage.windows.len(), 2, "a signed-in subscriber needs no prior model response");
+    assert_eq!(usage.windows.iter().find(|w| w.name == "seven_day").unwrap().used, 0.31);
+    assert_eq!(engine.ledger().claude.zero_turn_readings.len(), 2);
+    assert!(engine.ledger().claude.own_spend.is_empty());
+    assert!(f.wire.messages().iter().all(|m| m["type"] == "control_request"));
+    assert_eq!(f.wire.messages()[1]["request"]["skip_behaviors"], true);
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn failed_or_unsolicited_control_answers_cannot_publish_quota() {
+    for bad in [
+        json!({"type":"control_response","response":{"subtype":"error","request_id":"limits-usage","error":"unsupported"}}),
+        json!({"type":"control_response","response":{"subtype":"success","request_id":"unrelated","response":{}}}),
+        json!({"type":"assistant","message":{"content":[]}}),
+        json!({"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool"}}),
+    ] {
+        let dir = support::DataFolder::new();
+        let mut entries = support::fixture("claude", "usage-control");
+        entries.last_mut().unwrap().msg = bad;
+        let f = fake(entries);
+        let (auth, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
+        let quota = f.spawn.clone();
+        let spawn: Spawner =
+            Arc::new(move |bin, args, cwd| if args == ["auth", "status"] { auth(bin, args, cwd) } else { quota(bin, args, cwd) });
+        let (engine, _, _) = start(&dir, spawn, None);
+        engine.check_plans(FIVE).await;
+        assert!(engine.state().usage[0].windows.is_empty());
+        assert!(engine.ledger().claude.zero_turn_readings.is_empty());
+        assert_eq!(f.wire.messages().len(), 2, "no user message or tool permission answer");
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept() {
     let dir = support::DataFolder::new();
     let (spawn, calls) = status(Some(r#"{"loggedIn":true,"email":"someone@example.com","orgName":"Acme","subscriptionType":"max"}"#));
