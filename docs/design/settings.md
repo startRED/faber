@@ -28,7 +28,6 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   The account total keeps the shared "in API value" wording and immediately explains the estimate and that it is not a bill.
   Both access menus show every choice's description, with Ask's existing approvals and Full access's file, command and
   internet access stated in plain words. Long security warnings and all five existing modes, including Plan, remain. The Full access explanation also says in every language that the AI can bypass approval of project preferences and lessons.
-  The permission row's closed details explain the requested CLI policies and their limits; they do not claim machine isolation has been verified.
 - General has, in groups: *You* (language, name); *How the AI works* (Permissions as a menu of the five modes, Web search,
   automatic actions (hooks), "Full trust for Faber’s own setup" (one switch with one short line and a "?": off by default; it only skips the cards for the agent’s catalog installs, installed-tool switches, reversible removals and bounded web-search preference changes, and never covers sending, publishing, paying or deleting; it is written only here, and it is not a wall against an agent in Full access, which can edit the settings file as it can edit any file), Chat working folder with the recent folders where its control exists, Reply style for both AIs, and a closed "Codex" fold with
   reasoning summary only); *Notifications and system* (Notify me, Play a sound, and on Windows keep the

@@ -668,7 +668,7 @@ fn fits_every_look(ctx: &mut Ctx) -> Result {
 /// What a conversation shows: for the parts of a thread, the contrast of their text with the colour behind it (the same
 /// ratios the look engine promises for its pairs, measured on the page as drawn) and whether each one is whole inside the
 /// window and not covered. Each part is `[name, selector, smallest ratio, required]`.
-const THREAD: &str = r#"(async () => {
+const THREAD: &str = r#"(() => {
   const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
   const rgba = (css) => {
     probe.clearRect(0, 0, 1, 1);
@@ -710,13 +710,10 @@ const THREAD: &str = r#"(async () => {
   const found = [];
   const problems = [];
   for (const [name, selector, least, required] of parts) {
-    // Closed disclosures can retain layout boxes; their contents are checked after opening them below.
-    const all = [...document.querySelectorAll(selector)].filter((e) => e.textContent.trim() && !e.closest('details:not([open])'));
+    const all = [...document.querySelectorAll(selector)].filter((e) => e.textContent.trim());
     if (!all.length) { if (required) problems.push(name + ' is not on screen'); continue; }
     for (const e of all.slice(0, 3)) {
       e.scrollIntoView({ block: 'nearest' });
-      // As with Page::click, hit testing must see the rendered layout after disclosure and scrolling.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const box = e.getBoundingClientRect();
       const text = rgba(getComputedStyle(e).color);
       text[3] *= faded(e);
@@ -804,30 +801,13 @@ fn thread_in_every_look(ctx: &mut Ctx) -> Result {
         app.page.wait_visible(&question)?;
         // The controls and the column fade for a moment; the picture and the measures are taken once they settled.
         pause(0.7);
-        let details = css("article .ask .permission-raw > summary");
-        for expanded in [false, true] {
-            if expanded {
-                app.page.click(&details)?;
-                app.page.wait_for(
-                    "the original request is visible",
-                    "document.querySelector('article .ask .permission-raw pre')?.checkVisibility() === true",
-                )?;
-            }
-            let seen = app.page.eval(THREAD)?;
-            let problems: Vec<String> = seen["problems"]
-                .as_array()
-                .map(|all| all.iter().filter_map(|p| p.as_str().map(String::from)).collect())
-                .unwrap_or_default();
-            ensure(problems.is_empty(), || {
-                format!("{id} (details expanded: {expanded}): {}; measured {}", problems.join("; "), seen["found"])
-            })?;
-            let texts = seen["found"].as_array().into_iter().flatten().filter(|f| f["name"] == "the question text").count();
-            same(texts, if expanded { 3 } else { 2 }, "the preview is checked in both states, and raw input only when expanded")?;
-            let lowest = seen["found"].as_array().into_iter().flatten().filter_map(|f| f["ratio"].as_f64()).fold(f64::INFINITY, f64::min);
-            ctx.notes.push(format!("{id} (details expanded: {expanded}): {texts} text blocks, lowest contrast {lowest}"));
-            ctx.shot(&mut app, &format!("chat-thread-{id}-{expanded}"))?;
-        }
-        app.page.click(&details)?;
+        let seen = app.page.eval(THREAD)?;
+        let problems: Vec<String> =
+            seen["problems"].as_array().map(|all| all.iter().filter_map(|p| p.as_str().map(String::from)).collect()).unwrap_or_default();
+        ensure(problems.is_empty(), || format!("{id}: {}; measured {}", problems.join("; "), seen["found"]))?;
+        let lowest = seen["found"].as_array().into_iter().flatten().filter_map(|f| f["ratio"].as_f64()).fold(f64::INFINITY, f64::min);
+        ctx.notes.push(format!("{id}: lowest contrast {lowest}"));
+        ctx.shot(&mut app, &format!("chat-thread-{id}"))?;
     }
     let page = &mut app.page;
     let deny = page.text_of("ask.deny")?;

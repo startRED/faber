@@ -2,10 +2,6 @@
 
 How the Settings and composer permission choices behave.
 
-Readable cards keep the original request in a disclosure. Commands preserve argument boundaries and network requests show their destination; edits show proposed changed lines from the shared change reader, including all lines for assistive technology. Connected tools show the server, tool and the first 1,000 characters of arguments, with a marker and full details when longer. Direction and control characters are shown as code points throughout the request. Codex reason and working folder are retained. Native controls keep keyboard order and readable content stays still.
-
-Mode details distinguish requested CLI policy from machine isolation, which remains unverified. No new process or idle timer is kept. Full access retains its existing stored value and default; remembered-rule withdrawal and denial feedback need the separate host-command change.
-
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the

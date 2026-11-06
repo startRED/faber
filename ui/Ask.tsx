@@ -8,7 +8,18 @@ import { catalogName, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { millis } from './motion.ts';
 import { answerOutcome } from './running.ts';
-import { PermissionDetails } from './PermissionDetails.tsx';
+
+// What a permission request means, in plain words.
+function describe(tool: string, input: unknown): { title: string; note?: string; body: string } {
+  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const raw = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
+  if (tool === 'Bash' || tool === 'command') {
+    return { title: t('ask.command'), note: typeof i.description === 'string' ? i.description : undefined, body: typeof input === 'string' ? input : String(i.command ?? raw) };
+  }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool)) return { title: t('ask.file'), body: String(i.file_path ?? i.path ?? raw) };
+  if (tool === 'WebFetch') return { title: t('ask.page'), body: String(i.url ?? raw) };
+  return { title: t('ask.other', { tool }), body: raw };
+}
 
 /** Faber's own self-change card (the agent installing from the catalog): the engine sends ids and facts, and every word here is the
  * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
@@ -420,8 +431,8 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   const [sending, setSending] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
   const own = () => selfInstall(props.permission.tool, props.permission.input);
+  const d = () => describe(props.permission.tool, props.permission.input);
   const answer = async (allow: boolean, always = false) => {
-    if (sending()) return;
     setProblem(undefined);
     setSending(true);
     try {
@@ -438,12 +449,16 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   };
   return (
     <Show when={!dropped()}>
-      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')} aria-busy={sending()}>
+      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')}>
         <Show
           when={own()}
           fallback={
             <>
-              <PermissionDetails permission={props.permission} />
+              <b>{d().title}</b>
+              <Show when={d().note}>
+                <span class="note">{d().note}</span>
+              </Show>
+              <pre>{d().body}</pre>
             </>
           }
         >
@@ -474,7 +489,6 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
             {t('ask.deny')}
           </button>
         </div>
-        <Show when={sending()}><span class="note" role="status">{t('ask.sending')}</span></Show>
         <Show when={problem()}>
           <div class="note err" role="alert">
             {problem()}
