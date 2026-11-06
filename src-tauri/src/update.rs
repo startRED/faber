@@ -42,6 +42,8 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
 /// How often an idle moment is looked for while an update waits.
 const LOOK_EVERY: Duration = Duration::from_secs(30);
+/// Held for the whole of a release look, the automatic one or the button's: only one runs at a time.
+static LOOK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// The look for a release when Faber opens; an offline start waits this long at most.
 const START_CHECK: Duration = Duration::from_secs(8);
 /// The download at open: past this the line goes away and the update is tried again soon.
@@ -641,13 +643,13 @@ impl Release for Live {
 }
 
 /// Looks for a newer release and downloads it. False when the check or the download failed.
-async fn fetch(release: &impl Release, download_wait: Duration) -> bool {
-    match release.check().await {
-        Err(_) => false,
-        Ok(None) => fetch_succeeded(false, false),
+async fn fetch(release: &impl Release, check_wait: Duration, download_wait: Duration) -> bool {
+    match timeout(check_wait, release.check()).await {
+        Err(_) | Ok(Err(_)) => false,
+        Ok(Ok(None)) => fetch_succeeded(false, false),
         // A version tried a day ago is left alone: it would only be refused again.
-        Ok(Some(version)) if release.tried(&version) => true,
-        Ok(Some(_)) => fetch_succeeded(true, matches!(timeout(download_wait, release.download()).await, Ok(Ok(())))),
+        Ok(Ok(Some(version))) if release.tried(&version) => true,
+        Ok(Ok(Some(_))) => fetch_succeeded(true, matches!(timeout(download_wait, release.download()).await, Ok(Ok(())))),
     }
 }
 
@@ -728,6 +730,40 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
     }
 }
 
+fn eligible_for_updates(debug: bool, hidden: bool, custom_data: bool) -> bool {
+    !debug && !hidden && !custom_data
+}
+
+pub(crate) fn eligible(hidden: bool) -> bool {
+    eligible_for_updates(cfg!(debug_assertions), hidden, std::env::var_os("FABER_DATA_DIR").is_some())
+}
+
+fn manual_look(lock: &tokio::sync::Mutex<()>) -> Result<tokio::sync::MutexGuard<'_, ()>, String> {
+    lock.try_lock().map_err(|_| "error.update.checkFailed".into())
+}
+
+/// "Check for updates now": one look outside the six-hour clock. Nothing happens while a look, a download or an install
+/// already runs, or an update is already kept.
+pub(crate) async fn check_now(app: AppHandle) -> Result<Status, String> {
+    if !eligible(app.state::<Faber>().hidden) {
+        return Err("error.update.checkFailed".into());
+    }
+    let Some(install_dir) = install_dir(&app) else { return Err("error.update.none".into()) };
+    let _look = manual_look(&LOOK)?;
+    if matches!(status(&app).phase, Phase::Checking | Phase::Downloading) {
+        return Err("error.update.checkFailed".into());
+    }
+    if lock(&app.state::<Faber>().update).is_none() && status(&app).phase == Phase::None {
+        set_stage(&app, Phase::Checking);
+        let ok = fetch(&Live::new(&app, &install_dir, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await;
+        set_stage(&app, Phase::None);
+        if !ok {
+            return Err("error.update.checkFailed".into());
+        }
+    }
+    Ok(status(&app))
+}
+
 pub(crate) fn keep_updated(app: &AppHandle) {
     let Some(install_dir) = install_dir(app) else {
         log(&app.state::<Faber>().data_dir, "no-safe-folder", "Faber stays on this version");
@@ -752,7 +788,11 @@ pub(crate) fn keep_updated(app: &AppHandle) {
         loop {
             // A downloaded update is kept and installed first; the next one is looked for after it.
             if lock(&app.state::<Faber>().update).is_none() && Instant::now() >= next_check {
-                next_check = Instant::now() + next_check_delay(fetch(&Live::new(&app, &install_dir, Reopen::Tray), LATER_DOWNLOAD).await);
+                // A look the button started already runs: this round waits for the next tick.
+                if let Ok(_look) = LOOK.try_lock() {
+                    next_check = Instant::now()
+                        + next_check_delay(fetch(&Live::new(&app, &install_dir, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await);
+                }
             }
             install_when_idle(&app, &install_dir);
             sleep(LOOK_EVERY).await;
@@ -1169,6 +1209,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn updates_only_run_in_installed_non_test_runs() {
+        assert!(super::eligible_for_updates(false, false, false));
+        assert!(!super::eligible_for_updates(true, false, false));
+        assert!(!super::eligible_for_updates(false, true, false));
+        assert!(!super::eligible_for_updates(false, false, true));
+    }
+
+    #[test]
+    fn a_running_check_is_reported_as_failed() {
+        let lock = tokio::sync::Mutex::new(());
+        let running = lock.try_lock().unwrap();
+        assert!(matches!(super::manual_look(&lock), Err(error) if error == "error.update.checkFailed"));
+        drop(running);
+        assert!(super::manual_look(&lock).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_hung_manifest_check_times_out_without_downloading() {
+        let release = Fake { hangs: true, ..Fake::found() };
+        assert!(!fetch(&release, WAIT, WAIT).await);
+        assert_eq!(release.saw(), ["check"]);
+    }
+
     const WAIT: Duration = Duration::from_millis(50);
 
     async fn start(release: &Fake) -> Start {
@@ -1240,7 +1304,7 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(5));
         assert_eq!(release.saw(), ["checking", "check", "downloading", "download", "none"]);
         // A download in the background is bounded too, so the six-hour loop is never held for good.
-        assert!(!fetch(&Fake { stalls: true, ..Fake::found() }, WAIT).await);
+        assert!(!fetch(&Fake { stalls: true, ..Fake::found() }, WAIT, WAIT).await);
     }
 
     #[tokio::test]
@@ -1261,7 +1325,7 @@ mod tests {
             "the relaunch after a failed install does not start the same install again"
         );
         let later = Fake { tried: true, ..Fake::found() };
-        assert!(fetch(&later, WAIT).await);
+        assert!(fetch(&later, WAIT, WAIT).await);
         assert_eq!(later.saw(), ["check"], "nor does the periodic check download it");
     }
 

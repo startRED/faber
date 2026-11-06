@@ -32,7 +32,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   automatic actions (hooks), "Full trust for Faber’s own setup" (one switch with one short line and a "?": off by default; it only skips the cards for the agent’s catalog installs, installed-tool switches, reversible removals and bounded web-search preference changes, and never covers sending, publishing, paying or deleting; it is written only here, and it is not a wall against an agent in Full access, which can edit the settings file as it can edit any file), Chat working folder with the recent folders where its control exists, Reply style for both AIs, and a closed "Codex" fold with
   reasoning summary only); *Notifications and system* (Notify me, Play a sound, and on Windows keep the
   computer awake while Faber works and start Faber at sign-in); *Updates* (one switch, "Receive previews", off by default,
-  with one short line; it acts at the next update check and turning it off never installs an older version). "Don't ask" is the default for new and
+  with one short line; it acts at the next update check and turning it off never installs an older version, and "Check now" reports a failed or already running check rather than claiming the app is up to date). "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen

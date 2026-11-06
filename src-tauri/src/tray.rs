@@ -176,8 +176,6 @@ fn ask_then_quit(app: &AppHandle) {
 }
 
 /// The window closed while something runs: one short note that Faber stays in the tray and the work goes on.
-// Waits for the window-close handler in main.rs (another lane owns it) to call it after `api.prevent_exit()`.
-#[allow(dead_code)]
 pub(crate) fn window_closed(app: &AppHandle) {
     let (running, text) = {
         let tray = app.state::<Tray>();

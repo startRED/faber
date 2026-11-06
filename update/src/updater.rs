@@ -80,6 +80,8 @@ struct Inner {
     /// The install at open, as the screen shows it: looking, downloading (how far), installing.
     stage: Mutex<Status>,
     ready: Mutex<Option<Ready>>,
+    /// Held for the whole of a release look, the automatic one or the button's: only one runs at a time.
+    look: tokio::sync::Mutex<()>,
     /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen, so the
     /// install at open waits for an idle moment.
     touched: AtomicBool,
@@ -306,7 +308,10 @@ async fn keep_updated(inner: Arc<Inner>) {
     let mut next_check = Instant::now();
     loop {
         if Instant::now() >= next_check {
-            next_check = Instant::now() + next_check_delay(fetch(&Live::new(&inner, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await);
+            // A look the button started already runs: this round waits for the next tick.
+            if let Ok(_look) = inner.look.try_lock() {
+                next_check = Instant::now() + next_check_delay(fetch(&Live::new(&inner, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await);
+            }
         }
         install_when_idle(&inner);
         sleep(LOOK_EVERY).await;
@@ -344,6 +349,7 @@ impl Updater {
             ready: Mutex::default(),
             touched: AtomicBool::new(false),
             draft_dirty: AtomicBool::new(false),
+            look: tokio::sync::Mutex::new(()),
         })))
     }
 
@@ -368,6 +374,21 @@ impl Updater {
         #[cfg(windows)]
         crate::handoff::sweep();
         tokio::spawn(keep_updated(self.0.clone()));
+    }
+
+    /// "Check for updates now": one look outside the six-hour clock. Nothing happens while a look, a download or an install
+    /// already runs, or an update is already kept.
+    pub async fn check_now(&self) -> Result<Status, String> {
+        let _look = self.0.look.try_lock().map_err(|_| "error.update.checkFailed")?;
+        if lock(&self.0.ready).is_none() && self.0.status().phase == Phase::None {
+            self.0.set_stage(Phase::Checking);
+            let ok = fetch(&Live::new(&self.0, Reopen::Tray), START_CHECK, LATER_DOWNLOAD).await;
+            self.0.set_stage(Phase::None);
+            if !ok {
+                return Err("error.update.checkFailed".into());
+            }
+        }
+        Ok(self.0.status())
     }
 
     /// "Update ready, restart": installs the kept update now, with the window as it is. Work that runs is cut, noted first so
@@ -490,6 +511,7 @@ mod tests {
             ready: Mutex::default(),
             touched: AtomicBool::new(false),
             draft_dirty: AtomicBool::new(false),
+            look: tokio::sync::Mutex::new(()),
         });
         let (finished, done) = std::sync::mpsc::channel();
         Live::new(&inner, Reopen::Window).end_with(move || finished.send(()).unwrap());
@@ -553,6 +575,21 @@ mod tests {
         assert!(Updater::new(app.clone(), "0.4.0", data.path().into(), &inside).is_err(), "never into the data folder");
         assert!(Updater::new(app.clone(), "0.4.0", data.path().into(), &data.path().join("missing")).is_err(), "not sure means no");
         assert!(std::fs::read_to_string(data.path().join("update.log")).unwrap().contains("no-safe-folder"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_button_reports_a_running_look_as_failed() {
+        let app = Arc::new(Fake::default());
+        let (updater, _data, _program) = updater(&app);
+        let running = updater.0.look.try_lock().expect("the automatic look takes the lock");
+        let button = tokio::spawn({
+            let updater = updater.clone();
+            async move { updater.check_now().await }
+        });
+        assert_eq!(button.await.unwrap(), Err("error.update.checkFailed".into()));
+        drop(running);
+        assert!(app.told.lock().unwrap().is_empty(), "a running look does not start another");
     }
 
     #[cfg(windows)]

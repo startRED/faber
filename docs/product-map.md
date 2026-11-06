@@ -376,7 +376,7 @@ The screen and `faber` [command line](product/cli.md) use the command list in `h
 | Standing goals | `project_goals`, `project_goals_auto`, `project_goal_add`, `project_goal_remove`, `project_goal_resume` and `project_goal_add_crashes` manage project goals and checks. |
 | Project memory | `project_memory` lists project memory; `edit_project_memory` edits an entry or records a kept decision. |
 | Project checks | `project_proof` lists declared and confirmed checks; `project_proof_confirm` confirms them. |
-| Updates | `update_status`, `screen_ready`, `update_restart`, `input_seen`, `draft_dirty`, `notes_seen` and `save_notes_seen` handle updates and screen readiness. |
+| Updates | `update_status`, `screen_ready`, `update_check` (Settings > Updates "Check now": one look outside the six-hour clock, one look at a time; a busy, failed or timed-out check reports failure, and development and test runs do not download updates), `update_restart`, `input_seen`, `draft_dirty`, `notes_seen` and `save_notes_seen` handle updates and screen readiness. |
 | Window | `game_in_front` reports whether a game or another full-screen app is in front. |
 | Accounts | `setup_check`, `setup_install` and `setup_sign_in` handle account setup. |
 | Catalog | `tools_in_use`, `tools_list`, `tools_inventory`, `tools_install`, `tools_prepare_replacement`, `tools_replace`, `tools_remove`, `tools_restore`, `tools_clear_removed`, `tools_set_enabled`, `mcp_servers` and `set_mcp_server` manage tools and servers. |

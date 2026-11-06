@@ -16,6 +16,9 @@ import type { Quotas } from './sidebar.ts';
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
 // control at the right) and the long text of an option unfolds from the "?" next to its name (ui/controls.tsx).
 
+// The line under "Check for updates" for each answer of the one look.
+const LOOKUP = { busy: 'update.checking', none: 'set.updateNone', ready: 'set.updateReady', failed: 'error.update.checkFailed' } as const;
+
 const SECTIONS = [
   ['general', 'set.general', 'user'],
   ['projects', 'set.projects', 'folder'],
@@ -105,6 +108,12 @@ export function Settings(props: Props) {
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
   const mode = () => props.saved.permissions ?? 'dontAsk';
   const [hookLines, setHookLines] = createSignal<string[]>([]);
+  // "Check now" in Updates: what the one look found, shown as the row's line until the next press.
+  const [lookup, setLookup] = createSignal<'busy' | 'none' | 'ready' | 'failed'>();
+  const lookForUpdate = () => {
+    setLookup('busy');
+    api.updateCheck().then((status) => setLookup(status.phase === 'ready' ? 'ready' : 'none'), () => setLookup('failed'));
+  };
   let hookRequest = 0;
   const hooksClick = (event: MouseEvent) => {
     const target = event.target;
@@ -310,6 +319,11 @@ export function Settings(props: Props) {
               </Show>
             </Group>
             <Group title={t('set.updates')}>
+              <Opt id="set-update-check" label={t('set.updateCheck')} hint={t(lookup() ? LOOKUP[lookup()!] : 'set.updateCheckHint')}>
+                <button type="button" class="btn" disabled={lookup() === 'busy'} onClick={lookForUpdate}>
+                  {t('set.updateCheckNow')}
+                </button>
+              </Opt>
               <Toggle id="set-previews" label={t('set.previews')} hint={t('set.previewsHint')} more={t('set.previewsMore')} checked={props.saved.previews === true} onChange={(on) => save({ previews: on })} />
             </Group>
           </Match>

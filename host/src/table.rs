@@ -864,6 +864,11 @@ table! {
     Read Free fn update_status(h) -> Value {
         Ok(h.shell.update_status())
     }
+    /// "Check for updates now" (Settings): one look outside the six-hour clock; a found update is downloaded and kept, and
+    /// the answer is the update's phase.
+    Write Screen fn update_check(h) -> Value {
+        h.shell.update_check().await
+    }
     /// "Update ready, restart": installs the kept update now. Work that runs is cut and goes on after the restart.
     Write Ask fn update_restart(h) -> () {
         h.shell.update_restart().await

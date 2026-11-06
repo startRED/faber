@@ -252,6 +252,7 @@ async fn what_needs_a_window_says_so_and_a_link_that_is_not_web_is_refused_first
     assert_eq!(key(host.dispatch("add_project", Value::Null).await), NO_WINDOW);
     assert_eq!(key(host.dispatch("set_shell_texts", json!({ "texts": {} })).await), NO_WINDOW);
     assert_eq!(host.dispatch("update_status", Value::Null).await.unwrap(), json!({ "phase": "none" }));
+    assert_eq!(key(host.dispatch("update_check", Value::Null).await), NO_WINDOW);
 }
 
 #[tokio::test]

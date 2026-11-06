@@ -207,6 +207,11 @@ impl Shell for TauriShell {
         serde_json::to_value(update::status(&self.handle)).unwrap_or_default()
     }
 
+    fn update_check(&self) -> BoxFuture<'_, Result<Value, String>> {
+        let handle = self.handle.clone();
+        Box::pin(async move { update::check_now(handle).await.map(|status| serde_json::to_value(status).unwrap_or_default()) })
+    }
+
     fn update_restart(&self) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(update::restart_now(self.handle.clone()))
     }
@@ -1056,7 +1061,7 @@ fn main() {
                 std::fs::write(out, serde_json::json!({ "windowCount": app.windows().len() }).to_string())?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
-            if !cfg!(debug_assertions) && !hidden && std::env::var_os("FABER_DATA_DIR").is_none() {
+            if update::eligible(hidden) {
                 update::keep_updated(app.handle());
             }
             Ok(())
@@ -1072,6 +1077,7 @@ fn main() {
                 api.prevent_exit();
                 // The screen is gone: the quota is read at the slower pace until the window comes back.
                 app.state::<Faber>().engine.set_attention(false, false);
+                tray::window_closed(app);
             }
             if let RunEvent::Exit = event {
                 shut_down(app);

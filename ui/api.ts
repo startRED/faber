@@ -1200,6 +1200,7 @@ export const api = {
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<string | null>('screen_ready'),
   onShowConversation: (listener: (id: string) => void) => listen<string>('faber:show-conversation', (e) => listener(e.payload)),
+  updateCheck: () => invoke<UpdateStatus>('update_check'),
   updateRestart: () => invoke<void>('update_restart'),
   inputSeen: () => invoke<void>('input_seen'),
   /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */

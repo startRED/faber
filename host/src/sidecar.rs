@@ -340,6 +340,15 @@ impl Shell for SidecarShell {
         }
     }
 
+    fn update_check(&self) -> BoxFuture<'_, Res<Value>> {
+        Box::pin(async move {
+            match self.0.updater.get() {
+                Some(updater) => updater.check_now().await.map(|status| serde_json::to_value(status).unwrap_or_default()),
+                None => Err("error.update.none".into()),
+            }
+        })
+    }
+
     fn update_restart(&self) -> BoxFuture<'_, Res<()>> {
         Box::pin(async move {
             match self.0.updater.get() {
@@ -553,6 +562,13 @@ mod tests {
 
     fn running(revision: u64, items: Vec<RunningItem>) -> AppEvent {
         AppEvent::Running { revision, items }
+    }
+
+    #[tokio::test]
+    async fn checking_without_an_updater_reports_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shell, _) = shell_in(dir.path(), false, false, normal);
+        assert_eq!(shell.update_check().await, Err("error.update.none".into()));
     }
 
     #[tokio::test]
