@@ -34,16 +34,14 @@ mistake, and a rule a test enforces leaves it.
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
   reason and a measurement ([architecture](docs/product/architecture.md#architecture)).
 - Telemetry stays off by default.
-- One pull request per coherent change, the biggest slice one AI does well (one feature or fix with its tests,
-  often 300 to 1,000 lines), never a string of 100-line steps of one idea: each pull request costs a queue run. Push
-  proven work at once. Lane work enters `phase-1-base` as one squashed pull request that fills
-  `.github/pull_request_template.md`, titled as a commit (`pr-title` checks it). Right after opening it, run
-  `node scripts/land.mjs <number>` in the background: it runs the suites, squashes and numbers it on `phase-1-base`,
-  and CI lands it once every system is green and lets `main` follow (R126, R127, R162). Then go on and never watch CI:
-  a red queue run turns the pull request's `queue` check red, which wakes the session; push the complete fix and queue
-  it again (R182, [workflow](docs/dev/workflow.md#merge-on-green)). `land.mjs` is the only way in, never the merge
-  button or `gh pr merge`. Never merge the base into a branch only to keep up; a conflict only where both sides added
-  lines to a `.md` file settles itself at landing (R184).
+- One commit per coherent change, the biggest slice one AI does well (one feature or fix with its tests, often 300 to
+  1,000 lines), never a string of 100-line steps of one idea. It lands through the fast lane (R556):
+  `node scripts/ship.mjs` squashes the work into one commit on the newest `phase-1-base`, numbers it, runs the quick
+  proofs on that tree and pushes it there directly. CI checks it after: `main`, which updates installed copies, moves
+  only to a commit whose `gate` is green, and a red `gate` whose parent was green is reverted on its own, with a comment
+  on the commit (and on its pull request, whose number ship.mjs writes in a `Pull-request:` trailer) that wakes its
+  author; the fix ships again with `ship.mjs` ([landing](docs/dev/landing.md#fast-lane)). Never push to `phase-1-base`
+  by hand, never force. Pull requests queued before 2026-11-05 finish through `land.mjs` and the queue.
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
   and its `pre-push` hook refuses a push onto it ([workflow](docs/dev/workflow.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
   the fix.
@@ -54,8 +52,8 @@ mistake, and a rule a test enforces leaves it.
   holds at most 15. Ask the owner only what is theirs (direction, taste, money), in a short card, and go on with the
   next task meanwhile; stop when no task is free.
 - Until 2026-11-14 the process machinery is frozen (`scripts/land.mjs`, `scripts/tasks.mjs`, `testkit/`, `.github/`):
-  change it only to fix a red base or a landing that is blocked, never to improve it
-  ([workflow](docs/dev/workflow.md#process-freeze)).
+  change it only to fix a red base or a landing that is blocked, or for the owner's lean plan
+  (`docs/superpowers/plans/2026-11-05-lean-faber.md`), which removes machinery ([workflow](docs/dev/workflow.md#process-freeze)).
 - Never wait idle on a helper, another session or a run: hand out only pieces your next step does not need, keep
   working, and read each result when its notice comes; notices wake the session, so a turn ends only when nothing is
   left (R181). Research and collecting go to a cheap model; reviews go to the other vendor (R146).
@@ -80,7 +78,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map
 
 ## Done means
 
-- The local proofs below pass, the queued commit's `gate` is green in CI (it lands only then), and a check fails
+- The local proofs below pass, the landed commit's `gate` is green in CI (`main` follows only then), and a check fails
   without the change (the product map names the check per feature).
 - The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
   feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
@@ -93,7 +91,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and search [docs/product-map
 - For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
   it does not fit>`.
 - The commit body states the memory and processor cost, or why there is none (docs, tests only). CI measures it on
-  the queued commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
+  the landed commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
 - A change to engine state, stored data, permissions, processes or security gets a review from a fresh session that
   did not write it: the other vendor when it is available, the same vendor in a new read-only session when its quota is
   poor (R146); security changes get two. Words, docs, tests and screen-only changes land on their proofs. Every review
@@ -135,12 +133,11 @@ npm run test:scripts
 node scripts/cargo.mjs t --claims
 ```
 
-`cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. The heavy proofs run
-once per landing: `land.mjs` runs the suites a change needs on the PC on the exact commit it queues, and CI leaves out
-what that covered (R190 V2); otherwise CI runs them on the queued commit, and never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
+`cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. `ship.mjs` runs the
+same quick proofs on the exact tree it pushes. The heavy proofs run in CI on the landed commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
 memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
 --features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
-[testing](docs/dev/testing.md#what-a-run-prints)). A red one wakes the lane ([workflow](docs/dev/workflow.md#merge-on-green)).
+[testing](docs/dev/testing.md#what-a-run-prints)). A red one is reverted and wakes the lane ([landing](docs/dev/landing.md#fast-lane)).
 Run a suite on the PC only to see a new check fail before the change (`cargo t --filter <name>`) or to look closer at a
 failure CI reported; it runs only the tests that depend on the files you changed and prints only failures, measurements
 and a summary (every line in `target/faber-test/run.log`). A command that may take over two minutes (`cargo t`, a

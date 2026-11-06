@@ -624,6 +624,30 @@ jobs:
             gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
           fi
 
+  revert:
+    needs: gate
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base' && needs.gate.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Revert the red commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNNER_UNAVAILABLE: ${{ needs.gate.outputs.runner_unavailable }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node scripts/revert-red.mjs
+
   # The queue (R162): a commit pushed to queue/<name> lands on phase-1-base only after every check passed on top of the
   # newest phase-1-base, so a commit that is red on one system never reaches the shared branch and never stalls the
   # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it

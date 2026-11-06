@@ -1,6 +1,29 @@
 # Landing work
 
+## Fast lane
+
+New work lands directly on `phase-1-base` and is checked after (R556). `node scripts/ship.mjs` (or `npm run ship`)
+refuses a dirty tree or a red base (`FABER_PUSH_ON_RED=1` ships the fix), squashes every commit ahead of
+`origin/phase-1-base` into one on its newest tip without touching the branch, numbers it (`numbers.mjs assign --amend`),
+runs the quick proofs that tree needs (lint, typecheck, docs, build, formatting; the script tests when `scripts/`
+changed; `cargo check --workspace --all-targets` when Rust changed; the docs check alone for words) and pushes it. When
+the base moved meanwhile, it squashes, numbers and proves again on the new tip (at most three tries), since a change in
+another file can still break this one. A branch with an open pull request gets a `Pull-request: #<n>` trailer, a comment with
+the landed commit and the pull request closed. `--dry-run` stops before the push.
+
+The push starts `ci.yml` on `phase-1-base`, whose runs are never cancelled. `main`, which updates installed copies,
+moves only to a commit whose `gate` is green (R127), so a red commit never reaches anyone's Faber. When the `gate` is
+red, the `revert` job (`scripts/revert-red.mjs`) looks at the parent's `gate` (not its whole run, whose Electron jobs
+only advise): parent green and no later commit green, the commit is the culprit and is reverted at once, with a comment on the commit and on its pull request, which wakes the author; parent pending,
+cancelled or missing, the culprit is not known yet and the commit only gets a comment; a revert, or a run GitHub gave no
+runner, is left alone. The fix ships again with `ship.mjs`.
+
+Why (2026-11-05): through the queue a pull request took a median 6.7 h from opened to landed, p90 23.9 h, and 30% of
+queue runs were red; a direct landing waits only for its quick proofs while `main` keeps the same guarantee.
+
 ## Merge on green
+
+The queue below stays only for pull requests queued before the fast lane; it goes once they have landed.
 
 `gate` (R173) is a job in `ci.yml` that is green only when `changes`, `check`, `app` and `screen` passed or were left
 out on purpose by the plan. `main` and the queue (R162) run after it, so the queue only pushes a commit whose gate

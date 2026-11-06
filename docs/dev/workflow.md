@@ -24,7 +24,8 @@ a lane on another machine is not seen.
 
 ## Merge on green
 
-[Merge on green](landing.md#merge-on-green) explains the queue, batches and local checks.
+The [fast lane](landing.md#fast-lane) is how work lands; [merge on green](landing.md#merge-on-green) explains the queue
+that finishes the pull requests queued before it.
 
 ## Task queue
 
@@ -62,7 +63,8 @@ Until 2026-11-14 (R489) the process machinery changes only to fix a red base or 
 `scripts/land.mjs`, `scripts/tasks.mjs`, `scripts/pace.mjs`, `testkit/` and `.github/`. The W9 audit
 (`reports/reforma/workflow-audit.md` outside the repository) found 38% of the commits since 10-24 spent on that machinery,
 task files and CI, and 124 task files written in one day while 122 waited. A change it does need names the red run or the
-blocked pull request in its body.
+blocked pull request in its body. On 2026-11-05 the owner let the lean plan
+(`docs/superpowers/plans/2026-11-05-lean-faber.md`) change it, since that plan removes machinery; the fast lane is its first step.
 
 ## Board
 
