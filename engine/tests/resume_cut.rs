@@ -93,3 +93,51 @@ async fn cut_work_resumes_once_and_off_leaves_a_card() {
     third.shutdown();
     drop(third);
 }
+
+/// A conversation that worked on wakes for a day is one request for the person, but each cut-off turn is its own: a resume
+/// Faber sent hours and turns ago must not stop it from going on when the close cuts a later turn off.
+#[tokio::test]
+async fn a_turn_cut_off_long_after_an_earlier_resume_is_resumed_again() {
+    let dir = DataFolder::new();
+    let (spawn, made) = pipes();
+    let first = engine(&dir, spawn.clone());
+    let id = first
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: "Work".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let _pipe = crate::support::next_pipe(&made).await;
+    first.shutdown();
+    drop(first);
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let messages = saved["messages"].as_array_mut().unwrap();
+    let (user, reply) = (messages[0].clone(), messages[1].clone());
+    // The turn cut off, resumed (that resume ended well), then another turn of the same request cut off at the next close.
+    let turn = |wake: &str, n: u32, status: &str| {
+        let (mut user, mut reply) = (user.clone(), reply.clone());
+        user["id"] = format!("user{n}").into();
+        user["wake"] = serde_json::json!({ "why": wake });
+        reply["id"] = format!("reply{n}").into();
+        reply["status"] = status.into();
+        [user, reply]
+    };
+    messages.extend(turn("wake.resumed", 1, "done"));
+    messages.extend(turn("wake.asked", 2, "streaming"));
+    std::fs::write(&file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    let second = engine(&dir, spawn);
+    second.resume_interrupted();
+    crate::support::until("the later cut goes on", || {
+        second
+            .open(&id)
+            .is_some_and(|c| c.messages.iter().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed")).count() == 2)
+    })
+    .await;
+    second.shutdown();
+}

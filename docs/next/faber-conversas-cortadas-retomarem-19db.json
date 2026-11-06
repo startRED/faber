@@ -1,0 +1,12 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "A conversation Faber closed on again picks itself back up, even when it was already picked up earlier the same day. One whose pick-up was itself cut still waits for you.",
+      "pt-BR": "Uma conversa cortada de novo pelo fechamento do Faber volta sozinha, mesmo que já tenha voltado antes no mesmo dia. Se o próprio retorno foi cortado, ela espera por você.",
+      "es": "Una conversación que Faber vuelve a cortar al cerrarse se reanuda sola, aunque ya se hubiera reanudado antes ese mismo día. Si la propia reanudación se cortó, espera por ti.",
+      "fr": "Une conversation de nouveau coupée par la fermeture de Faber reprend toute seule, même si elle avait déjà repris plus tôt dans la journée. Si la reprise elle-même a été coupée, elle vous attend.",
+      "de": "Eine Unterhaltung, die Faber beim Schließen erneut unterbricht, macht von selbst weiter, auch wenn sie am selben Tag schon einmal weitergemacht hat. Wurde das Weitermachen selbst unterbrochen, wartet sie auf dich."
+    }
+  },
+  "decisions": ["| R-next | 2026-11-05 | Opening Faber resumes a reply the close cut off unless the turn right before it was itself Faber's resume, so the limit is once per cut, not once per request of the person (a conversation worked by agents' messages for a day was one request and never resumed again). | AI (Erick delegou) |"]
+}
