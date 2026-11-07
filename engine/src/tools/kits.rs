@@ -2201,6 +2201,63 @@ mod tests {
     }
 
     #[test]
+    fn stageshow_matches_product_demos_in_five_languages_for_both_vendors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store(tmp.path(), &[("stageshow", "design", 1000)]);
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            store.prepare_kit_for(vendor, "", None, Area::Project, Permissions::Ask, &[]);
+            store.wait_prepared_for_test();
+            for request in [
+                "Create an animated product demo",
+                "Create an animated product demo for my database",
+                "Crie uma demonstração animada do meu produto",
+                "Crea una demostración animada de mi producto",
+                "Crée une démo animée de mon produit",
+                "Erstelle eine animierte Produktdemo",
+                "Use Stageshow",
+            ] {
+                assert_eq!(
+                    store.ready_kit_for(vendor, request, None, Area::Project, Permissions::Ask, &[]).1.ids,
+                    ["stageshow"],
+                    "{vendor:?}: {request}"
+                );
+            }
+            for request in ["Improve the CSS layout of my website", "Build a demo database", "Fix my API"] {
+                assert!(store.ready_kit_for(vendor, request, None, Area::Project, Permissions::Ask, &[]).1.ids.is_empty(), "{request}");
+            }
+            store.set_enabled("stageshow", false).unwrap();
+            assert!(store.ready_kit_for(vendor, "Use Stageshow", None, Area::Project, Permissions::Ask, &[]).1.ids.is_empty());
+            store.set_enabled("stageshow", true).unwrap();
+        }
+    }
+
+    #[test]
+    fn stageshow_above_the_inline_budget_remains_readable_on_demand_in_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store(tmp.path(), &[("stageshow", "design", CONTEXT_BUDGET + 4096)]);
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let (kit, _) = store.kit_for(vendor, "Use Stageshow", None, Area::Project, Permissions::Ask, &[]);
+            let (checked, damaged, io_failed) = kit.verified_for_launch(vendor);
+            assert!(damaged.is_empty() && !io_failed);
+            let index = checked.project_skill_descriptions(vendor).unwrap();
+            assert!(index.contains("faber:stageshow"));
+            assert_eq!(
+                std::fs::read(checked.skills.as_ref().unwrap().join("stageshow/SKILL.md")).unwrap().len(),
+                CONTEXT_BUDGET + 4096,
+                "on-demand discovery retains the complete verified skill, never truncated instructions"
+            );
+            if vendor == Vendor::Codex {
+                assert!(index.contains("Read stageshow/SKILL.md"));
+                assert!(checked.skill_instructions().is_none(), "the oversized skill does not enter the inline budget");
+            }
+            store.set_enabled("stageshow", false).unwrap();
+            let (disabled, _) = store.kit_for(vendor, "Use Stageshow", None, Area::Project, Permissions::Ask, &[]);
+            assert!(disabled.project_skill_descriptions(vendor).is_none());
+            store.set_enabled("stageshow", true).unwrap();
+        }
+    }
+
+    #[test]
     fn unavailable_failed_and_genuinely_empty_catalogs_are_distinct() {
         let tmp = tempfile::tempdir().unwrap();
         let store = store(tmp.path(), &[("debug", "debugging", 100)]);

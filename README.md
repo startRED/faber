@@ -7,6 +7,9 @@ subscriptions you already pay for. It aims to do anything AI can do, at commerci
 AI app. It is for anyone: if you use AI every day it feels familiar, and if you never have, you learn it by using it.
 It runs on Windows, macOS and Linux, with Windows first.
 
+The [illustrated product demo](demos/faber/README.md) shows a project conversation from request to result.
+Run `npm run demo` to open its separate local preview; its synthetic scene runs no AI and adds nothing to the app bundle.
+
 It has two areas:
 
 - **Chat**: many conversations, with an optional working folder; whether it may change files follows the permission you set. Pick a model or Auto, and always see which model
