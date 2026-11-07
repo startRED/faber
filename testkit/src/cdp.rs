@@ -73,6 +73,12 @@ impl Write for Limited {
 }
 
 impl Cdp {
+    /// A second observer of this same hidden app, so recording never waits for an input call to return.
+    pub fn reconnect(&self) -> Result<Cdp, String> {
+        let port = self.socket.get_ref().stream.peer_addr().map_err(|e| e.to_string())?.port();
+        Cdp::connect(port, Duration::from_secs(3))
+    }
+
     /// Reports and clears an intercepted native file chooser.
     pub fn take_file_chooser(&mut self) -> bool {
         std::mem::take(&mut self.file_chooser)

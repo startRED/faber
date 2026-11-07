@@ -26,6 +26,7 @@
 
   // Every place a moving part can be: the page, and the shadow roots where exit copies are kept while they leave.
   const roots = () => [document, ...[...document.querySelectorAll('.motion-exit')].map((layer) => layer.shadowRoot).filter(Boolean)];
+  const animations = () => roots().flatMap((root) => root.getAnimations());
   const effective = (el) => {
     let opacity = 1;
     // Past the top of a shadow root the next element is its host.
@@ -52,15 +53,22 @@
 
   // Starts sampling these surfaces on every frame, and noting each animation that starts.
   const start = (names) => {
-    const seen = new Set(document.getAnimations());
-    run = { names, samples: Object.fromEntries(names.map((n) => [n, []])), animations: [], began: performance.now(), stop: false };
+    const seen = new Set(animations());
+    run = { names, samples: Object.fromEntries(names.map((n) => [n, []])), animations: [], longTasks: [], began: performance.now(), stop: false };
     const current = run;
+    const tasks = (entries) => entries.forEach((e) => current.longTasks.push({ at: e.startTime - current.began, ms: e.duration }));
+    current.longTasksSupported = PerformanceObserver.supportedEntryTypes.includes('longtask');
+    if (current.longTasksSupported) {
+      current.observer = new PerformanceObserver((list) => tasks(list.getEntries()));
+      current.observer.observe({ entryTypes: ['longtask'] });
+      current.stopTasks = () => { tasks(current.observer.takeRecords()); current.observer.disconnect(); };
+    }
     // The state before anything happens is taken now, not on the next frame, which the action may already have changed.
     for (const name of names) current.samples[name].push([0, ...stateOf(name)]);
     const frame = () => {
       const now = performance.now();
       for (const name of names) current.samples[name].push([Math.max(1, Math.round(now - current.began)), ...stateOf(name)]);
-      for (const animation of document.getAnimations()) {
+      for (const animation of animations()) {
         if (seen.has(animation)) continue;
         seen.add(animation);
         const timing = animation.effect.getTiming();
@@ -75,6 +83,7 @@
       if (!current.stop) requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
+    return current.began;
   };
 
   // Waits for the surfaces to rest (no change for `quiet` ms, and at least `least` ms since now), then stops and returns.
@@ -89,10 +98,14 @@
     const poll = () => {
       const now = performance.now() - current.began;
       const waited = performance.now() - began;
-      if ((waited >= least && now - last() >= quiet) || waited >= most) {
+      const quietFor = now - last();
+      const moving = animations().some((a) => a.effect?.getTiming().iterations !== Infinity && (a.pending || a.playState === 'running'));
+      const settled = waited >= least && quietFor >= quiet && !moving;
+      if (settled || waited >= most) {
         current.stop = true;
+        current.stopTasks?.();
         run = null;
-        resolve({ samples: current.samples, animations: current.animations });
+        resolve({ samples: current.samples, animations: current.animations, longTasks: current.longTasks, longTasksSupported: current.longTasksSupported, elapsed: now, settled, quietFor });
       } else setTimeout(poll, 50);
     };
     poll();
