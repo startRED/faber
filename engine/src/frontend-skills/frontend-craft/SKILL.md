@@ -26,8 +26,6 @@ are not evidence of a better result. Preserve the request, the project's identit
 
 ## Compose before decorating
 
-For illustrated demos, follow `frontend-proof` and Stageshow when installed. Scene limits do not govern real work screens.
-
 - Give the primary action visual priority. Group related controls by proximity and alignment before drawing more
   containers, borders and cards. Let important information have space; do not equate whitespace with empty padding.
 - Inspect the first useful viewport at narrow and wide sizes. Make the task and essential context discoverable

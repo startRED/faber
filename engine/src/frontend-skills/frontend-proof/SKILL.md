@@ -81,22 +81,6 @@ written requirement it breaks. A scoped fix is not permission to redesign neighb
 
 ## Performance and resource evidence
 
-Illustrated demos use three to five short beats, real product tokens and recognizable controls. Label synthetic
-content; scene clicks never prove product behavior. Use an installed Stageshow skill only for these demos. Copy needed
-kit/examples into the task workspace before edits or dependency installation; never modify a verified Catalog snapshot.
-Keep demo dependencies outside the app. Compose narrow layouts separately and provide a complete reduced-motion still.
-Illustration crops and word limits must not hide real app information or controls.
-
-For a changed transition or animated demonstration, retain a visual rehearsal of the actual interaction: its opening,
-intermediate images, settled outcome and, for a loop, the return to its opening. Include a narrow supported layout,
-reduced motion, interruption and replay where relevant. Pair images with the sampling trace so a reviewer can locate
-a jump instead of guessing from one settled screenshot.
-
-Treat missing images, missing samples, sampling gaps or a timeout before settling as incomplete evidence. Inspect the
-structured report, coverage and command exit status together; a printed approval line alone is insufficient. A clean
-automated report still needs visual judgment. Report the browser and build actually exercised, and distinguish
-illustrated scene checks from clicks through the real application.
-
 - For affected hot paths, measure interaction-to-next-paint and frame times on the same hardware, fixture and build
   mode before/after. Report sample size and p95/p99 only when there are enough observations; never infer them from
   one run. Distinguish local lab measurements from field INP (p75 of visits, <=200 ms is good).

@@ -19,8 +19,6 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
   cards (Chat, Projects, Follow along); someone who answered "A lot" gets two (Auto, the running list); no answer counts as
   a beginner. A card has Curioso, "n of total", a title, one or two sentences, Next (Got it on the last) and, except on
   the last card, Skip.
-  Its entrance starts after the anchor has been measured, beside the element it explains; hidden initial coordinates
-  never make the first card fly across the window (`tests/ui/motion.check.ts`).
   A ring and a pointer mark the real element the card is about (`data-tour`). When that element is missing or hidden, such
   as the Projects button below 900 px, the card is centred. The cards for the running button are pinned: that button is in
   the corner and is what they are about, so when the greeting is in the way they still sit under it with their pointer, at

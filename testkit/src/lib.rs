@@ -15,7 +15,6 @@ pub mod page;
 pub mod plan;
 pub mod proctree;
 pub mod quarantine;
-pub mod rehearsal;
 pub mod replay;
 pub mod report;
 pub mod runner;
