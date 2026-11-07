@@ -403,6 +403,8 @@ fn short_menus(ctx: &mut Ctx, page: &mut Page, mode: &str, found: &mut Vec<Findi
     for (selector, surface) in [(".cmenu", "context-menu"), (".st-menu", "permission-menu")] {
         if selector == ".st-menu" {
             page.press("Control+,")?;
+            let general = page.named("button", "set.general")?;
+            page.click(&general)?;
             page.wait_visible(&css("#set-permissions-pick"))?;
             page.wait_for(
                 "Settings to finish arriving",
@@ -491,13 +493,21 @@ fn motion(ctx: &mut Ctx) -> Result {
 
     // The probe sees through the shadow root of an exit copy: a host at half opacity makes its content half visible.
     let seen = page.eval(
-        "(() => { const host = document.createElement('div'); host.className = 'motion-exit'; host.style.opacity = '0.5'; document.body.append(host);
-          const child = document.createElement('div'); child.dataset.surface = 'probe.twin'; child.style.cssText = 'width:10px;height:10px';
-          host.attachShadow({ mode: 'open' }).append(child); const state = window.__sx.stateOf('probe.twin'); host.remove(); return state; })()",
+        "(async () => { const host = document.createElement('div'); host.className = 'motion-exit'; host.style.opacity = '0.5'; document.body.append(host);
+          const child = document.createElement('div'); child.className = 'probe-twin'; child.dataset.surface = 'probe.twin'; child.style.cssText = 'width:10px;height:10px';
+          host.attachShadow({ mode: 'open' }).append(child); const state = window.__sx.stateOf('probe.twin');
+          window.__sx.start(['probe.twin']); child.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 160 });
+          const trace = await window.__sx.finish(); host.remove(); return { state, animations: trace.animations }; })()",
     )?;
-    ensure(seen[0] == json!(1) && seen[5].as_f64().is_some_and(|o| (o - 0.5).abs() < 0.01), || {
+    ensure(seen["state"][0] == json!(1) && seen["state"][5].as_f64().is_some_and(|o| (o - 0.5).abs() < 0.01), || {
         format!("the probe must count the opacity of a shadow host (present, then 0.5 opacity wanted): {seen}")
     })?;
+    ensure(
+        seen["animations"]
+            .as_array()
+            .is_some_and(|list| list.iter().any(|a| a["target"].as_str().is_some_and(|t| t.contains("probe-twin")))),
+        || "the probe must record animations inside the exit shadow root".into(),
+    )?;
 
     // The tutorial card, coming in and moving to the next step.
     let heading = page.named("heading", "first.look.title")?;
@@ -560,7 +570,7 @@ fn motion(ctx: &mut Ctx) -> Result {
     // Rehearse the real appearance controls, including the draft/apply boundary, then return to the default look.
     page.press("Control+,")?;
     let appearance = page.named("button", "set.appearance")?;
-    page.click(&appearance)?;
+    watch(ctx, "appearance opens", page, &["settings"], |p| p.click(&appearance))?;
     for look in ["manha", "sala"] {
         let preset = page.named("button", &format!("look.{look}.name"))?;
         page.click(&preset)?;
@@ -571,8 +581,11 @@ fn motion(ctx: &mut Ctx) -> Result {
             p.wait_for("the chosen look to be applied", &format!("document.documentElement.dataset.base === {}", json!(look)))
         })?;
     }
-    page.press("Escape")?;
+    let closing = watch(ctx, "appearance closes", page, &["settings"], |p| p.press("Escape"))?;
     page.wait_gone(&css(".settings"))?;
+    ensure(closing.samples[0].last().is_some_and(|s| !s.present || s.o <= 0.01), || {
+        "Settings and its exit copy must leave before the reply is photographed".into()
+    })?;
 
     // A recorded provider reply, not a simulated DOM animation: require photographs of the partial and finished words.
     super::select_model(page, "Claude Haiku")?;

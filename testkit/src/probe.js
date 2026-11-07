@@ -26,6 +26,7 @@
 
   // Every place a moving part can be: the page, and the shadow roots where exit copies are kept while they leave.
   const roots = () => [document, ...[...document.querySelectorAll('.motion-exit')].map((layer) => layer.shadowRoot).filter(Boolean)];
+  const animations = () => roots().flatMap((root) => root.getAnimations());
   const effective = (el) => {
     let opacity = 1;
     // Past the top of a shadow root the next element is its host.
@@ -52,7 +53,7 @@
 
   // Starts sampling these surfaces on every frame, and noting each animation that starts.
   const start = (names) => {
-    const seen = new Set(document.getAnimations());
+    const seen = new Set(animations());
     run = { names, samples: Object.fromEntries(names.map((n) => [n, []])), animations: [], longTasks: [], began: performance.now(), stop: false };
     const current = run;
     const tasks = (entries) => entries.forEach((e) => current.longTasks.push({ at: e.startTime - current.began, ms: e.duration }));
@@ -67,7 +68,7 @@
     const frame = () => {
       const now = performance.now();
       for (const name of names) current.samples[name].push([Math.max(1, Math.round(now - current.began)), ...stateOf(name)]);
-      for (const animation of document.getAnimations()) {
+      for (const animation of animations()) {
         if (seen.has(animation)) continue;
         seen.add(animation);
         const timing = animation.effect.getTiming();
@@ -98,7 +99,7 @@
       const now = performance.now() - current.began;
       const waited = performance.now() - began;
       const quietFor = now - last();
-      const moving = document.getAnimations().some((a) => a.effect?.getTiming().iterations !== Infinity && (a.pending || a.playState === 'running'));
+      const moving = animations().some((a) => a.effect?.getTiming().iterations !== Infinity && (a.pending || a.playState === 'running'));
       const settled = waited >= least && quietFor >= quiet && !moving;
       if (settled || waited >= most) {
         current.stop = true;

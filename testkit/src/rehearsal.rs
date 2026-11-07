@@ -8,7 +8,16 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const STATE: &str = "(() => { const a = document.querySelector('article.ai'); return { at: performance.now(), look: document.documentElement.dataset.base, viewport: [innerWidth, innerHeight], reply: { chars: a?.querySelector('.md')?.textContent.length ?? 0, complete: !!a?.querySelector('.actions') } }; })()";
+const STATE: &str = r#"(() => {
+    const a = document.querySelector('article.ai');
+    const settings = window.__sx.stateOf('settings');
+    const exits = [...document.querySelectorAll('.motion-exit')].flatMap(h => [...(h.shadowRoot?.children ?? [])]
+        .filter(el => el.tagName !== 'STYLE').map(el => ({ class: el.className, opacity: getComputedStyle(el).opacity,
+            animations: el.getAnimations({ subtree: true }).map(a => ({ state: a.playState, time: a.currentTime, duration: a.effect?.getTiming().duration })) })));
+    return { at: performance.now(), look: document.documentElement.dataset.base, viewport: [innerWidth, innerHeight],
+        settingsVisible: !!settings[0] && settings[5] > 0.01, exits,
+        reply: { chars: a?.querySelector('.md')?.textContent.length ?? 0, complete: !!a?.querySelector('.actions') } };
+})()"#;
 
 pub struct Recording {
     folder: PathBuf,
@@ -21,7 +30,11 @@ fn photo(cdp: &mut Cdp, folder: &Path, began: f64, phase: &str, n: usize, size: 
     let state = cdp.eval(STATE)?;
     let from = state["at"].as_f64().ok_or("no photograph clock")? - began;
     // WebView2 applies a scaled clip to the live viewport too, disturbing the interaction being measured.
-    let shot = cdp.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 60 }))?;
+    let shot = cdp.call(
+        "Page.captureScreenshot",
+        json!({ "format": "jpeg", "quality": 60,
+        "clip": { "x": 0, "y": 0, "width": size[0], "height": size[1], "scale": 1 } }),
+    )?;
     let end = cdp.eval(STATE)?;
     let to = end["at"].as_f64().ok_or("no photograph clock")? - began;
     let bytes =
@@ -32,7 +45,7 @@ fn photo(cdp: &mut Cdp, folder: &Path, began: f64, phase: &str, n: usize, size: 
     let file = format!("{n:03}-{phase}.jpg");
     std::fs::write(folder.join(&file), bytes).map_err(|e| e.to_string())?;
     Ok(
-        json!({ "file": file, "phase": phase, "from": from, "to": to, "reply": state["reply"], "replyAfter": end["reply"], "look": state["look"], "lookAfter": end["look"], "viewport": state["viewport"], "viewportAfter": end["viewport"], "expectedViewport": size }),
+        json!({ "file": file, "phase": phase, "from": from, "to": to, "reply": state["reply"], "replyAfter": end["reply"], "look": state["look"], "lookAfter": end["look"], "viewport": state["viewport"], "viewportAfter": end["viewport"], "expectedViewport": size, "settingsVisible": state["settingsVisible"], "settingsVisibleAfter": end["settingsVisible"], "exits": state["exits"], "exitsAfter": end["exits"] }),
     )
 }
 
@@ -121,6 +134,9 @@ fn photo_problem(frames: &[Value]) -> Option<String> {
 }
 
 fn streaming_problem(frames: &[Value]) -> Option<String> {
+    if frames.iter().any(|f| f["settingsVisible"] != json!(false) || f["settingsVisibleAfter"] != json!(false)) {
+        return Some("the streaming photographs must show the conversation without Settings covering it".into());
+    }
     let final_chars = frames.last().and_then(|f| f["reply"]["chars"].as_u64()).unwrap_or(0);
     if frames.last().is_none_or(|f| ["reply", "replyAfter"].iter().any(|key| f[*key]["complete"] != json!(true)))
         || !frames.iter().any(|f| {
@@ -163,7 +179,7 @@ mod tests {
         ["before", "during", "after"]
             .iter()
             .enumerate()
-            .map(|(i, phase)| json!({ "file": format!("{i}.jpg"), "phase": phase, "from": i * 100, "to": i * 100 + 30, "viewport": [1440, 900], "viewportAfter": [1440, 900], "expectedViewport": [1440, 900] }))
+            .map(|(i, phase)| json!({ "file": format!("{i}.jpg"), "phase": phase, "from": i * 100, "to": i * 100 + 30, "viewport": [1440, 900], "viewportAfter": [1440, 900], "expectedViewport": [1440, 900], "settingsVisible": false, "settingsVisibleAfter": false }))
             .collect()
     }
 
@@ -209,6 +225,12 @@ mod tests {
         rows[1]["reply"] = json!({ "chars": 30, "complete": false });
         rows[1]["replyAfter"] = json!({ "chars": 35, "complete": false });
         assert!(streaming_problem(&rows).is_none());
+        rows[2]["settingsVisibleAfter"] = json!(true);
+        assert_eq!(
+            streaming_problem(&rows).as_deref(),
+            Some("the streaming photographs must show the conversation without Settings covering it")
+        );
+        rows[2]["settingsVisibleAfter"] = json!(false);
         rows[1]["reply"]["chars"] = json!(100);
         assert!(streaming_problem(&rows).is_some());
     }
