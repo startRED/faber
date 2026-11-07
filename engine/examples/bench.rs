@@ -68,20 +68,25 @@ struct Options {
     cap: Cap,
     per_run_usd: f64,
     dry_run: bool,
-    codex_only: bool,
+    subscription_vendor: Option<Vendor>,
 }
 
 impl Options {
     fn read() -> Result<Options, Failure> {
-        let args: Vec<String> = std::env::args().skip(1).collect();
-        let codex_only = args.iter().any(|a| a == "--codex-only");
+        Self::from_args(&std::env::args().skip(1).collect::<Vec<_>>())
+    }
+
+    fn from_args(args: &[String]) -> Result<Options, Failure> {
+        let only = subscription_vendor(args)?;
         let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         let vendor =
             |name: &str| Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"));
-        let plain = vendor(&value("--plain").unwrap_or_else(|| if codex_only { "codex" } else { "claude" }.into()))?;
+        let plain = vendor(&value("--plain").unwrap_or_else(|| only.unwrap_or(Vendor::Claude).name().into()))?;
         let vendors = value("--vendors").unwrap_or_else(|| plain.name().into()).split(',').map(vendor).collect::<Result<Vec<_>, _>>()?;
-        if codex_only && (plain != Vendor::Codex || vendors != [Vendor::Codex]) {
-            return Err("--codex-only excludes every other vendor".into());
+        if let Some(only) = only
+            && (plain != only || vendors != [only])
+        {
+            return Err(format!("--{}-only excludes every other vendor", only.name()).into());
         }
         let number = |name: &str, default: f64| -> Result<f64, Failure> {
             let number = value(name).map_or(Ok(default), |v| v.parse::<f64>().map_err(|_| format!("{name} takes a number")))?;
@@ -106,13 +111,26 @@ impl Options {
             cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
             per_run_usd: number("--per-run-usd", 1.5)?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
-            codex_only,
+            subscription_vendor: only,
         })
+    }
+
+    fn cli_allowance(&self, spent: &Spend) -> Option<f64> {
+        (self.subscription_vendor != Some(Vendor::Claude)).then(|| self.cap.allowance(&self.budget_spend(spent), self.per_run_usd))
     }
 
     fn budget_spend(&self, spent: &Spend) -> Spend {
         // Subscription-only admission uses tokens; preserve unknown API-equivalent costs in the evidence.
-        if self.codex_only { Spend { usd: 0.0, unknown_cost: false, ..*spent } } else { *spent }
+        if self.subscription_vendor.is_some() { Spend { usd: 0.0, unknown_cost: false, ..*spent } } else { *spent }
+    }
+}
+
+fn subscription_vendor(args: &[String]) -> Result<Option<Vendor>, Failure> {
+    match (args.iter().any(|a| a == "--codex-only"), args.iter().any(|a| a == "--claude-only")) {
+        (true, true) => Err("--claude-only and --codex-only are mutually exclusive".into()),
+        (true, false) => Ok(Some(Vendor::Codex)),
+        (false, true) => Ok(Some(Vendor::Claude)),
+        (false, false) => Ok(None),
     }
 }
 
@@ -288,9 +306,9 @@ fn not_run(side: Side, why: String) -> SideResult {
     result
 }
 
-async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work, allowance: f64) -> SideResult {
+async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work, allowance: Option<f64>) -> SideResult {
     let started = Instant::now();
-    let cmd: Vec<String> = match options.plain {
+    let mut cmd: Vec<String> = match options.plain {
         Vendor::Gemini => unreachable!("the bench takes only Claude and Codex"),
         Vendor::Claude => args(&[
             "-p",
@@ -303,8 +321,6 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
             &options.plain_model,
             "--effort",
             &options.plain_effort,
-            "--max-budget-usd",
-            &format!("{allowance:.2}"),
         ]),
         Vendor::Codex => args(&[
             "exec",
@@ -322,6 +338,9 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
             "-",
         ]),
     };
+    if options.plain == Vendor::Claude {
+        cmd.extend(dollar_args(allowance));
+    }
     let run = match run_cli(cli, &cmd, &work.plain, &request.prompt, RUN_LIMIT).await {
         Ok(run) => run,
         Err(error) => return failed(Side::Plain, started.elapsed().as_secs_f64(), error),
@@ -699,7 +718,7 @@ mod judge_tests {
             assert!(
                 faber_engine::route::PROFILES.iter().filter(|p| p.vendor == vendor).all(|p| (p.iq, p.agent) <= (profile.iq, profile.agent))
             );
-            let cmd = judge_args(vendor, profile.model, profile.effort, 0.5);
+            let cmd = judge_args(vendor, profile.model, profile.effort, Some(0.5));
             if vendor == Vendor::Codex {
                 assert!(cmd.iter().any(|arg| arg == "--ignore-user-config"));
             }
@@ -735,7 +754,7 @@ mod judge_tests {
             &side,
             &side,
             Path::new("."),
-            0.0,
+            Some(0.0),
         )
         .await;
         assert_eq!(result.cost_usd, Some(0.0));
@@ -743,8 +762,16 @@ mod judge_tests {
     }
 }
 
-async fn judge(options: &Options, cli: &Cli, request: &Request, a: &SideResult, b: &SideResult, dir: &Path, allowance: f64) -> Judged {
-    if !allowance.is_finite() || allowance <= 0.0 {
+async fn judge(
+    options: &Options,
+    cli: &Cli,
+    request: &Request,
+    a: &SideResult,
+    b: &SideResult,
+    dir: &Path,
+    allowance: Option<f64>,
+) -> Judged {
+    if allowance.is_some_and(|allowance| !allowance.is_finite() || allowance <= 0.0) {
         return Judged { verdict: None, usage: Usage::default(), cost_usd: Some(0.0), note: Some("not judged: no budget remains".into()) };
     }
     let prompt = pure::judge_prompt(&request.prompt, &entry_of(a), &entry_of(b));
@@ -758,7 +785,7 @@ async fn judge(options: &Options, cli: &Cli, request: &Request, a: &SideResult, 
     judge_result(options.judge_vendor, &options.judge_model, &run)
 }
 
-fn judge_args(vendor: Vendor, model: &str, effort: &str, allowance: f64) -> Vec<String> {
+fn judge_args(vendor: Vendor, model: &str, effort: &str, allowance: Option<f64>) -> Vec<String> {
     if vendor == Vendor::Codex {
         return args(&[
             "exec",
@@ -806,8 +833,6 @@ fn judge_args(vendor: Vendor, model: &str, effort: &str, allowance: f64) -> Vec<
         model,
         "--effort",
         effort,
-        "--max-budget-usd",
-        &format!("{allowance:.2}"),
         "--tools",
         "",
         "--strict-mcp-config",
@@ -819,6 +844,13 @@ fn judge_args(vendor: Vendor, model: &str, effort: &str, allowance: f64) -> Vec<
         "--system-prompt",
         pure::JUDGE_INSTRUCTIONS,
     ])
+    .into_iter()
+    .chain(dollar_args(allowance))
+    .collect()
+}
+
+fn dollar_args(allowance: Option<f64>) -> Vec<String> {
+    allowance.map_or_else(Vec::new, |allowance| args(&["--max-budget-usd", &format!("{allowance:.2}")]))
 }
 
 fn judge_result(vendor: Vendor, model: &str, run: &Finished) -> Judged {
@@ -880,17 +912,28 @@ fn hard_cap_admission(required: bool, root: &Path, requests: &[Request], options
     Err(HARD_CAP_BLOCKER.into())
 }
 
-async fn quota_receipt(codex_only: bool) -> serde_json::Value {
+async fn quota_receipt(only: Option<Vendor>) -> serde_json::Value {
     let cwd = std::env::current_dir().unwrap_or_else(|_| repo_root());
     let mut readings = Vec::new();
-    for vendor in Vendor::RUNNABLE.into_iter().filter(|v| !codex_only || *v == Vendor::Codex) {
+    for vendor in Vendor::RUNNABLE.into_iter().filter(|v| only.is_none_or(|only| *v == only)) {
         let mut receipt = json!({"vendor": vendor.name(), "at": chrono::Utc::now().timestamp(), "windows": []});
         if faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name)) {
             receipt["error"] = json!("billing environment is not isolated; no CLI started");
         } else if let Some(cli) = find_cli(vendor.name()) {
-            match bench_quiet::reading(vendor, &cli, proc::real_spawner(), &cwd).await {
+            let read = if only == Some(Vendor::Claude) {
+                bench_quiet::claude_reading(&cli, &proc::real_spawner(), &cwd).await
+            } else {
+                bench_quiet::reading(vendor, &cli, proc::real_spawner(), &cwd).await
+            };
+            match read {
                 Ok((source, events)) => {
                     receipt["source"] = json!(source);
+                    if only == Some(Vendor::Claude) {
+                        receipt["paidFallback"] = json!(events.iter().find_map(|event| match event {
+                            faber_engine::events::EngineEvent::Signals(signals) => signals.paid_fallback,
+                            _ => None,
+                        }));
+                    }
                     receipt["windows"] = json!(
                         events
                             .into_iter()
@@ -924,8 +967,8 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "only": options.only,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
-        "subscriptionOnly": options.codex_only,
-        "quotaPairing": if options.codex_only { "unpaired; watcher reads weekly before/after each request" } else { "quiet intervals" },
+        "subscriptionOnly": options.subscription_vendor.is_some(),
+        "quotaPairing": if options.subscription_vendor.is_some() { "unpaired; watcher reads weekly before/after each request" } else { "quiet intervals" },
         "judgeOverrides": { "model": options.judge_model, "effort": options.judge_effort },
         "cap": { "usd": options.cap.max_usd, "freshTokens": options.cap.max_fresh_tokens, "perRunUsd": options.per_run_usd },
         "spent": spent,
@@ -944,13 +987,12 @@ fn write_checkpoint(run_dir: &Path, options: &Options, rows: &[Row], row: &Row, 
 
 #[tokio::main]
 async fn main() -> Result<(), Failure> {
-    if std::env::args().any(|arg| arg == "--codex-only")
-        && std::env::vars_os().any(|(name, _)| billing_environment(&name.to_string_lossy()))
-    {
+    let only = subscription_vendor(&std::env::args().skip(1).collect::<Vec<_>>())?;
+    if only.is_some() && std::env::vars_os().any(|(name, _)| billing_environment(&name.to_string_lossy())) {
         return Err("subscription-only benchmark refuses billing environment variables; no CLI started".into());
     }
     if std::env::args().any(|arg| arg == "--quota-only") {
-        let receipt = quota_receipt(std::env::args().any(|arg| arg == "--codex-only")).await;
+        let receipt = quota_receipt(only).await;
         println!("{receipt}");
         if receipt["readings"].as_array().is_some_and(|readings| readings.iter().any(|r| r["unknownCost"] == true)) {
             return Err("quota status could not verify zero model spending; no more readings or model work allowed".into());
@@ -996,7 +1038,7 @@ async fn main() -> Result<(), Failure> {
     let node = find_cli("node").ok_or("node is not on the PATH (the fixtures and proofs are Node scripts)")?;
     let judges: BTreeMap<_, _> = Vendor::RUNNABLE
         .into_iter()
-        .filter(|v| !options.codex_only || *v == Vendor::Codex)
+        .filter(|v| options.subscription_vendor.is_none_or(|only| *v == only))
         .filter_map(|v| find_cli(v.name()).map(|cli| (v, cli)))
         .collect();
     if judges.is_empty() {
@@ -1036,15 +1078,13 @@ async fn main() -> Result<(), Failure> {
         }
         println!("[{}/{}] {}", index + 1, requests.len(), request.id);
         let work = prepare(request, &root, &node.command, &inputs)?;
-        if !options.codex_only
+        if options.subscription_vendor.is_none()
             && let Err(error) = accounts.wait(&judges, &[options.plain], &mut spent).await
         {
             write_checkpoint(&root, &options, &rows, &row, &spent)?;
             return Err(error.into());
         }
-        let mut plain =
-            run_plain(&options, &plain_cli, request, &work, options.cap.allowance(&options.budget_spend(&spent), options.per_run_usd))
-                .await;
+        let mut plain = run_plain(&options, &plain_cli, request, &work, options.cli_allowance(&spent)).await;
         accounts.worked(&[options.plain]);
         spent.add(&plain.usage, plain.cost_usd);
         row.plain = Some(plain.clone());
@@ -1053,13 +1093,13 @@ async fn main() -> Result<(), Failure> {
         let mut faber = if let Some(why) = options.cap.reached(&options.budget_spend(&spent)) {
             not_run(Side::Faber, why)
         } else {
-            if !options.codex_only
+            if options.subscription_vendor.is_none()
                 && let Err(error) = accounts.wait(&judges, &options.vendors, &mut spent).await
             {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
-            let allowance = (!options.codex_only).then(|| options.cap.allowance(&spent, options.per_run_usd));
+            let allowance = (options.subscription_vendor.is_none()).then(|| options.cap.allowance(&spent, options.per_run_usd));
             run_faber(&clis, request, &work, &root, allowance, false).await
         };
         accounts.worked(&options.vendors);
@@ -1086,7 +1126,7 @@ async fn main() -> Result<(), Failure> {
             options.judge_vendor = vendor;
             options.judge_model = if judge_model.is_empty() { profile.model.into() } else { judge_model.clone() };
             options.judge_effort = if judge_effort.is_empty() { profile.effort.into() } else { judge_effort.clone() };
-            if !options.codex_only
+            if options.subscription_vendor.is_none()
                 && let Err(error) = accounts.wait(&judges, &[vendor], &mut spent).await
             {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
@@ -1100,16 +1140,7 @@ async fn main() -> Result<(), Failure> {
                 independent_faber: faber.authors.independent_of(name),
             });
             row.judge_attempted = true;
-            let judged = judge(
-                &options,
-                &judges[&vendor],
-                request,
-                first,
-                second,
-                &judge_dir,
-                options.cap.allowance(&options.budget_spend(&spent), options.per_run_usd),
-            )
-            .await;
+            let judged = judge(&options, &judges[&vendor], request, first, second, &judge_dir, options.cli_allowance(&spent)).await;
             accounts.worked(&[vendor]);
             spent.add(&judged.usage, judged.cost_usd);
             row.judge_cost_usd = judged.cost_usd;
@@ -1144,6 +1175,29 @@ mod checkpoint_tests {
     use super::*;
 
     #[test]
+    fn single_vendor_modes_restrict_all_callers_and_only_claude_removes_cli_dollar_arguments() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let flag = format!("--{}-only", vendor.name());
+            let options = Options::from_args(&[flag.clone()]).unwrap();
+            assert_eq!(options.plain, vendor);
+            assert_eq!(options.vendors, [vendor]);
+            assert_eq!(options.judge_vendor, vendor);
+            assert_eq!(options.subscription_vendor, Some(vendor));
+            let allowance = options.cli_allowance(&Spend::default());
+            assert_eq!(allowance.is_none(), vendor == Vendor::Claude);
+            assert_eq!(dollar_args(allowance).is_empty(), vendor == Vendor::Claude);
+            assert!(!judge_args(vendor, "test", "high", allowance).contains(&"--max-budget-usd".into()));
+            for override_args in [args(&["--plain", "gemini"]), args(&["--vendors", "claude,codex"])] {
+                assert!(Options::from_args(&[vec![flag.clone()], override_args].concat()).is_err());
+            }
+        }
+        assert!(Options::from_args(&args(&["--claude-only", "--codex-only"])).is_err());
+        let bounded = Options::from_args(&[]).unwrap();
+        assert_eq!(bounded.cli_allowance(&Spend::default()), Some(1.5));
+        assert!(judge_args(Vendor::Claude, "test", "high", Some(1.5)).contains(&"--max-budget-usd".into()));
+    }
+
+    #[test]
     fn subscription_mode_disables_internal_dollar_guards_without_changing_bounded_runs() {
         assert!(!cost_limit_reached(None, None));
         assert!(!cost_limit_reached(None, Some(100.0)));
@@ -1174,8 +1228,10 @@ mod checkpoint_tests {
         let mut options = Options::read().unwrap();
         let spent = Spend { usd: 100.0, unknown_cost: true, ..Default::default() };
         assert!(options.cap.reached(&options.budget_spend(&spent)).is_some());
-        options.codex_only = true;
-        assert!(options.cap.reached(&options.budget_spend(&spent)).is_none());
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            options.subscription_vendor = Some(vendor);
+            assert!(options.cap.reached(&options.budget_spend(&spent)).is_none());
+        }
         assert!(spent.unknown_cost);
         assert_eq!(spent.usd, 100.0);
         let spent = Spend { usage: Usage { input: options.cap.max_fresh_tokens, ..Default::default() }, ..spent };

@@ -1,0 +1,41 @@
+{
+  "checks": {
+    "docs": 0,
+    "build": 0,
+    "typecheck": 0,
+    "scripts": 0,
+    "lint": 0,
+    "harness": 0,
+    "dryRun": 0,
+    "fmt": 0,
+    "claims": 0
+  },
+  "watcherTests": {
+    "pass": 16,
+    "fail": 0
+  },
+  "harnessTests": {
+    "pass": 42,
+    "fail": 0
+  },
+  "scriptTests": {
+    "pass": 337,
+    "skipped": 5,
+    "fail": 0
+  },
+  "thresholdMutationCaught": true,
+  "liveQuotaOrModelCalls": 0,
+  "releasePageEdited": false,
+  "resourceSample": {
+    "kind": "Node importing watcher only; no guard or child",
+    "rssMiB": 60.9453125,
+    "cpuThreads": 16
+  },
+  "notChecked": [
+    "live CS2 start",
+    "live Claude reader before reset",
+    "heavy Rust/UI suites"
+  ],
+  "initialClaimsBlockedByUnrelatedEvidence": true,
+  "unrelatedEvidenceEditedOrStaged": false
+}

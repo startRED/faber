@@ -23,6 +23,7 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
 | `--quota-only` | off | Read both subscriptions with the app's local quota readers; print sources, windows and times, without model work |
 | `--require-hard-cap` | off | Refuse model work and save all selected rows as skipped when an absolute dollar ceiling is required; the current harness cannot guarantee one |
+| `--claude-only` | off | Subscription-only Claude for both sides, judge and the fixed control-only quota reader; no dollar admission or CLI dollar caps, partial tokens accepted |
 | `--codex-only` | off | Subscription-only Codex for both sides, judge and quota reader; unpaired quota readings, token admission only, API-equivalent costs retained as evidence |
 
 For the Windows 1.0 gate, `node scripts/bench-when-quiet.mjs` waits up to 14 hours, polling local processor counters
@@ -46,6 +47,30 @@ hard cap, accepts unpaired readings and partial tokens, and stops permanently if
 Billing variables are removed before every watcher child, including git, the process guard and termination commands.
 Dollar estimates and unknown costs remain evidence, not subscription billing or dollar admission or interruption limits. Token limits
 still apply per request. Same-vendor verdicts do not prove independent quality qualification.
+
+For owner-authorized D, run one blocking command:
+
+```bash
+node scripts/bench-when-quiet.mjs --claude-only --not-before 2026-11-10T08:00:00Z
+```
+
+The watcher polls the clock every 60 seconds without quota readers, model work or the process guard until that UTC time.
+`--not-before <UTC ISO time>` can defer any mode; Claude admission always waits until at least the owner-provided reset.
+It then needs ten fresh quiet minutes with CS2 absent. The fixed absolute deadline is 2026-11-12T00:00:00Z, including
+waiting and active children, instead of the ordinary 14-hour limit. A strict reading above 25% used stops the whole run;
+exactly 25% is admitted. The app's #712 control-only `get_usage` reader must return exactly one valid new-week weekly
+window before and after each comparison (both answers and judge). Missing, invalid or stale windows stop admission;
+there is no text-command fallback. Paid extra usage must be explicitly disabled in that receipt. The comparison is the reading boundary; in-flight consumption is not visible until
+the after reading. The shared account's rounded/delayed readings cannot attribute outside use. There is no dollar cap;
+token admission and invocation timeouts remain. Claude is the sole answer, Faber and judge vendor. No API-key or billing
+overrides reach watcher children. Codex-only and bounded shared runs retain their existing policies.
+
+D runs outside credential-folder ancestors in the temporary folder's `faber-g390d-evidence/`. It pins product sources to
+the merged base containing #712 (recorded in provenance); all modes check that same updated product baseline. CS2 during an
+attempt stops it permanently by owned PID. On exit the watcher writes the eight rows, tokens, times, quota receipts and
+stop reason to `reports/reforma/helpers/g390d.result.md`, then creates `g390d.done`, including blocked or partial runs.
+An interrupted result with missing counters remains unknown, never zero. The done marker means the watcher ended, not
+that eight successful verdicts or release-wide qualification were obtained.
 
 ## What a run does
 
@@ -91,8 +116,8 @@ Each run needs a new run folder: an existing `--run-id` is rejected before savin
 ## Request coverage
 
 When Claude's zero-token text `/usage` returns no windows, `bench/account_quiet.rs` falls back to the structured local
-`account::claude_limits` reader used by `Engine::check_plans` (the app's quota reader). It requires a local usage receipt,
-zero reported model cost and no models. It never calls the model-based `claude_probe`. Missing windows remain unknown.
+`account::claude_limits` reader used by `Engine::check_plans` (the app's quota reader). Its control-only `get_usage`
+receipt requires available rate limits, zero reported model cost and no models. It never calls the model-based `claude_probe`. Missing windows remain unknown.
 
 The eight-request sample has five Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, and summarize a CSV export) and three Chat requests. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
 

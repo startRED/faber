@@ -34,7 +34,16 @@ fn now() -> f64 {
     chrono::Utc::now().timestamp_millis() as f64 / 1000.0
 }
 
-/// The same local, structured /usage reader as Engine::check_plans; never claude_probe.
+/// The app's control-only reader: no text command or model probe is sent.
+pub async fn claude_reading(cli: &Cli, spawn: &proc::Spawner, root: &Path) -> Result<(String, Vec<EngineEvent>), String> {
+    let events = claude_limits(cli, spawn, root, Duration::from_secs(45)).await;
+    if !events.iter().any(|event| matches!(event, EngineEvent::Quota { .. })) {
+        return Err("app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted".into());
+    }
+    Ok(("app claude_limits (control-only get_usage, zero model cost)".into(), events))
+}
+
+/// The same local readers as the app; never claude_probe.
 pub async fn reading(vendor: Vendor, cli: &Cli, real: proc::Spawner, root: &Path) -> Result<(String, Vec<EngineEvent>), String> {
     let spawn = status_spawner(vendor, cli, real);
     match vendor {
@@ -49,16 +58,7 @@ pub async fn reading(vendor: Vendor, cli: &Cli, real: proc::Spawner, root: &Path
                         .map(|(window, used, resets_at)| EngineEvent::Quota { window: window.into(), used, resets_at })
                         .collect(),
                 )),
-                UsageRead::NoWindows => {
-                    let events = claude_limits(cli, &spawn, root, Duration::from_secs(45)).await;
-                    if !events.iter().any(|event| matches!(event, EngineEvent::Quota { .. })) {
-                        return Err(
-                            "app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted"
-                                .into(),
-                        );
-                    }
-                    Ok(("app claude_limits (structured local /usage, zero model cost)".into(), events))
-                }
+                UsageRead::NoWindows => claude_reading(cli, &spawn, root).await,
                 UsageRead::Failed => Err("Claude local quota reading failed".into()),
                 UsageRead::Spent => Err("quota status unexpectedly used a model; spending is unknown, no more work admitted".into()),
             }
@@ -161,6 +161,39 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn scheduled_claude_reading_never_tries_a_text_command_and_keeps_the_paid_fallback_signal() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = calls.clone();
+        let fake: proc::Spawner = Arc::new(move |_, args, _| {
+            captured.lock().unwrap().push(args.to_vec());
+            let output = include_str!("../tests/fixtures/claude/usage-control.jsonl")
+                .lines()
+                .filter_map(|line| {
+                    let row: serde_json::Value = serde_json::from_str(line).unwrap();
+                    (row["dir"] == "out").then(|| format!("{}\n", row["msg"]))
+                })
+                .collect::<String>();
+            Ok(proc::Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(std::io::Cursor::new(output.into_bytes())),
+                stderr: None,
+                child: None,
+                contained: None,
+            })
+        });
+        let cli = Cli { command: "node".into(), prefix: vec!["tool.js".into()] };
+        let (source, events) = claude_reading(&cli, &fake, Path::new(".")).await.unwrap();
+        assert!(source.contains("control-only get_usage"));
+        assert!(events.iter().any(|event| matches!(event, EngineEvent::Quota { window, .. } if window == "seven_day")));
+        assert!(events.iter().any(|event| matches!(event, EngineEvent::Signals(s) if s.paid_fallback == Some(false))));
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].iter().any(|arg| arg == "--input-format"));
+        assert!(!calls[0].iter().any(|arg| arg == "/usage"));
+        assert_eq!(calls[0].iter().filter(|arg| arg.as_str() == "tool.js").count(), 1);
+    }
+
+    #[tokio::test]
     async fn missing_text_windows_use_the_apps_local_reader_without_a_model_probe() {
         for valid in [true, false] {
             let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -168,12 +201,13 @@ mod tests {
             let fake: proc::Spawner = Arc::new(move |_, args, _| {
                 seen.lock().unwrap().push(args.to_vec());
                 let output = if args.iter().any(|s| s == "--input-format") {
-                    let report = serde_json::json!({"type":"assistant", "usage_report":{"rate_limits":{"limits":[
-                        {"kind":"weekly_all", "percent":20, "resets_at":"2030-01-01T00:00:00Z"},
-                        {"kind":"session", "percent":10, "resets_at":"2030-01-01T00:00:00Z"}
-                    ]}}});
-                    let terminal = serde_json::json!({"type":"result", "local_command":"usage", "total_cost_usd":if valid {0.0} else {0.01}, "modelUsage":{}});
-                    format!("{report}\n{terminal}\n")
+                    let init = serde_json::json!({"type":"control_response", "response":{"subtype":"success", "request_id":"limits-init", "response":{}}});
+                    let usage = serde_json::json!({"type":"control_response", "response":{"subtype":"success", "request_id":"limits-usage", "response":{
+                        "rate_limits_available":true, "session":{"total_cost_usd":if valid {0.0} else {0.01}, "model_usage":{}},
+                        "rate_limits":{"model_scoped":[], "seven_day":{"utilization":20, "resets_at":"2030-01-01T00:00:00Z"},
+                        "five_hour":{"utilization":10, "resets_at":"2030-01-01T00:00:00Z"}}
+                    }}});
+                    format!("{init}\n{usage}\n")
                 } else {
                     serde_json::json!({"type":"result", "is_error":false, "num_turns":0, "total_cost_usd":0,
                         "usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},

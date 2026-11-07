@@ -1,0 +1,8 @@
+{
+  "scripts/bench-when-quiet.mjs": "6c7665bec4a40dc4c7eca5377786a2b28af5e007bfc5a296a0b709029397b1a3",
+  "scripts/bench-when-quiet.test.mjs": "a076c146149876e8a8b67f894fd90cc71819d37997ccbfe0147f158701a78c92",
+  "engine/examples/bench.rs": "80a50498b7c5ebe2e63ad561be95233d5a73e5d3f463bc3d343fa98b2c0340d8",
+  "bench/account_quiet.rs": "598abc1e984cea06b5363b912c15b8978bcdcdcbe90a2bf1e640dfe3af87eaea",
+  "bench/pure.rs": "4797c1b11b95b4a3e8ea19a0e5881e9491a68f6a3902c51bbc18b5b724b92983",
+  "bench/inputs.rs": "ea4ac29ce1e43a8824359d6133de3042488aeb24f0182bf5f142026a306cf480"
+}

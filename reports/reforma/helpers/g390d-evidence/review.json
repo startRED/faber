@@ -1,0 +1,17 @@
+{
+  "sessions": [
+    "review_process",
+    "review_security"
+  ],
+  "readOnly": true,
+  "finalFindings": [],
+  "fakeWatcherTests": 16,
+  "noRealCliOrCredentials": true,
+  "fixes": [
+    "preserve paid-fallback signal and require false for Claude",
+    "merged product baseline for all modes",
+    "explicit duplicate schedule flag",
+    "unknown interrupted wall time",
+    "actual caught blocker file:line"
+  ]
+}
