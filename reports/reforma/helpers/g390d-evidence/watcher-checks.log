@@ -1,0 +1,24 @@
+✔ Codex workspaces stay outside credential-folder ancestors even when the checkout is inside .claude (0.9616ms)
+✔ Claude scheduling cannot precede reset, exceed deadline or mix vendor modes; invalid times fail closed (1.7712ms)
+✔ scheduled polling does no sampling or work before reset and requires ten fresh quiet minutes afterward (0.6195ms)
+✔ absolute deadline applies during scheduled waiting and during quiet admission, without a 14-hour cutoff (33.4198ms)
+✔ Claude admission requires the fixed reader and exactly one current new-week weekly window (0.7461ms)
+✔ subscription requests preserve Codex sequencing and enforce Claude 25% before/after every request (1.7364ms)
+✔ missing Claude quota stops before model work; game/deadline stops never start another phase (0.7985ms)
+✔ the eight-row report distinguishes missing readings, interrupted tokens, partial results and real verdicts (0.8019ms)
+✔ ten consecutive idle minutes are required; game, busy CPU, bad samples and sleep reset admission (0.2944ms)
+✔ a game interruption resumes waiting, then needs a new full ten-minute quiet interval (0.4018ms)
+✔ a game already open at startup cannot count as the first idle minute (0.2633ms)
+✔ the 14-hour limit starts no bench when the PC never becomes quiet (2.6974ms)
+✔ billing variables are removed case-insensitively without changing the parent environment (0.3887ms)
+✔ Codex-only weekly admission accepts an unpaired app reading and rejects missing or invalid windows (0.201ms)
+✔ tree termination accepts only an owned positive PID, never an image name (0.1739ms)
+✔ unverified, duplicate, missing or spent quota receipts cannot authorize another reading (0.3336ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 135.9424

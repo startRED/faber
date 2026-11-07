@@ -8,7 +8,8 @@
     "harness": 0,
     "dryRun": 0,
     "fmt": 0,
-    "claims": 0
+    "claims": 0,
+    "diffWhitespace": 0
   },
   "watcherTests": {
     "pass": 16,
@@ -37,5 +38,6 @@
     "heavy Rust/UI suites"
   ],
   "initialClaimsBlockedByUnrelatedEvidence": true,
-  "unrelatedEvidenceEditedOrStaged": false
+  "unrelatedEvidenceEditedOrStaged": false,
+  "logTextNormalization": "CRLF to LF and trailing whitespace removed; diagnostic content retained"
 }

@@ -1,0 +1,204 @@
+Build storage: 27.8 GB exceeds the 12 GB budget; active and protected caches were kept
+   Compiling windows-link v0.2.1
+   Compiling stable_deref_trait v1.2.1
+   Compiling smallvec v1.16.3
+   Compiling syn v3.0.7
+   Compiling windows-sys v0.61.2
+   Compiling phf_shared v0.14.0
+   Compiling fastrand v2.5.0
+   Compiling getrandom v0.2.17
+   Compiling phf_generator v0.14.0
+   Compiling ring v0.17.14
+   Compiling windows-strings v0.4.2
+   Compiling windows-result v0.3.4
+   Compiling windows-strings v0.5.1
+   Compiling windows-result v0.4.1
+   Compiling futures-task v0.3.34
+   Compiling percent-encoding v2.3.2
+   Compiling memchr v2.8.3
+   Compiling slab v0.4.12
+   Compiling futures-util v0.3.34
+   Compiling rustls-webpki v0.103.15
+   Compiling windows-core v0.62.2
+   Compiling windows-core v0.61.2
+   Compiling phf_codegen v0.14.0
+   Compiling string_cache_codegen v0.11.2
+   Compiling synstructure v0.14.0
+   Compiling zerovec-derive v0.11.6
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling displaydoc v0.2.7
+   Compiling tokio-macros v2.7.2
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling zerotrie v0.2.5
+   Compiling parking_lot_core v0.9.12
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling serde_core v1.0.229
+   Compiling icu_collections v2.3.0
+   Compiling icu_locale_core v2.3.0
+   Compiling typenum v1.20.1
+   Compiling icu_provider v2.3.1
+   Compiling subtle v2.6.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+sccache: error: failed to execute compile
+sccache: error: failed to execute compile
+sccache: error: failed to execute compile
+sccache: error: failed to execute compile
+sccache: caused by: error reading compile response from server
+sccache: caused by: error reading compile response from server
+sccache: caused by: error reading compile response from server
+sccache: caused by: Failed to read response header
+sccache: caused by: Failed to read response header
+sccache: caused by: Failed to read response header
+sccache: caused by: error reading compile response from server
+sccache: caused by: Foi forçado o cancelamento de uma conexão existente pelo host remoto. (os error 10054)
+sccache: caused by: Foi forçado o cancelamento de uma conexão existente pelo host remoto. (os error 10054)
+sccache: caused by: Foi forçado o cancelamento de uma conexão existente pelo host remoto. (os error 10054)
+sccache: caused by: Failed to read response header
+sccache: caused by: Foi forçado o cancelamento de uma conexão existente pelo host remoto. (os error 10054)
+error: could not compile `serde_core` (lib)
+
+Caused by:
+  process didn't exit successfully: `sccache 'E:\Apps\rust\rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe' --crate-name serde_core --edition=2021 'E:\Apps\rust\cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde_core-1.0.229\src\lib.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no --cfg 'feature="alloc"' --cfg 'feature="rc"' --cfg 'feature="result"' --cfg 'feature="std"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("alloc", "default", "rc", "result", "std", "unstable"))' -C metadata=1c76b263cec150ec -C extra-filename=-5e58815b749f2cb9 --out-dir 'E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' -C linker=rust-lld.exe -C strip=debuginfo -L 'dependency=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' --cap-lints allow --check-cfg 'cfg(if_docsrs_then_no_serde_core)' --check-cfg 'cfg(no_core_cstr)' --check-cfg 'cfg(no_core_error)' --check-cfg 'cfg(no_core_net)' --check-cfg 'cfg(no_core_num_saturating)' --check-cfg 'cfg(no_diagnostic_namespace)' --check-cfg 'cfg(no_serde_derive)' --check-cfg 'cfg(no_std_atomic)' --check-cfg 'cfg(no_std_atomic64)' --check-cfg 'cfg(no_target_has_atomic)'` (exit code: 2)
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `icu_properties` (lib)
+
+Caused by:
+  process didn't exit successfully: `sccache 'E:\Apps\rust\rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe' --crate-name icu_properties --edition=2024 'E:\Apps\rust\cargo\registry\src\index.crates.io-1949cf8c6b5b557f\icu_properties-2.3.0\src\lib.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no --cfg 'feature="compiled_data"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("alloc", "compiled_data", "datagen", "default", "harfbuzz_traits", "log", "serde", "unicode_bidi", "unstable"))' -C metadata=8b8d5c4bfb07a49d -C extra-filename=-80be793a4913bd01 --out-dir 'E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' -C linker=rust-lld.exe -C strip=debuginfo -L 'dependency=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' --extern 'displaydoc=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\displaydoc-fbdb31bcf4292ff2.dll' --extern 'icu_collections=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_collections-c2eb89e65babc5cf.rmeta' --extern 'icu_locale_core=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_locale_core-77aeaf8b13fcc70e.rmeta' --extern 'icu_properties_data=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_properties_data-5bebe659a2cca205.rmeta' --extern 'icu_provider=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_provider-a8b08ade1e3a2e3d.rmeta' --extern 'zerotrie=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libzerotrie-11b016b42c4906a8.rmeta' --extern 'zerovec=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libzerovec-d75b4e484ca8d176.rmeta' --cap-lints allow` (exit code: 2)
+error: could not compile `icu_normalizer` (lib)
+
+Caused by:
+  process didn't exit successfully: `sccache 'E:\Apps\rust\rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe' --crate-name icu_normalizer --edition=2024 'E:\Apps\rust\cargo\registry\src\index.crates.io-1949cf8c6b5b557f\icu_normalizer-2.3.0\src\lib.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no --cfg 'feature="compiled_data"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("compiled_data", "datagen", "default", "harfbuzz_traits", "icu_properties", "serde", "utf16_iter", "utf8_iter", "write16"))' -C metadata=85975766f2c105b0 -C extra-filename=-0497765d13d5c06d --out-dir 'E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' -C linker=rust-lld.exe -C strip=debuginfo -L 'dependency=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' --extern 'icu_collections=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_collections-c2eb89e65babc5cf.rmeta' --extern 'icu_normalizer_data=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_normalizer_data-65269dcefb740af9.rmeta' --extern 'icu_provider=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libicu_provider-a8b08ade1e3a2e3d.rmeta' --extern 'smallvec=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libsmallvec-26bf60abe268b46e.rmeta' --extern 'zerovec=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libzerovec-d75b4e484ca8d176.rmeta' --cap-lints allow` (exit code: 2)
+error: could not compile `windows-sys` (lib)
+
+Caused by:
+  process didn't exit successfully: `sccache 'E:\Apps\rust\rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe' --crate-name windows_sys --edition=2021 'E:\Apps\rust\cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-sys-0.61.2\src\lib.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no --cfg 'feature="Wdk"' --cfg 'feature="Wdk_Foundation"' --cfg 'feature="Wdk_Storage"' --cfg 'feature="Wdk_Storage_FileSystem"' --cfg 'feature="Wdk_System"' --cfg 'feature="Wdk_System_IO"' --cfg 'feature="Wdk_System_SystemInformation"' --cfg 'feature="Win32"' --cfg 'feature="Win32_Foundation"' --cfg 'feature="Win32_Globalization"' --cfg 'feature="Win32_Graphics"' --cfg 'feature="Win32_Graphics_Gdi"' --cfg 'feature="Win32_Media"' --cfg 'feature="Win32_Media_Audio"' --cfg 'feature="Win32_Networking"' --cfg 'feature="Win32_Networking_WinSock"' --cfg 'feature="Win32_Security"' --cfg 'feature="Win32_Security_Authorization"' --cfg 'feature="Win32_Security_Cryptography"' --cfg 'feature="Win32_Storage"' --cfg 'feature="Win32_Storage_FileSystem"' --cfg 'feature="Win32_System"' --cfg 'feature="Win32_System_Diagnostics"' --cfg 'feature="Win32_System_Diagnostics_Debug"' --cfg 'feature="Win32_System_Diagnostics_ToolHelp"' --cfg 'feature="Win32_System_IO"' --cfg 'feature="Win32_System_Ioctl"' --cfg 'feature="Win32_System_JobObjects"' --cfg 'feature="Win32_System_Memory"' --cfg 'feature="Win32_System_Pipes"' --cfg 'feature="Win32_System_Registry"' --cfg 'feature="Win32_System_SystemServices"' --cfg 'feature="Win32_System_Threading"' --cfg 'feature="Win32_System_Time"' --cfg 'feature="Win32_System_WindowsProgramming"' --cfg 'feature="Win32_UI"' --cfg 'feature="Win32_UI_HiDpi"' --cfg 'feature="Win32_UI_Shell"' --cfg 'feature="Win32_UI_WindowsAndMessaging"' --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("Wdk", "Wdk_Devices", "Wdk_Devices_Bluetooth", "Wdk_Devices_HumanInterfaceDevice", "Wdk_Foundation", "Wdk_Graphics", "Wdk_Graphics_Direct3D", "Wdk_NetworkManagement", "Wdk_NetworkManagement_Ndis", "Wdk_NetworkManagement_WindowsFilteringPlatform", "Wdk_Storage", "Wdk_Storage_FileSystem", "Wdk_Storage_FileSystem_Minifilters", "Wdk_System", "Wdk_System_IO", "Wdk_System_Memory", "Wdk_System_OfflineRegistry", "Wdk_System_Registry", "Wdk_System_SystemInformation", "Wdk_System_SystemServices", "Wdk_System_Threading", "Win32", "Win32_Data", "Win32_Data_HtmlHelp", "Win32_Data_RightsManagement", "Win32_Devices", "Win32_Devices_AllJoyn", "Win32_Devices_Beep", "Win32_Devices_BiometricFramework", "Win32_Devices_Bluetooth", "Win32_Devices_Cdrom", "Win32_Devices_Communication", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_DeviceQuery", "Win32_Devices_Display", "Win32_Devices_Dvd", "Win32_Devices_Enumeration", "Win32_Devices_Enumeration_Pnp", "Win32_Devices_Fax", "Win32_Devices_HumanInterfaceDevice", "Win32_Devices_Nfc", "Win32_Devices_Nfp", "Win32_Devices_PortableDevices", "Win32_Devices_Properties", "Win32_Devices_Pwm", "Win32_Devices_Sensors", "Win32_Devices_SerialCommunication", "Win32_Devices_Tapi", "Win32_Devices_Usb", "Win32_Devices_WebServicesOnDevices", "Win32_Foundation", "Win32_Gaming", "Win32_Globalization", "Win32_Graphics", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Graphics_GdiPlus", "Win32_Graphics_Hlsl", "Win32_Graphics_OpenGL", "Win32_Graphics_Printing", "Win32_Graphics_Printing_PrintTicket", "Win32_Management", "Win32_Management_MobileDeviceManagementRegistration", "Win32_Media", "Win32_Media_Audio", "Win32_Media_DxMediaObjects", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_Media_Streaming", "Win32_Media_WindowsMediaFormat", "Win32_NetworkManagement", "Win32_NetworkManagement_Dhcp", "Win32_NetworkManagement_Dns", "Win32_NetworkManagement_InternetConnectionWizard", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Multicast", "Win32_NetworkManagement_Ndis", "Win32_NetworkManagement_NetBios", "Win32_NetworkManagement_NetManagement", "Win32_NetworkManagement_NetShell", "Win32_NetworkManagement_NetworkDiagnosticsFramework", "Win32_NetworkManagement_P2P", "Win32_NetworkManagement_QoS", "Win32_NetworkManagement_Rras", "Win32_NetworkManagement_Snmp", "Win32_NetworkManagement_WNet", "Win32_NetworkManagement_WebDav", "Win32_NetworkManagement_WiFi", "Win32_NetworkManagement_WindowsConnectionManager", "Win32_NetworkManagement_WindowsFilteringPlatform", "Win32_NetworkManagement_WindowsFirewall", "Win32_NetworkManagement_WindowsNetworkVirtualization", "Win32_Networking", "Win32_Networking_ActiveDirectory", "Win32_Networking_Clustering", "Win32_Networking_HttpServer", "Win32_Networking_Ldap", "Win32_Networking_WebSocket", "Win32_Networking_WinHttp", "Win32_Networking_WinInet", "Win32_Networking_WinSock", "Win32_Networking_WindowsWebServices", "Win32_Security", "Win32_Security_AppLocker", "Win32_Security_Authentication", "Win32_Security_Authentication_Identity", "Win32_Security_Authorization", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Certificates", "Win32_Security_Cryptography_Sip", "Win32_Security_Cryptography_UI", "Win32_Security_DiagnosticDataQuery", "Win32_Security_DirectoryServices", "Win32_Security_EnterpriseData", "Win32_Security_ExtensibleAuthenticationProtocol", "Win32_Security_Isolation", "Win32_Security_LicenseProtection", "Win32_Security_NetworkAccessProtection", "Win32_Security_WinTrust", "Win32_Security_WinWlx", "Win32_Storage", "Win32_Storage_Cabinets", "Win32_Storage_CloudFilters", "Win32_Storage_Compression", "Win32_Storage_DistributedFileSystem", "Win32_Storage_FileHistory", "Win32_Storage_FileSystem", "Win32_Storage_Imapi", "Win32_Storage_IndexServer", "Win32_Storage_InstallableFileSystems", "Win32_Storage_IscsiDisc", "Win32_Storage_Jet", "Win32_Storage_Nvme", "Win32_Storage_OfflineFiles", "Win32_Storage_OperationRecorder", "Win32_Storage_Packaging", "Win32_Storage_Packaging_Appx", "Win32_Storage_ProjectedFileSystem", "Win32_Storage_StructuredStorage", "Win32_Storage_Vhd", "Win32_Storage_Xps", "Win32_System", "Win32_System_AddressBook", "Win32_System_Antimalware", "Win32_System_ApplicationInstallationAndServicing", "Win32_System_ApplicationVerifier", "Win32_System_ClrHosting", "Win32_System_Com", "Win32_System_Com_Marshal", "Win32_System_Com_StructuredStorage", "Win32_System_Com_Urlmon", "Win32_System_ComponentServices", "Win32_System_Console", "Win32_System_CorrelationVector", "Win32_System_DataExchange", "Win32_System_DeploymentServices", "Win32_System_DeveloperLicensing", "Win32_System_Diagnostics", "Win32_System_Diagnostics_Ceip", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_Debug_Extensions", "Win32_System_Diagnostics_Etw", "Win32_System_Diagnostics_ProcessSnapshotting", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Diagnostics_TraceLogging", "Win32_System_DistributedTransactionCoordinator", "Win32_System_Environment", "Win32_System_ErrorReporting", "Win32_System_EventCollector", "Win32_System_EventLog", "Win32_System_EventNotificationService", "Win32_System_GroupPolicy", "Win32_System_HostCompute", "Win32_System_HostComputeNetwork", "Win32_System_HostComputeSystem", "Win32_System_Hypervisor", "Win32_System_IO", "Win32_System_Iis", "Win32_System_Ioctl", "Win32_System_JobObjects", "Win32_System_Js", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Mailslots", "Win32_System_Mapi", "Win32_System_Memory", "Win32_System_Memory_NonVolatile", "Win32_System_MessageQueuing", "Win32_System_MixedReality", "Win32_System_Ole", "Win32_System_PasswordManagement", "Win32_System_Performance", "Win32_System_Performance_HardwareCounterProfiling", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_ProcessStatus", "Win32_System_Recovery", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_RemoteManagement", "Win32_System_RestartManager", "Win32_System_Restore", "Win32_System_Rpc", "Win32_System_Search", "Win32_System_Search_Common", "Win32_System_SecurityCenter", "Win32_System_Services", "Win32_System_SetupAndMigration", "Win32_System_Shutdown", "Win32_System_StationsAndDesktops", "Win32_System_SubsystemForLinux", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Time", "Win32_System_TpmBaseServices", "Win32_System_UserAccessLogging", "Win32_System_Variant", "Win32_System_VirtualDosMachines", "Win32_System_WindowsProgramming", "Win32_System_Wmi", "Win32_UI", "Win32_UI_Accessibility", "Win32_UI_ColorSystem", "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Input_Pointer", "Win32_UI_Input_Touch", "Win32_UI_Input_XboxController", "Win32_UI_InteractionContext", "Win32_UI_Magnification", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_TabletPC", "Win32_UI_TextServices", "Win32_UI_WindowsAndMessaging", "Win32_Web", "Win32_Web_InternetExplorer", "default", "docs"))' -C metadata=2f9118db39dbf0e4 -C extra-filename=-376c618726317c95 --out-dir 'E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' -C linker=rust-lld.exe -C strip=debuginfo -L 'dependency=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps' --extern 'windows_link=E:\Documentos\ProjetosIA\faber\target\build-3\debug\deps\libwindows_link-6f9c636ac4b818d8.rmeta' --cap-lints allow` (exit code: 2)
+The compiler cache server died; running this build once more without it.
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling windows-sys v0.61.2
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling serde_core v1.0.229
+   Compiling hybrid-array v0.4.15
+   Compiling rustls v0.23.46
+   Compiling idna_adapter v1.2.2
+   Compiling web_atoms v0.3.0
+   Compiling parking_lot v0.12.5
+   Compiling bitflags v2.13.2
+   Compiling simd-adler32 v0.3.10
+   Compiling string_cache v0.11.0
+   Compiling tracing v0.1.44
+   Compiling idna v1.1.0
+   Compiling form_urlencoded v1.2.2
+   Compiling windows-threading v0.1.0
+   Compiling phf v0.14.0
+   Compiling windows-threading v0.2.1
+   Compiling base64 v0.23.1
+   Compiling miniz_oxide v0.9.1
+   Compiling windows-future v0.3.2
+   Compiling windows-future v0.2.1
+   Compiling url v2.5.8
+   Compiling getrandom v0.4.3
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling windows-numerics v0.2.0
+   Compiling windows-collections v0.2.0
+   Compiling windows-numerics v0.3.1
+   Compiling windows-collections v0.3.2
+   Compiling hashbrown v0.17.1
+   Compiling flate2 v1.1.10
+   Compiling windows v0.62.2
+   Compiling pulldown-cmark v0.13.5
+   Compiling indexmap v2.14.2
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling digest v0.11.3
+   Compiling zopfli v0.8.3
+   Compiling thiserror v1.0.69
+   Compiling windows v0.61.3
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling tokio v1.54.1
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling markup5ever v0.40.0
+   Compiling num-traits v0.2.19
+   Compiling serde_spanned v1.1.2
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+   Compiling serde_derive v1.0.229
+   Compiling cpufeatures v0.3.1
+   Compiling zip v9.0.5
+   Compiling hyper v1.12.0
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.6
+   Compiling hyper-util v0.1.21
+   Compiling tower-http v0.6.11
+   Compiling serde v1.0.229
+   Compiling faber-winproc v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\winproc)
+   Compiling tempfile v3.27.0
+   Compiling hyper-rustls v0.27.10
+   Compiling toml v1.1.8+spec-1.1.0
+   Compiling reqwest v0.13.5
+   Compiling sha2 v0.11.1
+   Compiling chrono v0.4.45
+   Compiling serde_json v1.0.154
+   Compiling html5ever v0.40.1
+   Compiling win32job v2.0.3
+   Compiling winreg v0.56.0
+   Compiling pulldown-cmark-to-cmark v23.0.0
+   Compiling uuid v1.28.0
+   Compiling junction v2.1.0
+   Compiling sysinfo v0.39.6
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\bench-1-0\engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 21s
+     Running unittests examples\bench.rs (E:\Documentos\ProjetosIA\faber\target\build-3\debug\examples\bench-6a3c85f5d81b1c8c.exe)
+
+running 42 tests
+test checkpoint_tests::subscription_mode_disables_internal_dollar_guards_without_changing_bounded_runs ... ok
+test bench_quiet::tests::an_invalid_window_cannot_disappear_behind_a_valid_one ... ok
+test cost_tests::an_exhausted_budget_does_not_make_unstarted_work_unknown ... ok
+test checkpoint_tests::subscription_mode_rejects_billing_names_without_reading_credentials ... ok
+test cost_tests::both_vendors_and_auxiliary_work_count_after_the_baseline ... ok
+test pure::quiet::tests::missing_stale_future_reset_and_new_windows_are_not_quiet ... ok
+test pure::quiet::tests::outside_use_pauses_until_a_new_quiet_interval ... ok
+test pure::quiet::tests::own_work_and_reporting_lag_need_new_baselines ... ok
+test pure::tests::a_failed_or_interrupted_proof_cannot_pass_from_its_stdout ... ok
+test bench_quiet::tests::npm_status_reads_prefix_the_script_exactly_once ... ok
+test judge_tests::fake_judge_outputs_keep_verdicts_blind_and_count_both_vendors ... ok
+test pure::tests::a_proof_passes_only_when_every_check_does ... ok
+test checkpoint_tests::single_vendor_modes_restrict_all_callers_and_only_claude_removes_cli_dollar_arguments ... ok
+test pure::tests::an_answer_that_is_not_a_verdict_is_not_taken_for_one ... ok
+test pure::tests::a_reply_is_cut_at_its_utf16_offset ... ok
+test bench_quiet::tests::scheduled_claude_reading_never_tries_a_text_command_and_keeps_the_paid_fallback_signal ... ok
+test pure::tests::a_request_file_with_a_mistake_is_refused_with_the_reason ... ok
+test checkpoint_tests::subscription_admission_keeps_cost_evidence_and_the_token_limit ... ok
+test judge_tests::exhausted_budget_starts_no_judge_even_with_a_missing_cli ... ok
+test pure::tests::codex_events_give_the_last_message_and_the_usage_of_every_turn ... ok
+test bench_quiet::tests::cancellation_before_admission_never_reads_an_account_or_changes_spending ... ok
+test pure::tests::a_request_file_gives_its_header_and_its_prompt_untouched ... ok
+test pure::tests::judge_selection_follows_actual_authors_and_marks_fallbacks ... ok
+test pure::tests::the_cap_stops_a_run_on_dollars_or_on_first_time_tokens_and_never_gives_a_negative_allowance ... ok
+test pure::tests::missing_cost_blocks_further_work_and_is_not_a_free_total ... ok
+test pure::tests::ledger_delta_includes_routing_and_unknown_work_is_never_free ... ok
+test bench_quiet::tests::missing_text_windows_use_the_apps_local_reader_without_a_model_probe ... ok
+test pure::tests::the_claude_result_gives_the_reply_the_tokens_and_the_cost ... ok
+test pure::tests::project_quality_needs_a_completed_proven_result_and_an_independent_win_or_tie ... ok
+test pure::tests::the_judge_names_a_letter_and_the_reveal_turns_it_into_a_side ... ok
+test pure::tests::the_sides_alternate_as_a_and_b_and_the_same_run_deals_the_same_way ... ok
+test pure::tests::unknown_authors_and_untracked_delegation_never_claim_complete_authorship ... ok
+test pure::tests::cost_comparison_needs_the_same_completed_requests_on_both_sides ... ok
+test pure::tests::what_the_judge_reads_never_names_the_app_and_is_cut_to_a_bounded_size ... ok
+test pure::tests::the_report_shows_the_verdict_by_side_the_proofs_and_the_totals ... ok
+test pure::tests::every_request_file_in_the_repository_parses ... ok
+test inputs::tests::missing_materials_fail_before_a_snapshot_is_returned ... ok
+test checkpoint_tests::a_completed_side_is_saved_before_the_next_admission_without_changing_spending ... ok
+test inputs::tests::relative_run_directories_return_inputs_safe_for_another_working_directory ... ok
+test inputs::tests::a_second_snapshot_cannot_overwrite_the_first_runs_inputs ... ok
+test checkpoint_tests::a_required_hard_ceiling_records_every_unstarted_request_and_spends_nothing ... ok
+test inputs::tests::both_sides_keep_the_original_inputs_after_source_edits_and_removal ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

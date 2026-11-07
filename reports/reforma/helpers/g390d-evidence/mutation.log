@@ -1,0 +1,45 @@
+✔ Codex workspaces stay outside credential-folder ancestors even when the checkout is inside .claude (0.9794ms)
+✔ Claude scheduling cannot precede reset, exceed deadline or mix vendor modes; invalid times fail closed (1.7236ms)
+✔ scheduled polling does no sampling or work before reset and requires ten fresh quiet minutes afterward (0.5847ms)
+✔ absolute deadline applies during scheduled waiting and during quiet admission, without a 14-hour cutoff (32.6627ms)
+✔ Claude admission requires the fixed reader and exactly one current new-week weekly window (0.8295ms)
+✖ subscription requests preserve Codex sequencing and enforce Claude 25% before/after every request (2.5734ms)
+✔ missing Claude quota stops before model work; game/deadline stops never start another phase (0.5003ms)
+✔ the eight-row report distinguishes missing readings, interrupted tokens, partial results and real verdicts (0.7078ms)
+✔ ten consecutive idle minutes are required; game, busy CPU, bad samples and sleep reset admission (0.4275ms)
+✔ a game interruption resumes waiting, then needs a new full ten-minute quiet interval (0.4128ms)
+✔ a game already open at startup cannot count as the first idle minute (0.2412ms)
+✔ the 14-hour limit starts no bench when the PC never becomes quiet (2.651ms)
+✔ billing variables are removed case-insensitively without changing the parent environment (0.3844ms)
+✔ Codex-only weekly admission accepts an unpaired app reading and rejects missing or invalid windows (0.207ms)
+✔ tree termination accepts only an owned positive PID, never an image name (0.2152ms)
+✔ unverified, duplicate, missing or spent quota receipts cannot authorize another reading (0.3482ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 135.1205
+
+✖ failing tests:
+
+test at scripts\bench-when-quiet.test.mjs:72:1
+✖ subscription requests preserve Codex sequencing and enforce Claude 25% before/after every request (2.5734ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'finished'
+  - 'stopped: claude weekly 25.1% used exceeds 25%'
+
+      at TestContext.<anonymous> (file:///E:/Documentos/ProjetosIA/faber/.claude/worktrees/bench-1-0/scripts/bench-when-quiet.test.mjs:92:14)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'finished',
+    expected: 'stopped: claude weekly 25.1% used exceeds 25%',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
