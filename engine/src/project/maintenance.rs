@@ -43,6 +43,8 @@ pub(super) fn invocation(root: &Path) -> Invocation {
             "pack.windowMemory=16m",
             "-c",
             "maintenance.loose-objects.auto=1000",
+            "-c",
+            "maintenance.loose-objects.batchSize=5000",
             "maintenance",
             "run",
             "--auto",

@@ -31,7 +31,7 @@ runner, is left alone. The fix ships again with `ship.mjs`.
 
 Main advances only by fast-forward; a competing promotion that already includes the checked commit is success.
 Test-app jobs and their warm caches build only `dist-test`; independent check jobs still build production assets.
-Electron's normal `npm ci` installs its binary once in the jobs that need it.
+Electron jobs run its native installer after `npm ci`: its package has no install lifecycle script.
 
 Why (2026-11-05): through the queue a pull request took a median 6.7 h from opened to landed, p90 23.9 h, and 30% of
 queue runs were red; a direct landing waits only for its quick proofs while `main` keeps the same guarantee.

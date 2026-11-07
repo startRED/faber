@@ -103,7 +103,7 @@ test('test-app jobs build only test assets and keep the production build in inde
   for (const name of ['electron-app', 'electron']) {
     assert.match(job(name), /ELECTRON_SKIP_BINARY_DOWNLOAD: ''/);
     assert.match(job(name), /run: npm ci/);
-    assert.doesNotMatch(job(name), /node node_modules\/electron\/install\.js/);
+    assert.match(job(name), /run: node node_modules\/electron\/install\.js/);
   }
   const main = job('main');
   assert.match(main, /if ! git push origin "\$GITHUB_SHA:refs\/heads\/main"; then\n\s+#.*\n\s+git fetch --quiet origin main\n\s+if git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main; then exit 0; fi/);

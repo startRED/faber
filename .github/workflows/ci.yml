@@ -319,6 +319,8 @@ jobs:
           shared-key: electron-app
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
+      # Electron's package has no install lifecycle script; prepare its binary explicitly.
+      - run: node node_modules/electron/install.js
       - run: cargo t --build-only
       - uses: actions/upload-artifact@v7
         with:
@@ -349,6 +351,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: node node_modules/electron/install.js
       - uses: actions/download-artifact@v8
         with:
           name: electron-test-app

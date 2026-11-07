@@ -18,8 +18,10 @@ starting. There is no idle timer, watcher, scheduler entry or permanent process.
 The native Git tasks are `loose-objects`, `incremental-repack` and `commit-graph`, with `--auto` thresholds. They do
 not fetch, push, expire reflogs, prune history or edit working files. Hooks, credential helpers and lazy network fetch
 stay disabled. Git runs in a contained process tree, with one packing thread, a 16 MiB packing-window budget and a
-60-second deadline. Windows also requests a 256 MiB job limit and below-normal process priority; other platforms use
-the existing process-group containment without claiming those Windows resource limits. Missing Git, refused paths,
+60-second deadline. Loose objects are packed in batches of at most 5,000 rather than Git's default 50,000, so a large
+repository can progress across idle passes. Inventory scanning and incremental repacking are still best-effort within
+the deadline; batch size is not a time guarantee. Windows also requests a 256 MiB job limit and below-normal process
+priority; other platforms use the existing process-group containment without claiming those Windows resource limits. Missing Git, refused paths,
 unsupported tasks and a failed maintenance pass never stop a conversation.
 
 Existing copy-retirement safeguards still apply: only an idle Faber-owned copy whose work is merged and clean is

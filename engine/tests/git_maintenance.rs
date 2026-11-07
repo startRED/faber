@@ -27,7 +27,13 @@ impl Executor for Git {
             args.iter().map(String::as_str).collect::<Vec<_>>(),
             ["maintenance", "run", "--auto", "--quiet", "--task=loose-objects", "--task=incremental-repack", "--task=commit-graph",]
         );
-        for pin in ["protocol.allow=never", "core.fsmonitor=false", "pack.threads=1", "pack.windowMemory=16m"] {
+        for pin in [
+            "protocol.allow=never",
+            "core.fsmonitor=false",
+            "pack.threads=1",
+            "pack.windowMemory=16m",
+            "maintenance.loose-objects.batchSize=5000",
+        ] {
             assert!(call.args.iter().any(|a| a == pin), "missing safety/resource pin: {pin}");
         }
         self.maintained.push(call.cwd.clone());
