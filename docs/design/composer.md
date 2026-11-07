@@ -8,8 +8,7 @@ language. A link-only or code-only message uses the Settings language. A bare we
 host-only fallback, with no URL credentials, path or query. The existing sidebar row receives the title through the
 ordinary list update; the draft, model choice and composer controls do not change. Manual names always win, including
 a rename back to the initial name. Branched, picked-up and agent-started conversations retain their existing names.
-One bounded request uses the cheapest available model at low effort, a connected subscription and the existing quota
-gate. Completed titles with reported usage add known spend to the subscription ledger and conversation total; denial, failure or a
+One bounded small-model request uses a connected subscription and the existing quota gate; denial, failure or a
 30-second timeout keeps the fallback, without retries or an extra control. Checks: `engine/tests/title.rs` and
 `tests/ui/composer.check.ts` (`composer: a localized first-exchange title updates the existing sidebar row without changing the draft`).
 
