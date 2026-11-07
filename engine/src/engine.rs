@@ -3907,7 +3907,7 @@ impl Core {
             archive::restore(c, reopened);
             return Err(error);
         }
-        self.draft_routes.remove(id);
+        self.sent_draft(id);
         if reopened.is_some() {
             self.list_changed();
         }
@@ -3983,6 +3983,7 @@ impl Core {
 
     /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
     fn steer(&mut self, id: &str, item: &mut QueuedTurn) {
+        self.sent_draft(id);
         if self.prepare_rewind_steer(id, item) {
             return;
         }
@@ -5429,7 +5430,7 @@ impl Core {
             }
             return Err(error);
         }
-        self.draft_routes.remove(&id);
+        self.sent_draft(&id);
         if previous.0 == 0 && previous.1.is_empty() {
             self.track_title(&id);
         }

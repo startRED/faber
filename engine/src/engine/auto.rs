@@ -231,12 +231,17 @@ impl Core {
         }
     }
 
-    /// A sent message uses a finished draft route; cold or pending classification never delays a send.
-    pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+    pub(super) fn sent_draft(&mut self, id: &str) {
+        self.draft_routes.remove(id);
         // Already-started work can settle its price, but queued draft work must not start after this send.
         if self.next_draft.as_ref().is_some_and(|d| d.warm == id) {
             self.next_draft = None;
         }
+    }
+
+    /// A sent message uses a finished draft route; cold or pending classification never delays a send.
+    pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+        self.sent_draft(id);
         let (tx, rx) = oneshot::channel();
         if self.route_profiles(only).len() <= 1 {
             let _ = tx.send(None);
@@ -694,6 +699,7 @@ mod tests {
         let drafts = Arc::new(Mutex::new(Vec::new()));
         let release = Arc::new(tokio::sync::Notify::new());
         let (seen, held) = (drafts.clone(), release.clone());
+        let queued = matches!(path, "queue" | "steer" | "other");
         let spawn: Spawner = Arc::new(move |_, args, _| {
             let (stdin, input) = tokio::io::duplex(65536);
             let (mut output, stdout) = tokio::io::duplex(65536);
@@ -753,6 +759,9 @@ mod tests {
                             json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":answer}}}),
                         )
                         .await;
+                        if !router && queued {
+                            continue;
+                        }
                         emit(
                             &mut output,
                             json!({"type":"result","subtype":"success","is_error":false,"result":answer,"total_cost_usd":0.001,"usage":{}}),
@@ -763,6 +772,9 @@ mod tests {
                         emit(&mut output, json!({"id":msg["id"],"result":{"turn":{"id":"turn","status":"inProgress","items":[]}}})).await;
                         emit(&mut output, json!({"method":"turn/started","params":{"threadId":thread,"turn":{"id":"turn"}}})).await;
                         emit(&mut output, json!({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":"turn","itemId":"answer","delta":answer}})).await;
+                        if !router && queued {
+                            continue;
+                        }
                         emit(&mut output, json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":"turn","status":"completed","items":[]}}})).await;
                     }
                 }
@@ -805,6 +817,38 @@ mod tests {
         draft_finished(&engine, "In one sentence: why is the sky blue?").await;
         let id = engine.send(auto_send("In one sentence: why is the sky blue?")).unwrap();
         engine.rename(&id, "Three messages");
+        if queued {
+            wait_for(|| engine.open(&id).unwrap().messages[1].text == "Answer").await;
+            assert_eq!(engine.open(&id).unwrap().messages[1].reason.as_deref(), Some("reason.route.chat.easy"));
+            let send = || engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send("A queued followup") }).unwrap();
+            if path == "steer" {
+                send();
+            }
+            let pending = "Reply with just the word: pong";
+            engine.route_draft(warm(Some(id.clone())), pending.into());
+            wait_for(|| drafts.lock().unwrap().len() == 2).await;
+            let owner = if path == "other" { engine.with(|c| c.blank(Area::Chat, None)) } else { id.clone() };
+            engine.route_draft(warm(Some(owner.clone())), "A queued draft".into());
+            assert!(engine.with(|c| c.next_draft.as_ref().is_some_and(|d| d.warm == owner)));
+            if path == "steer" {
+                let item = engine.open(&id).unwrap().queued[0].id.clone();
+                engine.send_queued(&id, &item).unwrap();
+                assert!(engine.open(&id).unwrap().queued[0].sending);
+            } else {
+                send();
+                assert_eq!(engine.open(&id).unwrap().queued.len(), 1);
+            }
+            assert_eq!(
+                engine.with(|c| c.next_draft.is_some()),
+                path == "other",
+                "accepted sends discard only their conversation's queued draft"
+            );
+            release.notify_one();
+            draft_finished(&engine, if path == "other" { "A queued draft" } else { pending }).await;
+            assert_eq!(drafts.lock().unwrap().len(), if path == "other" { 3 } else { 2 }, "sending must not spend quota on a queued draft");
+            engine.shutdown();
+            return;
+        }
         let first = turn_finished(&engine, &id, 0).await;
         assert_eq!(first.reason.as_deref(), Some("reason.route.chat.easy"));
         let second_text = "Reply with just the word: pong";
@@ -893,6 +937,36 @@ mod tests {
     #[tokio::test]
     async fn three_messages_preserve_routing_after_one_profile_recovers_codex() {
         three_message_fallback(Vendor::Codex, "single").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_discards_pending_draft_claude() {
+        three_message_fallback(Vendor::Claude, "queue").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_discards_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "queue").await;
+    }
+
+    #[tokio::test]
+    async fn queued_steer_discards_pending_draft_claude() {
+        three_message_fallback(Vendor::Claude, "steer").await;
+    }
+
+    #[tokio::test]
+    async fn queued_steer_discards_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "steer").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_preserves_other_conversation_draft_claude() {
+        three_message_fallback(Vendor::Claude, "other").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_preserves_other_conversation_draft_codex() {
+        three_message_fallback(Vendor::Codex, "other").await;
     }
 
     #[tokio::test]

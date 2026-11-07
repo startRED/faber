@@ -24,6 +24,8 @@
 - A message waits as a queued chip until the agent's step ends, then is handed to the running turn; Send now hands it
   over at once. A handed message swaps the badge for "Sent: the AI reads it at its next step" and drops the actions
   row: the CLI holds it, so Edit, Remove and Send now would do nothing.
+- Accepting a queued message or handing it to the running answer discards that conversation's queued Auto draft
+  classification, so already-sent words cannot start a later quota-spending request. Another conversation's draft stays.
 - Save changes the text in place, keeping the message's id, position, images and files. A message handed to the CLI
   cannot be edited. A save refused because the message left the queue closes the editor and returns its words to the
   conversation's message box, after a blank line if it already holds a draft, with focus there and one calm status

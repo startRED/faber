@@ -43,7 +43,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   without opening a classifier request on send. Reusing an easy route preserves its eligibility for later drafts, even
   after an immediate send or a temporary single-profile limit; the displayed explanation is separate from that marker.
   An injected classifier retains its bounded 2.5 s path. The answer shows the chosen model and why. While the person types, the
-  draft is routed at most twice per message, and sending it starts the count again (done, `engine/src/engine/auto.rs`).
+  draft is routed at most twice per message. An accepted send, including queueing or steering into a running answer,
+  resets that conversation's count and discards its queued draft classification; other conversations keep theirs
+  (done, `engine/src/engine/auto.rs`).
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
