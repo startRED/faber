@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 /// never moves, sizes or reads the window or the browser pane.
 impl Backend for Arc<Host> {
     fn version(&self) -> String {
-        env!("CARGO_PKG_VERSION").into()
+        self.shell.version()
     }
     fn commands(&self) -> Value {
         serde_json::to_value(Host::exported().collect::<Vec<_>>()).unwrap_or_default()

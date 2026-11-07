@@ -24,6 +24,9 @@ conversation identity and remains an agent without a conversation. Faber's built
 
 ## Reaching Faber
 
+The `hello` offer and `faber status` report the running application's version from its shell, including the preview
+suffix, rather than the channel library's package version. The protocol number remains separate.
+
 `faber` talks to the running Faber over a local channel (`channel/`), never a network port:
 
 - **Windows:** the named pipe `\\.\pipe\faber-<16 hex>` (FNV-1a 64 of the lowercased data folder path with backslashes and
