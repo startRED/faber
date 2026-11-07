@@ -88,7 +88,7 @@ impl Core {
             self.titles.remove(id);
             return;
         };
-        let (vendor, model, effort) = (profile.vendor, profile.model, profile.effort);
+        let (vendor, model, effort) = (profile.vendor, profile.model, "low");
         let mut spare = None;
         #[cfg(test)]
         let ask = self.title_ask.clone();

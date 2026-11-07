@@ -352,8 +352,8 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
-    // The header keeps the default reason; the Faber row explains the unanswered router (R493).
-    let reason = page.text_of("reason.autoDefault")?;
+    // A cold send starts with the default immediately; no classifier was asked or timed out.
+    let reason = page.text_of("reason.autoImmediate")?;
     let tips = page.eval("(() => ({ header: document.querySelector('article.ai .model')?.title, cost: document.querySelector('article.ai .actions .cost')?.title }))()")?;
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
         format!("the header's tooltip should say why Auto chose it: {tips}")
@@ -361,15 +361,13 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
+    ensure(text.contains(&reason), || format!("the Faber row should explain the immediate choice: {text}"))?;
     let timeout = page.text_of("act.why.routerTimeout")?;
-    ensure(text.contains(&timeout), || format!("the Faber row should explain the router timeout: {text}"))?;
+    ensure(!text.contains(&timeout), || format!("a cold send must not claim the router timed out: {text}"))?;
     ensure(!text.contains("in API value"), || format!("the price note stays in the cost's tooltip: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
-
-/// The whole answer header as text, and its height.
-const HEADER_ALL: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { text: h.innerText, height: h.getBoundingClientRect().height }; })()";
 
 /// The answer header's name slot and its height: what the person reads and where the line below sits.
 const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.querySelector('b').innerText, height: h.getBoundingClientRect().height }; })()";
@@ -382,7 +380,7 @@ fn names_the_codex_model_while_streaming(ctx: &mut Ctx) -> Result {
     names_while_streaming(ctx, "codex", "", "GPT-6 Luna")
 }
 
-/// With Auto and one vendor: the header says only that Auto is choosing, then names the model before the first word,
+/// With Auto: a cold send starts immediately and names the model before the first word,
 /// keeps the name and the height to the end, and reads the same when the conversation is opened again. The recording
 /// stops after the first words of the answer until the scenario lets it go on.
 fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &str) -> Result {
@@ -402,19 +400,6 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
         &format!("window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='{vendor}' && !u.billingUnknown && !u.billedPerUse))"),
     )?;
     ask(page, QUESTION)?;
-    // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
-    // the allowed time) and the header says only that; with one vendor there is nothing to choose.
-    let choosing = if vendor == "claude" {
-        // The header is placed a frame before its words are; reading it at once saw "".
-        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')?.innerText.trim()")?;
-        let header = page.eval(HEADER_ALL)?;
-        let reason = page.text_of("reason.routing")?;
-        let text = header["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
-        same(text, format!("Auto · {reason}"), "the header while Auto is choosing")?;
-        Some(header["height"].clone())
-    } else {
-        None
-    };
     // The answer is held before its first word (Codex) or just after it (Claude): the name is there either way.
     page.wait_for_within(
         "the model's name in the header",
@@ -431,9 +416,10 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
         )?;
     }
     let during = page.eval(HEADER)?;
-    if let Some(height) = choosing {
-        same(during["height"].clone(), height, "the header's height once the name is there")?;
-    }
+    // No model list means no Codex routing candidates, so the sole subscription's reason stays.
+    let reason = page.text_of(if vendor == "claude" { "reason.autoImmediate" } else { "reason.autoOnly" })?;
+    let tip = page.attr(&css("article.ai .model"), "title")?.unwrap_or_default();
+    ensure(tip.contains(&reason), || format!("the streaming header should explain Auto's direct choice: {tip}"))?;
     std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.css(".actions"))?;

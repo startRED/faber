@@ -192,6 +192,21 @@ async fn a_router_without_an_answer_leaves_the_everyday_default() {
 }
 
 #[tokio::test]
+async fn one_usable_profile_skips_router_and_uses_that_profile() {
+    let dir = crate::support::DataFolder::new();
+    let calls = Calls::default();
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
+    engine.set_codex_models(vec!["gpt-6-luna".into()], Some("gpt-6-luna".into()));
+    engine.send(auto(SKY)).unwrap();
+    let reply = finished(&mut rx).await;
+    assert!(calls.lock().unwrap().is_empty(), "one model/effort profile needs no classification");
+    assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
+    assert_eq!(reply.acts[0].why.as_deref(), Some("reason.autoSingleProfile"));
+    assert!(engine.ledger().codex.unmetered.is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn no_router_candidates_keep_the_default_reason() {
     let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
