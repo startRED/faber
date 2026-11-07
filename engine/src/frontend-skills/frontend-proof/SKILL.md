@@ -81,6 +81,12 @@ written requirement it breaks. A scoped fix is not permission to redesign neighb
 
 ## Performance and resource evidence
 
+Illustrated demos use three to five short beats, real product tokens and recognizable controls. Label synthetic
+content; scene clicks never prove product behavior. Use an installed Stageshow skill only for these demos. Copy needed
+kit/examples into the task workspace before edits or dependency installation; never modify a verified Catalog snapshot.
+Keep demo dependencies outside the app. Compose narrow layouts separately and provide a complete reduced-motion still.
+Illustration crops and word limits must not hide real app information or controls.
+
 For a changed transition or animated demonstration, retain a visual rehearsal of the actual interaction: its opening,
 intermediate images, settled outcome and, for a loop, the return to its opening. Include a narrow supported layout,
 reduced motion, interruption and replay where relevant. Pair images with the sampling trace so a reviewer can locate

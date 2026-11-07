@@ -1796,7 +1796,7 @@ mod tests {
             &texts,
         )
         .unwrap();
-        assert!(index.len() <= DISCOVERY_BUDGET, "114 descriptions need {} bytes", index.len());
+        assert!(index.len() <= DISCOVERY_BUDGET, "catalog descriptions need {} bytes", index.len());
         assert!(index.len() > CONTEXT_BUDGET, "discovery does not consume selected instructions or server budget");
         for item in items.iter().filter(|item| item.server.is_none()) {
             assert!(index.contains(&format!("{}/SKILL.md", item.id)), "{}", item.id);
@@ -1852,7 +1852,10 @@ mod tests {
         store.write_ledger(&store.items.iter().map(|item| (item.id.clone(), item.commit.clone())).collect()).unwrap();
         let check = |delivery: &Delivery| {
             let index = delivery.project_skill_descriptions(Vendor::Codex).unwrap();
-            assert_eq!(index.lines().filter(|line| line.starts_with("faber:")).count(), 114);
+            assert_eq!(
+                index.lines().filter(|line| line.starts_with("faber:")).count(),
+                store.items.iter().filter(|item| item.server.is_none()).count()
+            );
             assert!(index.len() > CONTEXT_BUDGET && index.len() <= DISCOVERY_BUDGET);
             assert!(index.contains("Checked capability for systematic-debugging."));
             assert!(delivery.servers.iter().any(|server| server.name == "faber-chrome-devtools"));

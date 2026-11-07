@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const STATE: &str = "(() => { const a = document.querySelector('article.ai'); return { at: performance.now(), look: document.documentElement.dataset.base, reply: { chars: a?.querySelector('.md')?.textContent.length ?? 0, complete: !!a?.querySelector('.actions') } }; })()";
+const STATE: &str = "(() => { const a = document.querySelector('article.ai'); return { at: performance.now(), look: document.documentElement.dataset.base, viewport: [innerWidth, innerHeight], reply: { chars: a?.querySelector('.md')?.textContent.length ?? 0, complete: !!a?.querySelector('.actions') } }; })()";
 
 pub struct Recording {
     folder: PathBuf,
@@ -20,11 +20,8 @@ fn photo(cdp: &mut Cdp, folder: &Path, began: f64, phase: &str, n: usize, size: 
     cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
     let state = cdp.eval(STATE)?;
     let from = state["at"].as_f64().ok_or("no photograph clock")? - began;
-    let shot = cdp.call(
-        "Page.captureScreenshot",
-        json!({ "format": "jpeg", "quality": 60,
-        "clip": { "x": 0, "y": 0, "width": size[0], "height": size[1], "scale": 0.5 } }),
-    )?;
+    // WebView2 applies a scaled clip to the live viewport too, disturbing the interaction being measured.
+    let shot = cdp.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 60 }))?;
     let end = cdp.eval(STATE)?;
     let to = end["at"].as_f64().ok_or("no photograph clock")? - began;
     let bytes =
@@ -35,7 +32,7 @@ fn photo(cdp: &mut Cdp, folder: &Path, began: f64, phase: &str, n: usize, size: 
     let file = format!("{n:03}-{phase}.jpg");
     std::fs::write(folder.join(&file), bytes).map_err(|e| e.to_string())?;
     Ok(
-        json!({ "file": file, "phase": phase, "from": from, "to": to, "reply": state["reply"], "replyAfter": end["reply"], "look": state["look"], "lookAfter": end["look"] }),
+        json!({ "file": file, "phase": phase, "from": from, "to": to, "reply": state["reply"], "replyAfter": end["reply"], "look": state["look"], "lookAfter": end["look"], "viewport": state["viewport"], "viewportAfter": end["viewport"], "expectedViewport": size }),
     )
 }
 
@@ -105,6 +102,12 @@ fn photo_problem(frames: &[Value]) -> Option<String> {
     {
         return Some("before, during and after photographs are required".into());
     }
+    let viewport = &frames[0]["expectedViewport"];
+    if viewport.as_array().is_none_or(|size| size.len() != 2 || size.iter().any(|n| n.as_u64().is_none_or(|n| n == 0)))
+        || frames.iter().any(|f| f["expectedViewport"] != *viewport || f["viewport"] != *viewport || f["viewportAfter"] != *viewport)
+    {
+        return Some("photographs must preserve the interaction's viewport".into());
+    }
     if frames.windows(2).any(|w| {
         let Some((a, b)) = w[0]["from"].as_f64().zip(w[1]["from"].as_f64()) else { return true };
         b <= a || b - a > 500.0
@@ -160,7 +163,7 @@ mod tests {
         ["before", "during", "after"]
             .iter()
             .enumerate()
-            .map(|(i, phase)| json!({ "file": format!("{i}.jpg"), "phase": phase, "from": i * 100, "to": i * 100 + 30 }))
+            .map(|(i, phase)| json!({ "file": format!("{i}.jpg"), "phase": phase, "from": i * 100, "to": i * 100 + 30, "viewport": [1440, 900], "viewportAfter": [1440, 900], "expectedViewport": [1440, 900] }))
             .collect()
     }
 
@@ -175,6 +178,17 @@ mod tests {
         let mut stalled = frames();
         stalled[1]["to"] = json!(800);
         assert!(photo_problem(&stalled).is_some());
+    }
+
+    #[test]
+    fn photographs_cannot_resize_the_interaction_they_observe() {
+        let mut rows = frames();
+        assert!(photo_problem(&rows).is_none());
+        rows[1]["viewportAfter"] = json!([720, 450]);
+        assert_eq!(photo_problem(&rows).as_deref(), Some("photographs must preserve the interaction's viewport"));
+        rows[1]["viewportAfter"] = json!([1440, 900]);
+        rows[2]["viewport"] = json!([720, 450]);
+        assert!(photo_problem(&rows).is_some());
     }
 
     #[test]

@@ -26,17 +26,7 @@ are not evidence of a better result. Preserve the request, the project's identit
 
 ## Compose before decorating
 
-For an illustrated product demo, plan one visible outcome in three to five short beats. Use the product's actual
-visual tokens and recognizable controls, and label synthetic content. An installed Stageshow catalog skill can
-supply its dedicated staging workflow; load it only for this kind of deliverable. Keep demonstration code and its
-dependencies separate from the real application. Treat verified Catalog folders as references: copy the needed kit
-and example files into the task workspace before editing or installing dependencies; never modify the catalog snapshot.
-An illustrated click changes a scene, not a real product, so never
-present it as evidence that the application works.
-
-Design the narrow composition separately instead of shrinking a desktop scene until its words become unreadable.
-Choose a complete still that explains the outcome when motion is reduced. Preserve readable information and fully
-reachable controls in the real app; the illustration's word budget and decorative crop do not govern work screens.
+For illustrated demos, follow `frontend-proof` and Stageshow when installed. Scene limits do not govern real work screens.
 
 - Give the primary action visual priority. Group related controls by proximity and alignment before drawing more
   containers, borders and cards. Let important information have space; do not equate whitespace with empty padding.

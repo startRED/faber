@@ -47,8 +47,10 @@ Each interaction writes its own `target/faber-test/shots/rehearsal/<interaction>
 `rehearsal.json`, including the frame trace, photograph intervals, coverage status, supported long-task measurements
 and reason for incomplete evidence.
 A second connection to the same hidden app takes photographs while the first drives the interaction; it closes when
-the interaction ends. Images are half resolution, quality 60, at most 96 per interaction, with an 80 ms pause between
-captures. This is test-only work: no recorder, extra state or process runs in the shipped app.
+the interaction ends. Images keep the viewport's full resolution, quality 60, at most 96 per interaction, with an 80 ms
+pause between captures. Scaled clips are forbidden: WebView2 changes the live viewport while capturing them. Each
+photograph records and checks the original viewport before and after capture. This is test-only work: no recorder,
+extra state or process runs in the shipped app.
 The existing CI screenshot artifact includes these bundles recursively; each JSON embeds its complete raw trace.
 
 Calibration alone cannot qualify a run. Every watched interaction needs a surface actually seen and valid ordered
