@@ -1,0 +1,80 @@
+{
+  "status": "all requested local checks passed",
+  "base": "4894add5",
+  "branch": "trim-tokens",
+  "model_calls": 0,
+  "benchmark_runs": 0,
+  "checks": [
+    {
+      "command": "npm run lint",
+      "exit": 0,
+      "notes": "13 existing warnings; no frontend changes"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit": 0,
+      "notes": "Initial shared main-checkout dependency folder lacked Electron types; reused the existing benchmark node_modules instead, without dependency changes"
+    },
+    {
+      "command": "npm run docs",
+      "exit": 0,
+      "pages": 63
+    },
+    {
+      "command": "npm run build",
+      "exit": 0
+    },
+    {
+      "command": "node scripts/cargo.mjs fmt --all --check",
+      "exit": 0
+    },
+    {
+      "command": "npm run test:scripts",
+      "exit": 0,
+      "tests": 326,
+      "passed": 321,
+      "skipped": 5
+    },
+    {
+      "command": "node scripts/cargo.mjs test -p faber-engine --lib progress::tests",
+      "exit": 0,
+      "passed": 24
+    },
+    {
+      "command": "offline recorded-accounting assertions",
+      "exit": 0,
+      "rows": 8,
+      "plain": 939005,
+      "faber_minimum": 1536903,
+      "conclusion_tokens": 449335,
+      "residual": 148563
+    },
+    {
+      "command": "node scripts/cargo.mjs check -p faber-engine --all-targets",
+      "exit": 0
+    },
+    {
+      "command": "node scripts/cargo.mjs test -p faber-engine --lib engine::ended::tests",
+      "exit": 0,
+      "passed": 16
+    },
+    {
+      "command": "node scripts/cargo.mjs t --claims",
+      "exit": 0,
+      "notes": "Claims hold; nothing was built. Suites run in CI."
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "description": {
+    "before_characters": 1081,
+    "after_characters": 1005,
+    "before_offline_score": 254,
+    "after_offline_score": 236,
+    "score_is_not_model_tokens": true
+  },
+  "review": "Self-review only: prompt words, docs and pure tests; no state, persistence, permission, process, security or schema changes. Both drivers share the description. R509 guard and evidence validation remain. Repository words-only review-by-risk permits proofs; no independent model session was started.",
+  "unverified": "No live model-quality or realized token-saving claim. No benchmark, UI suite, heavy Rust suite, Clippy or macOS run. CS2 was checked absent before proof batches and was never launched."
+}

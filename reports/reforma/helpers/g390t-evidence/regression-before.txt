@@ -1,0 +1,7 @@
+Regression before production edit
+Command: node scripts/cargo.mjs test -p faber-engine --lib both_drivers_request_a_conclusion_before_closing_and_reuse_current_checks
+Observed command exit: 1 (test failure)
+Result: 0 passed, 1 failed, 1067 filtered out.
+Failure: engine/src/progress.rs:778: assertion failed: words.contains("After edits, checks or a plan, call this before your closing message")
+Production description at this point was the unmodified 1081-character optional wording from origin/phase-1-base 4894add5.
+No model was invoked; this was a pure library unit test.
