@@ -74,6 +74,16 @@ impl Core {
                 match vendor {
                     Vendor::Claude => {
                         let mut read = claude_usage(&cli, &spawn, &cwd, CLAUDE_TIMEOUT, now, offset).await;
+                        if read == UsageRead::NoWindows {
+                            let events = account::claude_limits(&cli, &spawn, &cwd, CLAUDE_TIMEOUT).await;
+                            if !events.is_empty() {
+                                let Some(core) = me.upgrade() else { return };
+                                let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                                c.zero_turn_checked(vendor, events);
+                                c.reading_done(vendor);
+                                return;
+                            }
+                        }
                         // A Claude Code whose `/usage` prints no percentages is read by its smallest real request instead. That
                         // request is a model turn, so its windows are never zero-turn evidence (R131).
                         let probed = read == UsageRead::NoWindows

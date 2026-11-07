@@ -558,6 +558,31 @@ fn no_percentages() -> (Spawner, Calls) {
 }
 
 #[tokio::test]
+async fn a_percentage_free_local_answer_refreshes_through_control_before_any_probe() {
+    let dir = support::DataFolder::new();
+    let mut local: serde_json::Value = serde_json::from_str(&usage_json(0)).unwrap();
+    local["result"] = "You are currently using your subscription to power your Claude Code usage".into();
+    let f = fake(fixture("claude", "usage-control"));
+    let (engine, time) = start(&dir, spawner(local.to_string(), Some(f.spawn.clone())).0);
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("current control windows reach the usage view", || engine.state().usage[0].windows.len() == 2).await;
+    assert_eq!(engine.ledger().claude.zero_turn_readings.len(), 2);
+    assert!(engine.ledger().claude.own_spend.is_empty());
+    assert_eq!(f.wire.messages().len(), 2);
+    assert!(f.wire.messages().iter().all(|m| m["type"] == "control_request"));
+    time.store(WHEN + 901, Ordering::SeqCst);
+    engine.set_attention(true, true);
+    until("scheduled control reading refreshes its timestamp", || {
+        engine.ledger().claude.zero_turn_readings.get("seven_day").is_some_and(|r| r.read_at == (WHEN + 901) as f64)
+    })
+    .await;
+    assert_eq!(f.wire.messages().len(), 4);
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn a_usage_command_that_prints_no_percentages_is_read_by_one_tiny_request() {
     let dir = support::DataFolder::new();
     let (spawn, asked) = no_percentages();

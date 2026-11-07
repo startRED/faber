@@ -160,46 +160,32 @@ fn utc_seconds(text: &str) -> Option<f64> {
     Some((days * 86400 + u64::from(clock[0] * 3600 + clock[1] * 60 + clock[2])) as f64)
 }
 
-fn usage_events(report: &serde_json::Value, terminal: &serde_json::Value) -> Option<Vec<crate::events::EngineEvent>> {
+fn usage_events(report: &serde_json::Value) -> Option<Vec<crate::events::EngineEvent>> {
     use crate::events::EngineEvent;
-    // `/usage` labels its cached fallback; receipt time must not renew old server data.
-    let cached = |text: &str| {
-        let text = text.to_ascii_lowercase();
-        text.contains("last-known usage") || text.contains("last known usage")
-    };
-    let content = &report["message"]["content"];
-    if content.as_str().is_some_and(cached)
-        || content.as_array().is_some_and(|items| items.iter().any(|item| item["text"].as_str().is_some_and(cached)))
+    if report["rate_limits_available"] != true
+        || report["session"]["total_cost_usd"].as_f64() != Some(0.0)
+        || report["session"]["model_usage"].as_object().is_none_or(|models| !models.is_empty())
     {
         return None;
     }
-    if terminal["local_command"] != "usage"
-        || terminal["total_cost_usd"].as_f64() != Some(0.0)
-        || terminal["modelUsage"].as_object().is_none_or(|models| !models.is_empty())
-    {
-        return None;
-    }
-    let rates = &report["usage_report"]["rate_limits"];
-    let rows = rates["limits"].as_array()?;
+    let rates = &report["rate_limits"];
+    // SDK 0.3.312 omits model_scoped on cached answers; receipt time cannot renew those windows.
+    rates["model_scoped"].as_array()?;
     let mut events = vec![];
-    for row in rows {
-        let name = match row["kind"].as_str()? {
-            "weekly_all" => "seven_day",
-            "session" => "five_hour",
-            // Scoped display names are not canonical model identifiers.
-            _ => continue,
-        };
-        let used = row["percent"].as_f64()? / 100.0;
+    for name in ["five_hour", "seven_day"] {
+        let row = &rates[name];
+        // A window with no reset is not a reading; it must not hide the other window.
+        if row.is_null() || row["resets_at"].is_null() {
+            continue;
+        }
+        let used = row["utilization"].as_f64()? / 100.0;
         let resets_at = utc_seconds(row["resets_at"].as_str()?)?;
         if !(0.0..=1.0).contains(&used) {
             return None;
         }
-        if events.iter().any(|event| matches!(event,EngineEvent::Quota{window,..} if window==name)) {
-            return None;
-        }
         events.push(EngineEvent::Quota { window: name.into(), used, resets_at });
     }
-    if !events.iter().any(|event| matches!(event,EngineEvent::Quota{window,..} if window=="seven_day")) {
+    if events.is_empty() {
         return None;
     }
     events.push(EngineEvent::Signals(Signals { paid_fallback: rates["extra_usage"]["is_enabled"].as_bool(), ..Default::default() }));
@@ -277,36 +263,40 @@ fn limits_args(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     .to_vec()
 }
 
-/// Stock `/usage` is a local command; its terminal receipt must prove that no model loop ran.
+/// Read the named plan windows through the SDK's control-only `get_usage` contract (0.3.312).
+/// No user message is sent; `skip_behaviors` also avoids scanning local transcripts.
 pub async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<crate::events::EngineEvent> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let args = limits_args(&|name| std::env::var(name).ok());
     let args: Vec<_> = cli.prefix.iter().cloned().chain(args).collect();
-    let Ok(mut p) = spawn(&cli.command, &args, cwd) else { return vec![] };
+    let Ok(mut p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return vec![] };
     let _tail = crate::proc::stderr_tail(p.stderr.take());
     let mut lines = BufReader::new(p.stdout.take(OUTPUT_LIMIT)).lines();
     let ask = async {
-        crate::proc::write_line(
-            &mut *p.stdin,
-            &serde_json::json!({"type":"user",
-            "message":{"role":"user","content":"/usage"},"parent_tool_use_id":null,"session_id":""}),
-        )
-        .await
-        .ok()?;
-        let mut report = None;
-        while let Ok(Some(line)) = lines.next_line().await {
-            let msg: serde_json::Value = serde_json::from_str(&line).ok()?;
-            if msg["type"] == "stream_event" || (msg["type"] == "assistant" && msg["usage_report"].is_null()) {
-                return None;
-            }
-            if !msg["usage_report"].is_null() {
-                report = Some(msg.clone());
-            }
-            if msg["type"] == "result" {
-                return usage_events(report.as_ref()?, &msg);
-            }
-            if msg["type"] == "control_request" {
-                return None;
+        for (id, request) in [
+            ("limits-init", serde_json::json!({"subtype":"initialize"})),
+            ("limits-usage", serde_json::json!({"subtype":"get_usage","skip_behaviors":true})),
+        ] {
+            crate::proc::write_line(&mut *p.stdin, &serde_json::json!({"type":"control_request","request_id":id,"request":request}))
+                .await
+                .ok()?;
+            loop {
+                let line = lines.next_line().await.ok()??;
+                let msg: serde_json::Value = serde_json::from_str(&line).ok()?;
+                match msg["type"].as_str()? {
+                    "control_response" if msg["response"]["request_id"] == id => {
+                        let answer = &msg["response"];
+                        if answer["subtype"] != "success" || !answer["response"].is_object() {
+                            return None;
+                        }
+                        if id == "limits-usage" {
+                            return usage_events(&answer["response"]);
+                        }
+                        break;
+                    }
+                    "assistant" | "stream_event" | "result" | "control_request" => return None,
+                    _ => {}
+                }
             }
         }
         None
@@ -548,27 +538,55 @@ mod tests {
         assert_eq!(verdict(Vendor::Claude, "{\"loggedIn\":false}", Some(0)), AccountStatus::SignedOut);
     }
 
+    fn control_usage() -> serde_json::Value {
+        serde_json::json!({"session":{"total_cost_usd":0,"model_usage":{}},"rate_limits_available":true,
+            "rate_limits":{"model_scoped":[],"extra_usage":{"is_enabled":false},
+                "five_hour":{"utilization":22,"resets_at":"2026-10-14T21:30:00Z"},
+                "seven_day":{"utilization":31,"resets_at":"2026-10-20T08:00:00Z"}}})
+    }
+
     #[test]
-    fn usage_command_requires_local_completion_and_zero_counters() {
-        let report = serde_json::json!({"type":"assistant","usage_report":{
-            "rate_limits":{"extra_usage":{"is_enabled":false},"limits":[
-                {"kind":"weekly_all","percent":31,"resets_at":"2026-10-20T08:00:00.296594+00:00"},
-                {"kind":"session","percent":22,"resets_at":"2026-10-14T21:30:00.296575+00:00"}
-            ]}
-        }});
-        let terminal = serde_json::json!({"type":"result","local_command":"usage","total_cost_usd":0,"modelUsage":{}});
-        let events = usage_events(&report, &terminal).unwrap();
+    fn control_usage_requires_available_windows_and_zero_session_work() {
+        let report = control_usage();
+        let events = usage_events(&report).unwrap();
         assert!(events.iter().any(|e| matches!(e, crate::events::EngineEvent::Quota {window,used,resets_at}
             if window == "seven_day" && *used == 0.31 && *resets_at == 1792483200.0)));
         assert!(events.iter().any(|e| matches!(e,crate::events::EngineEvent::Signals(s) if s.paid_fallback==Some(false))));
-        for bad in [
-            serde_json::json!({"type":"result","total_cost_usd":0}),
-            serde_json::json!({"type":"result","local_command":"usage","total_cost_usd":0.01}),
-            serde_json::json!({"type":"result","local_command":"usage","total_cost_usd":0,"modelUsage":{"m":{"outputTokens":1}}}),
+        for (pointer, bad) in [
+            ("/rate_limits_available", serde_json::json!(false)),
+            ("/rate_limits", serde_json::Value::Null),
+            ("/rate_limits/model_scoped", serde_json::Value::Null),
+            ("/session/total_cost_usd", serde_json::json!(0.01)),
+            ("/session/total_cost_usd", serde_json::Value::Null),
+            ("/session/model_usage", serde_json::json!({"m":{"outputTokens":1}})),
+            ("/session/model_usage", serde_json::Value::Null),
+            ("/rate_limits/seven_day/utilization", serde_json::json!(101)),
+            ("/rate_limits/seven_day/utilization", serde_json::json!("31")),
+            ("/rate_limits/seven_day/resets_at", serde_json::json!("invalid")),
         ] {
-            assert!(usage_events(&report, &bad).is_none());
+            let mut invalid = report.clone();
+            *invalid.pointer_mut(pointer).unwrap() = bad;
+            assert!(usage_events(&invalid).is_none(), "{pointer}");
         }
-        assert!(usage_events(&serde_json::json!({}), &terminal).is_none());
+    }
+
+    #[test]
+    fn a_cached_control_answer_cannot_renew_windows_or_extra_usage_evidence() {
+        let mut report = control_usage();
+        report["rate_limits"].as_object_mut().unwrap().remove("model_scoped");
+        assert!(usage_events(&report).is_none());
+    }
+
+    #[test]
+    fn a_missing_or_unstarted_window_does_not_hide_the_other_window() {
+        for name in ["five_hour", "seven_day"] {
+            let mut report = control_usage();
+            report["rate_limits"][name]["resets_at"] = serde_json::Value::Null;
+            let events = usage_events(&report).unwrap();
+            assert_eq!(events.iter().filter(|e| matches!(e, crate::events::EngineEvent::Quota { .. })).count(), 1);
+            report["rate_limits"][name] = serde_json::Value::Null;
+            assert_eq!(usage_events(&report).unwrap(), events);
+        }
     }
 
     #[test]
@@ -587,15 +605,6 @@ mod tests {
         ] {
             assert_eq!(utc_seconds(text), None, "{text}");
         }
-    }
-
-    #[test]
-    fn last_known_usage_cannot_be_stamped_as_a_fresh_zero_turn_reading() {
-        let report = serde_json::json!({"usage_report":{"rate_limits":{"limits":[{
-            "kind":"weekly_all","percent":31,"resets_at":"2026-10-20T08:00:00Z"
-        }]}},"message":{"content":[{"type":"text","text":"Showing last-known usage from 20 minutes ago"}]}});
-        let terminal = serde_json::json!({"local_command":"usage","total_cost_usd":0,"modelUsage":{}});
-        assert!(usage_events(&report, &terminal).is_none());
     }
 
     fn stream(event: serde_json::Value, result: serde_json::Value) -> String {

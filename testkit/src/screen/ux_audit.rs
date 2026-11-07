@@ -50,6 +50,14 @@ fn compact_catalog(ctx: &mut Ctx) -> Result {
 
 pub const EXTERNAL_LINKS: &str = "ux audit: open-link records URLs in the hidden sandbox without starting a browser";
 
+fn scheduler_browser(row: &crate::proctree::ProcRow, rows: &[crate::proctree::ProcRow], app_tree: &[crate::proctree::ProcRow]) -> bool {
+    !crate::proctree::same_process(row, app_tree)
+        && rows.iter().find(|parent| parent.pid == row.parent).is_some_and(|parent| {
+            parent.born <= row.born
+                && matches!(parent.name.to_ascii_lowercase().as_str(), "svchost.exe" | "taskhostw.exe" | "taskeng.exe" | "services.exe")
+        })
+}
+
 fn external_links(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let mut app = ctx.launch(no_cli())?;
@@ -70,16 +78,20 @@ fn external_links(ctx: &mut Ctx) -> Result {
     }
     super::same(std::fs::read_to_string(log).map_err(|e| e.to_string())?, text, "invalid links leave no record")?;
     for _ in 0..10 {
-        let new_browsers: Vec<_> = crate::proctree::snapshot()?
-            .into_iter()
+        let rows = crate::proctree::snapshot()?;
+        let app_tree = crate::proctree::descendants(&rows, app.pid);
+        let new_browsers: Vec<_> = rows
+            .iter()
             .filter(|p| {
                 matches!(
                     p.name.to_ascii_lowercase().as_str(),
                     "chrome.exe" | "msedge.exe" | "firefox.exe" | "brave.exe" | "opera.exe" | "vivaldi.exe"
                 ) && !crate::proctree::same_process(p, &before)
+                    && !scheduler_browser(p, &rows, &app_tree)
             })
+            .map(|p| (p, rows.iter().find(|parent| parent.pid == p.parent).map(|parent| parent.name.as_str())))
             .collect();
-        ensure(new_browsers.is_empty(), || format!("open-link started browser processes: {new_browsers:?}"))?;
+        ensure(new_browsers.is_empty(), || format!("open-link started browser processes (process, parent name): {new_browsers:?}"))?;
         super::pause(0.1);
     }
     ctx.close(app.id)
@@ -115,6 +127,27 @@ mod tests {
     use crate::app::Paths;
     use crate::sandbox::child_env;
     use serde_json::Value;
+
+    #[test]
+    fn only_scheduler_browsers_outside_the_app_tree_are_ignored() {
+        use crate::proctree::{ProcRow, descendants};
+        let row = |pid, parent, name: &str| ProcRow { pid, parent, name: name.into(), born: u64::from(pid) };
+        for name in ["svchost.exe", "TASKHOSTW.EXE", "taskeng.exe", "services.exe"] {
+            let rows = [row(1, 0, "faber.exe"), row(2, 0, name), row(3, 2, "firefox.exe")];
+            assert!(scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+            let rows = [row(1, 0, "faber.exe"), row(2, 1, name), row(3, 2, "firefox.exe")];
+            assert!(!scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+        }
+        // A scheduler process that appeared after the browser may only have reused its parent's pid.
+        let rows = [row(1, 0, "faber.exe"), ProcRow { born: 9, ..row(2, 0, "svchost.exe") }, row(3, 2, "firefox.exe")];
+        assert!(!scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+        let rows =
+            [row(1, 0, "faber.exe"), row(2, 0, "other.exe"), row(3, 1, "firefox.exe"), row(4, 2, "firefox.exe"), row(5, 99, "firefox.exe")];
+        let tree = descendants(&rows, 1);
+        for browser in &rows[2..] {
+            assert!(!scheduler_browser(browser, &rows, &tree));
+        }
+    }
 
     #[test]
     fn ux_audit_codex_uses_only_the_fake_sandbox() {

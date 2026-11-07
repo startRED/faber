@@ -31,14 +31,23 @@ Settings separates whole-account bars from Faber's own spend and explains foreig
 
 Both vendors' counters are read by commands that answer locally, so a reading costs no model tokens:
 
-- Claude Code: `claude -p /usage --output-format json` (with Faber's usual isolation flags, no session saved). `/usage` is a local
+- Claude Code: a control-only stream sends `initialize`, then `get_usage` with `skip_behaviors: true`. No user message,
+  model request, transcript scan or saved session is needed. The correlated successful reply must confirm zero session
+  cost, no model usage, available plan windows and a present `model_scoped` array (absent on cached replies). Window
+  utilization is a percentage, with a UTC ISO reset timestamp. This experimental contract is documented by SDK 0.3.312 (paired with CLI 2.1.312); unsupported commands or
+  invalid/missing windows retain the previous reading. Synthetic `tests/fixtures/claude/usage-control.jsonl` models that
+  contract; it is not an authenticated capture. Plan checks use this reader; scheduled refreshes try it when the text
+  command returns no percentages. The text command is `claude -p /usage --output-format json` (isolated, no session saved).
+  `/usage` is a local
   command; the result reports `num_turns` 0, zero tokens and zero cost, and Faber checks that on every reading: if a CLI
   version ever answered it with a model, the result is thrown away and `/usage` is never run again. Its text gives the session
   and weekly percentages; the reset times are printed in the PC's own time, which the screen's offset converts. A reset time
   within two minutes of the one already held is the same window (the stream prints seconds, `/usage` the minute).
-  Claude Code 2.1.307 and later print no percentages there (only what contributes to the limits), and the usage report of
-  its stream is empty until a request has been made. When `/usage` answers cleanly with no window, the same scheduled
-  reading sends one tiny request instead (`account::claude_probe`): cheapest model, no tools, no skills, one turn, about 500
+  Claude Code 2.1.307 and later print no percentages there (only what contributes to the limits). The structured slash
+  report exposes only the server
+  `limits[]` rows, which may be null even for a subscriber. The control reply instead exposes the named windows. If both
+  local readers yield no windows, the same scheduled reading may send one tiny request instead (`account::claude_probe`):
+  cheapest model, no tools, no skills, one turn, about 500
   cached tokens (US$0.0001 at list price, measured 2026-10-28). Its rate-limit event carries both windows. A probe that failed
   or cost over US$0.01 is no reading; it is never stamped as zero-turn evidence for R131 and never counted as Faber's own
   spend. The probe runs only when `/usage` says the login is on its subscription, extra usage is not running, and a turn or

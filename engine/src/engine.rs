@@ -3343,9 +3343,15 @@ impl Core {
                 // A question the agent asks the person is always a card, in every mode: only the person can answer it.
                 let question = tool == "AskUserQuestion" || plan_card;
                 let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
+                // A Codex card carries its explanation beside the action; only the action decides a refusal.
+                let guarded = if matches!(tool.as_str(), "command" | "fileChange") {
+                    [&input["command"], &input["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(&input)
+                } else {
+                    &input
+                };
                 if let Some(l) = self.live.get(conv)
                     && !question
-                    && crate::permissions::touches_credentials(&input, cwd.as_deref().and_then(Path::to_str), &|name| {
+                    && crate::permissions::touches_credentials(guarded, cwd.as_deref().and_then(Path::to_str), &|name| {
                         std::env::var(name).ok()
                     })
                 {

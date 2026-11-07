@@ -34,6 +34,7 @@ ${I}Evidence (2026-11-06, candidate 0adba5bb): full hidden first-user walks pt-B
 - [ ] The eight-request sample bench
       Evidence (2026-11-04): NOT run: both comparisons stopped before any request. The harness rejects billing environment variables (now removed from the launcher) and then waits forever for quiet-account samples because the Claude usage reading returns no weekly or session windows. Needs a working zero-token Claude quota source in `bench/account_quiet.rs` (or an owner-approved bypass), and complete routing/auxiliary token accounting for the "no more tokens" condition. (`docs/dev/benchmark.md`) ties or beats plain Claude Code and Codex on quality and
       costs no more tokens.
+${I}Evidence (2026-11-06, candidate 0adba5bb): watcher built and run (branch bench-1-0, 7d0b876d, reviewed): quiet PC reached after 10 min, but all 16 comparison rows were skipped before any model work, spend US$0. Two blockers: (1) the harness cannot enforce a hard US$25 ceiling for plain Codex (engine/examples/bench.rs:288, :397), so it refuses; (2) the zero-token Claude quota reading and the app's own reader both return no verified windows (bench/account_quiet.rs:52-56), so no paired quota readings. Complete token comparison is also unavailable (bench/pure.rs:525, :685). Needs an owner/manager decision to run with subscription-only spend and no hard cap, or a harness change. Details: reports/reforma/helpers/g390b.result.md.
 
 ## Numbers
 
