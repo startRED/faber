@@ -32,8 +32,35 @@ rest. The design is in `docs/history/superpowers/specs/2026-10-12-ux-sentinel-de
 - **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
   file is a ratchet: it lists what is known, and a fix removes its line. Findings go to
-  `target/faber-test/ux/<scenario>.json` and raw frame traces to `target/faber-test/ux/traces/`. Nothing records the
+  `target/faber-test/ux/<scenario>.json` and all raw frame traces to `target/faber-test/shots/rehearsal/traces/`,
+  including incomplete interactions without photographs. CI uploads these in its screenshot artifact. Nothing records the
   person's screen.
+
+## Interaction rehearsal
+
+The existing panel-motion scenario also photographs the real hidden app before, during and after opening and closing
+the running column at 720 and 1440 px, opening and closing Settings, applying Morning and Dark Room through the actual
+appearance controls, and receiving the recorded sky answer. That replay preserves the fixture's words and events,
+with 120 ms pauses between its text deltas so partial words can actually be photographed. No real provider runs.
+
+Each interaction writes its own `target/faber-test/shots/rehearsal/<interaction>-<run>/index.html` contact sheet, JPEGs and
+`rehearsal.json`, including the frame trace, photograph intervals, coverage status, supported long-task measurements
+and reason for incomplete evidence.
+A second connection to the same hidden app takes photographs while the first drives the interaction; it closes when
+the interaction ends. Images keep the viewport's full resolution, quality 60, at most 96 per interaction, with an 80 ms
+pause between captures. Scaled clips are forbidden: WebView2 changes the live viewport while capturing them. Each
+photograph records and checks the original viewport before and after capture. This is test-only work: no recorder,
+extra state or process runs in the shipped app.
+The existing CI screenshot artifact includes these bundles recursively; each JSON embeds its complete raw trace.
+
+Calibration alone cannot qualify a run. Every watched interaction needs a surface actually seen and valid ordered
+samples from its start through its settled end, with no frame gap over 100 ms. A trace that times out while geometry or
+a finite animation still moves is incomplete and fails the scenario, including under reduced motion. Photographs need before/during/after coverage,
+no interval or gap over 500 ms, and successful file writes; streaming also needs an observed partial reply and a longer
+completed reply. Missing or incomplete evidence never passes. The contact sheet says `ready-for-review`, not visually
+passed: an independent reviewer still inspects alignment, clipping and continuity. The original geometry rules and
+planted-defect gates continue to run. Run only this scenario with
+`node scripts/cargo.mjs t --filter "sentinel: panels move through frames"`; all scenarios run in CI as before.
 
 ## Visual critique
 

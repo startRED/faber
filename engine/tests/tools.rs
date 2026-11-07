@@ -347,7 +347,7 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     let entries: Vec<_> = file["skills"].as_array().unwrap().iter().chain(file["servers"].as_array().unwrap()).collect();
     let items = catalog();
     assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
-    assert_eq!(file["skills"].as_array().unwrap().len(), 114, "21 original and 93 fully audited new skills");
+    assert_eq!(file["skills"].as_array().unwrap().len(), 115, "audited skills and the pinned on-demand product demo kit");
     assert_eq!(file["servers"].as_array().unwrap().len(), 4, "only audited credential-free trees enter the catalog");
     assert!(source.len() <= 128 * 1024, "metadata budget including complete runtime pins: {} bytes", source.len());
     let locales = [
@@ -419,6 +419,20 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     let mut invalid = entries[22].clone();
     invalid["tier"] = "automatic".into();
     assert!(serde_json::from_value::<Item>(invalid).is_err(), "unknown tiers never enter the engine");
+}
+
+#[test]
+fn stageshow_is_pinned_on_demand_with_its_complete_source() {
+    use faber_engine::tools::{Tier, find};
+    let item = find("stageshow").expect("product demos are available in the existing catalog");
+    assert_eq!(item.repo, "benjitaylor/skills");
+    assert_eq!(item.commit, "299140fafd08df55a9c234e610c3f64af3f45531");
+    assert_eq!(item.path, "stageshow");
+    assert_eq!(item.digest, "3e3ed3b317a94cab6f7027c199f2a899a562d8abe89e66e5bbad13b007b97444");
+    assert_eq!(item.license, "MIT");
+    assert_eq!(item.job, "design");
+    assert_eq!(item.tier, Tier::More);
+    assert!(item.server.is_none() && !item.chat_safe, "a skill adds no persistent tool process");
 }
 
 fn item() -> Item {
