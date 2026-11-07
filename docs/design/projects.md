@@ -2,6 +2,11 @@
 
 The published contract of the Projects area: screens, separate copies, stored records and how checks run.
 
+After edits, checks or a plan, both drivers tell the agent to record its conclusion before its closing message, reusing
+successful checks while their inputs and environment are unchanged. The conclusion still requires evidence for done;
+the bounded missing-conclusion request remains as recovery (R509). This instruction change does not prove a measured
+token saving without a live comparison (`engine/src/progress.rs`, `both_drivers_request_a_conclusion_before_closing_and_reuse_current_checks`).
+
 ## Projects
 
 The engine types live in `engine/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).

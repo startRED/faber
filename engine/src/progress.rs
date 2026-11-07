@@ -111,7 +111,7 @@ const PLAN_DESCRIPTION: &str = "Shows the person your plan as a short checklist,
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words (at most 50 characters) and their language, what you are doing now, with no tool, command or file names: \"Fixing the login page\". You can use it when substantial work starts or the phase changes.";
 
-const WRAP_UP_DESCRIPTION: &str = "You can record the outcome and write a closing message, in your own words, when the task the person asked for ends or stops. outcome: done when the whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: one or two sentences. result: what is now true. not_done: what is left or not verified (leave out when nothing). verified: what you ran or looked at that shows the result; required for done, never something you expect. Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. Some project turns without this call show as ended without a conclusion and may prompt one follow-up. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
+const WRAP_UP_DESCRIPTION: &str = "After edits, checks or a plan, call this before your closing message. Reuse successful check results while their inputs and environment are unchanged. outcome: done when the whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: one or two sentences. result: what is now true. not_done: what is left or not verified (leave out when nothing). verified: what you ran or looked at that shows the result; required for done, never something you expect. Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
 
 fn plan_schema() -> Value {
     json!({
@@ -766,6 +766,21 @@ mod tests {
         for old in [json!({ "recap": "Finished", "done": true }), json!({ "recap": "Finished" })] {
             assert!(wrap_up(&old).is_err(), "the older shape cannot claim done on a live call: {old}");
         }
+    }
+
+    #[test]
+    fn both_drivers_request_a_conclusion_before_closing_and_reuse_current_checks() {
+        let native = codex_tools().into_iter().find(|tool| tool["name"] == WRAP_UP).unwrap();
+        let mcp = mcp_tools().into_iter().find(|tool| tool["name"] == WRAP_UP).unwrap();
+        assert_eq!(native["description"], mcp["description"]);
+        assert_eq!(native["inputSchema"], mcp["inputSchema"]);
+        let words = native["description"].as_str().unwrap();
+        assert!(words.contains("After edits, checks or a plan, call this before your closing message"));
+        assert!(words.contains("Reuse successful check results while their inputs and environment are unchanged"));
+        assert!(words.contains("required for done, never something you expect"));
+        assert!(words.len() < 1081, "the contract must be shorter than the optional wording it replaces");
+        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works."})).is_err());
+        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works.","verified":"Saved tests passed."})).unwrap().done);
     }
 
     #[test]
