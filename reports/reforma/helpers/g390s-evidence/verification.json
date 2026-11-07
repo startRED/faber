@@ -1,0 +1,107 @@
+{
+  "base": "b0ecb64b2d58f68d2311aafbf3cac58ecd2f674a",
+  "branch": "trim-context",
+  "modelCalls": 0,
+  "benchmarkRuns": 0,
+  "cs2": "absent at preflight and final proof check",
+  "commands": [
+    {
+      "command": "npm run lint",
+      "exit": 0,
+      "warnings": 13
+    },
+    {
+      "command": "npm run typecheck",
+      "exit": 0
+    },
+    {
+      "command": "npm run docs",
+      "exit": 0,
+      "pages": 63
+    },
+    {
+      "command": "npm run build",
+      "exit": 0,
+      "note": "existing chunk-size warning"
+    },
+    {
+      "command": "node scripts/cargo.mjs fmt --all --check",
+      "exit": 0
+    },
+    {
+      "command": "node scripts/cargo.mjs check -p faber-engine --all-targets -j 1",
+      "exit": 0
+    },
+    {
+      "command": "npm run test:scripts",
+      "exit": 0,
+      "passed": 321,
+      "skipped": 5,
+      "total": 326
+    },
+    {
+      "command": "node scripts/cargo.mjs t --claims",
+      "exit": 0,
+      "note": "Claims passed; pre-existing red base reported; no suite was run by --claims"
+    }
+  ],
+  "focused": [
+    {
+      "name": "tools::kits",
+      "passed": 53,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "name": "captured fresh/resume prompt",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "helper tools",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "settings guard",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "creative guards",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "guide",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "expectedFailures": [
+    "literal duplicate count 2 vs 1",
+    "captured initial prompt count 3 vs 1",
+    "Isolated advertises judge_creative and settings",
+    "Plan advertises settings",
+    "inverted availability condition rejected; source restored"
+  ],
+  "observedBaseRun": "https://github.com/startRED/faber/actions/runs/42362787809",
+  "baseStatus": "red when claims checked; not polled afterwards",
+  "notRun": [
+    "live models",
+    "benchmark",
+    "live app",
+    "heavy Rust suites",
+    "Clippy",
+    "macOS",
+    "land.mjs",
+    "ship.mjs",
+    "merge",
+    "base push"
+  ]
+}

@@ -2206,6 +2206,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_prompt_contains_each_already_loaded_description_once() {
+        for resumed in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                core.catalog_store = Some(catalog_items(
+                    &folder,
+                    "\nCatalog instructions for this capability\n",
+                    &[("debug", "debugging"), ("design-taste-frontend", "design")],
+                ));
+                conversation(core, Area::Project, Some(&project.id), &folder, "Debug this failure");
+                if resumed {
+                    core.convs.get_mut("kit").unwrap().sessions.insert(Vendor::Codex, "native-history".into());
+                }
+                core.rewind.captured_for_test("reply");
+                core.start("kit", "reply", &pick(Vendor::Codex), "Debug this failure".into(), vec![], true).unwrap();
+            });
+            let opened = until_message(&messages, if resumed { "thread/resume" } else { "thread/start" }).await;
+            let text = if resumed {
+                until_message(&messages, "turn/start").await["params"]["input"][0]["text"].as_str().unwrap().to_string()
+            } else {
+                opened["params"]["developerInstructions"].as_str().unwrap().to_string()
+            };
+            assert_eq!(text.matches("Catalog instructions for this capability").count(), 1, "resumed={resumed}");
+            assert!(text.contains("debug_KIT_INSTRUCTIONS"), "the selected body stays whole");
+            assert!(text.contains("design-taste-frontend/SKILL.md"), "unselected skills stay discoverable");
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
     async fn codex_projects_discover_oversize_enabled_skills_while_chat_uses_the_next_fitting_item() {
         for area in [Area::Chat, Area::Project] {
             for resumed in [false, true] {

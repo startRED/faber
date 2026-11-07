@@ -508,6 +508,10 @@ The guide reaches new and resumed sessions when needed, with its saved digest ke
 
 Faber selects verified, enabled resources for each session and matches tasks and technology stacks in five languages. The Context meter lists the current kit, and a reply shows a quiet kit fold when it changes.
 
+Codex Projects omits a lazy-index description only when that exact text already occurs in the included kit instructions; skill names, jobs, paths and other descriptions remain. Checks: `selected_description_is_not_repeated_but_discovery_and_whole_instructions_stay`, `codex_prompt_contains_each_already_loaded_description_once`; offline block sizes: `standing_context_size_matrix`.
+
+Claude project sessions omit unusable `settings` definitions in Plan and Isolated, and `judge_creative` in Isolated. Codex retains definitions across permission changes, with the same engine guards. Check: `standing_context_size_matrix`.
+
 Projects read stack evidence from `package.json`, `Cargo.toml` and `pyproject.toml` at session boundaries. Checks include `project_facts_snapshot_shared_with_rules_and_start_card`, `project_python_dependencies_widen_only_requested_stack_tools`, `project_hostile_manifests_cannot_invent_stack_labels`, `project_without_manifest_stack_facts_keeps_the_exact_kit` and the `project_facts_` regressions.
 
 Manifest parsing keeps validation while retaining the facts needed for selection. The `package_fields_` checks cover malformed input, and `project_facts_cost` records timing and sampled memory.

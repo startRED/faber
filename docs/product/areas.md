@@ -67,6 +67,8 @@ Built so far, as tools of a project's own agent (R412): `memory.search` as `memo
 
 Projects also offer `judge_creative`: its definition costs input tokens on every request; calling it spends judge quota. It compares text drafts only; rendered-visual judging remains unbuilt.
 
+Claude project sessions omit `settings` in Plan and Isolated, and `judge_creative` in Isolated, where those calls are refused. Codex keeps its registered definitions across permission changes; the engine's existing call guards still apply.
+
 Measured 2026-11-04: Codex 0.166.0 / gpt-6-luna added `settings` 109 → 78 and `judge_creative` 161 → 109 input tokens after shortening (three samples each). Claude Code 2.1.312 / Haiku 5.5 added 191 for original settings, 443 for both final definitions. Its four-run cap prevented a final split. Cached tool overhead is unavailable. [Totals, method and limits](../product-map.md#tool-definition-measurements); `project_tool_definitions_do_not_grow` guards wire lengths.
 
 ## Guardrails enforced by code, never by the model

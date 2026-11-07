@@ -1,0 +1,27 @@
+red.log
+thread 'tools::kits::context_tests::selected_description_is_not_repeated_but_discovery_and_whole_instructions_stay' (43656) panicked at engine\src\tools\context_tests.rs:46:5:
+assertion `left == right` failed: the built context must carry this exact description once
+  left: 2
+ right: 1
+
+driver-red.log
+thread 'engine::kits::tests::codex_prompt_contains_each_already_loaded_description_once' (26092) panicked at engine\src\engine\kits.rs:2231:13:
+assertion `left == right` failed: resumed=false
+  left: 3
+ right: 1
+
+isolated-red.log
+thread 'tools::kits::context_tests::standing_context_size_matrix' (27440) panicked at engine\src\tools\context_tests.rs:219:25:
+unavailable isolated definitions: [String("judge_creative"), String("settings")]
+
+plan-red.log
+thread 'tools::kits::context_tests::standing_context_size_matrix' (14932) panicked at engine\src\tools\context_tests.rs:231:25:
+assertion `left == right` failed: settings is unavailable in Plan
+  left: [String("judge_creative"), String("settings")]
+ right: [String("judge_creative")]
+
+mutation.log
+thread 'tools::kits::context_tests::standing_context_size_matrix' (29996) panicked at engine\src\tools\context_tests.rs:231:25:
+assertion `left == right` failed
+  left: 0
+ right: 2

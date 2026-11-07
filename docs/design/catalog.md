@@ -97,6 +97,8 @@ cap is separate from the 16 KiB selected kit, so discovery cannot crowd out serv
 instructions and takes the next matching item that fits. Claude Projects names native plugin skills without outside
 file reads when its CLI supports the plugin flag; older CLIs and helpers receive the lazy Read fallback. An unchanged
 native resume, including warm-up, sends no repeated index.
+Codex skips descriptions repeated literally in included kit instructions, keeping names, jobs and paths.
+Other descriptions and Claude's fallback stay.
 
 A moved catalog pin keeps the installed copy, its on/off choice and its previous recovery copy, including while removing
 or undoing another item. Its card, detail and Installed row show a localized update-available line, even when off or

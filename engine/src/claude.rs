@@ -55,8 +55,9 @@ pub struct ClaudeLaunch {
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
-fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
+pub(crate) fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
     crate::helper::Tools {
+        permissions: launch.permissions,
         helper: launch.helper == crate::helper::Helper::Offers,
         browse: launch.browse,
         conversation: launch.conversations,

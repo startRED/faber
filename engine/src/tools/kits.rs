@@ -1,5 +1,8 @@
 //! One verified catalog snapshot; each session selects its own bounded kit in memory.
 
+#[cfg(test)]
+#[path = "context_tests.rs"]
+mod context_tests;
 mod matching;
 pub(crate) use matching::known_stack;
 use matching::{item_capability, labels, matches_task, stack_labels};
@@ -405,7 +408,7 @@ impl Delivery {
     /// Legacy selected-only index, assembled on demand for direct driver checks.
     pub fn skill_descriptions(&self) -> Option<String> {
         if let Some(text) = &self.prepared {
-            return description_index(&text.items, self.skill_ids.as_deref()?, self.skills.as_deref()?, false, &text.texts);
+            return description_index(&text.items, self.skill_ids.as_deref()?, self.skills.as_deref()?, false, &text.texts, None);
         }
         self.lease.as_ref()?;
         let mut files = super::entries(self.skills.as_ref()?)?;
@@ -452,6 +455,7 @@ impl Delivery {
             self.skills.as_deref()?,
             vendor == Vendor::Claude && self.plugin.is_some(),
             &prepared.texts,
+            if vendor == Vendor::Codex { prepared.instructions.as_deref() } else { None },
         )
     }
 
@@ -495,6 +499,7 @@ fn description_index(
     root: &Path,
     native: bool,
     texts: &BTreeMap<String, (String, String)>,
+    included: Option<&str>,
 ) -> Option<String> {
     let mut text = if native {
         String::from(
@@ -523,10 +528,14 @@ fn description_index(
     let description_limit = (DISCOVERY_BUDGET.checked_sub(fixed)? / records.len()).min(DESCRIPTION_LIMIT);
     for (item, prefix, suffix) in records {
         let description = texts.get(&item.id).map(|(_, description)| description.as_str()).unwrap_or_else(|| item_capability(&item.id));
-        text.push_str(&prefix);
-        // The loaded native plugin already supplies descriptions; only fallback discovery needs them here.
-        if !native {
-            text.push_str(&short_description(description, description_limit));
+        let description = short_description(description, description_limit);
+        let repeated = included.is_some_and(|included| {
+            texts.get(&item.id).is_some_and(|(body, _)| !body.is_empty() && included.contains(body) && body.contains(&description))
+        });
+        text.push_str(if repeated && !native { prefix.trim_end_matches("; ") } else { &prefix });
+        // Native discovery or this skill's already included body carries the same description.
+        if !native && !repeated {
+            text.push_str(&description);
         }
         text.push_str(&suffix);
     }
@@ -1794,6 +1803,7 @@ mod tests {
             ),
             false,
             &texts,
+            None,
         )
         .unwrap();
         assert!(index.len() <= DISCOVERY_BUDGET, "114 descriptions need {} bytes", index.len());
