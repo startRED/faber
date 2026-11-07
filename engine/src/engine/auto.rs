@@ -10,11 +10,10 @@ use tokio::sync::oneshot;
 
 /// How long a sent message may wait before the last choice or everyday default answers.
 pub(super) const ROUTE_BUDGET: Duration = Duration::from_millis(2500);
-/// The router itself gives up at the same point, drafts included.
-const ASK_LIMIT: Duration = ROUTE_BUDGET;
+/// Draft work includes CLI startup and inference (recorded medians exceed the send budget).
+const ASK_LIMIT: Duration = Duration::from_secs(30);
 
-/// How many times the draft of one message is routed while the person types it. The route of the sent message is never
-/// counted: it is asked for when the message leaves, or its draft's answer is reused.
+/// How many times the draft of one message is routed while the person types it.
 const DRAFT_ROUTES: u8 = 2;
 
 type RouteAnswer = Option<(Option<Asked>, crate::act::Actor)>;
@@ -68,6 +67,14 @@ fn covers(guessed: &str, sent: &str) -> bool {
 }
 
 impl Core {
+    fn route_profiles(&self, only: Option<Vendor>) -> Vec<Profile> {
+        let vendors: Vec<_> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        candidates(&vendors, &self.codex_models)
+            .into_iter()
+            .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+            .collect()
+    }
+
     /// Whether Auto routes this conversation's next message: its first one (`Some(None)`), or the next ones while only
     /// an easy model was needed, such as after a greeting (`Some(Some(the model so far))`). A conversation whose first
     /// route came too late stays with the default, so a slow router does not hold up every message. ponytail: only the
@@ -224,9 +231,29 @@ impl Core {
         }
     }
 
-    /// The route for a sent message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+    pub(super) fn sent_draft(&mut self, id: &str) {
+        self.draft_routes.remove(id);
+        // Already-started work can settle its price, but queued draft work must not start after this send.
+        if self.next_draft.as_ref().is_some_and(|d| d.warm == id) {
+            self.next_draft = None;
+        }
+    }
+
+    /// A sent message uses a finished draft route; cold or pending classification never delays a send.
+    pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+        self.sent_draft(id);
         let (tx, rx) = oneshot::channel();
+        if self.route_profiles(only).len() <= 1 {
+            let _ = tx.send(None);
+            return rx;
+        }
+        // An injected classifier has no CLI startup. Native routing runs while typing, never on the send's clock.
+        if self.opts.ask.is_none()
+            && !self.guess.as_ref().is_some_and(|g| attached == 0 && g.only == only && covers(&g.request, request) && g.result.is_some())
+        {
+            let _ = tx.send(None);
+            return rx;
+        }
         match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
             Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
             Some(g) => g.waiters.push(tx),
@@ -264,9 +291,8 @@ impl Core {
     }
 
     fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>, only: Option<Vendor>) {
-        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
-        let cands = candidates(&vendors, &self.codex_models);
-        // One candidate needs no router: the everyday default answers.
+        let cands = self.route_profiles(only);
+        // Availability and quota can leave one model/effort profile, even with several subscriptions.
         let (answer, stop, actor) =
             if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None, crate::act::Actor::Faber) };
         if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, actor, waiters: vec![], warm, only, stop }) {
@@ -518,15 +544,36 @@ impl Core {
         }
         // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
         let from_router = routed.is_some();
-        let pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let mut pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let route_reason = pick.reason.starts_with("reason.route.").then(|| pick.reason.clone());
+        let only = self.convs.get(id).filter(|c| c.messages.len() > 2).map(|_| pick.vendor);
+        if let [profile] = self.route_profiles(only).as_slice() {
+            let current =
+                PROFILES.iter().find(|p| p.vendor == pick.vendor && Some(p.model) == pick.model.as_deref() && p.effort == pick.effort);
+            if only.is_none() || current.is_none_or(|p| (profile.iq, profile.agent) >= (p.iq, p.agent)) {
+                pick = Pick {
+                    vendor: profile.vendor,
+                    model: Some(profile.model.into()),
+                    effort: profile.effort.into(),
+                    reason: "reason.autoSingleProfile".into(),
+                    pace: None,
+                };
+            }
+        } else if !from_router && !fallback.2 && self.route_profiles(only).len() > 1 {
+            pick.reason = "reason.autoImmediate".into();
+        }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
+        // Immediate and single-profile explanations must not erase the route's difficulty for later messages.
+        if let Some(reason) = route_reason {
+            pick.reason = reason;
+        }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
             let mut act = crate::act::FaberAct::route(&shown_pick, if from_router { fallback.1 } else { crate::act::Actor::Faber });
-            if fallback.2 {
+            if fallback.2 && shown_pick.reason != "reason.autoSingleProfile" {
                 act.why = Some("act.why.routerTimeout".into());
             }
             m.acts.push(act);
@@ -560,7 +607,7 @@ impl Core {
     /// Gets the router ready when the user starts typing in Auto. Codex answers on its running process; a cold Claude
     /// process takes about 9 s, so one starts now and waits for the question, closing when it goes unused.
     pub(super) fn warm_router(&mut self) {
-        if self.opts.ask.is_some() || self.spare.is_some() {
+        if self.opts.ask.is_some() || self.spare.is_some() || self.route_profiles(None).len() == 1 {
             return;
         }
         let codex = self.opts.clis.get(&Vendor::Codex).cloned().filter(|_| self.codex_models.iter().any(|m| m == ROUTER[0].1));
@@ -610,6 +657,358 @@ pub(super) fn stop_router(stop: Option<Stop>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn auto_send(text: &str) -> SendRequest {
+        SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: text.into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "auto".into(), model: None, effort: None },
+        }
+    }
+    async fn wait_for(mut ready: impl FnMut() -> bool) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !ready() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fake CLI did not reach the expected state");
+    }
+    async fn draft_finished(engine: &Engine, text: &str) {
+        wait_for(|| engine.with(|c| c.guess.as_ref().is_some_and(|g| g.request == text && g.result.is_some()))).await;
+    }
+    async fn turn_finished(engine: &Engine, id: &str, turn: usize) -> Message {
+        wait_for(|| engine.open(id).is_some_and(|c| c.messages.get(turn * 2 + 1).is_some_and(|m| m.status == Some(Status::Done)))).await;
+        engine.open(id).unwrap().messages[turn * 2 + 1].clone()
+    }
+    // A native fake CLI: each draft has its own verdict; the second one cannot finish until the test releases it.
+    async fn three_message_fallback(vendor: Vendor, path: &str) {
+        use crate::events::EngineEvent;
+        use crate::proc::{Proc, Spawner};
+        use serde_json::json;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        async fn emit(output: &mut tokio::io::DuplexStream, msg: serde_json::Value) {
+            output.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+
+        let dir = crate::workspace::TestRoot::new();
+        let drafts = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let (seen, held) = (drafts.clone(), release.clone());
+        let queued = matches!(path, "queue" | "steer" | "other");
+        let spawn: Spawner = Arc::new(move |_, args, _| {
+            let (stdin, input) = tokio::io::duplex(65536);
+            let (mut output, stdout) = tokio::io::duplex(65536);
+            let mut input = tokio::io::BufReader::new(input);
+            let model = args.windows(2).find(|p| p[0] == "--model").map(|p| p[1].clone()).unwrap_or_default();
+            let claude_router = args.iter().any(|s| s.contains("You classify"));
+            let (seen, held) = (seen.clone(), held.clone());
+            tokio::spawn(async move {
+                let mut threads = BTreeMap::new();
+                let mut line = String::new();
+                while input.read_line(&mut line).await.unwrap_or(0) > 0 {
+                    let msg: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    line.clear();
+                    let method = msg["method"].as_str().unwrap_or_default();
+                    if matches!(method, "thread/start" | "thread/resume") {
+                        let id = msg["params"]["threadId"].as_str().map(str::to_string).unwrap_or_else(|| format!("thread-{}", msg["id"]));
+                        threads.insert(id.clone(), msg["params"]["baseInstructions"].as_str().unwrap_or_default().contains("You classify"));
+                        emit(&mut output, json!({"id":msg["id"],"result":{"model":msg["params"]["model"],"thread":{"id":id,"turns":[]}}}))
+                            .await;
+                        continue;
+                    }
+                    if method == "config/read" {
+                        emit(&mut output, json!({"id":msg["id"],"result":{"config":{}}})).await;
+                        continue;
+                    }
+                    if method == "thread/unsubscribe" {
+                        emit(&mut output, json!({"id":msg["id"],"result":{"status":"unsubscribed"}})).await;
+                        continue;
+                    }
+                    if method != "turn/start" && msg["type"] != "user" {
+                        if !msg["id"].is_null() {
+                            emit(&mut output, json!({"id":msg["id"],"result":{}})).await;
+                        }
+                        continue;
+                    }
+                    let router =
+                        if vendor == Vendor::Claude { claude_router } else { threads[msg["params"]["threadId"].as_str().unwrap()] };
+                    let text =
+                        if vendor == Vendor::Claude { msg["message"]["content"].to_string() } else { msg["params"]["input"].to_string() };
+                    let hard = text.contains("billing service");
+                    if router {
+                        seen.lock().unwrap().push(text.clone());
+                        if text.contains("pong") {
+                            held.notified().await;
+                        }
+                    }
+                    let answer = if router {
+                        json!({"kind":if hard {"code"} else {"chat"},"difficulty":if hard {"hard"} else {"easy"},"confidence":0.95})
+                            .to_string()
+                    } else {
+                        "Answer".into()
+                    };
+                    if vendor == Vendor::Claude {
+                        emit(&mut output, json!({"type":"system","subtype":"init","session_id":"test","model":model})).await;
+                        emit(
+                            &mut output,
+                            json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":answer}}}),
+                        )
+                        .await;
+                        if !router && queued {
+                            continue;
+                        }
+                        emit(
+                            &mut output,
+                            json!({"type":"result","subtype":"success","is_error":false,"result":answer,"total_cost_usd":0.001,"usage":{}}),
+                        )
+                        .await;
+                    } else {
+                        let thread = &msg["params"]["threadId"];
+                        emit(&mut output, json!({"id":msg["id"],"result":{"turn":{"id":"turn","status":"inProgress","items":[]}}})).await;
+                        emit(&mut output, json!({"method":"turn/started","params":{"threadId":thread,"turn":{"id":"turn"}}})).await;
+                        emit(&mut output, json!({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":"turn","itemId":"answer","delta":answer}})).await;
+                        if !router && queued {
+                            continue;
+                        }
+                        emit(&mut output, json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":"turn","status":"completed","items":[]}}})).await;
+                    }
+                }
+            });
+            Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+        });
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: dir.path().into(),
+                #[cfg(windows)]
+                chat_dir: dir.work().into(),
+                clis: BTreeMap::from([(vendor, Cli { command: "fake".into(), prefix: vec![] })]),
+                spawn,
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        engine.note_account_events(
+            vendor,
+            vec![EngineEvent::Signals(crate::signals::Signals {
+                billing: Some(crate::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+        engine.set_codex_models(vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
+        let warm = |id| WarmRequest {
+            conversation_id: id,
+            area: Area::Chat,
+            project_id: None,
+            choice: Choice { vendor: "auto".into(), model: None, effort: None },
+        };
+        engine.route_draft(warm(None), "In one sentence: why is the sky blue?".into());
+        // A finished first draft warms the answering CLI, then Send consumes the cached verdict.
+        draft_finished(&engine, "In one sentence: why is the sky blue?").await;
+        let id = engine.send(auto_send("In one sentence: why is the sky blue?")).unwrap();
+        engine.rename(&id, "Three messages");
+        if queued {
+            wait_for(|| engine.open(&id).unwrap().messages[1].text == "Answer").await;
+            assert_eq!(engine.open(&id).unwrap().messages[1].reason.as_deref(), Some("reason.route.chat.easy"));
+            let send = || engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send("A queued followup") }).unwrap();
+            if path == "steer" {
+                send();
+            }
+            let pending = "Reply with just the word: pong";
+            engine.route_draft(warm(Some(id.clone())), pending.into());
+            wait_for(|| drafts.lock().unwrap().len() == 2).await;
+            let owner = if path == "other" { engine.with(|c| c.blank(Area::Chat, None)) } else { id.clone() };
+            engine.route_draft(warm(Some(owner.clone())), "A queued draft".into());
+            assert!(engine.with(|c| c.next_draft.as_ref().is_some_and(|d| d.warm == owner)));
+            if path == "steer" {
+                let item = engine.open(&id).unwrap().queued[0].id.clone();
+                engine.send_queued(&id, &item).unwrap();
+                assert!(engine.open(&id).unwrap().queued[0].sending);
+            } else {
+                send();
+                assert_eq!(engine.open(&id).unwrap().queued.len(), 1);
+            }
+            assert_eq!(
+                engine.with(|c| c.next_draft.is_some()),
+                path == "other",
+                "accepted sends discard only their conversation's queued draft"
+            );
+            release.notify_one();
+            draft_finished(&engine, if path == "other" { "A queued draft" } else { pending }).await;
+            assert_eq!(drafts.lock().unwrap().len(), if path == "other" { 3 } else { 2 }, "sending must not spend quota on a queued draft");
+            engine.shutdown();
+            return;
+        }
+        let first = turn_finished(&engine, &id, 0).await;
+        assert_eq!(first.reason.as_deref(), Some("reason.route.chat.easy"));
+        let second_text = "Reply with just the word: pong";
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        let single_profile = |used| {
+            if vendor == Vendor::Codex {
+                engine.set_codex_models(
+                    if used { vec!["gpt-6-luna".into()] } else { vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()] },
+                    Some("gpt-6-luna".into()),
+                );
+            } else {
+                engine.note_account_events(
+                    vendor,
+                    ["seven_day_opus", "seven_day_sonnet"]
+                        .map(|window| EngineEvent::Quota {
+                            window: window.into(),
+                            used: if used { 1.0 } else { 0.0 },
+                            resets_at: now + if used { 3600.0 } else { 7200.0 },
+                        })
+                        .to_vec(),
+                );
+            }
+        };
+        if path == "pending" {
+            engine.route_draft(warm(Some(id.clone())), second_text.into());
+            wait_for(|| drafts.lock().unwrap().len() == 2).await;
+        } else if path == "single" {
+            single_profile(true);
+        }
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(second_text) }).unwrap();
+        let second = turn_finished(&engine, &id, 1).await;
+        assert_eq!(second.model, first.model);
+        assert_eq!(second.acts[0].why.as_deref(), Some(if path == "single" { "reason.autoSingleProfile" } else { "reason.autoImmediate" }));
+        if path == "pending" {
+            release.notify_one();
+            draft_finished(&engine, second_text).await;
+            assert_eq!(engine.open(&id).unwrap().messages[3].model, first.model, "a late classifier cannot change the sent turn");
+        }
+        if path == "single" {
+            single_profile(false);
+        }
+        let hard = "Now refactor my billing service";
+        engine.route_draft(warm(Some(id.clone())), hard.into());
+        let expected = if path == "pending" { 3 } else { 2 };
+        if engine.with(|c| c.guess.as_ref().is_some_and(|g| g.request == hard)) {
+            draft_finished(&engine, hard).await;
+        }
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(hard) }).unwrap();
+        let third = turn_finished(&engine, &id, 2).await;
+        assert_eq!(third.vendor, Some(vendor));
+        assert_eq!(third.reason.as_deref(), Some("reason.route.code.hard"));
+        assert_ne!(third.model, first.model);
+        assert_eq!(drafts.lock().unwrap().len(), expected);
+        assert_eq!(engine.open(&id).unwrap().messages[3].reason.as_deref(), Some("reason.route.chat.easy"));
+        let saved = engine.with(|c| c.store.get(&id).unwrap());
+        assert_eq!(saved.messages[3].reason.as_deref(), Some("reason.route.chat.easy"));
+        assert_eq!(saved.messages[3].acts[0].why, second.acts[0].why);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_pending_draft() {
+        three_message_fallback(Vendor::Claude, "pending").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "pending").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_cold_followup() {
+        three_message_fallback(Vendor::Claude, "cold").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_cold_followup_codex() {
+        three_message_fallback(Vendor::Codex, "cold").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_one_profile_recovers() {
+        three_message_fallback(Vendor::Claude, "single").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_one_profile_recovers_codex() {
+        three_message_fallback(Vendor::Codex, "single").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_discards_pending_draft_claude() {
+        three_message_fallback(Vendor::Claude, "queue").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_discards_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "queue").await;
+    }
+
+    #[tokio::test]
+    async fn queued_steer_discards_pending_draft_claude() {
+        three_message_fallback(Vendor::Claude, "steer").await;
+    }
+
+    #[tokio::test]
+    async fn queued_steer_discards_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "steer").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_preserves_other_conversation_draft_claude() {
+        three_message_fallback(Vendor::Claude, "other").await;
+    }
+
+    #[tokio::test]
+    async fn queued_send_preserves_other_conversation_draft_codex() {
+        three_message_fallback(Vendor::Codex, "other").await;
+    }
+
+    #[tokio::test]
+    async fn router_send_discards_queued_draft_work_for_that_conversation() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|c| {
+            c.next_draft = Some(Draft { request: "queued".into(), warm: "sent".into(), only: None });
+            let _ = c.route_for("sent", "queued", 0, None);
+            assert!(c.next_draft.is_none(), "sending must not start another classifier later for already-sent text");
+            c.next_draft = Some(Draft { request: "other".into(), warm: "other-conversation".into(), only: None });
+            let _ = c.route_for("sent", "queued", 0, None);
+            assert!(c.next_draft.is_some(), "another conversation still owns its draft");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn one_usable_profile_filters_quota_before_routing_or_warming() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|c| {
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                c.opts.clis.insert(vendor, Cli { command: "fake".into(), prefix: vec![] });
+                c.ledger.of_mut(vendor).billing = Billing::Subscription;
+            }
+            c.codex_models = vec!["gpt-6-luna".into()];
+            c.opts.ask = Some(Arc::new(|_| panic!("the exhausted subscription is not a choice")));
+        });
+        engine.note_account_events(
+            Vendor::Claude,
+            vec![EngineEvent::Quota { window: "five_hour".into(), used: 1.0, resets_at: unix_secs() + 3600.0 }],
+        );
+        let mut answer = engine.with(|c| {
+            assert_eq!(c.route_profiles(None).len(), 1);
+            assert!(c.route_profiles(Some(Vendor::Claude)).is_empty());
+            c.route_for("sent", "test", 0, None)
+        });
+        assert_eq!(answer.try_recv().unwrap(), None, "no task, timeout or model request is needed");
+        assert!(engine.ledger().codex.unmetered.is_empty());
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn creative_aux_events_bound_output_and_settle_cost_once() {
