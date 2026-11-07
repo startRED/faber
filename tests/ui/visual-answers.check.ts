@@ -791,11 +791,8 @@ check('visual answers: closed fences become cards, the existing code view stays 
     await settle();
     equal(detail.querySelector('pre'), null, 'closing code releases it');
     host.querySelector<HTMLButtonElement>('.visual-open')!.click();
-    deepEqual(openedVisual(), { conversationId: 'visual', answerId: 'v1:0', messageId: 'v1', block: 0, inline: true });
-    ok(host.querySelector('.visual-preview'), 'the preview stays inside the reply card');
-    host.querySelector<HTMLButtonElement>('.visual-open')!.click();
-    equal(openedVisual(), undefined, 'closing the preview releases its selection');
-    equal(host.querySelector('iframe'), null, 'closing the preview releases its frame');
+    deepEqual(openedVisual(), { conversationId: 'visual', answerId: 'v1:0', messageId: 'v1', block: 0 });
+    equal(host.querySelector('iframe'), null, 'cards never create frames');
   } finally { showVisual(undefined); dispose(); host.remove(); }
 });
 
@@ -886,21 +883,6 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         await until(() => host.querySelectorAll('.visual-card').length === 2, `${area}/${form}: two visual cards render`);
         equal(host.querySelector('iframe'), null);
         host.querySelectorAll<HTMLButtonElement>('.visual-open')[1]!.click();
-        await until(() => !!host.querySelector('.visual-preview iframe'), 'the card opens an inline preview');
-        equal(host.querySelector('#running'), null, 'previewing does not open the running column');
-        equal(host.querySelector<HTMLElement>('.thread')!.inert, false, 'the conversation remains usable');
-        const preview = host.querySelector<HTMLIFrameElement>('.visual-preview iframe')!;
-        equal(preview.getAttribute('sandbox'), 'allow-scripts');
-        equal(preview.inert, true, 'the thumbnail cannot take input before expansion');
-        equal(preview.tabIndex, -1);
-        ok(host.querySelector('.visual-preview')!.closest('.visual-card'), 'the preview belongs to the reply');
-        host.querySelectorAll<HTMLButtonElement>('.visual-open')[0]!.click();
-        equal(preview.isConnected, false, 'another card releases the previous preview');
-        await until(() => host.querySelectorAll('iframe').length === 1, 'only the newly selected preview gets a frame');
-        host.querySelectorAll<HTMLButtonElement>('.visual-open')[1]!.click();
-        await until(() => host.querySelectorAll('iframe').length === 1, 'returning to the latest card keeps one frame');
-        host.querySelector<HTMLButtonElement>('.visual-expand')!.focus();
-        host.querySelector<HTMLButtonElement>('.visual-expand')!.click();
         await settle();
         const pane = host.querySelector<HTMLElement>('.visual-pane')!;
         ok(pane, 'the reply opens the existing column');
@@ -912,8 +894,6 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('.visual-version')!.textContent, t('visual.version', { at: 2, count: 2 }));
         await until(() => host.querySelectorAll('iframe').length === 1, 'the opened version gets its frame');
         const newest = host.querySelector('iframe')!;
-        equal(preview.isConnected, false, 'expanding releases the thumbnail before the interactive view');
-        equal(newest.inert, false, 'the expanded page accepts input');
         const browsingContext = newest.contentWindow;
         host.querySelector<HTMLButtonElement>('.visual-prev')!.click();
         equal(host.querySelector('iframe'), newest, 'a version switch reuses the frame');
@@ -971,7 +951,6 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), null, 'the browser page excludes the visual frame');
         equal(openedVisual(), undefined);
         host.querySelector<HTMLButtonElement>('.visual-open')!.click();
-        host.querySelector<HTMLButtonElement>('.visual-expand')!.click();
         await settle();
         equal(openedSite(), undefined, 'a visual closes the browser page');
         equal(host.querySelector('.visual-version')!.textContent, t('visual.version', { at: 1, count: 2 }), 'an older card opens its own version');
@@ -983,7 +962,6 @@ check('visual answers: Chat and Projects at 720 px reuse the resizable running p
         equal(host.querySelector('iframe'), null);
         ok(host.querySelector('.rc-body'), 'back shows the running list');
         host.querySelector<HTMLButtonElement>('.visual-open')!.click();
-        host.querySelector<HTMLButtonElement>('.visual-expand')!.click();
         await settle();
         await until(() => host.querySelector('iframe'), 'the reopened visual gets its frame');
         const closing = host.querySelector('iframe')!;

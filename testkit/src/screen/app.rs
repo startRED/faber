@@ -1416,19 +1416,6 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     app.page.wait_count(&css(".visual-frame"), 1)?;
     app.page.wait_for("the visual page to finish loading", "document.body.dataset.visualMemoryReady==='yes'")?;
     app.page.eval("window.__visualFrames=[new WeakRef(document.querySelector('.visual-frame'))];void 0")?;
-    super::setup::measure(ctx, &app, "visual answer inline preview")?;
-    let preview_before = ctx.cpu_ms(app.id)?;
-    let preview_started = Instant::now();
-    pause(2.0);
-    let preview_cpu = (ctx.cpu_ms(app.id)? - preview_before) / preview_started.elapsed().as_secs_f64() / 10.0;
-    ctx.notes.push(format!("visual answer inline preview: idle processor of one core {preview_cpu:.1}%"));
-    same(app.page.count(&css("#running"))?, 0, "previewing keeps the conversation open")?;
-    ctx.shot(&mut app, "visual-answer-inline-preview")?;
-    app.page.eval("delete document.body.dataset.visualMemoryReady;document.addEventListener('load',function ready(e){if(e.target instanceof HTMLIFrameElement && e.target.matches('.visual-frame')){document.removeEventListener('load',ready,true);document.body.dataset.visualMemoryReady='yes';}},true)")?;
-    app.page.click(&css(".visual-expand"))?;
-    app.page.wait_count(&css(".visual-frame"), 1)?;
-    app.page.wait_for("the expanded visual page to finish loading", "document.body.dataset.visualMemoryReady==='yes'")?;
-    app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
     super::setup::measure(ctx, &app, "visual answer while open")?;
     let close = app.page.named("button", "run.close")?;
     app.page.click(&close)?;
@@ -1451,10 +1438,7 @@ fn visual_answers_pane_memory(ctx: &mut Ctx) -> Result {
     let render_before = ctx.cpu_ms(app.id)?;
     let render_started = Instant::now();
     app.page.eval("document.addEventListener('load',function ready(e){if(e.target===document.querySelector('.visual-frame')){document.removeEventListener('load',ready,true);document.body.dataset.mermaidMemoryLoaded='yes';}},true)")?;
-    // Keep one prepared document for renderer measurements; the inline lifecycle was measured above.
-    app.page.eval(
-        "[...document.querySelectorAll('.visual-card .visual-open')].at(-1).click();document.querySelector('.visual-expand').click()",
-    )?;
+    app.page.click(&css(".visual-card .visual-open").last())?;
     app.page.wait_count(&css(".visual-frame"), 1)?;
     app.page
         .wait_for("the Mermaid frame document to load before inspecting its target", "document.body.dataset.mermaidMemoryLoaded==='yes'")?;
@@ -1531,10 +1515,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let idle_cpu = (ctx.cpu_ms(app.id)? - before_idle) / idle_started.elapsed().as_secs_f64() / 10.0;
     app.page.eval("window.addEventListener('message',e=>{if(e.source!==document.querySelector('.visual-frame')?.contentWindow)return; if(e.data?.visualTestReady)document.body.dataset.visualReadyVersion=e.data.visualTestReady; if(e.data?.visualTestFocus)document.body.dataset.visualFocused=e.data.visualTestFocus; if(e.data?.visualTestCounter)document.body.dataset.visualCounter=e.data.version+':'+e.data.visualTestCounter; if(e.data?.visualTestInput && e.data.focused)document.body.dataset.visualTyped=e.data.version+':'+e.data.visualTestInput; if(e.data?.visualTestMenu===true && e.data.trusted)document.body.dataset.visualMenuBlocked='yes';})")?;
     app.page.eval("window.__visualLoads=0;document.addEventListener('load',e=>{if(e.target===document.querySelector('.visual-frame'))window.__visualLoads++;},true)")?;
-    // Choose the interactive view in one turn so a transient thumbnail cannot change the load counters.
-    app.page.eval(
-        "[...document.querySelectorAll('.visual-card .visual-open')].at(-1).click();document.querySelector('.visual-expand').click()",
-    )?;
+    app.page.click(&css(".visual-card .visual-open").last())?;
     app.page.wait_visible(&css(".visual-pane"))?;
     app.page.wait_count(&css(".visual-frame"), 1)?;
     app.page.wait_for("the first visual version to load", "window.__visualLoads===1")?;
@@ -1598,9 +1579,7 @@ fn visual_answers_memory(ctx: &mut Ctx) -> Result {
     let mut previous_closed = resized;
     for cycle in 1..=2 {
         app.page.eval("delete document.body.dataset.visualReadyVersion;delete document.body.dataset.visualFocused;delete document.body.dataset.visualCounter;delete document.body.dataset.visualTyped;delete document.body.dataset.visualMenuBlocked")?;
-        app.page.eval(
-            "[...document.querySelectorAll('.visual-card .visual-open')].at(-1).click();document.querySelector('.visual-expand').click()",
-        )?;
+        app.page.click(&css(".visual-card .visual-open").last())?;
         app.page.wait_visible(&css(".visual-frame"))?;
         app.page.eval("window.__visualFrames.push(new WeakRef(document.querySelector('.visual-frame')));void 0")?;
         // Visible belongs to the outer iframe, not its asynchronous document or that document's input listeners.

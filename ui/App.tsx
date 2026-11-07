@@ -733,7 +733,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const sideVisual = createMemo(() => {
     const open = openedVisual();
-    if (!open || open.inline || current()?.id !== open.conversationId) return undefined;
+    if (!open || current()?.id !== open.conversationId) return undefined;
     const answer = visualAnswers().find((a) => a.id === open.answerId);
     return answer && { answer, open };
   });
@@ -782,10 +782,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedVisual, (open) => open && !open.inline && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(openedVisual, (open) => open && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
   createEffect(on(openedDetails, (id) => id && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (openedVisual()?.inline ? undefined : openedVisual()) ?? sideFile() ?? (openedDetails() ? { conversationId: openedDetails() } : undefined) ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? openedVisual() ?? sideFile() ?? (openedDetails() ? { conversationId: openedDetails() } : undefined) ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
