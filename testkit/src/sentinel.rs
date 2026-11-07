@@ -141,6 +141,39 @@ pub fn samples(rows: &Value) -> Vec<Sample> {
         .collect()
 }
 
+/// A good calibration clock cannot excuse an empty, stalled or cut-short interaction trace.
+pub fn coverage_problem(out: &Value, names: &[&str]) -> Option<String> {
+    let Some(elapsed) = out["elapsed"].as_f64().filter(|v| v.is_finite() && *v >= 350.0) else {
+        return Some("the trace has no complete elapsed time".into());
+    };
+    if !out["animations"].is_array() {
+        return Some("the probe did not return its animation trace".into());
+    }
+    if names.is_empty() || out["settled"] != json!(true) {
+        return Some("the interaction never settled, or no surfaces were requested".into());
+    }
+    for name in names {
+        let Some(rows) = out["samples"][name].as_array().filter(|r| r.len() >= 3) else {
+            return Some(format!("{name}: fewer than three samples"));
+        };
+        if rows.iter().any(|row| row.as_array().is_none_or(|r| r.len() != 7 || r.iter().any(|v| v.as_f64().is_none_or(|v| !v.is_finite()))))
+        {
+            return Some(format!("{name}: malformed samples"));
+        }
+        if !rows.iter().any(|row| row[1].as_f64() == Some(1.0) && row[6].as_f64().is_some_and(|o| o > 0.0)) {
+            return Some(format!("{name}: the requested surface was never visible"));
+        }
+        let times: Vec<f64> = rows.iter().map(|r| r[0].as_f64().expect("checked above")).collect();
+        if times[0] != 0.0 || times.windows(2).any(|w| w[1] <= w[0] || w[1] - w[0] > 100.0) {
+            return Some(format!("{name}: missing start, nonmonotonic clock or a frame gap over 100 ms"));
+        }
+        if elapsed + 1.0 < *times.last().expect("three samples") || elapsed - times.last().expect("three samples") > 100.0 {
+            return Some(format!("{name}: the trace does not reach the end of the interaction"));
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Motion {
     /// The surface did not change between the first and the last frame.
@@ -419,6 +452,49 @@ pub fn uneven(found: &[Columns]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interaction_coverage_rejects_missing_gapped_and_unsettled_traces() {
+        let rows: Vec<Value> = (0..=40).map(|i| json!([i * 16, 1, 0, 0, 300, 400, 1])).collect();
+        let complete = json!({ "elapsed": 650, "settled": true, "animations": [], "samples": { "running": rows } });
+        assert!(coverage_problem(&complete, &["running"]).is_none());
+        assert!(coverage_problem(&Value::Null, &["running"]).is_some());
+        assert!(coverage_problem(&complete, &[]).is_some());
+        assert!(coverage_problem(&complete, &["absent"]).is_some());
+        let mut failed = complete.clone();
+        failed["samples"]["running"] = json!([]);
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        failed["settled"] = json!(false);
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        failed["animations"] = Value::Null;
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        failed["samples"]["running"].as_array_mut().unwrap().drain(1..20);
+        for (i, sample) in failed["samples"]["running"].as_array_mut().unwrap().iter_mut().enumerate() {
+            sample[2] = json!(i * 10);
+        }
+        assert!(
+            matches!(teleport(&samples(&failed["samples"]["running"])), Motion::Smooth(_)),
+            "intermediate positions alone cannot prove gap-free sampling"
+        );
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        failed["elapsed"] = json!(1000);
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        failed["samples"]["running"][2][1] = json!("bad");
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        failed = complete.clone();
+        for sample in failed["samples"]["running"].as_array_mut().unwrap() {
+            sample[1] = json!(0);
+        }
+        assert!(coverage_problem(&failed, &["running"]).is_some());
+        let mut rounded = complete;
+        rounded["elapsed"] = json!(639.8);
+        assert!(coverage_problem(&rounded, &["running"]).is_none(), "the last sample is rounded to milliseconds");
+    }
 
     fn frames(rows: &[(f64, bool, f64, f64)]) -> Vec<Sample> {
         // (time, present, x, opacity)

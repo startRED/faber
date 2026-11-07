@@ -81,6 +81,16 @@ written requirement it breaks. A scoped fix is not permission to redesign neighb
 
 ## Performance and resource evidence
 
+For a changed transition or animated demonstration, retain a visual rehearsal of the actual interaction: its opening,
+intermediate images, settled outcome and, for a loop, the return to its opening. Include a narrow supported layout,
+reduced motion, interruption and replay where relevant. Pair images with the sampling trace so a reviewer can locate
+a jump instead of guessing from one settled screenshot.
+
+Treat missing images, missing samples, sampling gaps or a timeout before settling as incomplete evidence. Inspect the
+structured report, coverage and command exit status together; a printed approval line alone is insufficient. A clean
+automated report still needs visual judgment. Report the browser and build actually exercised, and distinguish
+illustrated scene checks from clicks through the real application.
+
 - For affected hot paths, measure interaction-to-next-paint and frame times on the same hardware, fixture and build
   mode before/after. Report sample size and p95/p99 only when there are enough observations; never infer them from
   one run. Distinguish local lab measurements from field INP (p75 of visits, <=200 ms is good).

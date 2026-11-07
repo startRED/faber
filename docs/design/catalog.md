@@ -1,5 +1,8 @@
 # Catalog
 
+Stageshow adds optional demos in More; [delivery and the Faber scene](../product/frontend.md#evidence-and-limits)
+use existing controls and keep the kit outside the app.
+
 Faber's original frontend-craft and frontend-proof instruction skills are part of its existing first-party guide
 delivery, not catalog entries or a new tool installation path. They add no cards, switches or screen layout; third-party
 design skills keep their existing source, installation and selection rules ([contract](../product/frontend.md)).

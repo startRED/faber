@@ -100,16 +100,41 @@ struct Watched {
 }
 
 /// Samples these surfaces on every frame while `act` runs, until they rest. The raw numbers are kept as the finding's
-/// evidence (spec section 10.1) in `target/faber-test/ux/traces/`.
-fn watch(ctx: &Ctx, label: &str, page: &mut Page, names: &[&str], act: impl FnOnce(&mut Page) -> Result) -> Result<Watched> {
-    page.eval(&format!("window.__sx.start({}); true", json!(names)))?;
-    act(page)?;
-    let out = page.eval("window.__sx.finish(500, 350, 4000)")?;
-    let folder = ctx.paths.target.join("ux/traces");
+/// evidence (spec section 10.1) in `target/faber-test/shots/rehearsal/traces/`, included in CI's screenshot artifact.
+fn watch(ctx: &mut Ctx, label: &str, page: &mut Page, names: &[&str], act: impl FnOnce(&mut Page) -> Result) -> Result<Watched> {
+    let began = page.eval(&format!("window.__sx.start({})", json!(names)))?.as_f64().ok_or("the probe did not start its clock")?;
+    let record = if matches!(
+        label,
+        "running opens 1440"
+            | "running closes 1440"
+            | "running opens 720"
+            | "running closes 720"
+            | "settings opens"
+            | "settings closes"
+            | "theme manha"
+            | "theme sala"
+            | "reply streams"
+    ) {
+        Some(crate::rehearsal::Recording::start(page.cdp.reconnect()?, &ctx.paths.target.join("shots/rehearsal"), label, began)?)
+    } else {
+        None
+    };
+    let action = act(page);
+    let measured = page.eval("window.__sx.finish(500, 350, 4000)");
+    let out = measured.as_ref().cloned().unwrap_or(Value::Null);
+    let problem =
+        action.as_ref().err().cloned().or_else(|| measured.as_ref().err().cloned()).or_else(|| sentinel::coverage_problem(&out, names));
+    let folder = ctx.paths.target.join("shots/rehearsal/traces");
     let slug: String = label.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    if std::fs::create_dir_all(&folder).is_ok() {
-        let _ = std::fs::write(folder.join(format!("{slug}.json")), out.to_string());
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    std::fs::write(folder.join(format!("{slug}.json")), out.to_string()).map_err(|e| e.to_string())?;
+    if let Some(record) = record {
+        let path = record.finish(label, &out, problem.as_deref())?;
+        ctx.notes.push(format!("visual rehearsal {label}: {} (independent visual review required)", path.display()));
     }
+    action?;
+    measured?;
+    ensure(problem.is_none(), || format!("infrastructure: incomplete sampling for {label}: {}", problem.unwrap_or_default()))?;
     Ok(Watched {
         samples: names.iter().map(|n| sentinel::samples(&out["samples"][n])).collect(),
         anims: sentinel::anims(&out["animations"]),
@@ -438,7 +463,24 @@ fn short_menus(ctx: &mut Ctx, page: &mut Page, mode: &str, found: &mut Vec<Findi
 fn motion(ctx: &mut Ctx) -> Result {
     // No look chosen yet: the first run shows its look step, and the tutorial that follows has a card to watch.
     ctx.write_settings(&json!({ "language": "en", "setup": "done" }))?;
-    let launch = claude_chat(ctx);
+    // The real fixture's deltas need a visible pace for the photographs, rather than all arriving in one browser frame.
+    let mut launch = claude_chat(ctx);
+    let source = std::fs::read_to_string(ctx.paths.fixtures.join("claude/chat.jsonl")).map_err(|e| e.to_string())?;
+    let mut paced = String::new();
+    let mut deltas = 0;
+    for line in source.lines() {
+        let entry: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        paced.push_str(line);
+        paced.push('\n');
+        if entry["msg"]["event"]["delta"]["type"] == "text_delta" {
+            paced.push_str("{\"dir\":\"out\",\"msg\":{\"faber_pause\":120}}\n");
+            deltas += 1;
+        }
+    }
+    ensure(deltas > 1, || "the rehearsal fixture must really stream several text deltas".into())?;
+    let recording = ctx.sb.sandbox.join("rehearsal-chat.jsonl");
+    std::fs::write(&recording, paced).map_err(|e| e.to_string())?;
+    launch.recording = Some(recording);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let mut found = Vec::new();
@@ -514,6 +556,31 @@ fn motion(ctx: &mut Ctx) -> Result {
     let w = watch(ctx, "settings closes", page, &["settings"], |p| p.press("Escape"))?;
     judge_motion(ctx, &mut found, "settings", "settings", "closes", &config, &w.samples[0])?;
     short_menus(ctx, page, "full", &mut found)?;
+
+    // Rehearse the real appearance controls, including the draft/apply boundary, then return to the default look.
+    page.press("Control+,")?;
+    let appearance = page.named("button", "set.appearance")?;
+    page.click(&appearance)?;
+    for look in ["manha", "sala"] {
+        let preset = page.named("button", &format!("look.{look}.name"))?;
+        page.click(&preset)?;
+        let use_look = page.named("button", "set.use")?;
+        page.wait_enabled(&use_look)?;
+        watch(ctx, &format!("theme {look}"), page, &["settings"], |p| {
+            p.click(&use_look)?;
+            p.wait_for("the chosen look to be applied", &format!("document.documentElement.dataset.base === {}", json!(look)))
+        })?;
+    }
+    page.press("Escape")?;
+    page.wait_gone(&css(".settings"))?;
+
+    // A recorded provider reply, not a simulated DOM animation: require photographs of the partial and finished words.
+    super::select_model(page, "Claude Haiku")?;
+    page.eval("document.querySelector('.app').dataset.surface = 'rehearsal.app'; true")?;
+    watch(ctx, "reply streams", page, &["rehearsal.app"], |p| {
+        ask(p, "In one sentence: why is the sky blue?")?;
+        p.wait_for("the recorded reply to finish", "!!document.querySelector('article.ai .actions') && document.querySelector('article.ai .md')?.textContent.includes('Rayleigh scattering')")
+    })?;
 
     // M6: with less motion asked for, nothing may travel. Reduced (the system's preference): only quick fades.
     let page = &mut app.page;

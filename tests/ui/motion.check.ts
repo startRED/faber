@@ -401,6 +401,37 @@ check('motion: a disclosure chevron turns with a transform that eases, and nothi
   }
 });
 
+check('motion: the first tutorial card starts at its measured anchor', async () => {
+  const { Tutorial } = await import('../../ui/Tutorial.tsx');
+  const root = document.createElement('div');
+  root.dataset.motion = 'full';
+  root.style.cssText = 'position:fixed;inset:0';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  const anchor = document.createElement('div');
+  anchor.dataset.tour = 'composer';
+  anchor.style.cssText = 'position:fixed;left:450px;top:300px;width:300px;height:100px';
+  document.body.append(anchor, root);
+  const dispose = render(() => createComponent(Tutorial, { onEnd: () => {} }), root);
+  try {
+    // Deliver placement and child-list observations without letting the entrance finish in a slow hidden frame.
+    await Promise.resolve();
+    await Promise.resolve();
+    const card = root.querySelector<HTMLElement>('.coach')!;
+    ok(card, 'the real tutorial card mounted');
+    const animations = card.getAnimations();
+    ok(animations.length > 0, 'the measured card still has its entrance');
+    for (const animation of animations) { animation.pause(); animation.currentTime = 0; }
+    const first = card.getBoundingClientRect();
+    const dx = Math.abs(first.x - parseFloat(card.style.left));
+    const dy = Math.abs(first.y - parseFloat(card.style.top));
+    ok(dx < 32 && dy < 32, `the first frame stays by its anchor instead of flying from the window corner (${dx.toFixed(0)}, ${dy.toFixed(0)}px)`);
+  } finally {
+    dispose();
+    anchor.remove();
+    root.remove();
+  }
+});
+
 check('motion: the tutorial leaves with a fade of its own instead of vanishing', async () => {
   // Imported here, not at the top: as a static import of this file it kept the checks page from starting at all (no check ran).
   const { Tutorial } = await import('../../ui/Tutorial.tsx');
