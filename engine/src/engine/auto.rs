@@ -68,6 +68,14 @@ fn covers(guessed: &str, sent: &str) -> bool {
 }
 
 impl Core {
+    fn route_profiles(&self, only: Option<Vendor>) -> Vec<Profile> {
+        let vendors: Vec<_> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        candidates(&vendors, &self.codex_models)
+            .into_iter()
+            .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+            .collect()
+    }
+
     /// Whether Auto routes this conversation's next message: its first one (`Some(None)`), or the next ones while only
     /// an easy model was needed, such as after a greeting (`Some(Some(the model so far))`). A conversation whose first
     /// route came too late stays with the default, so a slow router does not hold up every message. ponytail: only the
@@ -227,6 +235,10 @@ impl Core {
     /// The route for a sent message: the draft's while it still holds, or a new one.
     pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
         let (tx, rx) = oneshot::channel();
+        if self.route_profiles(only).len() <= 1 {
+            let _ = tx.send(None);
+            return rx;
+        }
         match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
             Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
             Some(g) => g.waiters.push(tx),
@@ -264,9 +276,8 @@ impl Core {
     }
 
     fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>, only: Option<Vendor>) {
-        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
-        let cands = candidates(&vendors, &self.codex_models);
-        // One candidate needs no router: the everyday default answers.
+        let cands = self.route_profiles(only);
+        // Availability and quota can leave one model/effort profile, even with several subscriptions.
         let (answer, stop, actor) =
             if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None, crate::act::Actor::Faber) };
         if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, actor, waiters: vec![], warm, only, stop }) {
@@ -518,7 +529,21 @@ impl Core {
         }
         // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
         let from_router = routed.is_some();
-        let pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let mut pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let only = self.convs.get(id).filter(|c| c.messages.len() > 2).map(|_| pick.vendor);
+        if let [profile] = self.route_profiles(only).as_slice() {
+            let current =
+                PROFILES.iter().find(|p| p.vendor == pick.vendor && Some(p.model) == pick.model.as_deref() && p.effort == pick.effort);
+            if only.is_none() || current.is_none_or(|p| (profile.iq, profile.agent) >= (p.iq, p.agent)) {
+                pick = Pick {
+                    vendor: profile.vendor,
+                    model: Some(profile.model.into()),
+                    effort: profile.effort.into(),
+                    reason: "reason.autoSingleProfile".into(),
+                    pace: None,
+                };
+            }
+        }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
@@ -526,7 +551,7 @@ impl Core {
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
             let mut act = crate::act::FaberAct::route(&shown_pick, if from_router { fallback.1 } else { crate::act::Actor::Faber });
-            if fallback.2 {
+            if fallback.2 && pick.reason != "reason.autoSingleProfile" {
                 act.why = Some("act.why.routerTimeout".into());
             }
             m.acts.push(act);
@@ -560,7 +585,7 @@ impl Core {
     /// Gets the router ready when the user starts typing in Auto. Codex answers on its running process; a cold Claude
     /// process takes about 9 s, so one starts now and waits for the question, closing when it goes unused.
     pub(super) fn warm_router(&mut self) {
-        if self.opts.ask.is_some() || self.spare.is_some() {
+        if self.opts.ask.is_some() || self.spare.is_some() || self.route_profiles(None).len() == 1 {
             return;
         }
         let codex = self.opts.clis.get(&Vendor::Codex).cloned().filter(|_| self.codex_models.iter().any(|m| m == ROUTER[0].1));
@@ -610,6 +635,32 @@ pub(super) fn stop_router(stop: Option<Stop>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn one_usable_profile_filters_quota_before_routing_or_warming() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|c| {
+            for vendor in [Vendor::Claude, Vendor::Codex] {
+                c.opts.clis.insert(vendor, Cli { command: "fake".into(), prefix: vec![] });
+                c.ledger.of_mut(vendor).billing = Billing::Subscription;
+            }
+            c.codex_models = vec!["gpt-6-luna".into()];
+            c.opts.ask = Some(Arc::new(|_| panic!("the exhausted subscription is not a choice")));
+        });
+        engine.note_account_events(
+            Vendor::Claude,
+            vec![EngineEvent::Quota { window: "five_hour".into(), used: 1.0, resets_at: unix_secs() + 3600.0 }],
+        );
+        let mut answer = engine.with(|c| {
+            assert_eq!(c.route_profiles(None).len(), 1);
+            assert!(c.route_profiles(Some(Vendor::Claude)).is_empty());
+            c.route_for("test", 0, None)
+        });
+        assert_eq!(answer.try_recv().unwrap(), None, "no task, timeout or model request is needed");
+        assert!(engine.ledger().codex.unmetered.is_empty());
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn creative_aux_events_bound_output_and_settle_cost_once() {

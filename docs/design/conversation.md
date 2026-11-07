@@ -38,7 +38,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
-  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task, only when that changed the pick. A wait for quota is told once,
+  tooltip. With one usable model/effort profile after availability, quota and conversation filters, Auto answers directly and its reason says only one profile is available; no router request is made. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task, only when that changed the pick. A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - The line under an answer (its buttons, hover bar, the reply's state and why it stopped) is in [answer-line.md](answer-line.md).
 - A reply shows as it happened (`ui/timeline.ts`): stretches of the agent's words (`div.md`), steps and thinking

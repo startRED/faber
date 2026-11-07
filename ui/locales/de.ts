@@ -601,6 +601,7 @@ export const de: Messages = {
   'reason.chosen': 'von dir gewählt',
   'reason.autoDefault': 'Automatisch: die Wahl für den Alltag',
   'reason.autoOnly': 'Automatisch: das einzige verbundene Abo',
+  'reason.autoSingleProfile': 'Automatisch: nur eine Kombination aus Modell und Aufwand verfügbar',
   'reason.routing': 'das beste Modell wird gewählt…',
   'reason.route': 'Automatisch: {kind}, {level}',
   'kind.chat': 'Unterhaltung',

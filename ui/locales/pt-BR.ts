@@ -761,6 +761,7 @@ export const ptBR: Messages = {
   'reason.chosen': 'escolhido por você',
   'reason.autoDefault': 'Automático: padrão do dia a dia',
   'reason.autoOnly': 'Automático: a única assinatura conectada',
+  'reason.autoSingleProfile': 'Automático: só há uma opção de modelo e esforço',
   'reason.routing': 'escolhendo o melhor modelo…',
   'reason.route': 'Automático: {kind}, {level}',
   'kind.chat': 'conversa',

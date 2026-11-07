@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "fixed": {
+      "en": "Auto answers directly when only one model and effort is available, without asking another AI to choose.",
+      "pt-BR": "O Automático responde direto quando só há uma opção de modelo e esforço, sem pedir pra outra IA escolher.",
+      "es": "Automático responde directamente cuando solo hay una opción de modelo y esfuerzo, sin pedir a otra IA que elija.",
+      "fr": "Auto répond directement lorsqu’un seul choix de modèle et d’effort est disponible, sans demander à une autre IA de choisir.",
+      "de": "Automatisch antwortet direkt, wenn nur eine Kombination aus Modell und Aufwand verfügbar ist, ohne eine weitere KI wählen zu lassen."
+    }
+  }
+}

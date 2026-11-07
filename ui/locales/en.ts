@@ -762,6 +762,7 @@ export const en = {
   'reason.chosen': 'chosen by you',
   'reason.autoDefault': 'Auto: everyday default',
   'reason.autoOnly': 'Auto: the only connected subscription',
+  'reason.autoSingleProfile': 'Auto: only one model and effort is available',
   'reason.routing': 'choosing the best model…',
   'reason.route': 'Auto: {kind}, {level}',
   'kind.chat': 'conversation',
