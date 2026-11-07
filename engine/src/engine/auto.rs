@@ -540,6 +540,7 @@ impl Core {
         // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
         let from_router = routed.is_some();
         let mut pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let route_reason = pick.reason.starts_with("reason.route.").then(|| pick.reason.clone());
         let only = self.convs.get(id).filter(|c| c.messages.len() > 2).map(|_| pick.vendor);
         if let [profile] = self.route_profiles(only).as_slice() {
             let current =
@@ -557,13 +558,17 @@ impl Core {
             pick.reason = "reason.autoImmediate".into();
         }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
+        // Immediate and single-profile explanations must not erase the route's difficulty for later messages.
+        if let Some(reason) = route_reason {
+            pick.reason = reason;
+        }
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
             let mut act = crate::act::FaberAct::route(&shown_pick, if from_router { fallback.1 } else { crate::act::Actor::Faber });
-            if fallback.2 && pick.reason != "reason.autoSingleProfile" {
+            if fallback.2 && shown_pick.reason != "reason.autoSingleProfile" {
                 act.why = Some("act.why.routerTimeout".into());
             }
             m.acts.push(act);
@@ -647,6 +652,248 @@ pub(super) fn stop_router(stop: Option<Stop>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn auto_send(text: &str) -> SendRequest {
+        SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: text.into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "auto".into(), model: None, effort: None },
+        }
+    }
+    async fn wait_for(mut ready: impl FnMut() -> bool) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !ready() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fake CLI did not reach the expected state");
+    }
+    async fn draft_finished(engine: &Engine, text: &str) {
+        wait_for(|| engine.with(|c| c.guess.as_ref().is_some_and(|g| g.request == text && g.result.is_some()))).await;
+    }
+    async fn turn_finished(engine: &Engine, id: &str, turn: usize) -> Message {
+        wait_for(|| engine.open(id).is_some_and(|c| c.messages.get(turn * 2 + 1).is_some_and(|m| m.status == Some(Status::Done)))).await;
+        engine.open(id).unwrap().messages[turn * 2 + 1].clone()
+    }
+    // A native fake CLI: each draft has its own verdict; the second one cannot finish until the test releases it.
+    async fn three_message_fallback(vendor: Vendor, path: &str) {
+        use crate::events::EngineEvent;
+        use crate::proc::{Proc, Spawner};
+        use serde_json::json;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        async fn emit(output: &mut tokio::io::DuplexStream, msg: serde_json::Value) {
+            output.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        }
+
+        let dir = crate::workspace::TestRoot::new();
+        let drafts = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let (seen, held) = (drafts.clone(), release.clone());
+        let spawn: Spawner = Arc::new(move |_, args, _| {
+            let (stdin, input) = tokio::io::duplex(65536);
+            let (mut output, stdout) = tokio::io::duplex(65536);
+            let mut input = tokio::io::BufReader::new(input);
+            let model = args.windows(2).find(|p| p[0] == "--model").map(|p| p[1].clone()).unwrap_or_default();
+            let claude_router = args.iter().any(|s| s.contains("You classify"));
+            let (seen, held) = (seen.clone(), held.clone());
+            tokio::spawn(async move {
+                let mut threads = BTreeMap::new();
+                let mut line = String::new();
+                while input.read_line(&mut line).await.unwrap_or(0) > 0 {
+                    let msg: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    line.clear();
+                    let method = msg["method"].as_str().unwrap_or_default();
+                    if matches!(method, "thread/start" | "thread/resume") {
+                        let id = msg["params"]["threadId"].as_str().map(str::to_string).unwrap_or_else(|| format!("thread-{}", msg["id"]));
+                        threads.insert(id.clone(), msg["params"]["baseInstructions"].as_str().unwrap_or_default().contains("You classify"));
+                        emit(&mut output, json!({"id":msg["id"],"result":{"model":msg["params"]["model"],"thread":{"id":id,"turns":[]}}}))
+                            .await;
+                        continue;
+                    }
+                    if method == "config/read" {
+                        emit(&mut output, json!({"id":msg["id"],"result":{"config":{}}})).await;
+                        continue;
+                    }
+                    if method == "thread/unsubscribe" {
+                        emit(&mut output, json!({"id":msg["id"],"result":{"status":"unsubscribed"}})).await;
+                        continue;
+                    }
+                    if method != "turn/start" && msg["type"] != "user" {
+                        if !msg["id"].is_null() {
+                            emit(&mut output, json!({"id":msg["id"],"result":{}})).await;
+                        }
+                        continue;
+                    }
+                    let router =
+                        if vendor == Vendor::Claude { claude_router } else { threads[msg["params"]["threadId"].as_str().unwrap()] };
+                    let text =
+                        if vendor == Vendor::Claude { msg["message"]["content"].to_string() } else { msg["params"]["input"].to_string() };
+                    let hard = text.contains("billing service");
+                    if router {
+                        seen.lock().unwrap().push(text.clone());
+                        if text.contains("pong") {
+                            held.notified().await;
+                        }
+                    }
+                    let answer = if router {
+                        json!({"kind":if hard {"code"} else {"chat"},"difficulty":if hard {"hard"} else {"easy"},"confidence":0.95})
+                            .to_string()
+                    } else {
+                        "Answer".into()
+                    };
+                    if vendor == Vendor::Claude {
+                        emit(&mut output, json!({"type":"system","subtype":"init","session_id":"test","model":model})).await;
+                        emit(
+                            &mut output,
+                            json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":answer}}}),
+                        )
+                        .await;
+                        emit(
+                            &mut output,
+                            json!({"type":"result","subtype":"success","is_error":false,"result":answer,"total_cost_usd":0.001,"usage":{}}),
+                        )
+                        .await;
+                    } else {
+                        let thread = &msg["params"]["threadId"];
+                        emit(&mut output, json!({"id":msg["id"],"result":{"turn":{"id":"turn","status":"inProgress","items":[]}}})).await;
+                        emit(&mut output, json!({"method":"turn/started","params":{"threadId":thread,"turn":{"id":"turn"}}})).await;
+                        emit(&mut output, json!({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":"turn","itemId":"answer","delta":answer}})).await;
+                        emit(&mut output, json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":"turn","status":"completed","items":[]}}})).await;
+                    }
+                }
+            });
+            Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+        });
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: dir.path().into(),
+                #[cfg(windows)]
+                chat_dir: dir.work().into(),
+                clis: BTreeMap::from([(vendor, Cli { command: "fake".into(), prefix: vec![] })]),
+                spawn,
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 3,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        engine.note_account_events(
+            vendor,
+            vec![EngineEvent::Signals(crate::signals::Signals {
+                billing: Some(crate::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+        engine.set_codex_models(vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
+        let warm = |id| WarmRequest {
+            conversation_id: id,
+            area: Area::Chat,
+            project_id: None,
+            choice: Choice { vendor: "auto".into(), model: None, effort: None },
+        };
+        engine.route_draft(warm(None), "In one sentence: why is the sky blue?".into());
+        // A finished first draft warms the answering CLI, then Send consumes the cached verdict.
+        draft_finished(&engine, "In one sentence: why is the sky blue?").await;
+        let id = engine.send(auto_send("In one sentence: why is the sky blue?")).unwrap();
+        engine.rename(&id, "Three messages");
+        let first = turn_finished(&engine, &id, 0).await;
+        assert_eq!(first.reason.as_deref(), Some("reason.route.chat.easy"));
+        let second_text = "Reply with just the word: pong";
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        let single_profile = |used| {
+            if vendor == Vendor::Codex {
+                engine.set_codex_models(
+                    if used { vec!["gpt-6-luna".into()] } else { vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()] },
+                    Some("gpt-6-luna".into()),
+                );
+            } else {
+                engine.note_account_events(
+                    vendor,
+                    ["seven_day_opus", "seven_day_sonnet"]
+                        .map(|window| EngineEvent::Quota {
+                            window: window.into(),
+                            used: if used { 1.0 } else { 0.0 },
+                            resets_at: now + if used { 3600.0 } else { 7200.0 },
+                        })
+                        .to_vec(),
+                );
+            }
+        };
+        if path == "pending" {
+            engine.route_draft(warm(Some(id.clone())), second_text.into());
+            wait_for(|| drafts.lock().unwrap().len() == 2).await;
+        } else if path == "single" {
+            single_profile(true);
+        }
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(second_text) }).unwrap();
+        let second = turn_finished(&engine, &id, 1).await;
+        assert_eq!(second.model, first.model);
+        assert_eq!(second.acts[0].why.as_deref(), Some(if path == "single" { "reason.autoSingleProfile" } else { "reason.autoImmediate" }));
+        if path == "pending" {
+            release.notify_one();
+            draft_finished(&engine, second_text).await;
+            assert_eq!(engine.open(&id).unwrap().messages[3].model, first.model, "a late classifier cannot change the sent turn");
+        }
+        if path == "single" {
+            single_profile(false);
+        }
+        let hard = "Now refactor my billing service";
+        engine.route_draft(warm(Some(id.clone())), hard.into());
+        let expected = if path == "pending" { 3 } else { 2 };
+        if engine.with(|c| c.guess.as_ref().is_some_and(|g| g.request == hard)) {
+            draft_finished(&engine, hard).await;
+        }
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(hard) }).unwrap();
+        let third = turn_finished(&engine, &id, 2).await;
+        assert_eq!(third.vendor, Some(vendor));
+        assert_eq!(third.reason.as_deref(), Some("reason.route.code.hard"));
+        assert_ne!(third.model, first.model);
+        assert_eq!(drafts.lock().unwrap().len(), expected);
+        assert_eq!(engine.open(&id).unwrap().messages[3].reason.as_deref(), Some("reason.route.chat.easy"));
+        let saved = engine.with(|c| c.store.get(&id).unwrap());
+        assert_eq!(saved.messages[3].reason.as_deref(), Some("reason.route.chat.easy"));
+        assert_eq!(saved.messages[3].acts[0].why, second.acts[0].why);
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_pending_draft() {
+        three_message_fallback(Vendor::Claude, "pending").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_pending_draft_codex() {
+        three_message_fallback(Vendor::Codex, "pending").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_cold_followup() {
+        three_message_fallback(Vendor::Claude, "cold").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_a_cold_followup_codex() {
+        three_message_fallback(Vendor::Codex, "cold").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_one_profile_recovers() {
+        three_message_fallback(Vendor::Claude, "single").await;
+    }
+
+    #[tokio::test]
+    async fn three_messages_preserve_routing_after_one_profile_recovers_codex() {
+        three_message_fallback(Vendor::Codex, "single").await;
+    }
 
     #[tokio::test]
     async fn router_send_discards_queued_draft_work_for_that_conversation() {

@@ -1,0 +1,101 @@
+Build storage: 31.8 GB exceeds the 12 GB budget; active and protected caches were kept
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\trim-router\engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 28s
+     Running unittests src\lib.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\faber_engine-10571912e8a90aed.exe)
+
+running 18 tests
+test engine::auto::tests::router_send_discards_queued_draft_work_for_that_conversation ... ok
+test engine::auto::tests::rewind_a_guessed_project_route_never_starts_before_its_message ... ok
+test engine::auto::tests::one_usable_profile_filters_quota_before_routing_or_warming ... ok
+test engine::auto::tests::only_a_retry_of_a_finished_auto_answer_says_the_pick_was_not_good_enough ... ok
+test engine::auto::tests::auto_keeps_the_model_the_live_process_was_asked_for_even_when_that_is_the_default ... ok
+test engine::auto::tests::creative_aux_quota_revocation_closes_and_refuses_the_answer ... ok
+test engine::auto::tests::creative_aux_events_bound_output_and_settle_cost_once ... ok
+test engine::auto::tests::creative_late_cost_after_cancel_is_counted_once_without_settling_another_request ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup ... ok
+test engine::auto::tests::a_message_after_a_finished_auto_answer_keeps_it ... ok
+test engine::auto::tests::the_draft_count_starts_again_when_a_message_is_sent_queued_or_not_and_goes_with_the_conversation ... ok
+test engine::auto::tests::taking_the_offered_step_up_counts_twice ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft_codex ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup_codex ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers ... ok
+test engine::auto::tests::only_the_first_question_of_a_conversation_asked_again_teaches ... ok
+test engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers_codex ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1057 filtered out; finished in 0.60s
+
+     Running tests\adopted_read_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\adopted_read_cost-b656178158d17209.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\background_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\background_cost-9e4decbedd236fc9.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\all.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\engine-88523da0eb91f2a7.exe)
+
+running 15 tests
+test auto::agent_questions_and_child_results_explain_why_they_were_sent ... ok
+test auto::with_only_claude_the_router_process_starts_while_the_user_types ... ok
+test auto::r121_the_codex_router_starts_its_own_isolated_process_while_conversations_follow_the_chosen_mode ... ok
+test auto::stop_while_the_route_is_coming_stops_the_answer ... ok
+test auto::a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first ... ok
+test auto::a_failed_router_keeps_the_previous_choice ... ok
+test auto::no_router_candidates_keep_the_default_reason ... ok
+test auto::one_usable_profile_skips_router_and_uses_that_profile ... ok
+test auto::a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does ... ok
+test auto::once_a_message_needs_more_than_an_easy_model_the_conversation_stays_with_it ... ok
+test auto::a_router_without_an_answer_leaves_the_everyday_default ... ok
+test auto::auto_routes_the_first_message_blind_and_says_why ... ok
+test auto::a_draft_routed_while_typing_answers_without_asking_again ... ok
+test auto::a_draft_is_routed_at_most_twice_while_typing_and_sending_starts_the_count_again ... ok
+test auto::a_slow_router_starts_the_turn_with_a_reason_within_the_budget ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 1385 filtered out; finished in 2.81s
+
+     Running tests\first_word_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\first_word_cost-59691a6812d91cc0.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\guarded_commands\main.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\guarded_commands-bd6070dbda6c2f1b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests\install_memory.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\install_memory-ea9b3591b57a495d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\project_facts_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\project_facts_cost-0679f1d156bdbd14.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\rewind\main.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\rewind-b427197a903963e8.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+     Running tests\rewind_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\rewind_cost-212574fe15cb176b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\verify_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\verify_cost-6532f7c924a03667.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

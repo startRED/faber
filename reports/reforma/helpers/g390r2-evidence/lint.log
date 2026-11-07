@@ -1,0 +1,17 @@
+
+> faber@0.3.2 lint
+> oxlint ui tests/ui electron
+
+ui/markdown.tsx:140:32: warning unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily. help: `for…of` can iterate over iterable, it's unnecessary to convert to an array.
+ui/markdown.tsx:141:32: warning unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily. help: `for…of` can iterate over iterable, it's unnecessary to convert to an array.
+ui/visual-page-runtime.js:94:52: warning unicorn(prefer-string-starts-ends-with): Prefer String#startsWith over a regex with a caret. help: Replace `/^script-src/.test(apply(directive, event, []))` with `apply(directive, event, []).startsWith('script-src')`.
+ui/ProjectMemory.tsx:27:7: warning eslint(no-unassigned-vars): 'body' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+ui/QuickQuestion.tsx:65:7: warning eslint(no-unassigned-vars): 'body' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+ui/QuickQuestion.tsx:66:7: warning eslint(no-unassigned-vars): 'box' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+tests/ui/site.check.ts:1075:15: warning eslint(no-unused-expressions): Expected expression to be used help: Consider using this expression or removing it
+ui/AgentChat.tsx:304:7: warning eslint(no-unassigned-vars): 'section' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+tests/ui/sidebar-exit.check.ts:32:7: warning eslint(no-unused-expressions): Expected expression to be used help: Consider using this expression or removing it
+ui/AnswerChanges.tsx:21:7: warning eslint(no-unassigned-vars): 'retryButton' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+ui/AnswerChanges.tsx:61:7: warning eslint(no-unassigned-vars): 'retryButton' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+ui/AnswerChanges.tsx:101:7: warning eslint(no-unassigned-vars): 'retryButton' is always 'undefined' because it's never assigned. help: Variable declared without assignment. Either assign a value or remove the declaration.
+ui/App.tsx:2310:86: warning typescript(no-non-null-asserted-optional-chain): Optional chain expressions can return undefined by design: using a non-null assertion is unsafe and wrong. help: Remove the non-null assertion.

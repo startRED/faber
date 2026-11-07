@@ -1,0 +1,75 @@
+Build storage: 31.7 GB exceeds the 12 GB budget; active and protected caches were kept
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running unittests src\lib.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\faber_engine-10571912e8a90aed.exe)
+
+running 8 tests
+test engine::title::tests::title_six_words_quotes_controls_and_localized_link_hosts ... ok
+test engine::title::tests::title_quota_and_billing_denials_never_call_a_model ... ok
+test engine::title::tests::title_deleted_and_shutdown_conversations_cancel_pending_work ... ok
+test engine::title::tests::title_timeout_keeps_fallback_and_late_answer_cannot_rename ... ok
+test engine::title::tests::title_router_replacement_does_not_start_unrelated_model_work ... ok
+test engine::title::tests::title_manual_rename_even_to_original_name_and_changed_titles_win ... ok
+test engine::title::tests::title_once_after_first_answer_in_message_language_and_settings_for_code ... ok
+test engine::title::tests::title_first_exchange_ignores_newer_messages_and_preserves_excluded_conversations ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1067 filtered out; finished in 0.17s
+
+     Running tests\adopted_read_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\adopted_read_cost-b656178158d17209.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\background_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\background_cost-9e4decbedd236fc9.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\all.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\engine-88523da0eb91f2a7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1400 filtered out; finished in 0.00s
+
+     Running tests\first_word_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\first_word_cost-59691a6812d91cc0.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\guarded_commands\main.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\guarded_commands-bd6070dbda6c2f1b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests\install_memory.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\install_memory-ea9b3591b57a495d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\project_facts_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\project_facts_cost-0679f1d156bdbd14.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\rewind\main.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\rewind-b427197a903963e8.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+     Running tests\rewind_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\rewind_cost-212574fe15cb176b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\verify_cost.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\verify_cost-6532f7c924a03667.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

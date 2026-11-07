@@ -40,7 +40,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   needed more, the conversation stays with that model. One usable model/effort profile needs no classifier. Otherwise,
   the native router runs while the person types, with up to 30 s for CLI startup and inference. Sending reuses a finished,
   still-matching draft verdict; when none is ready it starts immediately with the previous choice or everyday default,
-  without opening a classifier request on send. An injected classifier retains its bounded 2.5 s path. The answer shows the chosen model and why. While the person types, the
+  without opening a classifier request on send. Reusing an easy route preserves its eligibility for later drafts, even
+  after an immediate send or a temporary single-profile limit; the displayed explanation is separate from that marker.
+  An injected classifier retains its bounded 2.5 s path. The answer shows the chosen model and why. While the person types, the
   draft is routed at most twice per message, and sending it starts the count again (done, `engine/src/engine/auto.rs`).
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or

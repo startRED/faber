@@ -1,0 +1,5 @@
+
+> faber@0.3.2 docs
+> node scripts/docs.mjs
+
+docs: 63 living pages, each within its limit, listed and linked

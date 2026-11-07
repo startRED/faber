@@ -1,0 +1,57 @@
+Build storage: 31.8 GB exceeds the 12 GB budget; active and protected caches were kept
+   Compiling faber-engine v0.1.0 (E:\Documentos\ProjetosIA\faber\.claude\worktrees\trim-router\engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 51.34s
+     Running unittests src\lib.rs (E:\Documentos\ProjetosIA\faber\target\build-1\debug\deps\faber_engine-10571912e8a90aed.exe)
+
+running 6 tests
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers' (18564) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoSingleProfile")
+ right: Some("reason.route.code.hard")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers ... FAILED
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers_codex' (20240) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoSingleProfile")
+ right: Some("reason.route.code.hard")
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup_codex' (47644) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoImmediate")
+ right: Some("reason.route.code.hard")
+test engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers_codex ... FAILED
+test engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup_codex ... FAILED
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft_codex' (12500) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoImmediate")
+ right: Some("reason.route.code.hard")
+test engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft_codex ... FAILED
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup' (33760) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoImmediate")
+ right: Some("reason.route.code.hard")
+test engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup ... FAILED
+
+thread 'engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft' (40528) panicked at engine\src\engine\auto.rs:852:9:
+assertion `left == right` failed
+  left: Some("reason.autoImmediate")
+ right: Some("reason.route.code.hard")
+test engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft ... FAILED
+
+failures:
+
+failures:
+    engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup
+    engine::auto::tests::three_messages_preserve_routing_after_a_cold_followup_codex
+    engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft
+    engine::auto::tests::three_messages_preserve_routing_after_a_pending_draft_codex
+    engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers
+    engine::auto::tests::three_messages_preserve_routing_after_one_profile_recovers_codex
+
+test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 1069 filtered out; finished in 0.45s
+
+error: test failed, to rerun pass `-p faber-engine --lib`
