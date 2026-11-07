@@ -229,7 +229,10 @@ document.addEventListener('DOMContentLoaded', async () => {{
     app.page.cdp.serve_https_fixture(&server.origin)?;
     app.page.eval("window.__visualNetworkReports=[];window.addEventListener('message',e=>{if(e.origin==='null' && e.source===document.querySelector('.visual-frame')?.contentWindow && e.data?.visualNetworkResult)window.__visualNetworkReports.push(e.data.visualNetworkResult);});void 0")?;
     app.page.click(&css(".list .item").has_text("Visual network"))?;
-    app.page.click(&css(".visual-card .visual-open").last())?;
+    // Preserve one document per network-policy step; inline preview/expansion has its own lifecycle check.
+    app.page.eval(
+        "[...document.querySelectorAll('.visual-card .visual-open')].at(-1).click();document.querySelector('.visual-expand').click()",
+    )?;
     report(&mut app.page, 1, 2, false)?;
     same(server.requests(), Vec::<String>::new(), "off sends no request even to the controlled HTTPS fixture")?;
     app.page
@@ -262,7 +265,9 @@ document.addEventListener('DOMContentLoaded', async () => {{
     app.page.wait_count(&css(".visual-pane"), 0)?;
     same(app.page.count(&css("iframe"))?, 0, "closing removes the network-enabled frame too")?;
     save_web(&mut app.page, "live")?;
-    app.page.click(&css(".visual-card .visual-open").last())?;
+    app.page.eval(
+        "[...document.querySelectorAll('.visual-card .visual-open')].at(-1).click();document.querySelector('.visual-expand').click()",
+    )?;
     report(&mut app.page, 4, 2, true)?;
     same(server.requests().len(), 8, "reopening snapshots the saved live permission")?;
     app.page.eval("window.__networkFrame=null;window.__networkSource=null;void 0")?;
