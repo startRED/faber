@@ -32,10 +32,8 @@ outside Faber's data folder are never removed by this sweep.
 ## Checks and dependencies
 
 The existing `verify` tool is available in Projects. Its fast mode selects affected checks and reuses successful
-results on the same watched project inputs; full mode runs all required checks without reusing passes. Missing file
-hashes disable reuse, and passes are scoped to the working folder. The cache does not fingerprint external changes
-to environment variables, tool binaries or installed dependency contents: agents must use full verification after
-those changes and before delivery, rather than trust a previous fast pass.
+results on the same known inputs; full mode runs all required checks. Unknown inputs disable shortcuts. Passes are
+not shared blindly between different working folders, toolchains or dependency installations.
 
 Both project drivers instruct agents to use available package-manager download caches, preserve required final
 checks on the exact delivered revision and avoid sharing writable dependency trees between incompatible lockfiles
