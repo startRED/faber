@@ -763,6 +763,7 @@ export const es: Messages = {
   'reason.autoDefault': 'Automático: el habitual',
   'reason.autoOnly': 'Automático: la única suscripción conectada',
   'reason.autoSingleProfile': 'Automático: solo hay una opción de modelo y esfuerzo',
+  'reason.autoImmediate': 'Automático: empezó con el predeterminado sin esperar la elección',
   'reason.routing': 'eligiendo el mejor modelo…',
   'reason.route': 'Automático: {kind}, {level}',
   'kind.chat': 'conversación',

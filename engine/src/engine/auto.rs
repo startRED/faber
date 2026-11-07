@@ -10,11 +10,10 @@ use tokio::sync::oneshot;
 
 /// How long a sent message may wait before the last choice or everyday default answers.
 pub(super) const ROUTE_BUDGET: Duration = Duration::from_millis(2500);
-/// The router itself gives up at the same point, drafts included.
-const ASK_LIMIT: Duration = ROUTE_BUDGET;
+/// Draft work includes CLI startup and inference (recorded medians exceed the send budget).
+const ASK_LIMIT: Duration = Duration::from_secs(30);
 
-/// How many times the draft of one message is routed while the person types it. The route of the sent message is never
-/// counted: it is asked for when the message leaves, or its draft's answer is reused.
+/// How many times the draft of one message is routed while the person types it.
 const DRAFT_ROUTES: u8 = 2;
 
 type RouteAnswer = Option<(Option<Asked>, crate::act::Actor)>;
@@ -232,10 +231,21 @@ impl Core {
         }
     }
 
-    /// The route for a sent message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+    /// A sent message uses a finished draft route; cold or pending classification never delays a send.
+    pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+        // Already-started work can settle its price, but queued draft work must not start after this send.
+        if self.next_draft.as_ref().is_some_and(|d| d.warm == id) {
+            self.next_draft = None;
+        }
         let (tx, rx) = oneshot::channel();
         if self.route_profiles(only).len() <= 1 {
+            let _ = tx.send(None);
+            return rx;
+        }
+        // An injected classifier has no CLI startup. Native routing runs while typing, never on the send's clock.
+        if self.opts.ask.is_none()
+            && !self.guess.as_ref().is_some_and(|g| attached == 0 && g.only == only && covers(&g.request, request) && g.result.is_some())
+        {
             let _ = tx.send(None);
             return rx;
         }
@@ -543,6 +553,8 @@ impl Core {
                     pace: None,
                 };
             }
+        } else if !from_router && !fallback.2 && self.route_profiles(only).len() > 1 {
+            pick.reason = "reason.autoImmediate".into();
         }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
@@ -637,6 +649,21 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn router_send_discards_queued_draft_work_for_that_conversation() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with(|c| {
+            c.next_draft = Some(Draft { request: "queued".into(), warm: "sent".into(), only: None });
+            let _ = c.route_for("sent", "queued", 0, None);
+            assert!(c.next_draft.is_none(), "sending must not start another classifier later for already-sent text");
+            c.next_draft = Some(Draft { request: "other".into(), warm: "other-conversation".into(), only: None });
+            let _ = c.route_for("sent", "queued", 0, None);
+            assert!(c.next_draft.is_some(), "another conversation still owns its draft");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn one_usable_profile_filters_quota_before_routing_or_warming() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
@@ -655,7 +682,7 @@ mod tests {
         let mut answer = engine.with(|c| {
             assert_eq!(c.route_profiles(None).len(), 1);
             assert!(c.route_profiles(Some(Vendor::Claude)).is_empty());
-            c.route_for("test", 0, None)
+            c.route_for("sent", "test", 0, None)
         });
         assert_eq!(answer.try_recv().unwrap(), None, "no task, timeout or model request is needed");
         assert!(engine.ledger().codex.unmetered.is_empty());

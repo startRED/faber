@@ -602,6 +602,7 @@ export const fr: Messages = {
   'reason.autoDefault': 'Auto : le choix du quotidien',
   'reason.autoOnly': 'Auto : le seul abonnement connecté',
   'reason.autoSingleProfile': 'Auto : un seul choix de modèle et d’effort disponible',
+  'reason.autoImmediate': 'Auto : démarrage avec le modèle par défaut sans attendre le choix',
   'reason.routing': 'choix du meilleur modèle…',
   'reason.route': 'Auto : {kind}, {level}',
   'kind.chat': 'conversation',

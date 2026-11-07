@@ -4382,7 +4382,7 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
-            let route = self.route_for(&item.text, images.len() + attachments_len, only);
+            let route = self.route_for(id, &item.text, images.len() + attachments_len, only);
             self.push(id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.to_string(), images);
             tokio::spawn(async move {
@@ -5460,7 +5460,7 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
-            let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
+            let route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {

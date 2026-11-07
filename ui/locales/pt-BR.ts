@@ -762,6 +762,7 @@ export const ptBR: Messages = {
   'reason.autoDefault': 'Automático: padrão do dia a dia',
   'reason.autoOnly': 'Automático: a única assinatura conectada',
   'reason.autoSingleProfile': 'Automático: só há uma opção de modelo e esforço',
+  'reason.autoImmediate': 'Automático: começou com o padrão sem esperar pela escolha',
   'reason.routing': 'escolhendo o melhor modelo…',
   'reason.route': 'Automático: {kind}, {level}',
   'kind.chat': 'conversa',
