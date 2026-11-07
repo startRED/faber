@@ -165,6 +165,25 @@ fn a_project_prompt_teaches_the_decision_author_mark_and_the_common_persona_does
     assert!(!common.contains("Faber follows the pull requests"));
 }
 
+#[test]
+fn every_project_receives_the_portable_git_workflow_without_changing_chat() {
+    let common = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    let project = faber_engine::persona::PROJECT_DETAILS;
+    for rule in [
+        "In every project, use its existing workflow",
+        "do not make another full clone for each task",
+        "never share a writable dependency tree between incompatible lockfiles or toolchains",
+        "reuse passes only while their inputs and environment are unchanged",
+        "exact revision being delivered",
+        "never silently update the person's checkout",
+        "without removing required checks or replacing its pipeline",
+        "only Faber-owned idle copies",
+    ] {
+        assert!(project.contains(rule), "missing workflow rule: {rule}");
+        assert!(!common.contains(rule), "project workflow leaked into Chat: {rule}");
+    }
+}
+
 /// "Offer the bigger ask": only a project's own agent has the tool, so only its prompt names it, and the request as asked stays the default.
 #[test]
 fn a_project_prompt_teaches_the_bigger_offer_and_the_common_persona_does_not() {

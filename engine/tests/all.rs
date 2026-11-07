@@ -68,6 +68,8 @@ mod export;
 mod failed_writes;
 #[path = "failure.rs"]
 mod failure;
+#[path = "git_maintenance.rs"]
+mod git_maintenance;
 #[path = "goals.rs"]
 mod goals;
 #[path = "groups.rs"]

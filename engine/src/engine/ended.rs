@@ -29,6 +29,7 @@ impl Core {
         }
         self.drain(conv);
         self.tell_parent(conv);
+        self.schedule_copy_sweep();
     }
 
     pub(super) fn seen(&mut self, id: &str) -> Result<(), String> {

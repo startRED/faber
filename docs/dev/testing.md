@@ -66,8 +66,8 @@ of an earlier failure. Process enumeration may also delay reporting; no memory l
 A page wait (`Cdp::settle`) runs inside the page: one DevTools call of up to two seconds reads the condition again at
 every change of the document (at most every 16 ms, and every 50 ms without a change), instead of one call every 100 ms
 from the runner. A condition the page cannot wrap, statements rather than one expression, is asked every 100 ms as before. The checks and the hooks that report them exist only in the test build
-(`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
-only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
+(`--features test-hooks`, `vite build --mode test`); production `dist/` has none. CI's [shared-base proofs](landing.md#fast-lane)
+stay independent; each run picks jobs by changed files (R163), with the same rules as
 `cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
 `.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, the test files of the engine
 and the shell need only the `rust` suite, the queue's own scripts and the scripts' tests only the lints (rule `lints`), a

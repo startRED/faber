@@ -11,6 +11,7 @@ pub mod copy;
 pub mod git;
 pub mod goals;
 pub mod lease;
+pub mod maintenance;
 pub mod memory;
 pub mod proof;
 pub mod remote;

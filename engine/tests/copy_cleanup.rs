@@ -110,6 +110,7 @@ impl Executor for Git {
                 say("")
             }
             ["worktree", "prune"] | ["branch", "-D", _] => say(""),
+            ["maintenance", "run", ..] => say(""),
             ["ls-files", ..] => say(&repo.tracked),
             ["check-ignore", ..] => {
                 if repo.ignored {
@@ -221,6 +222,19 @@ async fn a_running_copy_keeps_its_rebuildable_folders_during_the_startup_sweep()
     std::fs::write(target.join("keep"), "still in use").unwrap();
     s.engine.sweep_copies();
     assert_eq!(std::fs::read_to_string(target.join("keep")).unwrap(), "still in use");
+    s.engine.shutdown();
+}
+
+#[tokio::test]
+async fn idle_storage_maintenance_applies_to_an_ordinary_project_without_a_conversation() {
+    let s = setup();
+    let root = s.git.lock().unwrap().root.clone();
+    std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+    s.engine.sweep_copies();
+    s.engine.sweep_copies();
+    let calls = s.git.lock().unwrap().calls.clone();
+    assert_eq!(calls.iter().filter(|args| args.first().is_some_and(|a| a == "maintenance")).count(), 1);
+    assert!(calls.iter().all(|args| !args.iter().any(|a| a == "fetch" || a == "gc")), "housekeeping never downloads or prunes history");
     s.engine.shutdown();
 }
 

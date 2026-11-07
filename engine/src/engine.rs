@@ -514,6 +514,7 @@ struct Core {
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
     git_missing: bool,
+    copy_sweeps: crate::project::maintenance::Sweeps,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
@@ -844,6 +845,7 @@ impl Engine {
                 test_items: Vec::new(),
                 git: None,
                 git_missing: false,
+                copy_sweeps: Default::default(),
                 rewind,
                 unclean_exit,
                 project_states: Mutex::new(HashMap::new()),
@@ -1730,6 +1732,7 @@ impl Engine {
     pub fn is_working(&self) -> bool {
         self.with(|c| {
             !c.running.items.is_empty()
+                || c.copy_sweeps.running()
                 // An install the agent was allowed to make goes on after Stop, with nothing in the list.
                 || c.agent_installs > 0
                 // A standing goal's check runs for a while with nothing in the list.

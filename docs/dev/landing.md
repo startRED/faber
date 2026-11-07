@@ -11,12 +11,27 @@ the base moved meanwhile, it squashes, numbers and proves again on the new tip (
 another file can still break this one. A branch with an open pull request gets a `Pull-request: #<n>` trailer, a comment with
 the landed commit and the pull request closed. `--dry-run` stops before the push.
 
-The push starts `ci.yml` on `phase-1-base`, whose runs are never cancelled. `main`, which updates installed copies,
+Each delivery uses a locked detached worktree under `.faber/verify/`, sharing Git objects instead of copying the whole
+repository. Its HEAD, index and fetched base ref are private; the caller's branch, index and configuration stay intact.
+Numbering takes that exact fetched base (`numbers.mjs assign --amend --base <full SHA>`), without fetching a different tip.
+Each retry proves its new combined tree. Success and failure remove only that worktree; a cleanup failure reports its
+path and fails, preserving it for inspection. Installed dependencies are linked from the caller, never copied or installed again.
+Proof subprocesses stop Git discovery at the verification folder, while their own test repositories stay independent.
+On the maintainer's PC (one run, 2026-11-07), preparing the same HEAD took 100.13 s with the old private clone and
+2.10 s with the worktree (97.9% less); the clone copied 1.08 GB of Git objects while the worktree added 139 KB of its own
+Git metadata. This measures preparation only, not proofs, network pushes or performance on another machine.
+
+The push starts `ci.yml` on `phase-1-base`, with a separate concurrency group for every run: no newer pending push
+replaces an untested commit. Pull requests and queue branches still cancel superseded runs. `main`, which updates installed copies,
 moves only to a commit whose `gate` is green (R127), so a red commit never reaches anyone's Faber. When the `gate` is
 red, the `revert` job (`scripts/revert-red.mjs`) looks at the parent's `gate` (not its whole run, whose Electron jobs
 only advise): parent green and no later commit green, the commit is the culprit and is reverted at once, with a comment on the commit and on its pull request, which wakes the author; parent pending,
 cancelled or missing, the culprit is not known yet and the commit only gets a comment; a revert, or a run GitHub gave no
 runner, is left alone. The fix ships again with `ship.mjs`.
+
+Main advances only by fast-forward; a competing promotion that already includes the checked commit is success.
+Test-app jobs and their warm caches build only `dist-test`; independent check jobs still build production assets.
+Electron's normal `npm ci` installs its binary once in the jobs that need it.
 
 Why (2026-11-05): through the queue a pull request took a median 6.7 h from opened to landed, p90 23.9 h, and 30% of
 queue runs were red; a direct landing waits only for its quick proofs while `main` keeps the same guarantee.
