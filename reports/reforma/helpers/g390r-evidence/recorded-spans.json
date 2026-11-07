@@ -1,0 +1,162 @@
+[
+  {
+    "request": "everyday-question",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-everyday-question-bench\\everyday-question\\faber\\state\\budget.json",
+    "sha256": "f23ec9df3d586193d639d7a7a6fe71eb09d216ae1b7fe52629632d8684d23d34",
+    "firstSpan": {
+      "start": 1793979706.0,
+      "end": 1793979708.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [],
+    "spawnCount": 4
+  },
+  {
+    "request": "fix-invoice",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-fix-invoice-bench\\fix-invoice\\faber\\state\\budget.json",
+    "sha256": "7a562cffaaeaab321c646d0e6f6d21180c25760e4bbfd25a1d2ab7fe3e4430ce",
+    "firstSpan": {
+      "start": 1793979798.0,
+      "end": 1793979801.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [
+      {
+        "start": 1793979842.0,
+        "end": 1793979845.0,
+        "model": "gpt-6-luna",
+        "cost": 0.001239,
+        "incomplete": false
+      }
+    ],
+    "spawnCount": 4
+  },
+  {
+    "request": "migrate-settings",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-migrate-settings-bench\\migrate-settings\\faber\\state\\budget.json",
+    "sha256": "f7e750672dfdb520cd0f86e93ac422e3e7ae3ece897c2fb7988331c365fbe3d3",
+    "firstSpan": {
+      "start": 1793979954.0,
+      "end": 1793979956.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [
+      {
+        "start": 1793980024.0,
+        "end": 1793980027.0,
+        "model": "gpt-6-luna",
+        "cost": 0.001673,
+        "incomplete": false
+      }
+    ],
+    "spawnCount": 4
+  },
+  {
+    "request": "organize-folder",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-organize-folder-bench\\organize-folder\\faber\\state\\budget.json",
+    "sha256": "251347445bfb0cb9af7bef11d531a786541fcfb7e8712e73c3352eef62848471",
+    "firstSpan": {
+      "start": 1793979093.0,
+      "end": 1793979096.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [
+      {
+        "start": 1793979149.0,
+        "end": 1793979152.0,
+        "model": "gpt-6-luna",
+        "cost": 0.001231,
+        "incomplete": false
+      }
+    ],
+    "spawnCount": 4
+  },
+  {
+    "request": "plan-an-app",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-plan-an-app-bench\\plan-an-app\\faber\\state\\budget.json",
+    "sha256": "5b2f9019104eca11b9f941aa555953c05ebe9354bb585e11945f6ae3a8b8c69d",
+    "firstSpan": {
+      "start": 1793979221.0,
+      "end": 1793979224.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [],
+    "spawnCount": 4
+  },
+  {
+    "request": "research-with-sources",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-research-with-sources-bench\\research-with-sources\\faber\\state\\budget.json",
+    "sha256": "1bb61c140c209729b482824b4e532dfee88e39fbe0ebb47bf98d86739cc97a1d",
+    "firstSpan": {
+      "start": 1793979574.0,
+      "end": 1793979577.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [],
+    "spawnCount": 4
+  },
+  {
+    "request": "summarize-sales",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-summarize-sales-bench\\summarize-sales\\faber\\state\\budget.json",
+    "sha256": "eff70728642c15352c023cf7495d3d2df90655965300a3d22bf4cb99e771fa60",
+    "firstSpan": {
+      "start": 1793980136.0,
+      "end": 1793980139.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [
+      {
+        "start": 1793980203.0,
+        "end": 1793980206.0,
+        "model": "gpt-6-luna",
+        "cost": 0.001337,
+        "incomplete": false
+      }
+    ],
+    "spawnCount": 4
+  },
+  {
+    "request": "todo-app",
+    "source": "E:\\Temp\\faber-g390c2-final-evidence\\attempt-1-todo-app-bench\\todo-app\\faber\\state\\budget.json",
+    "sha256": "dda8d9b567257a5a2057db99f41aea8cd6e766e16de25231bf83ce48aed3a0dc",
+    "firstSpan": {
+      "start": 1793979377.0,
+      "end": 1793979380.0,
+      "model": "gpt-6-luna",
+      "cost": null,
+      "incomplete": true
+    },
+    "unknownEntries": 1.0,
+    "knownTitleSpans": [
+      {
+        "start": 1793979456.0,
+        "end": 1793979459.0,
+        "model": "gpt-6-luna",
+        "cost": 0.001337,
+        "incomplete": false
+      }
+    ],
+    "spawnCount": 4
+  }
+]

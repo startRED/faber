@@ -1,0 +1,30 @@
+{
+  "noNewModelServiceCalls": true,
+  "gameLaunched": false,
+  "failingFirst": [
+    {"check":"one_usable_profile_skips_router_and_uses_that_profile","before":"reason.autoOnly != reason.autoSingleProfile","after":"passed"},
+    {"check":"router_cold_send_starts_at_once_without_an_auxiliary_request","before":"act.why.routerTimeout != reason.autoImmediate","after":"passed"},
+    {"check":"router_draft_can_finish_after_the_old_send_deadline","before":"reason.autoOnly != reason.route.chat.easy","after":"passed"},
+    {"check":"router_send_discards_queued_draft_work_for_that_conversation","before":"next_draft remained after send","after":"passed"},
+    {"check":"title_cheapest_models_use_low_effort_and_known_ledger_spend","before":"medium != low","after":"passed for both vendors, known native spend in both ledgers"}
+  ],
+  "proofs": [
+    {"command":"npm run lint","exit":0,"existingWarnings":13},
+    {"command":"npm run typecheck","exit":0},
+    {"command":"npm run docs","exit":0,"livingPages":63},
+    {"command":"npm run build","exit":0,"existingChunkSizeWarning":true},
+    {"command":"cargo fmt --all --check","exit":0},
+    {"command":"npm run test:scripts","exit":0,"passed":321,"skipped":5},
+    {"command":"node --test scripts/numbers.test.mjs","exit":0,"passed":12,"skipped":1},
+    {"command":"node scripts/cargo.mjs t --filter one_usable_profile","exit":0,"passed":3},
+    {"command":"node scripts/cargo.mjs t --claims","exit":0},
+    {"command":"node scripts/cargo.mjs check -p faber-engine --all-targets -j 1","exit":0},
+    {"command":"node scripts/cargo.mjs test -p faber-engine --lib --test engine auto:: -j 1 -- --nocapture","exit":0,"passed":27},
+    {"command":"node scripts/cargo.mjs test -p faber-engine --test engine auxiliary:: -j 1 -- --nocapture","exit":0,"passed":4},
+    {"command":"node scripts/cargo.mjs test -p faber-engine --lib engine::title::tests -j 1 -- --nocapture","exit":0,"passed":8},
+    {"command":"node scripts/cargo.mjs test -p faber-engine --test engine locales:: -j 1 -- --nocapture","exit":0,"passed":4},
+    {"command":"git diff --check","exit":0}
+  ],
+  "independentReview":{"agent":"/root/review_router","mode":"read-only","finding":"post-send queued classification","resolution":"cleared only for the sent conversation; regression failed before fix, passed after; reviewer closed finding","remainingBlockers":0},
+  "limitations":["No live model, benchmark, UI or memory measurement","Historical logs do not partition router startup versus inference or preserve late responses","Known native title accounting was already present and is protected, not reconstructed","Missing or incomplete native usage remains unknown","Heavy Rust suites, Clippy and macOS were not run"]
+}

@@ -1,5 +1,12 @@
 {
   "notes": {
+    "better": {
+      "en": "Conversation titles use low effort on the cheapest available model; their reported cost stays included in your usage.",
+      "pt-BR": "Os títulos das conversas usam esforço baixo no modelo mais barato disponível; o custo informado continua incluído no seu uso.",
+      "es": "Los títulos usan esfuerzo bajo con el modelo disponible más económico; el coste informado sigue incluido en tu uso.",
+      "fr": "Les titres utilisent un effort faible avec le modèle disponible le moins cher ; leur coût déclaré reste inclus dans votre utilisation.",
+      "de": "Gesprächstitel nutzen niedrigen Aufwand beim günstigsten verfügbaren Modell; die gemeldeten Kosten bleiben in deinem Verbrauch enthalten."
+    },
     "fixed": {
       "en": "Auto no longer holds your first message waiting to choose a model; with one option it answers directly.",
       "pt-BR": "O Automático não segura mais sua primeira mensagem esperando escolher um modelo; com uma opção só, responde direto.",
