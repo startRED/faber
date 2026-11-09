@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
-import { proof, proofEnvironment, proofsFor, temporaryWorktree, withTrailer } from './ship.mjs';
+import { localeNeeded, proof, proofEnvironment, proofsFor, temporaryWorktree, withTrailer } from './ship.mjs';
 
 test('proofs follow the changed files', () => {
   assert.deepEqual(proofsFor(['docs/a.json', 'README.md']), [['npm', 'run', 'docs']]);
@@ -12,6 +12,19 @@ test('proofs follow the changed files', () => {
   assert.deepEqual(all.at(-1), ['node', 'scripts/cargo.mjs', 'check', '--workspace', '--all-targets']);
   assert.equal(proofsFor(['Cargo.lock']).length, 6);
   assert.equal(proofsFor(['ui/a.ts']).length, 5);
+});
+test('locale proof follows English changes and removed key uses', () => {
+  const en = "  'menu.open': 'Open',\n  'look.dark.name': 'Dark',";
+  assert.equal(localeNeeded(['ui/locales/en.ts'], '', en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], "-t('menu.open')", en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '-t(`look.${id}.name`)', en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '-t(`${section}.${action}`)', en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '-  `${section}.${action}`', en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '-  ${section}.${action}', en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '+t("menu.open")', en), false);
+  assert.equal(localeNeeded(['ui/a.ts'], "-const prefix = 'look.da'", en), true);
+  assert.equal(localeNeeded(['ui/a.ts'], '-const x = 1', en), false);
+  assert.ok(proofsFor(['ui/a.ts'], true).at(-1).includes('every_english_text_is_shown_somewhere'));
 });
 test('adds a pull request trailer once', () => {
   assert.equal(withTrailer('fix: a\n', 12), 'fix: a\n\nPull-request: #12\n');
@@ -96,8 +109,8 @@ test('a ship candidate numbers the fetched snapshot and proves its final tree on
   assert.match(source, /'--no-write-fetch-head'.*\+refs\/heads\/phase-1-base:refs\/worktree\/faber-ship-base/);
   assert.match(source, /'scripts\/numbers\.mjs', 'assign', '--amend', '--base', base/);
   const loop = source.slice(source.indexOf('for (let attempt = 1; attempt <= 3; attempt++)'));
-  assert.ok(loop.indexOf("g('merge', '--squash', original)") < loop.indexOf('proofsFor(finalFiles)'));
-  assert.ok(loop.indexOf('proofsFor(finalFiles)') < loop.indexOf("g('push', remote"));
+  assert.ok(loop.indexOf("g('merge', '--squash', original)") < loop.indexOf('proofsFor(finalFiles,'));
+  assert.ok(loop.indexOf('proofsFor(finalFiles,') < loop.indexOf("g('push', remote"));
 });
 
 test('proof subprocesses cannot discover the source and can still create independent Git fixtures', () => {

@@ -23,11 +23,9 @@ Git metadata. This measures preparation only, not proofs, network pushes or perf
 
 The push starts `ci.yml` on `phase-1-base`, with a separate concurrency group for every run: no newer pending push
 replaces an untested commit. Pull requests and queue branches still cancel superseded runs. `main`, which updates installed copies,
-moves only to a commit whose `gate` is green (R127), so a red commit never reaches anyone's Faber. When the `gate` is
-red, the `revert` job (`scripts/revert-red.mjs`) looks at the parent's `gate` (not its whole run, whose Electron jobs
-only advise): parent green and no later commit green, the commit is the culprit and is reverted at once, with a comment on the commit and on its pull request, which wakes the author; parent pending,
-cancelled or missing, the culprit is not known yet and the commit only gets a comment; a revert, or a run GitHub gave no
-runner, is left alone. The fix ships again with `ship.mjs`.
+moves only to a commit whose `gate` is green (R127), so a red commit never reaches anyone's Faber. When the gate is red, `scripts/revert-red.mjs` reverts a confirmed required failure immediately if the parent gate passed and no later commit passed. It reads each required job's conclusion, runner ID and step conclusions from GitHub's jobs API. A cancelled, timed-out, unstarted or unconfirmed job holds the base instead; a failed job with a runner and failed step identifies a failure, though the API cannot prove its underlying cause. A revert or unavailable runner is left alone. Main still moves only after a green gate.
+
+The ship proof also runs the isolated unused-English-text test when the English locale changes or a removed source line contains an English key, a dynamic key prefix, or a template literal containing `${` under `ui/` outside `ui/locales/`. Other changes do not run it; the checks can conservatively select extra changes. On the maintainer PC (2026-11-09), a first run took 96.2 s including compilation, of which the test itself took 19.44 s.
 
 Main advances only by fast-forward; a competing promotion that already includes the checked commit is success.
 Test-app jobs and their warm caches build only `dist-test`; independent check jobs still build production assets.

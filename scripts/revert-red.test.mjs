@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, notice, pullRequest, revertMessage, revertsOf } from './revert-red.mjs';
+import { decide, failureAction, notice, pullRequest, revertMessage, revertsOf } from './revert-red.mjs';
 
 test('only a red commit on a green parent gate, not fixed later, is reverted', () => {
   const input = { subject: 'fix: a', parentGate: 'success', reverted: false, fixedLater: false, runnerUnavailable: false };
@@ -23,4 +23,18 @@ test('messages preserve the run, commit and optional pull request', () => {
   assert.equal(revertMessage('fix: a', 'abc', 'url'), 'revert: fix: a\n\nFailed run: url\n\nReverts: abc\n');
   assert.match(notice('abc', 'url'), /abc was reverted/);
   assert.match(notice('abc', 'url'), /node scripts\/ship\.mjs/);
+});
+
+test('only confirmed required failures identify a culprit', () => {
+  const job = (name, conclusion = 'failure') => ({ name, conclusion, runner_id: 1, steps: [{ conclusion }] });
+  assert.equal(failureAction([job('docs', 'cancelled')]), 'skip');
+  assert.equal(failureAction([job('docs', 'timed_out')]), 'skip');
+  assert.equal(failureAction([job('docs', null)]), 'skip');
+  assert.equal(failureAction([{ ...job('docs'), runner_id: null, steps: [] }]), 'skip');
+  assert.equal(failureAction([{ ...job('docs'), steps: [] }]), 'skip');
+  assert.equal(failureAction([job('screen (1/8)')]), 'revert');
+  assert.equal(failureAction([job('check (lint)')]), 'revert');
+  assert.equal(failureAction([job('check (lint)'), job('screen (1/8)', 'cancelled')]), 'revert');
+  assert.equal(failureAction([job('screen (1/8)', 'cancelled'), job('docs', 'timed_out')]), 'skip');
+  assert.equal(failureAction([job('electron', 'failure')]), 'skip');
 });

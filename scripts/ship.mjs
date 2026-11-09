@@ -4,13 +4,24 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { verdict, failures, message as baseMessage, tipPassed } from './base.mjs';
 
 const words = (file) => file.startsWith('docs/') || file.endsWith('.md');
-export function proofsFor(files) {
+export function localeNeeded(files, diff, english) {
+  if (files.includes('ui/locales/en.ts')) return true;
+  const keys = [...english.matchAll(/^  ['"]([^'"]+)['"]:/gm)].map((m) => m[1]);
+  const removed = diff.split('\n').filter((line) => line.startsWith('-') && !/^--- (a\/|\/dev\/null)/.test(line)).map((line) => line.slice(1));
+  return removed.some((line) => {
+    const literals = [...line.matchAll(/['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
+    // Any removed `${` selects the check: a key built over several lines has no single line with both marks.
+    return line.includes('${') || keys.some((key) => line.includes(key) || literals.some((literal) => key.startsWith(literal)) || key.split('.').slice(0, -1).some((_, i, parts) => line.includes(parts.slice(0, i + 1).join('.') + '.')));
+  });
+}
+export function proofsFor(files, locale = false) {
   if (files.every(words)) return [['npm', 'run', 'docs']];
   const proofs = [['npm', 'run', 'lint'], ['npm', 'run', 'typecheck'], ['npm', 'run', 'docs'],
     ['npm', 'run', 'build'], ['cargo', 'fmt', '--all', '--check']];
   if (files.some((f) => f.startsWith('scripts/'))) proofs.push(['npm', 'run', 'test:scripts']);
   if (files.some((f) => /(^|\/)(Cargo\.toml|Cargo\.lock)$|\.rs$/.test(f)))
     proofs.push(['node', 'scripts/cargo.mjs', 'check', '--workspace', '--all-targets']);
+  if (locale) proofs.push(['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-engine', '--test', 'engine', 'every_english_text_is_shown_somewhere']);
   return proofs;
 }
 export function withTrailer(message, number) {
@@ -132,7 +143,8 @@ export function main(args) {
       });
       const finalFiles = list(g('diff', '--name-only', '-z', base, 'HEAD'));
       // Every candidate tree is proven again: a base change in another file can still break this one.
-      const proofs = proofsFor(finalFiles);
+      const diff = g('diff', '--no-ext-diff', '--unified=0', base, 'HEAD', '--', 'ui/', ':(exclude)ui/locales/');
+      const proofs = proofsFor(finalFiles, localeNeeded(finalFiles, diff, readFileSync(join(dir, 'ui/locales/en.ts'), 'utf8')));
       // Without installed packages lint and typecheck fail on files the change never touched; say why instead.
       if (proofs.length > 1 && !existsSync('node_modules')) throw Error('node_modules is missing here: run `npm ci` first.');
       for (const args of proofs) if (!proof(args, dir, proofEnv)) return 1;
