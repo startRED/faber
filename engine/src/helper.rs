@@ -27,23 +27,28 @@ pub enum Helper {
     Offers,
     /// A helper: it leaves no history in the CLI and cannot call a helper of its own.
     Is,
+    /// An independent reviewer: helper restrictions without a team channel.
+    Reviewer,
     /// A quick question on the side (R250): it may only read, search and list the working folder, and leaves no history.
     Aside,
 }
 
-const DESCRIPTION: &str = "Hand reading many files to a read helper instead of reading them yourself; hand a self-contained change to a build helper; ask for a review of finished work. The brief must stand alone with the goal, files and what done looks like. Do a piece yourself if it needs a stronger model than yours. The report is short; a longer report is saved in a file.";
+const DESCRIPTION: &str = "helper({title, brief}) starts a helper; helper({to, answer}) answers and waits; helper({to, tell}) instructs immediately; helper({to, wait:true}) waits for a question or report. Hand reading many files to a read helper instead of reading them yourself; hand a self-contained change to a build helper; ask for a review of finished work. The brief must stand alone with the goal, files and what done looks like. Do a piece yourself if it needs a stronger model than yours. The report is short; a longer report is saved in a file.";
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
+            "to": { "type": "string" },
+            "answer": { "type": "string", "maxLength": 1000 },
+            "tell": { "type": "string", "maxLength": 1000 },
+            "wait": { "type": "boolean" },
             "title": { "type": "string", "description": "A few words naming the piece of work, shown to the person." },
             "brief": { "type": "string", "description": "Everything the helper needs to do the work on its own." },
             "job": { "type": "string", "enum": ["read", "build", "review"], "description": "The kind of work; defaults to review." },
             "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "Difficulty of a build; defaults to medium." },
             "kind": { "type": "string", "enum": ["chat", "writing", "code", "math", "research", "image", "other"], "description": "The kind of task; defaults to code." }
         },
-        "required": ["title", "brief"],
         "additionalProperties": false
     })
 }
@@ -51,6 +56,55 @@ fn schema() -> Value {
 /// The tool as a Codex `dynamicTools` entry.
 pub fn codex_tool() -> Value {
     json!({ "type": "function", "name": NAME, "description": DESCRIPTION, "inputSchema": schema() })
+}
+
+pub const TEAM_NAME: &str = "team";
+pub const TEAM_CLAUDE_NAME: &str = "mcp__faber__team";
+pub const NO_ANSWER: &str = "No answer: decide yourself and say what you assumed in your report.";
+pub const TEAM_LIMIT: usize = 6;
+pub const TEAM_LENGTH: usize = 1000;
+
+/// Both drivers offer this only to helpers, which cannot delegate or request approvals.
+pub fn team_tool() -> Value {
+    json!({"name": TEAM_NAME, "description": "who lists the team; ask asks the lead and waits; tell sends a short note to a named teammate. Decide yourself whenever possible. At most 6 messages, 1000 characters each.",
+        "inputSchema": {"type":"object", "properties": {
+            "do":{"type":"string","enum":["who","ask","tell"]},
+            "to":{"type":"string"}, "text":{"type":"string","maxLength":1000}},
+            "required":["do"], "additionalProperties":false}})
+}
+
+pub fn team_codex_tool() -> Value {
+    let mut tool = team_tool();
+    tool["type"] = json!("function");
+    tool
+}
+
+/// Paths named in a brief, without reading the folder or sending its contents.
+pub fn brief_files(brief: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    for word in brief.split_whitespace() {
+        let path = word
+            .trim_start_matches(['`', '\'', '"', '(', ')', '[', ']', ',', ';'])
+            .trim_end_matches(['`', '\'', '"', '(', ')', '[', ']', ',', ';', '.']);
+        let path = path
+            .rsplit_once(':')
+            .filter(|(_, line)| !line.is_empty() && line.chars().all(|c| c.is_ascii_digit()))
+            .map_or(path, |(file, _)| file);
+        let named = word.starts_with(['`', '\'', '"'])
+            || path.contains(['/', '\\'])
+            || path.starts_with('.')
+            || matches!(path, "Makefile" | "Dockerfile" | "Justfile" | "README" | "LICENSE");
+        let extension =
+            path.rsplit_once('.').is_some_and(|(_, ext)| !ext.is_empty() && ext.len() <= 8 && ext.chars().all(char::is_alphanumeric));
+        if (named || extension)
+            && !path.trim_matches(['.', '/', '\\']).is_empty()
+            && !path.contains("://")
+            && !files.iter().any(|f| f == path)
+        {
+            files.push(path.to_string());
+        }
+    }
+    files
 }
 
 /// What Faber's MCP server answers to one message Claude Code sends it.
@@ -67,6 +121,7 @@ pub enum Mcp {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Tools {
     pub helper: bool,
+    pub team: bool,
     pub browse: bool,
     /// Conversations the agent starts by itself (`crate::sibling`).
     pub conversation: bool,
@@ -82,7 +137,7 @@ pub struct Tools {
 
 impl Tools {
     pub fn any(self) -> bool {
-        self.helper || self.browse || self.conversation || self.verify || self.map || self.progress
+        self.helper || self.team || self.browse || self.conversation || self.verify || self.map || self.progress
     }
 }
 
@@ -99,6 +154,9 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
         })),
         "tools/list" => {
             let mut list = vec![];
+            if tools.team {
+                list.push(team_tool());
+            }
             if tools.helper {
                 list.push(json!({ "name": NAME, "description": DESCRIPTION, "inputSchema": schema() }));
             }
@@ -139,6 +197,7 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
 /// The offered tool a call names, if any.
 fn called(name: &Value, tools: Tools) -> Option<&'static str> {
     match name.as_str()? {
+        TEAM_NAME if tools.team => Some(TEAM_NAME),
         NAME if tools.helper => Some(NAME),
         crate::review::NAME if tools.progress => Some(crate::review::NAME),
         crate::browser::NAME if tools.browse => Some(crate::browser::NAME),
@@ -237,13 +296,22 @@ pub fn select(
     }
 }
 
-/// What the helper's session is asked: the agent's own title and brief, framed so it knows nobody can answer it.
+/// What the helper's session is asked: the agent's own title and brief, with a bounded team channel.
 pub fn prompt(input: &Value) -> Option<String> {
+    worker_prompt(input, true)
+}
+
+pub fn worker_prompt(input: &Value, team: bool) -> Option<String> {
     let brief = input["brief"].as_str().map(str::trim).filter(|b| !b.is_empty())?;
     let title = input["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("A piece of work");
+    let decisions = if team {
+        "Decide whatever you reasonably can yourself; ask the lead with team only for a choice that is not yours and costly to get wrong. Tell a teammate directly when your work changes what it must do; team who lists them."
+    } else {
+        "Decide yourself and state any assumptions in your report."
+    };
     Some(format!(
         "You are a helper. Another AI agent working in this folder handed you the piece of work below. You cannot see its \
-         conversation, and nobody can answer questions, so decide for yourself and do what you can. Finish with a report of about 1,200 characters at most, in this order: \
+         conversation. {decisions} Finish with a report of about 1,200 characters at most, in this order: \
          the outcome in one or two sentences; files changed; checks run and their results; anything you could not do or assumed.\n\nTask: {title}\n\n{brief}"
     ))
 }
@@ -438,8 +506,9 @@ mod tests {
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {
-        let mcp =
-            |m: &Value| mcp(m, Tools { helper: true, browse: false, conversation: false, verify: false, map: false, progress: false });
+        let mcp = |m: &Value| {
+            mcp(m, Tools { team: false, helper: true, browse: false, conversation: false, verify: false, map: false, progress: false })
+        };
         let init = json!({"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0});
         let Mcp::Answer(a) = mcp(&init) else { panic!() };
         assert_eq!((a["id"].clone(), a["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
@@ -493,15 +562,15 @@ mod tests {
             Mcp::Call { .. } => panic!(),
         };
         assert_eq!(
-            list(Tools { helper: true, browse: true, conversation: false, verify: false, map: false, progress: false }),
+            list(Tools { team: false, helper: true, browse: true, conversation: false, verify: false, map: false, progress: false }),
             ["helper", "browse"]
         );
         assert_eq!(
-            list(Tools { helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
+            list(Tools { team: false, helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
             ["browse"]
         );
         assert_eq!(
-            list(Tools { helper: false, browse: false, conversation: false, verify: true, map: true, progress: false }),
+            list(Tools { team: false, helper: false, browse: false, conversation: false, verify: true, map: true, progress: false }),
             ["verify", "map"]
         );
         let map = json!({"method":"tools/call","params":{"name":"map","arguments":{}},"jsonrpc":"2.0","id":5});
@@ -510,11 +579,11 @@ mod tests {
         let call = json!({"method":"tools/call","params":{"name":"browse","arguments":{"url":"https://a.org"},
             "_meta":{"claudecode/toolUseId":"toolu_2"}},"jsonrpc":"2.0","id":4});
         assert_eq!(
-            mcp(&call, Tools { helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
+            mcp(&call, Tools { team: false, helper: false, browse: true, conversation: false, verify: false, map: false, progress: false }),
             Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
         );
         let Mcp::Answer(refused) =
-            mcp(&call, Tools { helper: true, browse: false, conversation: false, verify: false, map: false, progress: false })
+            mcp(&call, Tools { team: false, helper: true, browse: false, conversation: false, verify: false, map: false, progress: false })
         else {
             panic!("a tool not offered is never called")
         };
@@ -561,5 +630,58 @@ mod tests {
         assert!(ok && text.starts_with("Read it.") && text.contains("approval, so it did not: Bash."), "{text}");
         assert_eq!(report(false, "", &[], Some("error.quotaOut")), (false, "The helper stopped: error.quotaOut.".into()));
         assert_eq!(report(true, "", &[], None), (false, "The helper stopped: it ended without a report.".into()));
+    }
+}
+
+#[cfg(test)]
+mod team_tests {
+    use super::*;
+
+    #[test]
+    fn team_is_helper_only_and_uses_the_existing_reply_transport() {
+        let tools = Tools { team: true, ..Default::default() };
+        let Mcp::Answer(list) = mcp(&json!({"id":1,"method":"tools/list"}), tools) else { panic!() };
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(list["result"]["tools"][0]["name"], TEAM_NAME);
+        assert_eq!(team_codex_tool()["name"], TEAM_NAME);
+        let call =
+            json!({"id":2,"method":"tools/call","params":{"name":"team","arguments":{"do":"who"},"_meta":{"claudecode/toolUseId":"who"}}});
+        assert!(matches!(mcp(&call, tools), Mcp::Call { tool: TEAM_NAME, id, .. } if id == "who"));
+        assert!(matches!(mcp(&call, Tools { helper: true, ..Default::default() }), Mcp::Answer(_)));
+        assert!(matches!(mcp(&json!({"id":3,"method":"tools/call","params":{"name":"helper"}}), tools), Mcp::Answer(_)));
+    }
+
+    #[test]
+    fn team_roster_extracts_only_named_files_without_reading_them() {
+        assert_eq!(
+            brief_files("Change `engine/a.rs:12`, ui/b.ts and engine/a.rs. Keep https://example.test out. Read E:\\work\\config.toml."),
+            ["engine/a.rs", "ui/b.ts", "E:\\work\\config.toml"]
+        );
+        assert_eq!(
+            brief_files("Change Makefile and .gitignore. Also `scripts/check`, `./.env:2`, [.dockerignore], and Makefile."),
+            ["Makefile", ".gitignore", "scripts/check", "./.env", ".dockerignore"]
+        );
+        assert_eq!(brief_files(",engine/a.rs; ;Makefile `..` ../ ./"), ["engine/a.rs", "Makefile"]);
+        assert!(brief_files("Review the changes and report.").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    #[test]
+    fn team_tool_schemas_have_no_top_level_composition() {
+        let Mcp::Answer(list) = mcp(
+            &json!({"id":1,"method":"tools/list"}),
+            Tools { team: true, helper: true, browse: true, conversation: true, verify: true, map: true, progress: true },
+        ) else {
+            panic!()
+        };
+        for tool in list["result"]["tools"].as_array().unwrap().iter().chain([codex_tool(), team_codex_tool()].iter()) {
+            for keyword in ["anyOf", "oneOf", "allOf"] {
+                assert!(tool["inputSchema"].get(keyword).is_none(), "{}: {keyword}", tool["name"]);
+            }
+        }
+        assert!(codex_tool()["inputSchema"].get("required").is_none());
     }
 }

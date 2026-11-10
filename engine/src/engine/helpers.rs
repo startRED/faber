@@ -40,6 +40,11 @@ pub(super) struct Run {
     /// has begun (`turn/steer` names the turn). What the person wrote before that waits in `early` (id, words).
     ready: bool,
     early: Vec<(String, String)>,
+    lead_call: Option<String>,
+    question: Option<String>,
+    question_timed: bool,
+    sent: usize,
+    reviewer: bool,
 }
 
 struct Ended {
@@ -60,6 +65,16 @@ impl Core {
 
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.
     pub(super) fn start_helper(&mut self, conv: &str, call: String, input: serde_json::Value) {
+        if ["to", "answer", "tell", "wait"].iter().any(|key| input.get(key).is_some()) {
+            return self.helper_control(conv, &call, &input);
+        }
+        if helper::prompt(&input).is_some() {
+            self.init_team(conv, &call, &input);
+            if self.helpers.values().any(|h| h.conv == conv && h.question.is_some()) {
+                self.release_team_calls(conv, &call);
+                self.start_team_timers(conv);
+            }
+        }
         if let Err(why) = self.launch_helper(conv, &call, &input, None) {
             if why == super::worker_memory::PENDING {
                 let Some(sid) = self.live.get(conv).map(|live| live.sid) else { return };
@@ -101,8 +116,13 @@ impl Core {
                 self.never_read(conv, &call, &ids);
             }
             let (_, text) = helper::report(false, "", &[], Some(why));
+            self.change_team(conv, &call, |team| team.state = TeamState::Ended);
             if let Some(l) = self.live.get(conv) {
-                l.session.helper_reply(&call, false, text);
+                if self.team_of(conv, &call).is_some() && !l.open_tools.contains(&call) {
+                    self.handle(conv, l.sid, EngineEvent::HelperDone { id: call, ok: false, text });
+                } else {
+                    l.session.helper_reply(&call, false, text);
+                }
             }
         }
     }
@@ -161,7 +181,7 @@ impl Core {
         {
             return Err("three helpers are already working; wait for one to finish");
         }
-        let prompt = helper::prompt(input).ok_or("the brief was empty")?;
+        let prompt = helper::worker_prompt(input, review.is_none()).ok_or("the brief was empty")?;
         let economy = self.economy(conv);
         let review_vendor = review.unwrap_or_else(|| {
             let other = helper::other(lead_vendor);
@@ -264,7 +284,7 @@ impl Core {
                         group_instructions: None,
                         flags,
                         tuning,
-                        helper: Helper::Is,
+                        helper: if review.is_some() { Helper::Reviewer } else { Helper::Is },
                         browse: false,
                         conversations: false,
                         leads: false,
@@ -292,7 +312,7 @@ impl Core {
                     group_instructions: None,
                     permissions,
                     tuning,
-                    helper: Helper::Is,
+                    helper: if review.is_some() { Helper::Reviewer } else { Helper::Is },
                     browse: false,
                     conversations: false,
                     leads: false,
@@ -328,6 +348,7 @@ impl Core {
             self.emit_message(conv, &id);
         }
         session.send(UserTurn::text(prompt));
+        self.init_team(conv, call, input);
         let started = self.secs();
         let mut run = Run {
             conv: conv.to_string(),
@@ -348,6 +369,13 @@ impl Core {
             stopping: false,
             ready: vendor == Vendor::Claude,
             early: vec![],
+            lead_call: (self.team_of(conv, call).is_none()
+                || self.live.get(conv).is_some_and(|l| l.open_tools.iter().any(|id| id == call)))
+            .then(|| call.to_string()),
+            question: None,
+            question_timed: false,
+            sent: 0,
+            reviewer: review.is_some(),
         };
         self.mark_helper_seen(call);
         // What the person wrote while the helper was still starting (the box shows from its call on) is first in line.
@@ -361,7 +389,40 @@ impl Core {
         }
         self.expire_helper(call, hsid, MAX_RUN, "it ran out of time");
         self.flush_early(call);
+        if self.helpers.values().any(|h| h.conv == conv && h.question.is_some()) {
+            self.release_team_calls(conv, call);
+            self.start_team_timers(conv);
+        }
         Ok(())
+    }
+
+    fn init_team(&mut self, conv: &str, call: &str, input: &serde_json::Value) {
+        if self.team_of(conv, call).is_some() {
+            return;
+        }
+        let job = input["job"].as_str().filter(|job| matches!(*job, "read" | "build")).unwrap_or("review");
+        let title = input["title"].as_str().unwrap_or("A piece of work").to_string();
+        let number = self.turn(conv).map_or(1, |m| {
+            m.tools
+                .iter()
+                .flatten()
+                .filter(|t| matches!(t.name.as_str(), "Helper" | "Agent" | "Task" | "Review"))
+                .position(|t| t.id == call)
+                .unwrap_or(0)
+                + 1
+        });
+        let name = self.new_team_name(conv, &title, number);
+        if let Some(tool) = self.tool_of(conv, call) {
+            tool.team = Some(crate::model::HelperTeam {
+                name,
+                title,
+                job: job.into(),
+                files: helper::brief_files(input["brief"].as_str().unwrap_or_default()),
+                state: crate::model::TeamState::Running,
+                messages: vec![],
+            });
+        }
+        self.change_team(conv, call, |_| {});
     }
 
     /// Remembers a call that started or failed to start; only recent ones matter, so the set stays small.
@@ -377,7 +438,7 @@ impl Core {
         let Some(h) = self.helpers.get_mut(call) else { return };
         if h.ready || h.vendor == Vendor::Claude {
             for (id, text) in std::mem::take(&mut h.early) {
-                h.session.steer(UserTurn::text(helper::from_person(&text)), &id);
+                h.session.steer(UserTurn::text(if id.starts_with("team:") { text } else { helper::from_person(&text) }), &id);
             }
         }
     }
@@ -461,6 +522,11 @@ impl Core {
     /// What a helper's own session reports. Its tools show inside the agent's call; nobody answers its approvals, because the
     /// person sees only the agent: the agent hears what was refused and can do it itself, where the person approves it.
     fn helper_event(&mut self, call: &str, hsid: u64, event: EngineEvent) {
+        if self.helpers.get(call).is_some_and(|h| h.hsid == hsid)
+            && let EngineEvent::TeamCall { id, input } = &event
+        {
+            return self.team_call(call, id, input);
+        }
         self.rewind_helper_event(call, hsid, &event);
         if let EngineEvent::Background(update) = event {
             let owner = self
@@ -523,6 +589,7 @@ impl Core {
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
         match event {
+            EngineEvent::Tool { name, .. } if matches!(name.as_str(), helper::TEAM_NAME | helper::TEAM_CLAUDE_NAME) => {}
             EngineEvent::Tool { id, name, input, parent } => {
                 self.handle(&conv, sid, EngineEvent::Tool { id, name, input, parent: parent.or_else(|| Some(call.to_string())) })
             }
@@ -607,6 +674,7 @@ impl Core {
     }
 
     fn end_helper(&mut self, call: &str, ok: bool, error: Option<&str>, cost: Option<f64>, incomplete: bool) {
+        self.answer_team(call, helper::NO_ANSWER, true);
         self.flush_helper_words(call);
         let Some(h) = self.helpers.remove(call) else { return };
         if self.background.end_turn(&h.conv, h.hsid) {
@@ -634,9 +702,15 @@ impl Core {
                 text = "error.review.failed".into();
             }
             self.handle(&h.conv, h.sid, EngineEvent::ToolResult { id: call.to_string(), ok, declined: false, text });
-        } else if let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid) {
-            l.session.helper_reply(call, ok, text);
+        } else {
+            self.handle(&h.conv, h.sid, EngineEvent::HelperDone { id: call.into(), ok, text: text.clone() });
+            if let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid)
+                && let Some(pending) = h.lead_call.as_deref()
+            {
+                l.session.helper_reply(pending, ok, text);
+            }
         }
+        self.change_team(&h.conv, call, |team| team.state = crate::model::TeamState::Ended);
         if let Some(m) = self.turn(&h.conv) {
             if incomplete {
                 m.incomplete = Some(true);
@@ -702,14 +776,16 @@ impl Core {
         self.stop_verify(conv);
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.conv == conv).map(|(call, _)| call.clone()).collect();
         for call in calls {
-            if close {
-                if let Some(h) = self.helpers.remove(&call) {
-                    self.rewind_helper_retire(&call, h.hsid);
-                    h.session.close();
-                    self.note_span(h.vendor, h.started, &h.model, None, true);
-                    self.never_read(&h.conv, &call, &h.waiting);
+            if close || self.helpers.get(&call).is_some_and(|h| h.question.is_some()) {
+                self.end_helper(&call, false, Some("it was stopped"), None, true);
+                continue;
+            }
+            if let Some(h) = self.helpers.get_mut(&call) {
+                if let Some(pending) = h.lead_call.take()
+                    && let Some(live) = self.live.get(conv)
+                {
+                    live.session.helper_reply(&pending, false, "The helper was stopped.".into());
                 }
-            } else if let Some(h) = self.helpers.get_mut(&call) {
                 h.stopping = true;
                 h.session.interrupt();
                 // A helper whose turn had not begun cannot be interrupted: it ends here if it has not reported by then.
@@ -779,6 +855,11 @@ mod tests {
                         stopping: false,
                         ready: true,
                         early: vec![],
+                        lead_call: Some("call".into()),
+                        question: None,
+                        question_timed: false,
+                        sent: 0,
+                        reviewer: false,
                     },
                 );
                 if partial {
@@ -835,5 +916,376 @@ mod tests {
     #[tokio::test]
     async fn helper_jobs_keep_person_note_after_shortening_report() {
         helper_exit(Vendor::Claude, false, true).await;
+    }
+}
+use crate::model::{HelperTeam, QuestionState, TeamKind, TeamMessage, TeamState};
+
+impl Core {
+    fn new_team_name(&self, conv: &str, title: &str, number: usize) -> String {
+        let language = self.store.settings().language.unwrap_or_else(|| "en".into());
+        let names: BTreeMap<String, String> =
+            serde_json::from_str(include_str!("../../../ui/locales/helper-names.json")).expect("checked helper names");
+        let numbered = names.get(&language).unwrap_or(&names["en"]);
+        let used = |name: &str| {
+            self.convs.get(conv).is_some_and(|c| {
+                c.messages.iter().flat_map(|m| m.tools.iter().flatten()).any(|t| t.team.as_ref().is_some_and(|team| team.name == name))
+            })
+        };
+        let mut name = if language == "en" && !title.trim().is_empty() && !used(title) {
+            title.to_string()
+        } else {
+            numbered.replace("{n}", &number.to_string())
+        };
+        let mut suffix = number;
+        while used(&name) {
+            suffix += 1;
+            name = numbered.replace("{n}", &suffix.to_string());
+        }
+        name
+    }
+
+    fn team_of(&self, conv: &str, call: &str) -> Option<&HelperTeam> {
+        self.convs.get(conv)?.messages.iter().rev().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == call)?.team.as_ref()
+    }
+
+    fn team_name(&self, conv: &str, call: &str) -> String {
+        self.team_of(conv, call).map_or_else(|| call.to_string(), |t| t.name.clone())
+    }
+
+    fn change_team(&mut self, conv: &str, call: &str, change: impl FnOnce(&mut HelperTeam)) {
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let Some(m) = c.messages.iter_mut().rev().find(|m| m.tools.iter().flatten().any(|t| t.id == call)) else { return };
+        let Some(team) = m.tools.iter_mut().flatten().find(|t| t.id == call).and_then(|t| t.team.as_mut()) else { return };
+        change(team);
+        let id = m.id.clone();
+        self.save(conv);
+        self.push(conv, Some(&id), true);
+    }
+
+    fn team_record(&mut self, conv: &str, ends: (&str, &str), kind: TeamKind, text: &str, question: Option<String>) {
+        let (from, to) = ends;
+        let name = |id: &str| if matches!(id, "lead" | "engine") { id.to_string() } else { self.team_name(conv, id) };
+        let message = TeamMessage {
+            id: new_id(),
+            from: from.into(),
+            to: to.into(),
+            from_name: name(from),
+            to_name: name(to),
+            kind,
+            text: text.into(),
+            at: now(),
+            question,
+            state: (kind == TeamKind::Ask).then_some(QuestionState::Waiting),
+        };
+        for call in [from, to].into_iter().filter(|c| !matches!(*c, "lead" | "engine")) {
+            self.change_team(conv, call, |team| {
+                match kind {
+                    TeamKind::Ask => team.state = TeamState::WaitingLead,
+                    TeamKind::Answer | TeamKind::NoAnswer => {
+                        team.state = TeamState::Running;
+                        if let Some(ask) = team.messages.iter_mut().find(|m| m.kind == TeamKind::Ask && m.question == message.question) {
+                            ask.state = Some(if kind == TeamKind::NoAnswer { QuestionState::Lapsed } else { QuestionState::Answered });
+                        }
+                    }
+                    TeamKind::Tell => {}
+                }
+                team.messages.push(message.clone());
+            });
+        }
+    }
+
+    pub(super) fn helper_call_released(&self, conv: &str, call: &str) -> bool {
+        self.helpers.get(call).is_some_and(|h| h.conv == conv)
+            || self.convs.get(conv).is_some_and(|c| {
+                c.messages.iter().rev().flat_map(|m| m.tools.iter().flatten()).any(|t| {
+                    t.id == call
+                        && t.name == "Helper"
+                        && t.team.is_some()
+                        && (t.ok.is_some()
+                            || self.worker_waiting(&format!("helper:{call}"))
+                            || self.kit_checks.contains_key(&format!("helper:{call}")))
+                })
+            })
+    }
+
+    fn team_target(&self, conv: &str, name: &str) -> Option<String> {
+        self.helpers.keys().find(|call| self.helpers[*call].conv == conv && self.team_name(conv, call) == name).cloned()
+    }
+
+    fn team_reply(&self, call: &str, id: &str, ok: bool, text: &str) {
+        if let Some(h) = self.helpers.get(call) {
+            h.session.helper_reply(id, ok, text.into());
+        }
+    }
+
+    fn team_call(&mut self, call: &str, id: &str, input: &serde_json::Value) {
+        let Some(h) = self.helpers.get(call) else { return };
+        let conv = h.conv.clone();
+        if h.reviewer {
+            return self.team_reply(call, id, false, "Nobody can answer: decide yourself.");
+        }
+        if h.stopping {
+            return self.team_reply(call, id, false, "The helper was stopped. Decide yourself.");
+        }
+        if input["do"] == "who" {
+            let mut roster = vec![serde_json::json!({"name":"lead","job":"lead","title":"lead","files":[]})];
+            let mut calls: Vec<_> = self.helpers.keys().filter(|c| self.helpers[*c].conv == conv).collect();
+            calls.sort_by_key(|c| self.team_name(&conv, c));
+            for call in calls {
+                if let Some(team) = self.team_of(&conv, call) {
+                    roster.push(serde_json::json!({"name":team.name,"job":team.job,"title":team.title,"files":team.files}));
+                }
+            }
+            return self.team_reply(call, id, true, &serde_json::Value::Array(roster).to_string());
+        }
+        let raw = input["text"].as_str().unwrap_or("");
+        let text = raw.trim();
+        if text.is_empty() || raw.chars().count() > helper::TEAM_LENGTH || h.sent >= helper::TEAM_LIMIT {
+            return self.team_reply(call, id, false, "Team messages must be 1 to 1,000 characters, at most 6 per helper per reply. Decide yourself and state your assumption in your report.");
+        }
+        match input["do"].as_str() {
+            Some("ask") if h.question.is_none() => {
+                let h = self.helpers.get_mut(call).unwrap();
+                h.sent += 1;
+                h.question = Some(id.into());
+                h.question_timed = false;
+                self.team_record(&conv, (call, "lead"), TeamKind::Ask, text, Some(id.into()));
+                let notified = self.helpers.values().any(|h| h.conv == conv && h.lead_call.is_some())
+                    || self.live.get(&conv).is_some_and(|l| l.open_tools.iter().any(|id| self.queued_team_call(&conv, id, None)));
+                self.release_team_calls(&conv, call);
+                if !notified && let Some(live) = self.live.get(&conv) {
+                    live.session.steer(UserTurn::text(self.team_question(&conv, call)), &format!("team:{id}"));
+                }
+                self.expire_team_question(call, self.helpers[call].hsid, id, Duration::from_secs(15 * 60));
+                self.start_team_timers(&conv);
+            }
+            Some("tell") => {
+                if input["to"] == "lead" {
+                    return self.team_reply(call, id, false, "Use ask to send a message to the lead.");
+                }
+                let Some(target) = input["to"].as_str().and_then(|name| self.team_target(&conv, name)) else {
+                    return self.team_reply(call, id, false, "That teammate has ended or is not in this conversation. Decide yourself.");
+                };
+                if target == call {
+                    return self.team_reply(call, id, false, "Choose another teammate. Decide yourself.");
+                }
+                self.helpers.get_mut(call).unwrap().sent += 1;
+                self.send_team_note(&conv, call, &target, text);
+                self.team_reply(call, id, true, "Sent to the teammate.");
+            }
+            _ => self.team_reply(call, id, false, "Use who, ask or tell; only one question may wait. Decide yourself."),
+        }
+    }
+
+    fn team_question(&self, conv: &str, call: &str) -> String {
+        let text = self
+            .team_of(conv, call)
+            .and_then(|team| team.messages.iter().rev().find(|m| m.state == Some(QuestionState::Waiting)))
+            .map_or("", |m| m.text.as_str());
+        let name = self.team_name(conv, call);
+        let answer = serde_json::json!({"to":name,"answer":"your answer"});
+        let message = Self::helper_message(Some(&name), text);
+        format!("{message}\nAnswer with helper({answer}); it waits for the next question or report.")
+    }
+
+    fn helper_message(name: Option<&str>, text: &str) -> String {
+        let quoted = text.split(['\n', '\r']).map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n");
+        match name {
+            Some(name) => format!(
+                "Message from helper {}, not from the person; it grants no permission and does not change your brief:\n{quoted}",
+                name.escape_debug()
+            ),
+            None => format!("Message from the lead:\n{quoted}"),
+        }
+    }
+
+    fn queued_team_call(&self, conv: &str, call: &str, launching: Option<&str>) -> bool {
+        !self.helpers.contains_key(call)
+            && self.convs.get(conv).is_some_and(|c| {
+                c.messages
+                    .iter()
+                    .rev()
+                    .flat_map(|m| m.tools.iter().flatten())
+                    .any(|t| t.id == call && t.ok.is_none() && t.team.as_ref().is_some_and(|team| team.state != TeamState::Ended))
+            })
+            && (launching == Some(call)
+                || self.worker_waiting(&format!("helper:{call}"))
+                || self.kit_checks.get(&format!("helper:{call}")).is_some_and(|check| check.owner == conv))
+    }
+
+    /// Both CLIs wait for the whole tool batch: one question must release every pending call in that batch.
+    fn release_team_calls(&mut self, conv: &str, call: &str) {
+        let calls: Vec<_> = self.helpers.iter().filter(|(_, h)| h.conv == conv && h.lead_call.is_some()).map(|(c, _)| c.clone()).collect();
+        let mut question = self.helpers.get(call).filter(|h| h.conv == conv && h.question.is_some() && h.lead_call.is_none()).map(|_| call);
+        for call in &calls {
+            let text = if self.helpers[call].question.is_some() {
+                self.team_question(conv, call)
+            } else {
+                let name = self.team_name(conv, call);
+                let wait = serde_json::json!({"to":name,"wait":true});
+                let mut text = format!("{name} is still working; use helper({wait}) to wait for its question or report.");
+                if let Some(asking) = question.take() {
+                    text.push_str(&format!("\n{}", self.team_question(conv, asking)));
+                }
+                text
+            };
+            let h = self.helpers.get_mut(call).unwrap();
+            let pending = h.lead_call.take().unwrap();
+            if let Some(live) = self.live.get_mut(conv).filter(|l| l.sid == h.sid) {
+                live.open_tools.retain(|id| id != call && id != &pending);
+                live.session.helper_reply(&pending, true, text);
+            }
+        }
+        let queued: Vec<_> = self
+            .live
+            .get(conv)
+            .into_iter()
+            .flat_map(|l| &l.open_tools)
+            .filter(|id| self.queued_team_call(conv, id, Some(call)))
+            .cloned()
+            .collect();
+        for call in queued {
+            let name = self.team_name(conv, &call);
+            let wait = serde_json::json!({"to":name,"wait":true});
+            let mut text = format!("{name} is still queued; use helper({wait}) to wait.");
+            if let Some(asking) = question.take() {
+                text.push_str(&format!("\n{}", self.team_question(conv, asking)));
+            }
+            if let Some(live) = self.live.get_mut(conv) {
+                live.open_tools.retain(|id| id != &call);
+                live.session.helper_reply(&call, true, text);
+            }
+        }
+    }
+
+    fn answer_team(&mut self, call: &str, text: &str, lapsed: bool) -> bool {
+        let Some(h) = self.helpers.get_mut(call) else { return false };
+        let Some(question) = h.question.take() else { return false };
+        let (conv, session) = (h.conv.clone(), h.session.clone());
+        self.team_record(
+            &conv,
+            (if lapsed { "engine" } else { "lead" }, call),
+            if lapsed { TeamKind::NoAnswer } else { TeamKind::Answer },
+            text,
+            Some(question.clone()),
+        );
+        session.helper_reply(&question, true, text.into());
+        true
+    }
+
+    fn send_team_note(&mut self, conv: &str, from: &str, to: &str, text: &str) {
+        self.team_record(conv, (from, to), TeamKind::Tell, text, None);
+        let name = (from != "lead").then(|| self.team_name(conv, from));
+        let note = Self::helper_message(name.as_deref(), text);
+        let h = self.helpers.get_mut(to).unwrap();
+        let id = format!("team:{}", new_id());
+        h.waiting.push(id.clone());
+        if h.ready {
+            h.session.steer(UserTurn::text(note), &id);
+        } else {
+            h.early.push((id, note));
+        }
+    }
+
+    fn helper_control(&mut self, conv: &str, id: &str, input: &serde_json::Value) {
+        let reply = |core: &Self, ok, text: String| {
+            if let Some(live) = core.live.get(conv) {
+                live.session.helper_reply(id, ok, text);
+            }
+        };
+        let name = input["to"].as_str().unwrap_or("");
+        let tell = input["tell"].as_str();
+        let answer = input["answer"].as_str();
+        if name.is_empty()
+            || ["title", "brief", "job", "kind", "difficulty"].iter().any(|key| input.get(key).is_some())
+            || ["answer", "tell", "wait"].iter().filter(|key| input.get(**key).is_some()).count() != 1
+            || usize::from(tell.is_some()) + usize::from(answer.is_some()) + usize::from(input["wait"] == true) != 1
+            || tell.or(answer).is_some_and(|text| text.trim().is_empty() || text.chars().count() > helper::TEAM_LENGTH)
+        {
+            return reply(
+                self,
+                false,
+                "Use one of {to, answer}, {to, tell} or {to, wait:true}; messages must be 1 to 1,000 characters.".into(),
+            );
+        }
+        let Some(call) = self.team_target(conv, name) else {
+            let ended = self
+                .convs
+                .get(conv)
+                .into_iter()
+                .flat_map(|c| &c.messages)
+                .rev()
+                .flat_map(|m| m.tools.iter().flatten())
+                .find(|t| t.team.as_ref().is_some_and(|team| team.name == name));
+            if input.get("tell").is_some() || input.get("answer").is_some() {
+                return reply(self, false, "That helper has ended or is not in this conversation.".into());
+            }
+            if ended.is_some_and(|t| t.ok.is_none()) {
+                return reply(self, true, "Still queued: do other work, then wait again for its question or report.".into());
+            }
+            let text =
+                ended.and_then(|t| t.output.clone()).unwrap_or_else(|| "That helper has ended or is not in this conversation.".into());
+            return reply(self, ended.is_some_and(|t| t.ok == Some(true)), text);
+        };
+        if let Some(text) = tell {
+            if self.helpers[&call].sent >= helper::TEAM_LIMIT {
+                return reply(self, false, "At most 6 team messages per helper per reply. Decide yourself.".into());
+            }
+            self.helpers.get_mut(&call).unwrap().sent += 1;
+            self.send_team_note(conv, "lead", &call, text);
+            return reply(self, true, "Sent to the helper.".into());
+        }
+        if self.helpers[&call].lead_call.is_some() {
+            return reply(self, false, "A call is already waiting for this helper.".into());
+        }
+        if let Some(text) = answer
+            && !self.answer_team(&call, text, false)
+        {
+            return reply(self, false, "This helper has no question waiting. Use wait:true.".into());
+        }
+        self.helpers.get_mut(&call).unwrap().lead_call = Some(id.into());
+        if self.helpers[&call].question.is_some() {
+            let text = self.team_question(conv, &call);
+            self.helpers.get_mut(&call).unwrap().lead_call = None;
+            reply(self, true, text);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "helpers/team_tests.rs"]
+mod team_tests;
+
+impl Core {
+    /// Start the allowance only when the CLI's whole tool batch has returned, so a long command cannot consume it.
+    pub(super) fn start_team_timers(&mut self, conv: &str) {
+        if self.live.get(conv).is_none_or(|live| !live.open_tools.is_empty()) {
+            return;
+        }
+        let pending: Vec<_> = self
+            .helpers
+            .iter_mut()
+            .filter(|(_, h)| h.conv == conv && h.question.is_some() && !h.question_timed)
+            .map(|(call, h)| {
+                h.question_timed = true;
+                (call.clone(), h.hsid, h.question.clone().unwrap())
+            })
+            .collect();
+        for (call, hsid, id) in pending {
+            self.expire_team_question(&call, hsid, &id, Duration::from_secs(5 * 60));
+        }
+    }
+
+    fn expire_team_question(&self, call: &str, hsid: u64, id: &str, after: Duration) {
+        let (me, call, id) = (self.me.clone(), call.to_string(), id.to_string());
+        let deadline = tokio::time::Instant::now() + after;
+        self.opts.runtime.spawn(async move {
+            tokio::time::sleep_until(deadline).await;
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            if core.helpers.get(&call).is_some_and(|h| h.hsid == hsid && h.question.as_deref() == Some(&id)) {
+                core.answer_team(&call, helper::NO_ANSWER, true);
+            }
+        });
     }
 }

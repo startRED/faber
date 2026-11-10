@@ -178,7 +178,7 @@ export function agentMeta(step: AgentStep, streaming: boolean): string {
 
 /** Keep the last observed step between tools, marked with its result; never invent work or retain it after the helper ends. */
 export function agentActivity(step: AgentStep, streaming: boolean): string {
-  if (!['running', 'background', 'waiting', 'stuck'].includes(agentState(step, streaming))) return '';
+  if (!['running', 'background', 'waiting', 'waitingLead', 'stuck'].includes(agentState(step, streaming))) return '';
   const current = step.tools.findLast((tool) => tool.ok === undefined && !tool.declined) ?? step.tools.at(-1);
   if (!current) return '';
   const row = toolRow(current);
@@ -403,7 +403,7 @@ export function AgentChat(props: {
 }) {
   const state = () => agentState(props.step, props.streaming);
   const title = () => props.step.title || t('agent.untitled');
-  const working = () => ['running', 'waiting', 'stuck'].includes(state());
+  const working = () => ['running', 'waiting', 'waitingLead', 'stuck'].includes(state());
   // What the subagent wrote between its steps comes from the engine while this view is open (the reply's own updates carry only
   // how much there is), and again whenever that changes.
   const [loaded] = createResource(
@@ -524,6 +524,9 @@ export function AgentChat(props: {
             );
           }}
         </For>}>{(_callId) => <Transcript step={props.step} />}</Show>
+        <For each={props.step.call.team?.messages}>
+          {(message) => <p class="side-meta">{message.from === 'lead' ? t('agent.team.lead') : message.from === 'engine' ? t('agent.team.engine') : message.fromName} → {message.to === 'lead' ? t('agent.team.lead') : message.toName}: {message.kind === 'noAnswer' ? t('agent.team.noAnswer') : message.text}</p>}
+        </For>
         <Show when={props.step.call.told?.length}>
           <Told told={props.step.call.told!} />
         </Show>

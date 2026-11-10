@@ -82,6 +82,7 @@ const STATE_OF_WORD: Record<string, StateKind> = {
   streaming: 'working',
   pending: 'working',
   waiting: 'waiting',
+  waitingLead: 'working',
   stuck: 'stuck',
   needsYou: 'waiting',
   done: 'concluded',

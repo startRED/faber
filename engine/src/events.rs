@@ -203,8 +203,12 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
-    /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
-    /// which the engine sends with `Session::helper_reply` once the helper is done.
+    /// A helper calls its own team channel, answered through the existing helper-reply transport.
+    TeamCall {
+        id: String,
+        input: Value,
+    },
+    /// The lead calls the helper tool, to start, answer, instruct or wait for a helper.
     HelperCall {
         id: String,
         input: Value,

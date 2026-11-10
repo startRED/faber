@@ -3099,6 +3099,11 @@ fn r161_only_a_project_agent_gets_the_helper_tool_and_a_helper_keeps_no_history(
     assert!(names(&with(Helper::Offers, Some("Route."), None)).is_empty(), "a side question never gets it");
     assert!(with(Helper::Offers, None, Some("t1")).get("dynamicTools").is_none(), "a resumed thread keeps the tools it started with");
     assert_eq!(with(Helper::Is, None, None)["ephemeral"], true);
+    assert_eq!(
+        names(&with(Helper::Is, None, None)),
+        ["run_command", "team"],
+        "a helper gets the team channel at thread start, never delegation"
+    );
     assert!(with(Helper::Offers, None, None).get("ephemeral").is_none());
 }
 
@@ -3415,4 +3420,127 @@ async fn settings_search_result_before_close_drains_owner_without_stopping_share
         support::emit(&mut output,json!({"method":"turn/completed","params":{"threadId":"peer","turn":{"id":"peer-turn","status":"completed"}}})).await;
         peer.close(); server.retire();
     }).await.expect("owner must drain with a live peer");
+}
+
+#[tokio::test]
+async fn team_tool_codex_helper_asks_over_its_existing_dynamic_tool_transport() {
+    let mut entries = fixture("codex", "helper-call");
+    for entry in &mut entries {
+        if entry.msg["method"] == "item/tool/call" {
+            entry.msg["params"]["tool"] = json!("team");
+            entry.msg["params"]["arguments"] = json!({"do":"ask","text":"Which field?"});
+        }
+    }
+    let mut asked = false;
+    let (events, mismatches) = drive(
+        entries,
+        |spawn, sink| {
+            let options = CodexServerOptions {
+                permissions: Permissions::FullAccess,
+                cli: faber_engine::cli::Cli { command: "unused".into(), prefix: vec![] },
+                cwd: ".".into(),
+                area: Area::Project,
+                user_hooks: false,
+                windows: false,
+                spawn,
+                tools: Default::default(),
+            };
+            CodexServer::start(options).open(
+                CodexThread {
+                    helper: faber_engine::helper::Helper::Is,
+                    model: Some("gpt-6-luna".into()),
+                    ..mode_thread(Permissions::FullAccess, Default::default())
+                },
+                sink,
+            )
+        },
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.",
+        |event, session| {
+            if let EngineEvent::TeamCall { id, input } = event {
+                assert_eq!(input, &json!({"do":"ask","text":"Which field?"}));
+                asked = true;
+                session.helper_reply(id, true, "Use bar.".into());
+            }
+            matches!(event, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert!(asked, "team call reaches the engine through the live dynamic tool transport");
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::HelperCall { .. })), "helpers cannot delegate");
+}
+
+#[tokio::test]
+async fn team_lead_helper_control_forms_survive_recorded_dynamic_frames() {
+    for input in
+        [json!({"to":"Parser","answer":"Use bar."}), json!({"to":"Parser","tell":"Keep the field."}), json!({"to":"Parser","wait":true})]
+    {
+        let mut entries = fixture("codex", "helper-call");
+        for entry in &mut entries {
+            if entry.msg["method"] == "item/tool/call" {
+                entry.msg["params"]["arguments"] = input.clone();
+            }
+            if entry.msg["params"]["item"]["type"] == "dynamicToolCall" {
+                entry.msg["params"]["item"]["arguments"] = input.clone();
+            }
+        }
+        let mut asked = false;
+        let (_,mismatches) = drive(entries, |spawn,sink| CodexServer::start(CodexServerOptions {
+            permissions:Permissions::FullAccess,cli:faber_engine::cli::Cli {command:"unused".into(),prefix:vec![]},cwd:".".into(),area:Area::Project,user_hooks:false,windows:false,spawn,tools:Default::default()
+        }).open(CodexThread {helper:faber_engine::helper::Helper::Offers,model:Some("gpt-6-luna".into()),..mode_thread(Permissions::FullAccess,Default::default())},sink),
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.",|event,session| {
+            if let EngineEvent::HelperCall {id,input:got} = event {
+                assert_eq!(got,&input); asked = true; session.helper_reply(id,true,"config.toml sets timeout = 30 and retries = 3; nothing risky.".into());
+            }
+            matches!(event,EngineEvent::Done {..})
+        }).await;
+        assert!(asked);
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+    }
+}
+
+#[tokio::test]
+async fn team_reviewer_dynamic_call_is_refused_without_offering_the_channel() {
+    let mut entries = fixture("codex", "helper-call");
+    for entry in &mut entries {
+        if entry.msg["method"] == "item/tool/call" {
+            entry.msg["params"]["tool"] = json!("team");
+            entry.msg["params"]["arguments"] = json!({"do":"ask","text":"Which field?"});
+        }
+    }
+    let f = fake(entries);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::FullAccess,
+        cli: faber_engine::cli::Cli { command: "unused".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Project,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+        tools: Default::default(),
+    });
+    let thread = CodexThread {
+        helper: faber_engine::helper::Helper::Reviewer,
+        model: Some("gpt-6-luna".into()),
+        ..mode_thread(Permissions::FullAccess, Default::default())
+    };
+    let params = thread_params(Area::Project, &thread).1;
+    assert_eq!(params["ephemeral"], true);
+    assert!(!params["dynamicTools"].as_array().into_iter().flatten().any(|tool| tool["name"] == "team" || tool["name"] == "helper"));
+    let session = server.open(thread, Arc::new(move |event| drop(tx.send(event))));
+    session.send(UserTurn::text(
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.",
+    ));
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(!matches!(event, EngineEvent::TeamCall { .. }));
+        if matches!(event, EngineEvent::Done { .. }) {
+            break;
+        }
+    }
+    session.close();
+    server.retire();
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    assert!(f.wire.messages().iter().any(|msg| msg.to_string().contains("Nobody can answer: decide yourself.")));
 }

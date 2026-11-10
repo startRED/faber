@@ -57,6 +57,7 @@ pub struct ClaudeLaunch {
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
 fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
     crate::helper::Tools {
+        team: launch.helper == crate::helper::Helper::Is,
         helper: launch.helper == crate::helper::Helper::Offers,
         browse: launch.browse,
         conversation: launch.conversations,
@@ -458,7 +459,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
         if launch.area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
-            if launch.helper == crate::helper::Helper::Is {
+            if matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
                 words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
             }
             if let Some(card) = &tools.start_card {
@@ -508,7 +509,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
         // read, and by which turn. A helper keeps no history.
         args.push("--replay-user-messages".into());
-        if launch.helper == crate::helper::Helper::Is {
+        if matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
             args.push("--no-session-persistence".into());
         }
     }
@@ -835,7 +836,7 @@ pub fn claude_fork_args(launch: &ClaudeLaunch, point: &crate::engine::NativePoin
     if !supported
         || !point.valid(crate::model::Vendor::Claude)
         || launch.instructions.is_some()
-        || matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Aside)
+        || matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer | crate::helper::Helper::Aside)
     {
         return Err("error.sessionLost".into());
     }
@@ -1039,7 +1040,12 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                             if msg["type"] == "control_request" && msg["request"]["subtype"] == "mcp_message" {
                                 let tools = mcp_tools(&opts.launch);
                                 let offered = tools.any() && msg["request"]["server_name"] == "faber";
-                                let step = if offered { crate::helper::mcp(&msg["request"]["message"], tools) } else {
+                                let step = if opts.launch.helper == crate::helper::Helper::Reviewer
+                                    && msg["request"]["server_name"] == "faber"
+                                    && msg["request"]["message"]["method"] == "tools/call"
+                                    && msg["request"]["message"]["params"]["name"] == crate::helper::TEAM_NAME {
+                                    crate::helper::Mcp::Answer(crate::helper::mcp_result(&msg["request"]["message"]["id"], false, "Nobody can answer: decide yourself.", &[]))
+                                } else if offered { crate::helper::mcp(&msg["request"]["message"], tools) } else {
                                     crate::helper::Mcp::Answer(json!({"jsonrpc":"2.0","id":msg["request"]["message"]["id"],"error":{"code":-32601,"message":"No such server"}}))
                                 };
                                 match step {
@@ -1052,6 +1058,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
                                         on_event(match tool {
+                                            crate::helper::TEAM_NAME => EngineEvent::TeamCall { id, input },
                                             crate::review::NAME => EngineEvent::ReviewCall { id, input },
                                             crate::browser::NAME => EngineEvent::BrowseCall { id, input },
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
@@ -1099,6 +1106,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     // Calling the helper changes nothing by itself: what the helper does is held to the same mode. The
                                     // browser is offered only in full access, which asks nothing, and the engine checks every address.
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)
+                                        || (tool == crate::helper::TEAM_CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Is)
                                         || (tool == crate::review::CLAUDE_NAME && opts.launch.progress)
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)

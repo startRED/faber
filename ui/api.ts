@@ -83,6 +83,7 @@ export interface ToolUse {
   check?: boolean;
   /** On a helper's call: what the person wrote to it while it worked (R161 step 5); `taken` is absent while on its way. */
   told?: { id: string; text: string; taken?: boolean }[];
+  team?: HelperTeam;
   /** On a subagent's call: how many characters it wrote between its steps (R161 step 3). The words are read with `childWords` while its view is open. */
   wordsChars?: number;
   /** On a subagent's call: more of its words were left out than the engine keeps, so its view says later ones are not kept. */
@@ -94,6 +95,27 @@ export interface ToolUse {
   ended?: number;
   /** On an edit step: what it changed, as the engine read it when the step started; absent on older conversations. */
   change?: Change;
+}
+/** Bounded exchanges on a helper call, retained by save and branch. IDs name calls, or lead/engine. */
+export interface TeamMessage {
+  id: string;
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+  kind: 'ask' | 'answer' | 'tell' | 'noAnswer';
+  text: string;
+  at: number;
+  question?: string;
+  state?: 'waiting' | 'answered' | 'lapsed';
+}
+export interface HelperTeam {
+  name: string;
+  job: string;
+  title: string;
+  files: string[];
+  state: 'running' | 'waitingLead' | 'ended';
+  messages: TeamMessage[];
 }
 /** A line an edit step added or removed. */
 export interface ChangedLine {

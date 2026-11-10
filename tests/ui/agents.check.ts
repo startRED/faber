@@ -7,8 +7,10 @@ import { t, useLanguage } from '../../ui/i18n.ts';
 import { AgentChat, dropHelperTarget, helperTarget, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
+import { workStatus } from '../../ui/background.ts';
 import { agentReport, agentState, agentSteps, helperNumbers, helpersAtWork, sameTools } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
+import { stateKind } from '../../ui/icons/kinds.tsx';
 
 // The subagents the agent starts show as steps in its reply (R161; docs/product-map.md, "Subagent step").
 
@@ -883,4 +885,42 @@ check('review rounds: two scored rows, nested reviewers and the final line', () 
     equal(detail.querySelector('details summary')?.textContent, '1 seen by one reviewer');
     equal(detail.querySelector('details')?.open, false);
   } finally { close(); detail.remove(); }
+});
+
+check('team messages: helper row waits for the lead and the running view keeps exchanges in order', () => {
+  useLanguage('en');
+  const messages: NonNullable<ToolUse['team']>['messages'] = [
+    { id: 'q', from: 'h1', to: 'lead', fromName: 'Parser', toName: 'lead', kind: 'ask', text: 'May I rename foo?', at: 10, question: 'q', state: 'waiting' },
+    { id: 't', from: 'h2', to: 'h1', fromName: 'Caller', toName: 'Parser', kind: 'tell', text: 'I use bar now.', at: 11 },
+  ];
+  const [team, setTeam] = createSignal<NonNullable<ToolUse['team']>>({ name: 'Parser', title: 'Review the parser', job: 'build', files: ['parser.rs'], state: 'waitingLead', messages });
+  const tool = (): ToolUse => ({ ...HELPER, team: team() });
+  const root = document.createElement('div');
+  document.body.append(root);
+  showAgent({ conversationId: 'team', messageId: 'team-reply', callId: HELPER.id });
+  const detail = document.createElement('div'); root.append(detail);
+  const rows = document.createElement('div'); root.append(rows);
+  const dispose = render(() => createComponent(Thread, {
+    get messages(): Message[] { return [{ id: 'team-reply', role: 'assistant', at: 0, status: 'streaming', vendor: 'claude', text: '', tools: [tool()] }]; },
+    from: 0, conversationId: 'team', options: [], onBranch: () => {},
+  }), rows);
+  const close = render(() => createComponent(AgentChat, {
+    get step() { return agentSteps([tool()])[0]!; }, streaming: true, onBack: () => {}, onClose: () => {},
+  }), detail);
+  try {
+    equal(root.querySelector('.agent b')!.textContent, 'Parser');
+    ok(root.querySelector('.agent-meta')!.textContent!.includes('asked the lead; waiting'));
+    equal(agentState(agentSteps([tool()])[0]!, true), 'waitingLead', 'distinct from waiting on the person');
+    const status = workStatus({ agent: agentSteps([tool()])[0]!, streaming: true });
+    equal(status.state, 'waitingLead');
+    equal(stateKind(status.state), 'working', 'waiting for the lead never uses the amber needs-you glyph');
+    equal(status.need, false, 'a question for the lead never asks the person to intervene');
+    const lines = [...root.querySelectorAll('.side-body .side-meta')].map((line) => line.textContent);
+    deepEqual(lines.filter((line) => line?.includes('→')), ['Parser → Lead: May I rename foo?', 'Caller → Parser: I use bar now.']);
+    setTeam({ ...team(), state: 'running', messages: [...messages.map((m) => m.id === 'q' ? { ...m, state: 'answered' as const } : m), { id: 'a', from: 'lead', to: 'h1', fromName: 'lead', toName: 'Parser', kind: 'answer', text: 'Use bar.', at: 12, question: 'q' }] });
+    ok(!root.querySelector('.agent-meta')!.textContent!.includes('asked the lead; waiting'));
+    ok(root.querySelector('.side-body')!.textContent!.includes('Lead → Parser: Use bar.'));
+  } finally {
+    dispose(); close(); root.remove(); showAgent();
+  }
 });

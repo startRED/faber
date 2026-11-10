@@ -186,6 +186,9 @@ pub struct ToolUse {
     /// On a helper's call: what the person wrote to the helper while it worked (R161 step 5), oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub told: Vec<Told>,
+    /// Bounded team exchanges, preserved by screen updates, saves and branching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<HelperTeam>,
     /// On a subagent's call: what the subagent itself wrote between its steps, oldest first (R161 step 3). Each entry sits after
     /// the first `at` steps it ran under this call, so the side chat draws it in order with them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -269,6 +272,58 @@ pub const WORDS_LIMIT: usize = 16_000;
 pub struct Words {
     pub at: usize,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelperTeam {
+    pub name: String,
+    pub job: String,
+    pub title: String,
+    pub files: Vec<String>,
+    pub state: TeamState,
+    pub messages: Vec<TeamMessage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TeamState {
+    Running,
+    WaitingLead,
+    Ended,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMessage {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+    pub from_name: String,
+    pub to_name: String,
+    pub kind: TeamKind,
+    pub text: String,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<QuestionState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TeamKind {
+    Ask,
+    Answer,
+    Tell,
+    NoAnswer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuestionState {
+    Waiting,
+    Answered,
+    Lapsed,
 }
 
 /// A message the person wrote to a helper at work. `taken` is empty while it is on its way, true once the helper took it

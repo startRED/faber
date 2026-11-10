@@ -3,7 +3,7 @@ import { agentState, agentSteps, agentWord, helperNumbers, isAgentCall, toolRow,
 import type { Key } from './locales/en.ts';
 import { lang } from './i18n.ts';
 
-export type WorkState = 'running' | 'passed' | 'failed' | 'waiting' | 'stuck' | 'unreported' | 'stopped';
+export type WorkState = 'running' | 'passed' | 'failed' | 'waiting' | 'waitingLead' | 'stuck' | 'unreported' | 'stopped';
 export interface BackgroundWork {
   id: string;
   title: string;
@@ -139,7 +139,7 @@ export function backgroundOf(messages: Message[], commands: BackgroundCommand[],
       if ((item.agent?.call ?? item.tool)?.declined || sources.has(item.id)) continue;
       const row = { ...item, streaming: m.status === 'streaming', interrupted: i <= stopped };
       const status = workStatus(row);
-      if (current || status.running || ['waiting', 'stuck', 'unreported'].includes(status.state)) rows.push({ ...row, state: status.state });
+      if (current || status.running || ['waiting', 'waitingLead', 'stuck', 'unreported'].includes(status.state)) rows.push({ ...row, state: status.state });
     }
     if (m.checks && (current || (m.id === latest?.id && (m.checks.state === 'running' || m.checks.state === 'needsYou')))) {
       rows.push({ id: `${m.id}:checks`, title: '', state: workStatus({ checks: m.checks }).state, checks: m.checks });

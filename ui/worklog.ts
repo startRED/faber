@@ -313,12 +313,13 @@ export function agentKind(kind: string): string {
 
 /** Where a subagent is, in one word: still at work (in the background, waiting on the person, or seemingly stuck), or how it
  * ended. A call left open after its reply ended was stopped with it, unless it was sent to the background. */
-export type AgentState = 'running' | 'background' | 'waiting' | 'stuck' | 'stopped' | 'declined' | 'done' | 'failed';
+export type AgentState = 'running' | 'background' | 'waiting' | 'waitingLead' | 'stuck' | 'stopped' | 'declined' | 'done' | 'failed';
 export function agentState(step: AgentStep, streaming: boolean): AgentState {
   const { ok, declined, sign } = step.call;
   if (ok === undefined) {
     if (step.call.interrupted) return 'stopped';
     if (!streaming) return step.background ? 'background' : 'stopped';
+    if (step.call.team?.state === 'waitingLead') return 'waitingLead';
     if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
     return step.background ? 'background' : 'running';
   }
@@ -360,7 +361,7 @@ export function helpersAtWork(messages: Message[] = []): number {
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
  * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
-  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.interrupted === b[i]!.interrupted && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.team?.state === b[i]!.team?.state && tool.team?.name === b[i]!.team?.name && tool.team?.messages.length === b[i]!.team?.messages.length && tool.interrupted === b[i]!.interrupted && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
 }
 
 /** Each helper's place among the agent calls of one reply, from 1: what "Helper 1" counts. A view that reads the steps of
@@ -393,6 +394,7 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
       const round = rounds.find((r) => r.call === call.id);
       return round ? t('review.round', { n, total: round.total }) : t('review.running', { n });
     }
+    if (call.team?.name) return call.team.name;
     const named = namedOf(call);
     return named && readsIn(named, lang()) ? named : t('agent.numbered', { n: numbers.get(call.id) ?? 1 });
   };

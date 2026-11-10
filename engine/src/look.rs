@@ -260,6 +260,7 @@ mod tests {
             sign: None,
             facts: None,
             told: vec![],
+            team: None,
             words: vec![],
             words_cut: false,
             words_chars: None,

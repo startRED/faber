@@ -463,6 +463,26 @@ fn settle(m: &mut Message) {
         if tool.ok.is_none() && matches!(tool.name.as_str(), "Agent" | "Task" | "Helper" | "Review") {
             tool.interrupted = true;
             tool.sign = None;
+            if let Some(team) = &mut tool.team {
+                team.state = crate::model::TeamState::Ended;
+                let mut lapsed = Vec::new();
+                for question in team.messages.iter_mut().filter(|m| m.state == Some(crate::model::QuestionState::Waiting)) {
+                    question.state = Some(crate::model::QuestionState::Lapsed);
+                    lapsed.push(crate::model::TeamMessage {
+                        id: new_id(),
+                        from: "engine".into(),
+                        to: tool.id.clone(),
+                        from_name: "engine".into(),
+                        to_name: team.name.clone(),
+                        kind: crate::model::TeamKind::NoAnswer,
+                        text: crate::helper::NO_ANSWER.into(),
+                        at: now(),
+                        question: question.question.clone(),
+                        state: None,
+                    });
+                }
+                team.messages.extend(lapsed);
+            }
         }
     }
     if m.vendor == Some(Vendor::Codex) && m.status == Some(Status::Done) {
@@ -3030,7 +3050,8 @@ impl Core {
                     }
                     return;
                 }
-                EngineEvent::HelperCall { id, .. }
+                EngineEvent::TeamCall { id, .. }
+                | EngineEvent::HelperCall { id, .. }
                 | EngineEvent::ReviewCall { id, .. }
                 | EngineEvent::BrowseCall { id, .. }
                 | EngineEvent::ConversationCall { id, .. }
@@ -3208,6 +3229,9 @@ impl Core {
                 }
             }
             EngineEvent::Tool { id, name, input, parent } => {
+                if name == crate::helper::TOOL && input.get("to").is_some() {
+                    return;
+                }
                 if parent.is_none()
                     && let Some(l) = self.live.get_mut(conv)
                 {
@@ -3235,6 +3259,7 @@ impl Core {
                         sign: None,
                         facts: None,
                         told: vec![],
+                        team: None,
                         words: vec![],
                         words_cut: false,
                         words_chars: None,
@@ -3282,12 +3307,20 @@ impl Core {
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
+                if self.helper_call_released(conv, &id) {
+                    if let Some(live) = self.live.get_mut(conv) {
+                        live.open_tools.retain(|open| *open != id);
+                    }
+                    self.start_team_timers(conv);
+                    return self.hand_over_at_step(conv);
+                }
                 if let Some(owner) = self.child_owner(conv, &id) {
                     self.keep_child_event(conv, &owner, crate::transcript::TranscriptKind::Result, Some(&id), &text);
                 }
                 if let Some(l) = self.live.get_mut(conv) {
                     l.open_tools.retain(|open| *open != id);
                 }
+                self.start_team_timers(conv);
                 let current = self.live.get(conv).and_then(|l| l.turn.clone());
                 let mut background = false;
                 if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
@@ -3331,6 +3364,11 @@ impl Core {
                 }
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
+            }
+            EngineEvent::TeamCall { id, .. } => {
+                if let Some(l) = self.live.get(conv) {
+                    l.session.helper_reply(&id, false, "Team is available only to helpers.".into());
+                }
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::ReviewCall { id, input } => return self.start_review(conv, id, input),
@@ -3454,6 +3492,7 @@ impl Core {
                 }
             }
             EngineEvent::Parked { tool_use_id, tool, input } => self.park(conv, tool_use_id, tool, input),
+            EngineEvent::Injected { tag: Some(ref tag) } | EngineEvent::SteerFailed { ref tag } if tag.starts_with("team:") => {}
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),

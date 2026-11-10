@@ -74,6 +74,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         sign: None,
         facts: None,
         told: vec![],
+        team: None,
         words: vec![],
         words_cut: false,
         words_chars: None,

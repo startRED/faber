@@ -1658,7 +1658,10 @@ fn r161_the_helper_tool_reaches_only_the_project_agent() {
     assert!(!args(Helper::Off, None).iter().any(|a| a == CLAUDE_MCP_CONFIG));
     assert!(!args(Helper::Offers, Some("Route.")).iter().any(|a| a == CLAUDE_MCP_CONFIG), "a side question has no tools at all");
     let helper = args(Helper::Is, None);
-    assert!(helper.iter().any(|a| a == "--no-session-persistence") && !helper.iter().any(|a| a == CLAUDE_MCP_CONFIG));
+    assert!(
+        helper.iter().any(|a| a == "--no-session-persistence") && helper.iter().any(|a| a == CLAUDE_MCP_CONFIG),
+        "helpers keep no history and receive their team tool through Faber"
+    );
 }
 
 /// R250: a quick question on the side forks the conversation's session, which stays as it was, and may only read, search and
@@ -1833,4 +1836,168 @@ fn reply_style_does_not_replace_an_internal_claude_tasks_fixed_instructions() {
         Settings { reply_style: Some(ReplyStyle::Own), reply_style_text: Some("My custom style.".into()), ..Default::default() }.tuning();
     let plain = ClaudeLaunch { instructions: Some("Answer in one word.".into()), ..launch(Area::Chat) };
     assert_eq!(claude_args(&plain), claude_args(&ClaudeLaunch { tuning, ..plain.clone() }));
+}
+
+#[tokio::test]
+async fn team_tool_claude_helper_asks_over_its_existing_mcp_session() {
+    fn team(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if fields.get("name").and_then(|v| v.as_str()) == Some("helper") {
+                    fields.insert("name".into(), json!("team"));
+                    if fields.contains_key("arguments") {
+                        fields.insert("arguments".into(), json!({"do":"ask","text":"Which field?"}));
+                    }
+                }
+                if fields.get("name").and_then(|v| v.as_str()) == Some("mcp__faber__helper") {
+                    fields.insert("name".into(), json!("mcp__faber__team"));
+                    if fields.contains_key("input") {
+                        fields.insert("input".into(), json!({"do":"ask","text":"Which field?"}));
+                    }
+                }
+                for value in fields.values_mut() {
+                    team(value);
+                }
+            }
+            serde_json::Value::Array(values) => values.iter_mut().for_each(team),
+            serde_json::Value::String(text) => *text = text.replace("mcp__faber__helper", "mcp__faber__team"),
+            _ => {}
+        }
+    }
+    let mut entries = fixture("claude", "helper-call");
+    for entry in &mut entries {
+        team(&mut entry.msg);
+    }
+    let mut asked = false;
+    let (events, mismatches) = drive(
+        entries,
+        |spawn, sink| {
+            start_claude(
+                ClaudeOptions {
+                    bin: "unused".into(),
+                    cwd: ".".into(),
+                    launch: ClaudeLaunch { helper: faber_engine::helper::Helper::Is, ..launch(Area::Project) },
+                    spawn,
+                    sandbox: None,
+                },
+                sink,
+            )
+        },
+        "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.",
+        |event, session| {
+            if let EngineEvent::TeamCall { id, input } = event {
+                assert_eq!(input, &json!({"do":"ask","text":"Which field?"}));
+                asked = true;
+                session.helper_reply(id, true, "Use bar.".into());
+            }
+            matches!(event, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert!(asked, "team call reaches the engine through the live MCP session");
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::HelperCall { .. })), "helpers cannot delegate");
+}
+
+#[tokio::test]
+async fn team_lead_helper_control_forms_survive_recorded_mcp_frames() {
+    fn set_input(value: &mut serde_json::Value, input: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if fields.get("name") == Some(&json!("helper")) && fields.contains_key("arguments") {
+                    fields.insert("arguments".into(), input.clone());
+                }
+                if fields.get("name") == Some(&json!("mcp__faber__helper")) && fields.contains_key("input") {
+                    fields.insert("input".into(), input.clone());
+                }
+                for value in fields.values_mut() {
+                    set_input(value, input);
+                }
+            }
+            serde_json::Value::Array(values) => values.iter_mut().for_each(|value| set_input(value, input)),
+            _ => {}
+        }
+    }
+    for input in
+        [json!({"to":"Parser","answer":"Use bar."}), json!({"to":"Parser","tell":"Keep the field."}), json!({"to":"Parser","wait":true})]
+    {
+        let mut entries = fixture("claude", "helper-call");
+        for entry in &mut entries {
+            set_input(&mut entry.msg, &input);
+        }
+        let mut asked = false;
+        let (events, mismatches) = drive(
+            entries,
+            |spawn, sink| {
+                start_claude(
+                    ClaudeOptions {
+                        bin: "unused".into(),
+                        cwd: ".".into(),
+                        launch: ClaudeLaunch { helper: faber_engine::helper::Helper::Offers, ..launch(Area::Project) },
+                        spawn,
+                        sandbox: None,
+                    },
+                    sink,
+                )
+            },
+            "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.",
+            |event, session| {
+                if let EngineEvent::HelperCall { id, input: got } = event {
+                    assert_eq!(got, &input);
+                    asked = true;
+                    session.helper_reply(id, true, "Nothing risky.".into());
+                }
+                matches!(event, EngineEvent::Done { .. })
+            },
+        )
+        .await;
+        assert!(asked);
+        assert!(events.iter().any(|e| matches!(e,EngineEvent::Tool {name,input:got,..} if name == "Helper" && got == &input)));
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+    }
+}
+
+#[tokio::test]
+async fn team_reviewer_mcp_call_is_refused_without_offering_the_channel() {
+    let entries = fixture("claude", "helper-call")
+        .into_iter()
+        .map(|mut entry| {
+            entry.msg = serde_json::from_str(
+                &entry.msg.to_string().replace("\"helper\"", "\"team\"").replace("mcp__faber__helper", "mcp__faber__team"),
+            )
+            .unwrap();
+            if entry.msg["request"]["message"]["method"] == "tools/call" {
+                entry.msg["request"]["message"]["params"]["arguments"] = json!({"do":"ask","text":"Which field?"});
+            }
+            entry
+        })
+        .collect();
+    let f = fake(entries);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions {
+            bin: "unused".into(),
+            cwd: ".".into(),
+            launch: ClaudeLaunch { helper: faber_engine::helper::Helper::Reviewer, ..launch(Area::Project) },
+            spawn: f.spawn.clone(),
+            sandbox: None,
+        },
+        Arc::new(move |event| drop(tx.send(event))),
+    );
+    session.send(UserTurn::text(
+        "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.",
+    ));
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(!matches!(event, EngineEvent::TeamCall { .. }));
+        if matches!(event, EngineEvent::Done { .. }) {
+            break;
+        }
+    }
+    session.close();
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    let args = f.args.lock().unwrap();
+    assert!(!args[0].iter().any(|a| a == faber_engine::helper::CLAUDE_MCP_CONFIG));
+    assert!(args[0].iter().any(|a| a == "--no-session-persistence"));
+    assert!(f.wire.messages().iter().any(|msg| msg.to_string().contains("Nobody can answer: decide yourself.")));
 }

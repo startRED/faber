@@ -54,6 +54,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/running.md](design/running.md) | The running column: rows, question cards, done cards, when it opens by itself |
 | [design/keep-going.md](design/keep-going.md) | Keep going: the chip, the quiet lines, the quota warning, the running row and the summary on coming back |
 | [design/search.md](design/search.md) | Sidebar message search, the command box (Ctrl+K) and find in a conversation (Ctrl+F) |
+| [design/helper-team.md](design/helper-team.md) | Helpers asking the lead, teammate notes, limits, saved records and the quiet message lines |
 | [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view, the stuck signs and the pages opened in Faber's browser |
 | [design/catalog.md](design/catalog.md) | Catalog browsing, installation, on/off, Undo and per-source inventory |
 | [design/settings.md](design/settings.md) | The Settings screen |

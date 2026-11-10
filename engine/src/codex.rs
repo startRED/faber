@@ -1196,7 +1196,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning, research: t.research });
         if area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
-            if t.helper == crate::helper::Helper::Is {
+            if matches!(t.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
                 words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
             }
             if t.progress {
@@ -1222,8 +1222,12 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
                     tools.push(crate::helper::codex_tool());
                 }
             }
+            crate::helper::Helper::Reviewer => {
+                params.insert("ephemeral".into(), true.into());
+            }
             crate::helper::Helper::Is => {
                 params.insert("ephemeral".into(), true.into());
+                params.entry("dynamicTools").or_insert_with(|| json!([])).as_array_mut().unwrap().push(crate::helper::team_codex_tool());
             }
             crate::helper::Helper::Off | crate::helper::Helper::Aside => {}
         }
@@ -1385,6 +1389,7 @@ pub(crate) fn redact_sink(sink: EventSink, token: String) -> EventSink {
             | EngineEvent::MapCall { input, .. }
             | EngineEvent::ToolboxCall { input, .. }
             | EngineEvent::ProgressCall { input, .. }
+            | EngineEvent::TeamCall { input, .. }
             | EngineEvent::HelperCall { input, .. }
             | EngineEvent::ReviewCall { input, .. }
             | EngineEvent::Permission { input, .. }
@@ -2028,6 +2033,22 @@ async fn serve(
                             }
                             continue;
                         }
+                        if method == "item/tool/call" && params["tool"] == crate::helper::TEAM_NAME {
+                            let refusal = if thread.as_ref().is_some_and(|t| t.params.helper == crate::helper::Helper::Reviewer) {
+                                "Nobody can answer: decide yourself."
+                            } else {
+                                "Team is available only to helpers."
+                            };
+                            match thread.filter(|t| t.params.helper == crate::helper::Helper::Is && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::TeamCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => { let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":crate::helper::dynamic_result(false, refusal, &[])})).await; }
+                            }
+                            continue;
+                        }
                         if method == "item/tool/call" && params["tool"] == crate::helper::NAME {
                             // R161: the agent asked for a helper; the engine answers once the helper is done.
                             match thread.filter(|t| t.params.helper == crate::helper::Helper::Offers && !t.blocked && !t.closing) {
@@ -2364,7 +2385,7 @@ async fn serve(
             }
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink, tools, identity, before_turn, native_fork }) => {
-                    if native_fork.as_ref().is_some_and(|point| !point.valid(crate::model::Vendor::Codex) || before_turn.is_some() || thread.instructions.is_some() || matches!(thread.helper, crate::helper::Helper::Is | crate::helper::Helper::Aside)) {
+                    if native_fork.as_ref().is_some_and(|point| !point.valid(crate::model::Vendor::Codex) || before_turn.is_some() || thread.instructions.is_some() || matches!(thread.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer | crate::helper::Helper::Aside)) {
                         sink(EngineEvent::Error { message: "error.sessionLost".into(), fatal: true });
                         sink(EngineEvent::WriterExit { confirmed: true });
                         continue;

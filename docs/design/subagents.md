@@ -123,9 +123,9 @@ step (six times in a row, or 10 with no file changed whatever came between), or 
 with no file changed. The sign stops nothing: the existing 15-minute stop with no open step still applies.
 The running column shows the same words on the row, with "Open conversation", like a stuck helper's.
 
-Three helpers run if memory allows. Aim at 1,200 chars; over 2,000, show a sentence/paragraph excerpt and saved path. Keep 20 helper logs; append the person's note last. Full text stays visible.
+Up to three helpers run if memory allows; reports, saved logs and their exchanges with the lead: [team channel](helper-team.md).
 
-A helper (Faber's helper tool, R161) is the same row: its title in bold, its job, model and effort. Older rows show the AI name. Its commands show under it and its report is its final words. The person
+A helper (Faber's helper tool, R161) is the same row: its title in bold, its job, model and effort. Team names also reserve ended rows, keeping old reports addressable. Older rows show the AI name. Its commands show under it and its report is its final words. The person
 never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
 report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
 helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.
