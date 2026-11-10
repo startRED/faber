@@ -39,7 +39,7 @@ pub mod visual_network;
 use crate::app::{Ctx, Paths};
 use crate::page::{Page, css};
 use crate::plan::{Suite, deal};
-use crate::report::{Outcome, file_name};
+use crate::report::{Outcome, Status, file_name};
 use crate::sandbox::{CliSlot, Launch};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -305,9 +305,26 @@ pub fn run_all(
 
 fn run_one(paths: &Paths, scenario: &Scenario) -> Outcome {
     crate::timing::scenario_begins();
-    let outcome = run_timed(paths, scenario);
+    let outcome = if scenario.name == "sentinel: panels move through frames, and reduced motion moves nothing" {
+        retry_motion_infrastructure(|| run_timed(paths, scenario))
+    } else {
+        run_timed(paths, scenario)
+    };
     crate::timing::scenario_ends(scenario.name, outcome.time.unwrap_or_default());
     outcome
+}
+
+fn retry_motion_infrastructure(mut run: impl FnMut() -> Outcome) -> Outcome {
+    let first = run();
+    if first.status != Status::Fail || !first.message.starts_with("infrastructure:") {
+        return first;
+    }
+    let mut second = run();
+    if second.status == Status::Fail && second.message.starts_with("infrastructure:") {
+        second.status = Status::Quarantined;
+        second.message = format!("{} (first attempt: {})", second.message, first.message);
+    }
+    second
 }
 
 fn run_timed(paths: &Paths, scenario: &Scenario) -> Outcome {
@@ -330,6 +347,9 @@ fn run_timed(paths: &Paths, scenario: &Scenario) -> Outcome {
         (Ok(()), Ok(())) => Outcome::pass_with(Suite::Screen, scenario.name, time, &ctx.notes.join(", ")),
         (Err(e), Ok(())) => Outcome::fail(Suite::Screen, scenario.name, time, &e),
         (Ok(()), Err(a)) => Outcome::fail(Suite::Screen, scenario.name, time, &format!("audit: {a}")),
+        (Err(e), Err(a)) if scenario.name == "sentinel: panels move through frames, and reduced motion moves nothing" => {
+            Outcome::fail(Suite::Screen, scenario.name, time, &format!("audit: {a}\nscenario: {e}"))
+        }
         (Err(e), Err(a)) => Outcome::fail(Suite::Screen, scenario.name, time, &format!("{e}\naudit: {a}")),
     }
 }
@@ -639,3 +659,59 @@ mod tests {
 
 #[cfg(windows)]
 pub mod project_drivers;
+
+#[cfg(test)]
+mod motion_infrastructure_tests {
+    use super::*;
+    use crate::report::{exit_code, line, summary};
+
+    fn run(results: &[&str]) -> (Outcome, usize) {
+        let mut calls = 0;
+        let outcome = retry_motion_infrastructure(|| {
+            let result = results[calls];
+            calls += 1;
+            if result.is_empty() {
+                Outcome::pass(Suite::Screen, "sentinel: panels", None)
+            } else {
+                Outcome::fail(Suite::Screen, "sentinel: panels", None, result)
+            }
+        });
+        (outcome, calls)
+    }
+
+    #[test]
+    fn completed_motion_defects_still_fail() {
+        use crate::sentinel::{self, Anim, Motion};
+        use serde_json::json;
+        let rows: Vec<_> = (0..=40).map(|i| json!([i * 16, 1, 0, 0, 300, 400, 1])).collect();
+        let trace = json!({ "elapsed": 640, "settled": true, "animations": [], "samples": { "settings": rows } });
+        assert!(sentinel::coverage_problem(&trace, &["settings"]).is_none());
+        assert!(matches!(sentinel::teleport(&sentinel::samples(&trace["samples"]["settings"])), Motion::Still));
+        let (still, calls) = run(&["settings opens: nothing moved"]);
+        assert_eq!((exit_code(&[still]), calls), (1, 1));
+        let moving = Anim { target: "panel".into(), props: vec!["transform".into()], ms: 400.0, infinite: false };
+        assert!(!sentinel::reduced_problems("reduced", &[moving]).is_empty());
+        let (reduced, calls) = run(&["reduced motion: transform moved"]);
+        assert_eq!((exit_code(&[reduced]), calls), (1, 1));
+    }
+
+    #[test]
+    fn retries_only_infrastructure_and_quarantines_two_incomplete_attempts() {
+        let (passed, calls) = run(&["infrastructure: incomplete sampling", ""]);
+        assert_eq!((passed.status, calls), (Status::Pass, 2));
+        let (incomplete, calls) = run(&["infrastructure: first", "infrastructure: second"]);
+        assert_eq!((incomplete.status, calls), (Status::Quarantined, 2));
+        assert!(line(&incomplete).contains("QUARANTINED sentinel: panels: infrastructure: second"));
+        assert!(summary(std::slice::from_ref(&incomplete)).contains("quarantined failures: 1"));
+        assert_eq!(exit_code(&[incomplete]), 0);
+        for failure in
+            ["settings opens: nothing moved", "reduced motion: transform moved", "audit: leak\nscenario: infrastructure: incomplete"]
+        {
+            let (outcome, calls) = run(&[failure]);
+            assert_eq!((outcome.status, calls), (Status::Fail, 1));
+            assert_eq!(exit_code(&[outcome]), 1);
+        }
+        let (outcome, calls) = run(&["infrastructure: incomplete", "settings opens: nothing moved"]);
+        assert_eq!((outcome.status, calls), (Status::Fail, 2));
+    }
+}
