@@ -107,11 +107,9 @@ pub const NO_TEXT: &str = "error.plan.noText";
 pub const RUNNING: &str = "error.plan.running";
 pub const NO_EVIDENCE: &str = "error.plan.noEvidence";
 
-const PLAN_DESCRIPTION: &str = "Shows the person your plan as a short checklist, kept with the conversation across turns. You can send the whole list (at most 12 short imperative steps, each pending, in_progress or done, exactly one in_progress while you work), and again when the plan changes. You can send {\"advance\": true, \"evidence\": \"...\"} with the call that starts the next step: it finishes the current step and starts the next pending one. Every step marked done (in steps or with advance) needs evidence: what you ran or looked at that shows it is done. Never repeat the plan as a list in your text. When a conversation you started does a step, give that step its id in conversation. For big work you can also send estimate: your honest guess of the whole job's cost in US dollars at API price; Faber counts the spend and, when it has cost half as much again, tells you to keep to the plan and use cheaper helpers. For a visible or behavior change, include a contract in the person's language with what it extends or why it is new, the proof and a target for speed, size or cost; omit it for questions and small fixes.";
+const PLAN_DESCRIPTION: &str = "You can show a persistent checklist of up to 12 short imperative steps; update it when it changes. Keep exactly one in_progress while working. Every done step or advance needs evidence of what you ran or saw. Never repeat the list in text. Link a started conversation to its step. For big work give an estimate; for visible or behavior changes give a contract in the person's language, except questions and small fixes.";
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words (at most 50 characters) and their language, what you are doing now, with no tool, command or file names: \"Fixing the login page\". You can use it when substantial work starts or the phase changes.";
-
-const WRAP_UP_DESCRIPTION: &str = "After edits, checks or a plan, call this before your closing message. Reuse successful check results while their inputs and environment are unchanged. outcome: done when the whole request is finished and you verified it; blocked when you cannot go on until something outside your reach changes; needs_you when a decision or an action is theirs. did: one or two sentences. result: what is now true. not_done: what is left or not verified (leave out when nothing). verified: what you ran or looked at that shows the result; required for done, never something you expect. Everyday words, in the person's language. ask: at most one short question, only when the next move is the person's, with actions: one or two replies of 1 to 3 words, your recommendation first. When the task fixed a mistake, first look where the same kind of mistake could also be (other callers, sibling code, copies of the same text); if you find it, name the places in result and make fixing them your ask, and never fix them unasked.";
 
 fn plan_schema() -> Value {
     json!({
@@ -139,6 +137,7 @@ fn plan_schema() -> Value {
             },
             "contract": {
                 "type": "object",
+                "description": "For visible or behavior changes: what this extends or why it is new, proof, and a speed, size or cost target in the person's language; omit for questions and small fixes.",
                 "properties": {
                     "extends": { "type": "string", "description": "The existing thing this extends." },
                     "new_because": { "type": "string", "description": "The closest existing thing and why it does not fit." },
@@ -150,7 +149,7 @@ fn plan_schema() -> Value {
             "size": { "type": "string", "enum": ["small", "normal", "risky"], "description": "Work size, default small. Never lowered. A supplied contract covers this size, including an engine raise. After a boundary hold, state what it extends or why new and its proof in contract before retrying the action." },
             "advance": { "type": "boolean", "description": "Finish the current step and start the next pending one." },
             "evidence": { "type": "string", "description": "Required with advance: what you ran or looked at." },
-            "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price." }
+            "estimate": { "type": "number", "description": "For big work: the whole job's cost in US dollars at API price; at 150% Faber advises sticking to the plan and using cheaper helpers." }
         },
         "additionalProperties": false
     })
@@ -165,50 +164,110 @@ fn status_schema() -> Value {
     })
 }
 
-fn wrap_up_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "outcome": { "type": "string", "enum": ["done", "blocked", "needs_you"], "description": "done: the whole request is finished and verified. blocked: you cannot go on. needs_you: a decision or action is the person's." },
-            "did": { "type": "string", "description": "What you did, one or two sentences." },
-            "result": { "type": "string", "description": "What is now true." },
-            "not_done": { "type": "string", "description": "What is left or not verified; leave out when nothing is." },
-            "verified": { "type": "string", "description": "What you ran or looked at that shows the result. Required for done." },
-            "follow_ups": { "type": "array", "maxItems": 32, "description": "Project tasks discovered at close, each under 6,000 bytes. Depends names existing task files; omit when there are none.", "items": {
-                "type": "object", "properties": {
-                    "title": { "type": "string" }, "area": { "type": "string" }, "files": { "type": "string" },
-                    "depends": { "type": "array", "items": { "type": "string" } }, "size": { "type": "string" }, "done": { "type": "string" }
-                }, "required": ["title", "done"], "additionalProperties": false
-            } },
-            "ask": { "type": "string", "description": "One short question for the person, only when the next move is theirs." },
-            "actions": {
-                "type": "array",
-                "maxItems": 2,
-                "items": { "type": "string" },
-                "description": "With ask: one or two replies of 1 to 3 words, the recommendation first."
-            }
-        },
-        "required": ["outcome", "did", "result"],
-        "additionalProperties": false
-    })
-}
-
-/// The three tools as Codex `dynamicTools` entries.
-pub fn codex_tools() -> [Value; 3] {
+/// The tools offered to new threads; legacy wrap_up calls are still accepted.
+pub fn codex_tools() -> [Value; 2] {
     [
         json!({ "type": "function", "name": PLAN, "description": PLAN_DESCRIPTION, "inputSchema": plan_schema() }),
         json!({ "type": "function", "name": STATUS, "description": STATUS_DESCRIPTION, "inputSchema": status_schema() }),
-        json!({ "type": "function", "name": WRAP_UP, "description": WRAP_UP_DESCRIPTION, "inputSchema": wrap_up_schema() }),
     ]
 }
 
-/// The three tools as Faber's MCP server lists them to Claude Code.
-pub fn mcp_tools() -> [Value; 3] {
+/// The tools offered to Claude Code.
+pub fn mcp_tools() -> [Value; 2] {
     [
         json!({ "name": PLAN, "description": PLAN_DESCRIPTION, "inputSchema": plan_schema() }),
         json!({ "name": STATUS, "description": STATUS_DESCRIPTION, "inputSchema": status_schema() }),
-        json!({ "name": WRAP_UP, "description": WRAP_UP_DESCRIPTION, "inputSchema": wrap_up_schema() }),
     ]
+}
+
+/// The machine-only conclusion at the end of a Project's final message.
+const TRAILER_OPEN: &str = "<|faber-wrap-up|>";
+const TRAILER_CLOSE: &str = "<|/faber-wrap-up|>";
+
+#[derive(Default)]
+pub(crate) struct Trailer {
+    pending: String,
+    candidate: bool,
+    message_start: usize,
+}
+
+impl Trailer {
+    pub(crate) fn begin(&mut self, at: usize) {
+        self.message_start = at;
+    }
+
+    pub(crate) fn message_start(&self) -> usize {
+        self.message_start
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Hold a possible delimiter across deltas, then hold the candidate until its message ends.
+    pub(crate) fn feed(&mut self, delta: &str) -> String {
+        self.pending.push_str(delta);
+        if self.candidate {
+            return String::new();
+        }
+        if let Some(at) = self.pending.find(TRAILER_OPEN) {
+            self.candidate = true;
+            return self.pending.drain(..at).collect();
+        }
+        let keep = (1..TRAILER_OPEN.len()).rev().find(|&n| self.pending.ends_with(&TRAILER_OPEN[..n])).unwrap_or(0);
+        self.pending.drain(..self.pending.len() - keep).collect()
+    }
+
+    /// Return visible words and, only for a final top-level trailer, its JSON or a parse error.
+    pub(crate) fn finish(&mut self, prefix: &str) -> (String, Option<Result<Value, String>>) {
+        self.candidate = false;
+        let pending = std::mem::take(&mut self.pending);
+        let mut chosen = None;
+        for (at, _) in pending.match_indices(TRAILER_OPEN) {
+            let before = format!("{prefix}{}", &pending[..at]);
+            if (before.is_empty() || before.ends_with('\n')) && !inside_fence(&before) {
+                chosen = Some(at);
+            }
+        }
+        let Some(at) = chosen else {
+            // A truncated marker is machine syntax, not part of the answer.
+            return if !pending.is_empty() && TRAILER_OPEN.starts_with(&pending) && pending.starts_with("<|") {
+                (String::new(), None)
+            } else {
+                (pending, None)
+            };
+        };
+        let tail = &pending[at + TRAILER_OPEN.len()..];
+        let body = tail.strip_prefix("\r\n").or_else(|| tail.strip_prefix('\n')).unwrap_or(tail);
+        let Some(end) = body.find(TRAILER_CLOSE) else {
+            return (pending[..at].to_string(), Some(Err("missing closing delimiter".into())));
+        };
+        let trailing = &body[end + TRAILER_CLOSE.len()..];
+        let value = serde_json::from_str(body[..end].trim()).map_err(|e| e.to_string());
+        if value.is_err() && !trailing.trim().is_empty() {
+            return (pending, None);
+        }
+        (format!("{}{trailing}", &pending[..at]), Some(value))
+    }
+}
+
+/// Markdown examples containing the marker are ordinary answer text, including at the end.
+fn inside_fence(text: &str) -> bool {
+    let mut open: Option<(char, usize)> = None;
+    for line in text.lines() {
+        let line = line.trim_start_matches(' ');
+        let Some(ch @ ('`' | '~')) = line.chars().next() else { continue };
+        let count = line.chars().take_while(|&c| c == ch).count();
+        if count < 3 {
+            continue;
+        }
+        match open {
+            None => open = Some((ch, count)),
+            Some((marker, size)) if marker == ch && count >= size && line[count..].trim().is_empty() => open = None,
+            _ => {}
+        }
+    }
+    open.is_some()
 }
 
 /// The name both drivers give a call of one of these tools, from the name Codex or the MCP server knows.
@@ -769,29 +828,135 @@ mod tests {
     }
 
     #[test]
-    fn both_drivers_request_a_conclusion_before_closing_and_reuse_current_checks() {
-        let native = codex_tools().into_iter().find(|tool| tool["name"] == WRAP_UP).unwrap();
-        let mcp = mcp_tools().into_iter().find(|tool| tool["name"] == WRAP_UP).unwrap();
-        assert_eq!(native["description"], mcp["description"]);
-        assert_eq!(native["inputSchema"], mcp["inputSchema"]);
-        let words = native["description"].as_str().unwrap();
-        assert!(words.contains("After edits, checks or a plan, call this before your closing message"));
-        assert!(words.contains("Reuse successful check results while their inputs and environment are unchanged"));
-        assert!(words.contains("required for done, never something you expect"));
-        assert!(words.len() < 1081, "the contract must be shorter than the optional wording it replaces");
-        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works."})).is_err());
-        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works.","verified":"Saved tests passed."})).unwrap().done);
+    fn trailer_streams_only_visible_text_and_accepts_split_markers() {
+        let mut parser = Trailer::default();
+        let mut visible = String::new();
+        for part in [
+            "Done.\n<|fa",
+            "ber-wrap-",
+            "up|>\n{\"outcome\":\"done\",\"did\":\"Fixed\",",
+            "\"result\":\"Works\",\"verified\":\"Tests\"}\n<|/faber-wrap-up|>",
+        ] {
+            visible.push_str(&parser.feed(part));
+            assert!(!visible.contains("<|"));
+        }
+        let (rest, payload) = parser.finish(&visible);
+        visible.push_str(&rest);
+        assert_eq!(visible, "Done.\n");
+        assert!(wrap_up(&payload.unwrap().unwrap()).unwrap().done);
     }
 
     #[test]
-    fn the_closing_box_asks_about_the_same_mistake_elsewhere_only_after_a_fix() {
-        // Look around (R369): scoped to the close of a fix, never a rule for every turn, and never a fix unasked.
-        for words in ["When the task fixed a mistake", "same kind of mistake", "make fixing them your ask", "never fix them unasked"] {
-            assert!(WRAP_UP_DESCRIPTION.contains(words), "{words}");
+    fn trailer_keeps_quoted_or_nonfinal_blocks_and_rejects_bad_or_missing_ones() {
+        let block = "<|faber-wrap-up|>\n{bad}\n<|/faber-wrap-up|>";
+        let mut parser = Trailer::default();
+        let prefix = parser.feed(&format!("Example:\n{block}\nMore text."));
+        let (rest, payload) = parser.finish(&prefix);
+        assert_eq!(format!("{prefix}{rest}"), format!("Example:\n{block}\nMore text."));
+        assert!(payload.is_none());
+        let prefix = parser.feed(&format!("```text\n{block}\n```"));
+        let (rest, payload) = parser.finish(&prefix);
+        assert_eq!(format!("{prefix}{rest}"), format!("```text\n{block}\n```"));
+        assert!(payload.is_none());
+        let prefix = parser.feed(&format!("Answer.\n{block}"));
+        let (rest, payload) = parser.finish(&prefix);
+        assert_eq!(format!("{prefix}{rest}"), "Answer.\n");
+        assert!(payload.unwrap().is_err());
+        let prefix =
+            parser.feed("Answer.\n<|faber-wrap-up|>\n{\"outcome\":\"done\",\"did\":\"Fixed\",\"result\":\"Works\"}\n<|/faber-wrap-up|>");
+        let (rest, payload) = parser.finish(&prefix);
+        assert_eq!(format!("{prefix}{rest}"), "Answer.\n");
+        assert!(wrap_up(&payload.unwrap().unwrap()).is_err());
+        assert_eq!(parser.feed("No block."), "No block.");
+        assert!(parser.finish("No block.").1.is_none());
+        assert_eq!(parser.feed("Working.\n<|faber-wrap-up|>"), "Working.\n");
+        let (rest, invalid) = parser.finish("Working.\n");
+        assert!(rest.is_empty() && invalid.unwrap().is_err());
+    }
+
+    #[test]
+    fn trailer_strips_valid_blocks_with_following_text_or_inline_json() {
+        for block in [
+            "<|faber-wrap-up|>\n{\"outcome\":\"blocked\",\"did\":\"Tried\",\"result\":\"Waiting\"}\n<|/faber-wrap-up|>",
+            "<|faber-wrap-up|>{\"outcome\":\"blocked\",\"did\":\"Tried\",\"result\":\"Waiting\"}<|/faber-wrap-up|>",
+        ] {
+            let mut parser = Trailer::default();
+            let prefix = parser.feed(&format!("Words.\n{block}\nMore words."));
+            let (rest, payload) = parser.finish(&prefix);
+            assert_eq!(format!("{prefix}{rest}"), "Words.\n\nMore words.");
+            assert!(wrap_up(&payload.unwrap().unwrap()).is_ok());
         }
-        let tuning = crate::model::Tuning::default();
-        let persona = crate::persona::persona(&crate::persona::PersonaInput { name: None, tuning: &tuning, research: None });
-        assert!(!persona.contains("same kind of mistake"), "the persona weighs on every turn of both areas");
+    }
+
+    #[test]
+    fn helpers_of_both_drivers_are_told_to_return_plain_reports() {
+        use crate::helper::Helper;
+        use crate::model::{Area, Permissions};
+        let launch = crate::claude::ClaudeLaunch {
+            temporary: false,
+            area: Area::Project,
+            model: None,
+            effort: None,
+            resume: None,
+            user_hooks: false,
+            permissions: Permissions::Ask,
+            instructions: None,
+            user_name: None,
+            research: None,
+            group_instructions: None,
+            flags: Default::default(),
+            tuning: Default::default(),
+            helper: Helper::Is,
+            browse: false,
+            conversations: false,
+            leads: false,
+            verify: false,
+            progress: false,
+            tools: Default::default(),
+        };
+        let args = crate::claude::claude_args(&launch);
+        assert!(args.iter().any(|arg| arg.contains("As a helper, return an ordinary report without a faber-wrap-up block.")));
+        let thread = crate::codex::CodexThread {
+            temporary: false,
+            title: None,
+            leave_plan: false,
+            cwd: Default::default(),
+            model: None,
+            effort: None,
+            resume: None,
+            instructions: None,
+            research: None,
+            user_name: None,
+            group_instructions: None,
+            permissions: Permissions::Ask,
+            tuning: Default::default(),
+            helper: Helper::Is,
+            browse: false,
+            conversations: false,
+            leads: false,
+            progress: false,
+            verify: false,
+        };
+        let (_, params) = crate::codex::thread_params(Area::Project, &thread);
+        assert!(
+            params["developerInstructions"]
+                .as_str()
+                .unwrap()
+                .contains("As a helper, return an ordinary report without a faber-wrap-up block.")
+        );
+    }
+
+    #[test]
+    fn new_tools_omit_wrap_up_but_legacy_calls_are_recognized() {
+        assert!(codex_tools().iter().all(|tool| tool["name"] != WRAP_UP));
+        assert!(mcp_tools().iter().all(|tool| tool["name"] != WRAP_UP));
+        assert_eq!(tool_of(WRAP_UP), Some(WRAP_UP_TOOL));
+        assert_eq!(claude_tool(CLAUDE_WRAP_UP), Some(WRAP_UP_TOOL));
+        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works."})).is_err());
+        assert!(wrap_up(&json!({"outcome":"done","did":"Fixed it.","result":"Works.","verified":"Tests passed."})).unwrap().done);
+        for words in ["required for done", "same kind of mistake", "never fix them unasked", "one or two"] {
+            assert!(crate::persona::PROJECT_DETAILS.contains(words), "{words}");
+        }
     }
 
     fn refused(input: Value) -> String {

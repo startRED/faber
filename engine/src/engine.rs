@@ -13,6 +13,7 @@ use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
+use crate::progress;
 use crate::project::FolderState;
 use crate::recents::RecentsView;
 use crate::router::{Choice, Pick, pick_model};
@@ -319,6 +320,7 @@ struct Live {
     parent_reported: Option<String>,
     break_pending: bool,
     answer_started: bool,
+    trailer: progress::Trailer,
     /// The main thread said all it will say (`Settled`) and only helpers in the background may still run: a message written now
     /// waits for no step and goes in at once.
     settled: bool,
@@ -2819,6 +2821,9 @@ impl Core {
     /// turn that failed.
     fn interrupt(&mut self, id: &str, by_person: bool) {
         let waiting = self.live.get_mut(id).is_some_and(|l| l.overload_wait.take().is_some());
+        if waiting {
+            self.flush_trailer(id, false);
+        }
         let retry_line = self.turn(id).is_some_and(|m| m.overload_retry.take().is_some());
         self.cancel_workers(id);
         self.settings_changes.remove(id);
@@ -2879,6 +2884,45 @@ impl Core {
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
         let id = self.live.get(conv)?.turn.clone()?;
         self.convs.get_mut(conv)?.messages.iter_mut().find(|m| m.id == id)
+    }
+
+    fn append_stream_text(&mut self, conv: &str, delta: &str) {
+        let pending = self.live.get(conv).is_some_and(|l| l.break_pending);
+        let Some(m) = self.turn(conv) else { return };
+        if pending && !delta.is_empty() {
+            m.text.push_str("\n\n");
+            m.text_breaks.get_or_insert_default().push(m.text.encode_utf16().count());
+        }
+        m.text.push_str(delta);
+        if pending
+            && !delta.is_empty()
+            && let Some(l) = self.live.get_mut(conv)
+        {
+            l.break_pending = false;
+        }
+    }
+
+    /// Flush held text before a message or turn boundary, without exposing a machine block.
+    fn flush_trailer(&mut self, conv: &str, record: bool) {
+        let Some(start) = self.live.get(conv).filter(|l| !l.trailer.is_empty()).map(|l| l.trailer.message_start()) else { return };
+        let prefix = self.turn(conv).and_then(|m| m.text.get(start..)).unwrap_or_default().to_string();
+        let (visible, payload) = self.live.get_mut(conv).unwrap().trailer.finish(&prefix);
+        self.append_stream_text(conv, &visible);
+        if record && let Some(payload) = payload {
+            match payload.and_then(|input| self.write_progress(conv, progress::WRAP_UP_TOOL, &input)) {
+                Ok(_) => {
+                    if let Some(m) = self.turn(conv) {
+                        m.conclusion_error = None;
+                    }
+                }
+                Err(error) => {
+                    eprintln!("project conclusion rejected: {error}");
+                    if let Some(m) = self.turn(conv) {
+                        m.conclusion_error = Some(error);
+                    }
+                }
+            }
+        }
     }
 
     fn handle(&mut self, conv: &str, sid: u64, event: EngineEvent) {
@@ -2997,6 +3041,17 @@ impl Core {
                 }
                 EngineEvent::Text(_) | EngineEvent::Thinking(_) | EngineEvent::Tool { .. } | EngineEvent::ChildWords { .. } => return,
                 _ => {}
+            }
+        }
+        if self.convs.get(conv).is_some_and(|c| c.area == Area::Project) {
+            if matches!(&event, EngineEvent::Break { .. } | EngineEvent::Tool { parent: None, .. }) {
+                self.flush_trailer(conv, true);
+                let at = self.turn(conv).map_or(0, |m| m.text.len());
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.trailer.begin(at);
+                }
+            } else if matches!(&event, EngineEvent::Settled | EngineEvent::MainIdle | EngineEvent::Done { .. }) {
+                self.flush_trailer(conv, !matches!(&event, EngineEvent::Done { ok: false, .. }));
             }
         }
         // What the reply says or does moves it: its age counts from here, and more words after the agent finished mean it was not done.
@@ -3122,19 +3177,12 @@ impl Core {
                 {
                     l.settled = false;
                 }
-                let pending = self.live.get(conv).is_some_and(|l| l.break_pending);
-                let Some(m) = self.turn(conv) else { return };
-                if pending && !delta.is_empty() {
-                    m.text.push_str("\n\n");
-                    m.text_breaks.get_or_insert_default().push(m.text.encode_utf16().count());
-                }
-                m.text.push_str(&delta);
-                if pending
-                    && !delta.is_empty()
-                    && let Some(l) = self.live.get_mut(conv)
-                {
-                    l.break_pending = false;
-                }
+                let visible = if self.convs.get(conv).is_some_and(|c| c.area == Area::Project) {
+                    self.live.get_mut(conv).map(|l| l.trailer.feed(&delta)).unwrap_or_default()
+                } else {
+                    delta
+                };
+                self.append_stream_text(conv, &visible);
             }
             EngineEvent::Thinking(delta) => {
                 if !delta.is_empty()
@@ -4030,6 +4078,7 @@ impl Core {
         if l.held.take().is_some() && l.started == 0.0 {
             l.started = secs;
         }
+        self.flush_trailer(conv, true);
         let point = self.take_rewind_steer(&queued_id);
         let Some(c) = self.convs.get_mut(conv) else { return };
         let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
@@ -4066,6 +4115,7 @@ impl Core {
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = Some(reply_id.clone());
             l.answer_started = false;
+            l.trailer = Default::default();
             l.break_pending = false;
             l.settled = false;
             if unattended {
@@ -4729,6 +4779,7 @@ impl Core {
             return Err("error.conversationGone".into());
         }
         self.begin_unbounded(pick.vendor)?;
+        self.flush_trailer(id, true);
         self.count_correction(id);
         if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
             t.approved = None;
@@ -4737,6 +4788,7 @@ impl Core {
         let text = self.fold_notice_input(id, text);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
+            l.trailer = Default::default();
             l.turn = Some(reply_id.to_string());
             // Same-reply quota continuations must keep an already-visible answer outside activity.
             l.answer_started = self
@@ -5167,6 +5219,7 @@ impl Core {
                 parent_reported: None,
                 break_pending: false,
                 answer_started: false,
+                trailer: Default::default(),
                 settled: false,
                 open_tools: Vec::new(),
                 used: self.tick,
@@ -6368,6 +6421,7 @@ mod tool_in_tests {
             parent_reported: None,
             break_pending: false,
             answer_started: false,
+            trailer: Default::default(),
             settled: false,
             open_tools: Vec::new(),
             used: 0,
@@ -6463,6 +6517,7 @@ mod tool_in_tests {
                         parent_reported: None,
                         break_pending: false,
                         answer_started: false,
+                        trailer: Default::default(),
                         settled: false,
                         open_tools: Vec::new(),
                         used: 0,
