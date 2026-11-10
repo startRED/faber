@@ -53,6 +53,7 @@ pub const ROUTER: [(Vendor, &str, &str); 2] = [(Vendor::Codex, "gpt-6-luna", "me
 
 pub const KINDS: [&str; 7] = ["chat", "writing", "code", "math", "research", "image", "other"];
 pub const LEVELS: [&str; 3] = ["easy", "medium", "hard"];
+pub const SCOPES: [&str; 2] = ["tight", "open"];
 pub const CHECKS: [&str; 3] = ["machine", "glance", "blind"];
 
 pub const INSTRUCTIONS: &str = "You classify a user's request for a router. Never answer the request itself.
@@ -62,12 +63,13 @@ explanations, advice), image (making or editing pictures), other.
 difficulty: easy (a quick answer any competent person gets right), medium (needs care, several steps or some \
 expertise), hard (expert work where a subtle mistake is costly: proofs, multi-file changes, concurrency, architecture, \
 legal, medical or financial analysis).
+scope: tight (named bug, file or function, spec, one deliverable); open (explore and decide, many files, services or sources, migration, major refactor, architecture, deep research, long unattended run).
 check: machine (a test, exit code, schema or number the work can recount proves it), glance (the person sees at once \
 whether it is right), blind (the person cannot easily tell a wrong answer from a right one: facts, advice, analysis, \
 subtle code).
 Reply with one line of JSON only: \
 {\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"check\":\"machine|glance|blind\",\
-\"confidence\":<0..1>}";
+\"scope\":\"tight|open\",\"confidence\":<0..1>}";
 
 /// The profiles this user can run: a connected CLI and, for Codex, a model the account lists.
 pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile> {
@@ -97,6 +99,8 @@ pub struct Routed {
     pub difficulty: &'static str,
     /// The verdict's `check`, kept so a quota recovery re-picks with the same quality floor.
     pub check: &'static str,
+    pub scope: &'static str,
+    pub project: bool,
     pub confidence: f64,
     /// What the table compared for the pick: cost x weight x quota factor. Kept for tests and logs.
     pub price: f64,
@@ -132,6 +136,8 @@ struct Answer {
     #[serde(default)]
     check: String,
     #[serde(default)]
+    scope: serde_json::Value,
+    #[serde(default)]
     confidence: f64,
 }
 
@@ -143,6 +149,7 @@ pub struct Asked {
     pub difficulty: &'static str,
     /// How easily the person can tell a wrong answer from a right one (`CHECKS`); missing or unknown reads as `glance`.
     pub check: &'static str,
+    pub scope: &'static str,
     pub confidence: f64,
 }
 
@@ -153,19 +160,19 @@ pub fn asked(answer: &str) -> Option<Asked> {
     let kind = KINDS.into_iter().find(|k| *k == a.kind).unwrap_or("other");
     let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty)?;
     let check = CHECKS.into_iter().find(|c| *c == a.check).unwrap_or("glance");
-    Some(Asked { kind, difficulty, check, confidence: a.confidence.clamp(0.0, 1.0) })
+    let scope = SCOPES.into_iter().find(|c| Some(*c) == a.scope.as_str()).unwrap_or("tight");
+    Some(Asked { kind, difficulty, check, scope, confidence: a.confidence.clamp(0.0, 1.0) })
 }
 
 /// The router's line and the table's pick with no quota information.
 pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
     let a = asked(answer)?;
-    choose(a.kind, a.difficulty, a.check, a.confidence, candidates)
+    choose_scoped(a.kind, a.difficulty, a.check, a.scope, a.confidence, false, candidates)
 }
 
-/// The bar a task must clear: (general intelligence, agentic coding). `expert` is not a level the router can name; it is
-/// the rung above `hard` that spare quota can buy.
-fn bar(kind: &str, level: &str) -> (u8, u8) {
-    match (level, kind) {
+/// The bar a task must clear: (general intelligence, agentic work). Projects always have an agent bar.
+fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
+    let (iq, agent): (u8, u8) = match (level, kind) {
         ("easy", "code") => (0, 15),
         ("easy", _) => (0, 0),
         ("medium", "code") => (0, 30),
@@ -173,41 +180,55 @@ fn bar(kind: &str, level: &str) -> (u8, u8) {
         ("medium", "math") => (47, 0),
         ("medium", _) => (41, 0),
         ("hard", "code") => (47, 44),
+        ("frontier", "code") => (58, 61),
+        ("frontier", _) => (58, 0),
         ("expert", "code") => (50, 52),
         ("expert", _) => (50, 0),
         _ => (47, 0),
-    }
+    };
+    (
+        iq,
+        if project {
+            agent.max(match level {
+                "easy" => 15,
+                "medium" => 30,
+                "hard" => 44,
+                "expert" => 52,
+                _ => 61,
+            })
+        } else {
+            agent
+        },
+    )
 }
 
-const LADDER: [&str; 4] = ["easy", "medium", "hard", "expert"];
+const LADDER: [&str; 5] = ["easy", "medium", "hard", "expert", "frontier"];
 
 /// The bar of the nearest higher level whose bar is different; a task already at the top keeps its own.
-fn next_bar(kind: &str, level: &str) -> (u8, u8) {
-    let own = bar(kind, level);
+fn next_bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
+    let own = bar(kind, level, project);
     let at = LADDER.iter().position(|l| *l == level).unwrap_or(2);
-    LADDER[at + 1..].iter().map(|l| bar(kind, l)).find(|b| *b != own).unwrap_or(own)
+    LADDER[at + 1..].iter().map(|l| bar(kind, l, project)).find(|b| *b != own).unwrap_or(own)
 }
 
-/// Whole-answer time a step up may take: hard code and math of medium or hard take about 3 minutes, the rest about 1.
+/// Whole-answer time a step up may take: hard or higher code and non-easy math take about 3 minutes, the rest about 1.
 fn cap_secs(kind: &str, level: &str) -> f32 {
-    if (kind == "code" && level == "hard") || (kind == "math" && level != "easy") { 180.0 } else { 60.0 }
+    if (kind == "code" && matches!(level, "hard" | "expert" | "frontier")) || (kind == "math" && level != "easy") { 180.0 } else { 60.0 }
 }
 
 /// Spare quota only buys quality where quality matters.
 fn matters(kind: &str, level: &str) -> bool {
-    matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard")
+    matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard" | "expert" | "frontier")
 }
 
 /// An unsure verdict gets the next level's bar, and so does a `blind` one where quality matters: self-checking pays most
 /// where the person cannot verify the answer quickly, as with math's early hard bar (`bar`). The two are one step, never
 /// two, and a `machine` check lowers nothing: this is raise-only.
-fn level_of(kind: &str, difficulty: &'static str, check: &str, confidence: f64) -> &'static str {
-    let step = confidence < 0.5 || (check == "blind" && matters(kind, difficulty));
-    match (step, difficulty) {
-        (true, "easy") => "medium",
-        (true, _) => "hard",
-        (false, level) => level,
-    }
+fn level_of(kind: &str, difficulty: &'static str, check: &str, scope: &str, confidence: f64) -> &'static str {
+    let level = if difficulty == "hard" && scope == "open" { "expert" } else { difficulty };
+    let step = confidence < 0.5 || (check == "blind" && matters(kind, level));
+    let at = LADDER.iter().position(|l| *l == level).unwrap_or(2);
+    LADDER[if step { (at + 1).min(LADDER.len() - 1) } else { at }]
 }
 
 /// What the quota says about one profile's price.
@@ -283,8 +304,9 @@ fn cheapest(
     candidates: &[Profile],
     factor: &dyn Fn(&Profile) -> Factor,
     steps: bool,
+    project: bool,
 ) -> Option<(Profile, f64, bool)> {
-    let (own, next, cap) = (bar(kind, level), next_bar(kind, level), cap_secs(kind, level));
+    let (own, next, cap) = (bar(kind, level, project), next_bar(kind, level, project), cap_secs(kind, level));
     let matters = matters(kind, level);
     candidates
         .iter()
@@ -312,27 +334,42 @@ pub fn choose(
     confidence: f64,
     candidates: &[Profile],
 ) -> Option<Routed> {
-    choose_reading(kind, difficulty, check, confidence, candidates, &|_| 0.0)
+    choose_scoped(kind, difficulty, check, "tight", confidence, false, candidates)
+}
+
+pub fn choose_scoped(
+    kind: &'static str,
+    difficulty: &'static str,
+    check: &'static str,
+    scope: &'static str,
+    confidence: f64,
+    project: bool,
+    candidates: &[Profile],
+) -> Option<Routed> {
+    choose_reading(kind, difficulty, check, scope, confidence, project, candidates, &|_| 0.0)
 }
 
 /// `choose` with what reading the request costs on each profile (`Factor::read`), and no quota.
+#[allow(clippy::too_many_arguments)]
 fn choose_reading(
     kind: &'static str,
     difficulty: &'static str,
     check: &'static str,
+    scope: &'static str,
     confidence: f64,
+    project: bool,
     candidates: &[Profile],
     read: &dyn Fn(&Profile) -> f64,
 ) -> Option<Routed> {
-    let level = level_of(kind, difficulty, check, confidence);
-    let (profile, price) = match cheapest(kind, level, candidates, &|p| Factor { read: read(p), ..Factor::NEUTRAL }, false) {
+    let level = level_of(kind, difficulty, check, scope, confidence);
+    let (profile, price) = match cheapest(kind, level, candidates, &|p| Factor { read: read(p), ..Factor::NEUTRAL }, false, project) {
         Some((p, price, _)) => (p, price),
         None => {
             let p = strongest(candidates)?;
             (p, p.cost as f64 + read(&p))
         }
     };
-    Some(Routed { profile, kind, difficulty, check, confidence, price, pace: None })
+    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace: None })
 }
 
 /// The table with the quota in it. Every candidate that clears the task's own bar is in the pool at `cost x w x f`, where
@@ -347,9 +384,23 @@ pub fn choose_paced(
     candidates: &[Profile],
     factor: &dyn Fn(&Profile) -> Factor,
 ) -> Option<Routed> {
-    let level = level_of(kind, difficulty, check, confidence);
-    let usual = choose_reading(kind, difficulty, check, confidence, candidates, &|p| factor(p).read)?;
-    let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true) else {
+    choose_paced_scoped(kind, difficulty, check, "tight", confidence, false, candidates, factor)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn choose_paced_scoped(
+    kind: &'static str,
+    difficulty: &'static str,
+    check: &'static str,
+    scope: &'static str,
+    confidence: f64,
+    project: bool,
+    candidates: &[Profile],
+    factor: &dyn Fn(&Profile) -> Factor,
+) -> Option<Routed> {
+    let level = level_of(kind, difficulty, check, scope, confidence);
+    let usual = choose_reading(kind, difficulty, check, scope, confidence, project, candidates, &|p| factor(p).read)?;
+    let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true, project) else {
         return Some(usual);
     };
     let pace = if profile == usual.profile {
@@ -364,7 +415,7 @@ pub fn choose_paced(
     } else {
         None
     };
-    Some(Routed { profile, kind, difficulty, check, confidence, price, pace })
+    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace })
 }
 
 /// What the person's own redoing adds to the table's pick: for a kind of task they keep redoing (`auto_learned`), one rung up.
@@ -376,7 +427,7 @@ pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) ->
     if base.pace.is_some() {
         return base;
     }
-    let level = level_of(base.kind, base.difficulty, base.check, base.confidence);
+    let level = level_of(base.kind, base.difficulty, base.check, base.scope, base.confidence);
     let Some(up) = LADDER.iter().position(|l| *l == level).and_then(|at| LADDER.get(at + 1)) else { return base };
     let (cap, here) = (cap_secs(base.kind, level), (base.profile.iq, base.profile.agent));
     let room: Vec<Profile> = candidates
@@ -387,6 +438,6 @@ pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) ->
         })
         .copied()
         .collect();
-    let Some((profile, price, _)) = cheapest(base.kind, up, &room, factor, false) else { return base };
+    let Some((profile, price, _)) = cheapest(base.kind, up, &room, factor, false, base.project) else { return base };
     Routed { profile, price, pace: Some(PaceNote { kind: "learned".into(), vendor: profile.vendor }), ..base }
 }

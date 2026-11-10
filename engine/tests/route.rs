@@ -178,3 +178,91 @@ fn handoff_keeps_the_exhausted_model_and_loads_older_messages() {
     assert_eq!(old.moved_from_model, None);
     assert_eq!(old.moved_from, Some(Vendor::Claude));
 }
+
+#[test]
+fn scoped_pick_table() {
+    use faber_engine::route::choose_scoped;
+    let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+    let sets = [candidates(&BOTH, &models), candidates(&[Vendor::Claude], &models), candidates(&[Vendor::Codex], &models)];
+    // kind, difficulty, scope, check, project, both, Claude only, Codex only (model and effort)
+    let rows = [
+        ("chat", "easy", "tight", "glance", false, ("gpt-6-luna", "medium"), ("claude-haiku-5-5", "medium"), ("gpt-6-luna", "medium")),
+        (
+            "writing",
+            "medium",
+            "tight",
+            "glance",
+            false,
+            ("gpt-6.1-terra", "medium"),
+            ("claude-sonnet-5-5", "medium"),
+            ("gpt-6.1-terra", "medium"),
+        ),
+        ("research", "hard", "tight", "glance", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
+        (
+            "research",
+            "hard",
+            "open",
+            "blind",
+            false,
+            ("claude-fable-5-2", "medium"),
+            ("claude-fable-5-2", "medium"),
+            ("gpt-6.1-sol", "high"),
+        ),
+        (
+            "code",
+            "easy",
+            "tight",
+            "machine",
+            false,
+            ("claude-haiku-5-5", "medium"),
+            ("claude-haiku-5-5", "medium"),
+            ("gpt-6.1-terra", "low"),
+        ),
+        (
+            "code",
+            "medium",
+            "tight",
+            "machine",
+            false,
+            ("gpt-6.1-terra", "medium"),
+            ("claude-sonnet-5-5", "medium"),
+            ("gpt-6.1-terra", "medium"),
+        ),
+        ("code", "hard", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
+        ("code", "hard", "tight", "blind", false, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "open", "machine", false, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "open", "blind", false, ("claude-fable-5-2", "medium"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "high")),
+        ("math", "medium", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
+        ("research", "hard", "open", "machine", true, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
+    ];
+    for (kind, difficulty, scope, check, project, both, claude, codex) in rows {
+        for (set, expected) in sets.iter().zip([both, claude, codex]) {
+            let p = choose_scoped(kind, difficulty, check, scope, 0.9, project, set).unwrap().profile;
+            assert_eq!((p.model, p.effort), expected, "{kind} {difficulty} {scope} {check} project={project}");
+        }
+        if kind == "code" {
+            for set in &sets {
+                assert_eq!(
+                    choose_scoped(kind, difficulty, check, scope, 0.9, true, set).unwrap().profile,
+                    choose_scoped(kind, difficulty, check, scope, 0.9, false, set).unwrap().profile
+                );
+            }
+        }
+    }
+    for line in [r#"{"difficulty":"hard"}"#, r#"{"difficulty":"hard","scope":"unknown"}"#, r#"{"difficulty":"hard","scope":null}"#] {
+        assert_eq!(asked(line).unwrap().scope, "tight");
+    }
+}
+
+#[test]
+fn frontier_does_not_step_up_again() {
+    use faber_engine::route::{Factor, choose_paced_scoped, choose_scoped, lifted};
+    let candidates = candidates(&BOTH, &["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()]);
+    let base = choose_scoped("code", "hard", "blind", "open", 0.2, true, &candidates).unwrap();
+    assert_eq!(base.profile.model, "claude-fable-5-2");
+    let factor = |_: &Profile| Factor { m: 0.01, ..Factor::NEUTRAL };
+    let paced = choose_paced_scoped("code", "hard", "blind", "open", 0.2, true, &candidates, &factor).unwrap();
+    assert_eq!(paced.profile, base.profile);
+    assert!(paced.pace.is_none());
+    assert_eq!(lifted(base.clone(), &candidates, &factor), base);
+}

@@ -2530,6 +2530,8 @@ impl Core {
                         by_hand: t.by_hand,
                         retried: t.retried,
                         check: t.check.into(),
+                        scope: t.scope.into(),
+                        confidence: t.confidence,
                     });
             }
             return Some(f(&saved));
@@ -4432,6 +4434,8 @@ impl Core {
                 retried: false,
                 moving: false,
                 check: "glance",
+                scope: "tight",
+                confidence: 0.95,
             },
         );
         if let Some(before) = route {
@@ -4447,7 +4451,9 @@ impl Core {
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
-                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref(), &reading));
+                    let routed = verdict.and_then(|(v, _)| {
+                        core.table_at(&v, only, before.as_ref(), core.convs.get(&conv).is_some_and(|c| c.area == Area::Project), &reading)
+                    });
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });
@@ -5514,6 +5520,8 @@ impl Core {
                 retried: false,
                 moving: false,
                 check: "glance",
+                scope: "tight",
+                confidence: 0.95,
             },
         );
         if let Some(before) = route {
@@ -5532,7 +5540,9 @@ impl Core {
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
-                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref(), &reading));
+                    let routed = verdict.and_then(|(v, _)| {
+                        core.table_at(&v, only, before.as_ref(), core.convs.get(&conv).is_some_and(|c| c.area == Area::Project), &reading)
+                    });
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });
