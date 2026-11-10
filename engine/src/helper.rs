@@ -1,4 +1,4 @@
-//! Faber's "call a helper" tool (R161): a project's agent hands one piece of work or a review to the other vendor, which
+//! Faber's "call a helper" tool (R161): a project's agent hands one piece of work or a review to a selected vendor, which
 //! runs it in a short-lived session of its own in the same folder and with the same permission mode. Both CLIs call the tool
 //! in their own way (Claude Code through an MCP server the host answers over stdio, Codex as a dynamic tool), and both get
 //! the helper's final report back as the tool's result.
@@ -16,7 +16,7 @@ pub const CLAUDE_NAME: &str = "mcp__faber__helper";
 /// Faber's own MCP server for Claude Code: an `sdk` server lives in the host, which answers it over stdio.
 pub const CLAUDE_MCP_CONFIG: &str = r#"{"mcpServers":{"faber":{"type":"sdk","name":"faber"}}}"#;
 /// Helpers one conversation may run at once; each is a CLI process.
-pub const MAX_PER_CONVERSATION: usize = 2;
+pub const MAX_PER_CONVERSATION: usize = 3;
 
 /// Whether a session offers the tool, or is a helper itself.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -31,14 +31,17 @@ pub enum Helper {
     Aside,
 }
 
-const DESCRIPTION: &str = "Hands a self-contained piece of work, a review of your work or a second opinion to a helper agent from another AI vendor, in the same folder with the same permissions. It cannot see this conversation or ask anyone questions, so the brief must give the goal, the files involved and what done looks like. Returns the helper's final report. Use it when an independent look is worth a few minutes, never for trivial steps.";
+const DESCRIPTION: &str = "Hand reading many files to a read helper instead of reading them yourself; hand a self-contained change to a build helper; ask for a review of finished work. The brief must stand alone with the goal, files and what done looks like. Do a piece yourself if it needs a stronger model than yours. The report is short; a longer report is saved in a file.";
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "title": { "type": "string", "description": "A few words naming the piece of work, shown to the person." },
-            "brief": { "type": "string", "description": "Everything the helper needs to do the work on its own." }
+            "brief": { "type": "string", "description": "Everything the helper needs to do the work on its own." },
+            "job": { "type": "string", "enum": ["read", "build", "review"], "description": "The kind of work; defaults to review." },
+            "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "Difficulty of a build; defaults to medium." },
+            "kind": { "type": "string", "enum": ["chat", "writing", "code", "math", "research", "image", "other"], "description": "The kind of task; defaults to code." }
         },
         "required": ["title", "brief"],
         "additionalProperties": false
@@ -169,7 +172,7 @@ pub fn dynamic_result(ok: bool, text: &str, pictures: &[String]) -> Value {
     json!({ "success": ok, "contentItems": items })
 }
 
-/// The other vendor: a helper always comes from the one that is not running the conversation.
+/// The other vendor, used when an independent review is available.
 pub fn other(vendor: Vendor) -> Vendor {
     match vendor {
         Vendor::Claude => Vendor::Codex,
@@ -191,14 +194,57 @@ pub fn profile(candidates: &[Profile], vendor: Vendor, economy: bool) -> Option<
         .copied()
 }
 
+/// Select a helper using the same project bars and quota factors as Auto.
+#[allow(clippy::too_many_arguments)]
+pub fn select(
+    job: &str,
+    kind: &'static str,
+    difficulty: &'static str,
+    lead: Option<Profile>,
+    lead_vendor: Vendor,
+    candidates: &[Profile],
+    factor: &dyn Fn(&Profile) -> crate::route::Factor,
+    economy: bool,
+) -> Option<Profile> {
+    if job == "review" {
+        let other = other(lead_vendor);
+        return profile(candidates, if candidates.iter().any(|p| p.vendor == other) { other } else { lead_vendor }, economy);
+    }
+    let level = if economy {
+        match difficulty {
+            "hard" => "medium",
+            _ => "easy",
+        }
+    } else {
+        difficulty
+    };
+    let bar = if job == "read" { (34, 15) } else { crate::route::bar(kind, level, true) };
+    let eligible: Vec<Profile> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
+    let within: Vec<Profile> = eligible.iter().copied().filter(|p| lead.is_none_or(|l| p.iq <= l.iq && p.agent <= l.agent)).collect();
+    let pool = if job == "build" && !within.is_empty() { &within } else { &eligible };
+    if job == "read" {
+        pool.iter()
+            .min_by(|a, b| {
+                let price = |p: &Profile| {
+                    let f = factor(p);
+                    (p.cost as f64 + f.read) * f.w * f.m.max(1.0)
+                };
+                price(a).total_cmp(&price(b))
+            })
+            .copied()
+    } else {
+        crate::route::choose_paced_scoped(kind, level, "machine", "tight", 1.0, true, pool, factor).map(|r| r.profile)
+    }
+}
+
 /// What the helper's session is asked: the agent's own title and brief, framed so it knows nobody can answer it.
 pub fn prompt(input: &Value) -> Option<String> {
     let brief = input["brief"].as_str().map(str::trim).filter(|b| !b.is_empty())?;
     let title = input["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("A piece of work");
     Some(format!(
         "You are a helper. Another AI agent working in this folder handed you the piece of work below. You cannot see its \
-         conversation, and nobody can answer questions, so decide for yourself and do what you can. Finish with a short report \
-         for that agent: what you found or changed (files, checks you ran) and anything you could not do.\n\nTask: {title}\n\n{brief}"
+         conversation, and nobody can answer questions, so decide for yourself and do what you can. Finish with a report of about 1,200 characters at most, in this order: \
+         the outcome in one or two sentences; files changed; checks run and their results; anything you could not do or assumed.\n\nTask: {title}\n\n{brief}"
     ))
 }
 
@@ -246,9 +292,149 @@ pub fn report(ok: bool, text: &str, refused: &[String], error: Option<&str>) -> 
     (ok && !text.trim().is_empty(), out)
 }
 
+/// Keep the full report beside verify logs and bound the text returned to the agent.
+pub fn short_report(folder: &std::path::Path, text: &str, ok: bool) -> String {
+    if text.chars().count() <= 2000 {
+        return text.to_string();
+    }
+    let prefix: String = text.chars().take(1600).collect();
+    let end = prefix
+        .rfind("\n\n")
+        .or_else(|| {
+            prefix
+                .char_indices()
+                .rev()
+                .find(|(i, c)| matches!(c, '.' | '?' | '!') && prefix[i + 1..].starts_with(char::is_whitespace))
+                .map(|(i, _)| i + 1)
+        })
+        .unwrap_or(prefix.len());
+    let excerpt = prefix[..end].trim_end();
+    let status = if ok { "" } else { "\nThe helper stopped or failed." };
+    let failed = || format!("{excerpt}{status}\nThe full report could not be saved; it is visible in the helper view.");
+    let faber = folder.join(".faber");
+    let dir = faber.join("verify");
+    let linked = |path: &std::path::Path| std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if linked(&faber)
+        || linked(&dir)
+        || std::fs::create_dir_all(&dir).is_err()
+        || linked(&faber)
+        || linked(&dir)
+        || !matches!((folder.canonicalize(), dir.canonicalize()), (Ok(root), Ok(real)) if real.starts_with(&root))
+    {
+        return failed();
+    }
+    if let Ok(mut ignore) = std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(".gitignore")) {
+        let _ = std::io::Write::write_all(&mut ignore, b"*\n");
+    }
+    let name = format!("helper-{}.log", uuid::Uuid::new_v4().simple());
+    if std::fs::write(dir.join(&name), text).is_err() {
+        return failed();
+    }
+    let mut logs: Vec<_> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.file_type().is_ok_and(|t| t.is_file())
+                && e.file_name().to_str().is_some_and(|n| n.starts_with("helper-") && n.ends_with(".log"))
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.file_name() == name.as_str(), e.path())))
+        .collect();
+    logs.sort_by(|a, b| b.cmp(a));
+    for (_, _, path) in logs.into_iter().skip(20) {
+        let _ = std::fs::remove_file(path);
+    }
+    format!("{excerpt}{status}\nFull report: .faber/verify/{name}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selects_jobs_and_keeps_long_reports() {
+        let all = crate::route::PROFILES;
+        let neutral = |_: &Profile| crate::route::Factor::NEUTRAL;
+        let pick = |job, difficulty, vendor, candidates: &[Profile]| {
+            select(job, "code", difficulty, None, vendor, candidates, &neutral, false).unwrap()
+        };
+        assert_eq!(pick("read", "easy", Vendor::Claude, &all).model, "claude-haiku-5-5");
+        assert!(pick("build", "easy", Vendor::Claude, &all).agent < pick("build", "hard", Vendor::Claude, &all).agent);
+        assert_eq!(pick("review", "medium", Vendor::Claude, &all), profile(&all, Vendor::Codex, false).unwrap());
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let only: Vec<_> = all.iter().copied().filter(|p| p.vendor == vendor).collect();
+            for job in ["read", "build", "review"] {
+                assert_eq!(pick(job, "medium", vendor, &only).vendor, vendor);
+            }
+        }
+        let scarce =
+            |p: &Profile| crate::route::Factor { m: if p.vendor == Vendor::Claude { 10.0 } else { 1.0 }, ..crate::route::Factor::NEUTRAL };
+        assert_eq!(select("read", "code", "easy", None, Vendor::Claude, &all, &scarce, false).unwrap().vendor, Vendor::Codex);
+        let dir = crate::workspace::TestRoot::new();
+        let full = format!("{}.\n\n{}", "a".repeat(1000), "b".repeat(1500));
+        let short = short_report(dir.path(), &full, false);
+        assert!(short.contains("helper stopped or failed"));
+        let path = short.lines().last().unwrap().strip_prefix("Full report: ").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), full);
+        let blocked = dir.path().join("blocked");
+        std::fs::write(&blocked, "file").unwrap();
+        let missing = short_report(&blocked, &full, false);
+        assert!(missing.chars().count() < 2000 && missing.contains("could not be saved") && missing.contains("stopped or failed"));
+    }
+
+    #[test]
+    fn helper_reports_keep_only_the_newest_twenty_logs() {
+        let root = crate::workspace::TestRoot::new();
+        let dir = root.path().join(".faber/verify");
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..23 {
+            let path = dir.join(format!("helper-{i:032}.log"));
+            std::fs::write(&path, "old report").unwrap();
+            let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(100 + i);
+            std::fs::File::options().write(true).open(path).unwrap().set_times(std::fs::FileTimes::new().set_modified(time)).unwrap();
+        }
+        for name in ["verify-001.log", "other.log", "helper-note.txt"] {
+            std::fs::write(dir.join(name), "keep").unwrap();
+        }
+        std::fs::create_dir(dir.join("helper-directory.log")).unwrap();
+        let full = "é".repeat(2500);
+        let short = short_report(root.path(), &full, true);
+        let path = short.lines().last().unwrap().strip_prefix("Full report: ").unwrap();
+        assert_eq!(std::fs::read_to_string(root.path().join(path)).unwrap(), full);
+        for i in 0..23 {
+            assert_eq!(dir.join(format!("helper-{i:032}.log")).exists(), i >= 4, "log {i}");
+        }
+        for name in ["verify-001.log", "other.log", "helper-note.txt"] {
+            assert_eq!(std::fs::read_to_string(dir.join(name)).unwrap(), "keep");
+        }
+        assert!(dir.join("helper-directory.log").is_dir());
+        for _ in 0..25 {
+            let short = short_report(root.path(), &full, true);
+            let path = short.lines().last().unwrap().strip_prefix("Full report: ").unwrap();
+            assert_eq!(std::fs::read_to_string(root.path().join(path)).unwrap(), full);
+        }
+        assert_eq!(
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .map(Result::unwrap)
+                .filter(|e| e.file_type().unwrap().is_file()
+                    && e.file_name().to_string_lossy().starts_with("helper-")
+                    && e.path().extension().is_some_and(|x| x == "log"))
+                .count(),
+            20
+        );
+    }
+
+    #[test]
+    fn long_report_ends_at_a_sentence_boundary() {
+        let dir = crate::workspace::TestRoot::new();
+        for punctuation in ['?', '!'] {
+            let sentence = format!("{}{} ", "é".repeat(99), punctuation);
+            let full = sentence.repeat(25);
+            let short = short_report(dir.path(), &full, true);
+            assert!(short.lines().next().unwrap().ends_with(punctuation), "{short}");
+        }
+    }
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {

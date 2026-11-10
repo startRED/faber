@@ -3642,6 +3642,194 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn helper_jobs_launch_the_selected_vendor_and_model() {
+        for (job, difficulty, vendor, expected) in [
+            ("read", "easy", Vendor::Claude, "claude-haiku-5-5"),
+            ("build", "easy", Vendor::Claude, "claude-haiku-5-5"),
+            ("build", "hard", Vendor::Claude, "claude-sonnet-5-5"),
+            ("review", "medium", Vendor::Codex, "gpt-6.1-sol"),
+        ] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Claude)).unwrap();
+                core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                core.start_helper("kit", "child".into(), json!({"title":"Task", "brief":"Do it", "job":job, "difficulty":difficulty}));
+                assert!(core.helpers.contains_key("child"), "{job}/{difficulty} must launch");
+                let act = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                assert!(
+                    matches!(&act.actor, crate::act::Actor::Ai { vendor: v, model: Some(m), .. } if *v == vendor && m == expected),
+                    "{job}/{difficulty}: {:?}",
+                    act.actor
+                );
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_review_does_not_fall_back_to_the_lead_when_the_other_vendor_would_bill() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+            core.launch("kit", &pick(Vendor::Codex)).unwrap();
+            core.ledger.of_mut(Vendor::Claude).billing = Billing::UsageBilled;
+            assert_eq!(
+                core.launch_helper("kit", "review", &json!({"title":"Review", "brief":"Check the change"}), None),
+                Err("that AI may be billed per use, so Faber does not call it on its own")
+            );
+            assert!(core.helpers.is_empty());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn helper_jobs_normalize_unknown_input_at_the_door() {
+        for job in [json!("Read"), json!("readonly"), json!("BUILD"), json!("write"), json!(null), json!(42)] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Claude)).unwrap();
+                core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                core.launch_helper("kit", "child", &json!({"brief":"Do it", "job":job}), None).unwrap();
+                let act = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                assert_eq!(act.params["job"], "review", "{job}");
+                assert!(matches!(act.actor, crate::act::Actor::Ai { vendor: Vendor::Codex, .. }));
+            });
+            engine.shutdown();
+        }
+        for (kind, difficulty) in [(json!("CODE"), json!("HARD")), (json!(null), json!(null)), (json!(42), json!(42))] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Claude)).unwrap();
+                core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                for (call, input) in [
+                    ("default", json!({"brief":"Do it", "job":"build", "kind":"code", "difficulty":"medium"})),
+                    ("unknown", json!({"brief":"Do it", "job":"build", "kind":kind, "difficulty":difficulty})),
+                ] {
+                    core.launch_helper("kit", call, &input, None).unwrap();
+                }
+                let acts: Vec<_> =
+                    core.convs["kit"].messages.last().unwrap().acts.iter().filter(|a| a.kind == crate::act::ActKind::Helper).collect();
+                assert_eq!(acts[0].actor, acts[1].actor);
+                assert_eq!(acts[0].params["effort"], acts[1].params["effort"]);
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_jobs_cap_builds_by_the_leads_strongest_model_row() {
+        for effort in ["medium", "low", "max"] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Claude)).unwrap();
+                let live = core.live.get_mut("kit").unwrap();
+                live.turn = Some("reply".into());
+                live.model = Some("claude-sonnet-5-5".into());
+                live.effort = effort.into();
+                core.ledger.of_mut(Vendor::Codex).weights.w.insert("gpt-6.1-sol".into(), 0.001);
+                core.launch_helper("kit", "child", &json!({"brief":"Do it", "job":"build"}), None).unwrap();
+                let act = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                assert!(matches!(&act.actor, crate::act::Actor::Ai { model: Some(m), .. } if m == "gpt-6.1-sol"));
+                assert_eq!(act.params["effort"], "low", "lead effort {effort}");
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_jobs_preserve_quota_and_billing_reasons_for_helpers_and_reviews() {
+        for billing in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                let until = core.secs() + 600.0;
+                for vendor in [Vendor::Claude, Vendor::Codex] {
+                    if billing {
+                        core.ledger.of_mut(vendor).billing = Billing::UsageBilled;
+                    } else {
+                        core.ledger.of_mut(vendor).reach = crate::budget::Reach::Out(Some(until));
+                    }
+                }
+                let expected = if billing {
+                    "that AI may be billed per use, so Faber does not call it on its own"
+                } else {
+                    "that AI has no quota left right now"
+                };
+                for job in ["review", "read", "build"] {
+                    assert_eq!(core.launch_helper("kit", "child", &json!({"brief":"Do it", "job":job}), None), Err(expected));
+                }
+                core.start_review("kit", "review-call".into(), json!({"request":"Check it", "files":[]}));
+                let reply = core.convs["kit"].messages.last().unwrap();
+                assert_eq!(reply.review.as_ref().unwrap().stop.as_deref(), Some("review.stop.quota"));
+                let tools = reply.tools.as_ref().unwrap();
+                assert_eq!(tools.len(), 2);
+                assert!(tools.iter().all(|t| t.output.as_deref() == Some("error.review.quota")));
+                assert!(core.helpers.is_empty());
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_jobs_same_vendor_refusals_use_neutral_words() {
+        for billing in [false, true] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, _, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(Vendor::Codex)).unwrap();
+                core.codex_recommended = Some("gpt-6.1-sol".into());
+                if billing {
+                    core.ledger.of_mut(Vendor::Codex).billing = Billing::UsageBilled;
+                } else {
+                    core.ledger.of_mut(Vendor::Codex).reach = crate::budget::Reach::Out(Some(core.secs() + 600.0));
+                }
+                let expected = if billing {
+                    "that AI may be billed per use, so Faber does not call it on its own"
+                } else {
+                    "that AI has no quota left right now"
+                };
+                assert_eq!(core.launch_helper("kit", "child", &json!({"brief":"Check it"}), Some(Vendor::Codex)), Err(expected));
+                assert!(core.helpers.is_empty());
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
     async fn core_helpers_deliver_their_own_tasks_kit_to_the_other_vendor() {
         for caller in [Vendor::Claude, Vendor::Codex] {
             let dir = crate::workspace::TestRoot::new();
@@ -3830,7 +4018,8 @@ mod tests {
             core.start_helper("kit", "rejected-child".into(), json!({"title":"Design", "brief":"Design a landing page"}));
         });
         checked_signal(&entered).await;
-        let child_cli = engine.with(|core| core.opts.clis.remove(&Vendor::Codex).unwrap());
+        let (child_cli, parent_cli) =
+            engine.with(|core| (core.opts.clis.remove(&Vendor::Codex).unwrap(), core.opts.clis.remove(&Vendor::Claude).unwrap()));
         gate.wait();
         checked_signal(&ended).await;
         tokio::time::timeout(Duration::from_secs(3), async {
@@ -3844,11 +4033,16 @@ mod tests {
         engine.with(|core| {
             assert!(core.helpers.is_empty());
             core.opts.clis.insert(Vendor::Codex, child_cli);
+            core.opts.clis.insert(Vendor::Claude, parent_cli);
             core.synchronous_kit_checks = true;
-            for call in ["first-child", "second-child"] {
+            for call in ["first-child", "second-child", "third-child"] {
                 core.start_helper("kit", call.into(), json!({"title":"Design", "brief":"Design a landing page"}));
             }
-            assert_eq!(core.helpers.len(), 2, "a rejected pending helper consumes neither of the two slots");
+            assert_eq!(core.helpers.len(), 3, "a rejected pending helper consumes none of the three slots");
+            assert_eq!(
+                core.launch_helper("kit", "fourth-child", &json!({"title":"Design", "brief":"Design a landing page"}), None),
+                Err("three helpers are already working; wait for one to finish")
+            );
         });
         engine.shutdown();
     }

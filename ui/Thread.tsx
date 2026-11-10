@@ -480,7 +480,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const thinking = createMemo(() => thinkingParts(thinkingText()));
   // A helper always comes from the AI that is not running the reply.
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
-  const agents = createMemo(() => agentSteps(tools(), helperKind(), undefined, m().review?.rounds));
+  const agents = createMemo(() => agentSteps(tools(), helperKind(), undefined, m().review?.rounds, m().acts));
   // The agent's own tools, without its subagents' (each subagent's sit in its own row).
   const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
   // The reply as it happened: words, thinking and steps in their order (W1). Each part that did not change keeps its object, so

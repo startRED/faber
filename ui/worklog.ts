@@ -1,3 +1,4 @@
+import { prettyModel } from './models.ts';
 import type { Change, ChangedLine, Message, ReviewRound, ToolUse } from './api.ts';
 import { lang, t } from './i18n.ts';
 import { readsIn } from './language.ts';
@@ -369,7 +370,7 @@ export function helperNumbers(tools: ToolUse[] = []): Map<string, number> {
 }
 
 /** Each subagent, including nested ones, with its own tools. The parent keeps the handoff, the child keeps its work. */
-export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = helperNumbers(tools), rounds: ReviewRound[] = []): AgentStep[] {
+export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = helperNumbers(tools), rounds: ReviewRound[] = [], acts: import('./api.ts').FaberAct[] = []): AgentStep[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const reviews = tools.filter((tool) => tool.name === 'Review');
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
@@ -407,13 +408,18 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     const input = (call.input ?? {}) as Record<string, unknown>;
     const helper = call.name === 'Helper';
     const parent = parentOf(call);
+    const act = acts.find((a) => a.kind === 'helper' && a.params?.call === call.id);
+    const model = act?.actor.who === 'ai' ? act.actor.model : undefined;
+    const job = act?.params?.job;
+    const jobWord = job === 'read' ? t('tool.read') : job === 'build' ? t('tool.write') : job === 'review' ? t('review.kind') : '';
+    const helperModel = model ? [jobWord, prettyModel(model), act?.params?.effort ? t(`answer.effort.${act.params.effort as 'low' | 'medium' | 'high'}`) : ''].filter(Boolean).join(' · ') : helperKind;
     return {
       call,
       review: call.name === 'Review' ? rounds.find((r) => r.call === call.id) : undefined,
       parent: parent ? { id: parent.id, title: titleOf(parent) } : undefined,
       title: titleOf(call),
       named: namedOf(call),
-      kind: call.name === 'Review' ? t('review.kind') : helper ? helperKind : text(input.subagent_type),
+      kind: call.name === 'Review' ? t('review.kind') : helper ? helperModel : text(input.subagent_type),
       helper,
       brief: text(helper ? input.brief : input.prompt).trim(),
       tools: own.get(call.id) ?? [],

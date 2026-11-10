@@ -1,8 +1,6 @@
 # Subagent steps
 
-A helper from the other AI whose process dies answers its caller immediately with a failed report and any words
-already received. It leaves the live-helper count even when a message was still on its way to it; its missing cost
-keeps the reply's existing approximate-cost mark. The caller can continue. No new control, animation or screen is added.
+A helper whose process dies immediately returns a failed report and any words received. It leaves the live count, even with a message in flight; missing cost keeps the approximate-cost mark.
 
 ## Current activity
 
@@ -125,8 +123,9 @@ step (six times in a row, or 10 with no file changed whatever came between), or 
 with no file changed. The sign stops nothing: the existing 15-minute stop with no open step still applies.
 The running column shows the same words on the row, with "Open conversation", like a stuck helper's.
 
-A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
-ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
+Three helpers run if memory allows. Aim at 1,200 chars; over 2,000, show a sentence/paragraph excerpt and saved path. Keep 20 helper logs; append the person's note last. Full text stays visible.
+
+A helper (Faber's helper tool, R161) is the same row: its title in bold, its job, model and effort. Older rows show the AI name. Its commands show under it and its report is its final words. The person
 never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
 report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
 helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.

@@ -3540,11 +3540,11 @@ impl Core {
                         m.finished_at = None;
                     }
                     m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
-                    m.input_tokens = Some(input_tokens);
-                    m.output_tokens = Some(output_tokens);
-                    m.cache_read_tokens = Some(cache_read_tokens);
-                    m.cache_write_tokens = Some(cache_write_tokens);
-                    m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
+                    m.input_tokens = Some(m.input_tokens.unwrap_or(0).saturating_add(input_tokens));
+                    m.output_tokens = Some(m.output_tokens.unwrap_or(0).saturating_add(output_tokens));
+                    m.cache_read_tokens = Some(m.cache_read_tokens.unwrap_or(0).saturating_add(cache_read_tokens));
+                    m.cache_write_tokens = Some(m.cache_write_tokens.unwrap_or(0).saturating_add(cache_write_tokens));
+                    m.cache_write_1h_tokens = Some(m.cache_write_1h_tokens.unwrap_or(0).saturating_add(cache_write_1h_tokens));
                     m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     if vendor == Vendor::Codex && ok {
                         if let Some(waiting) = m.permissions.as_mut() {

@@ -5296,7 +5296,13 @@ fn two_vendors_heard(dir: &support::DataFolder, spawn: Spawner) -> (Engine, toki
 #[tokio::test]
 async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_report_back() {
     let dir = support::DataFolder::new();
-    let (claude, codex) = (fake(fixture("claude", "helper-call")), fake(fixture("codex", "helper-run")));
+    let mut helper_events = fixture("codex", "helper-run");
+    for entry in &mut helper_events {
+        if entry.msg["method"] == "thread/tokenUsage/updated" {
+            entry.msg["params"]["tokenUsage"]["total"]["cacheWriteInputTokens"] = 111.into();
+        }
+    }
+    let (claude, codex) = (fake(fixture("claude", "helper-call")), fake(helper_events));
     let (to_claude, to_codex) = (claude.spawn.clone(), codex.spawn.clone());
     let spawn: Spawner = Arc::new(move |bin, argv, cwd| if bin == "codex" { to_codex(bin, argv, cwd) } else { to_claude(bin, argv, cwd) });
     let engine = two_vendors(&dir, spawn);
@@ -5337,6 +5343,54 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     assert!(reply.text.contains("nothing risky"), "{}", reply.text);
     // The helper's cost joins the reply's, which is more than the agent's own turn.
     assert!(reply.cost_usd.unwrap() > 0.00815, "{:?}", reply.cost_usd);
+    assert!(reply.input_tokens.unwrap() > 6 && reply.output_tokens.unwrap() > 211, "helper usage joins the reply");
+    assert!(reply.cache_read_tokens.unwrap() > 72649, "helper cached input joins the reply");
+    assert_eq!(reply.cache_write_tokens, Some(36698));
+    assert_eq!(reply.cache_write_1h_tokens, Some(36587));
+}
+
+#[tokio::test]
+async fn helper_long_report_is_short_for_the_agent_and_whole_in_the_file() {
+    let dir = support::DataFolder::new();
+    let full = format!("{}.\n\n{}", "First sentence".repeat(80), "Last paragraph".repeat(150));
+    let mut entries = fixture("codex", "helper-run");
+    let final_id = entries
+        .iter()
+        .find_map(|e| {
+            (e.msg["method"] == "item/completed" && e.msg["params"]["item"]["phase"] == "final_answer")
+                .then(|| e.msg["params"]["item"]["id"].as_str().unwrap().to_string())
+        })
+        .unwrap();
+    let mut first = true;
+    for e in &mut entries {
+        if e.msg["method"] == "item/agentMessage/delta" && e.msg["params"]["itemId"] == final_id {
+            e.msg["params"]["delta"] = if std::mem::take(&mut first) { full.clone().into() } else { "".into() };
+        }
+        if e.msg["method"] == "item/completed" && e.msg["params"]["item"]["id"] == final_id {
+            e.msg["params"]["item"]["text"] = full.clone().into();
+        }
+    }
+    let (claude, codex) = (fake(fixture("claude", "helper-call")), fake(entries));
+    let (to_claude, to_codex) = (claude.spawn.clone(), codex.spawn.clone());
+    let spawn: Spawner = Arc::new(move |bin, argv, cwd| if bin == "codex" { to_codex(bin, argv, cwd) } else { to_claude(bin, argv, cwd) });
+    let engine = two_vendors(&dir, spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let id =
+        engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("claude", Some("haiku"))) }).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    let answered =
+        claude.wire.messages().into_iter().find(|m| m["response"]["response"]["mcp_response"]["result"]["content"].is_array()).unwrap();
+    let sent = answered["response"]["response"]["mcp_response"]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(sent.chars().count() <= 2000, "{sent}");
+    let path = sent.lines().find_map(|line| line.strip_prefix("Full report: ")).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), full);
+    let call = c.messages[1].tools.as_ref().unwrap().iter().find(|t| t.name == "Helper").unwrap();
+    let pages = call.transcript.as_ref().unwrap().pages;
+    let retained: String =
+        (0..pages).flat_map(|page| engine.child_transcript(&id, &call.id, page).unwrap()).map(|entry| entry.text).collect();
+    assert!(retained.contains("Last paragraph"));
+    engine.shutdown();
 }
 
 /// R250: a quick question on the side, asked while the agent works, runs in a process of its own on a fork of the

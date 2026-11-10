@@ -1,4 +1,4 @@
-//! Helpers (R161): when a project's agent calls Faber's helper tool, the other vendor runs that piece of work in a session of
+//! Helpers (R161): when a project's agent calls Faber's helper tool, a selected vendor runs that piece of work in a session of
 //! its own, in the same folder and with the same permission mode. What the helper runs shows inside the agent's call, its
 //! final words go back as the call's result, and its cost joins the reply's.
 use super::*;
@@ -53,9 +53,9 @@ impl Core {
     pub(super) fn helpers_in(&self, conv: &str) -> bool {
         self.helpers.values().any(|h| h.conv == conv) || self.waiting_helpers(conv, "") > 0
     }
-    /// Whether a project conversation on `vendor` offers the helper tool: the other vendor's CLI is connected.
+    /// Whether a project conversation on `vendor` offers the helper tool.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
-        if area == Area::Project && self.opts.clis.contains_key(&helper::other(vendor)) { Helper::Offers } else { Helper::Off }
+        if area == Area::Project && self.opts.clis.contains_key(&vendor) { Helper::Offers } else { Helper::Off }
     }
 
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.
@@ -121,10 +121,26 @@ impl Core {
             return Err("error.rewind.busy");
         }
         let l = self.live.get(conv).ok_or("the conversation is gone")?;
-        let (sid, vendor, permissions, tuning, cwd) = (
+        let job = if review.is_some() {
+            "review"
+        } else {
+            match input["job"].as_str() {
+                Some("read") => "read",
+                Some("build") => "build",
+                _ => "review",
+            }
+        };
+        let kind = crate::route::KINDS.into_iter().find(|k| Some(*k) == input["kind"].as_str()).unwrap_or("code");
+        let difficulty = crate::route::LEVELS.into_iter().find(|k| Some(*k) == input["difficulty"].as_str()).unwrap_or("medium");
+        let lead_vendor = l.vendor;
+        // A model absent from the table stays uncapped: its strength is unknown.
+        let lead = crate::route::PROFILES
+            .into_iter()
+            .filter(|p| p.vendor == l.vendor && Some(p.model) == l.model.as_deref())
+            .max_by_key(|p| (p.iq, p.agent));
+        let (sid, permissions, tuning, cwd) = (
             l.sid,
-            review.unwrap_or_else(|| helper::other(l.vendor)),
-            if review.is_some() { Permissions::Plan } else { l.permissions },
+            if review.is_some() || job == "read" { Permissions::Plan } else { l.permissions },
             Tuning { web: l.tuning.web, summary: l.tuning.summary, language: l.tuning.language.clone(), ..Default::default() },
             l.cwd.clone(),
         );
@@ -143,24 +159,62 @@ impl Core {
             + self.waiting_helpers(conv, &check_name)
             >= helper::MAX_PER_CONVERSATION
         {
-            return Err("two helpers are already working; wait for one to finish");
+            return Err("three helpers are already working; wait for one to finish");
         }
         let prompt = helper::prompt(input).ok_or("the brief was empty")?;
-        let cli = self.opts.clis.get(&vendor).cloned().ok_or("the other AI is not connected")?;
-        // Before Codex has listed the account's models, its recommended one stands in.
         let economy = self.economy(conv);
-        let (model, effort) = match helper::profile(&crate::route::candidates(&self.vendors(), &self.codex_models), vendor, economy) {
-            Some(p) => (Some(p.model.to_string()), p.effort.to_string()),
-            None if vendor == Vendor::Codex && self.codex_recommended.is_some() => {
-                (self.codex_recommended.clone(), if economy { "low" } else { "medium" }.to_string())
-            }
-            None => return Err("the other AI has no model for this"),
+        let review_vendor = review.unwrap_or_else(|| {
+            let other = helper::other(lead_vendor);
+            if self.vendors().contains(&other) { other } else { lead_vendor }
+        });
+        let refusal = |why| match why {
+            Why::Billing => "that AI may be billed per use, so Faber does not call it on its own",
+            _ => "that AI has no quota left right now",
         };
+        let mut refused = None;
+        let candidates: Vec<_> = crate::route::candidates(&self.vendors(), &self.codex_models)
+            .into_iter()
+            .filter(|p| job != "review" || p.vendor == review_vendor)
+            .filter(|p| match self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false) {
+                Ok(()) => true,
+                Err(why) => {
+                    refused.get_or_insert(why);
+                    false
+                }
+            })
+            .collect();
+        let now = self.secs();
+        let factor = |p: &crate::route::Profile| {
+            let snap = self.snap(p.vendor, now);
+            let ledger = self.ledger.of(p.vendor);
+            crate::route::Factor {
+                m: snap.profile_m(family_of(p.model), &ledger.shape(), self.utc_offset, now),
+                w: ledger.weights.w.get(p.model).copied().unwrap_or(1.0),
+                step_ok: snap.step_ok(now),
+                read: 0.0,
+            }
+        };
+        let selected = if let Some(vendor) = review {
+            helper::profile(&candidates, vendor, economy)
+        } else {
+            helper::select(job, kind, difficulty, lead, lead_vendor, &candidates, &factor, economy)
+        };
+        // Before the account lists its models, retain the recommended Codex model for independent reviews.
+        let fallback = (job == "review" && review_vendor == Vendor::Codex && self.vendors().contains(&Vendor::Codex))
+            .then(|| self.codex_recommended.clone())
+            .flatten();
+        let (vendor, model, effort) = if let Some(p) = selected.filter(|p| fallback.is_none() || p.vendor == Vendor::Codex) {
+            (p.vendor, Some(p.model.to_string()), p.effort.to_string())
+        } else if let Some(model) = fallback {
+            (Vendor::Codex, Some(model), if economy { "low" } else { "medium" }.to_string())
+        } else if let Some(p) = selected {
+            (p.vendor, Some(p.model.to_string()), p.effort.to_string())
+        } else {
+            return Err(refused.map(refusal).unwrap_or("no connected AI has a model for this"));
+        };
+        let cli = self.opts.clis.get(&vendor).cloned().ok_or("the AI is not connected")?;
         let family = model.as_deref().and_then(family_of);
-        self.allows(vendor, family, Purpose::UserTurn { by_hand: false }, false).map_err(|why| match why {
-            Why::Billing => "the other AI may be billed per use, so Faber does not call it on its own",
-            _ => "the other AI has no quota left right now",
-        })?;
+        self.allows(vendor, family, Purpose::UserTurn { by_hand: false }, false).map_err(refusal)?;
         let project = self.convs.get(conv).and_then(|c| c.project_id.clone());
         let disabled = self.project_disabled_servers(project.as_deref());
         let raw = self.session_tools(vendor, Area::Project, permissions, project.as_deref(), &prompt, &cwd);
@@ -175,7 +229,7 @@ impl Core {
         if vendor == Vendor::Claude && !flags.plugin_dir {
             tools.plugin = None;
         }
-        self.begin_unbounded(vendor).map_err(|_| "the other AI cannot start right now")?;
+        self.begin_unbounded(vendor).map_err(|_| "that AI cannot start right now")?;
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions.guarded();
         self.next_sid += 1;
         let hsid = self.next_sid;
@@ -187,6 +241,7 @@ impl Core {
             }
         });
         let shown = model.clone().unwrap_or_else(|| vendor.name().to_string());
+        let shown_effort = effort.clone();
         let effort = Some(effort);
         let resources = (vendor == Vendor::Claude).then(|| super::kits::claude_resources(Area::Project, &tools)).flatten();
         let session = match vendor {
@@ -257,7 +312,14 @@ impl Core {
                 actor: crate::act::Actor::Ai { vendor, model: model.clone(), role: crate::act::ActorRole::Helper },
                 what: "act.helper.started".into(),
                 why: None,
-                params: [("vendor".into(), vendor.name().into()), ("model".into(), shown.clone())].into(),
+                params: [
+                    ("vendor".into(), vendor.name().into()),
+                    ("model".into(), shown.clone()),
+                    ("effort".into(), shown_effort),
+                    ("job".into(), job.into()),
+                    ("call".into(), call.into()),
+                ]
+                .into(),
                 change: None,
                 sent: Some(prompt.chars().take(4000).collect()),
             });
@@ -448,6 +510,16 @@ impl Core {
             h.ready = true;
             self.flush_early(call);
         }
+        if let EngineEvent::Done { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, .. } = &event
+            && let Some(conv) = self.helpers.get(call).filter(|h| h.hsid == hsid).map(|h| h.conv.clone())
+            && let Some(m) = self.turn(&conv)
+        {
+            m.input_tokens = Some(m.input_tokens.unwrap_or(0).saturating_add(*input_tokens));
+            m.output_tokens = Some(m.output_tokens.unwrap_or(0).saturating_add(*output_tokens));
+            m.cache_read_tokens = Some(m.cache_read_tokens.unwrap_or(0).saturating_add(*cache_read_tokens));
+            m.cache_write_tokens = Some(m.cache_write_tokens.unwrap_or(0).saturating_add(*cache_write_tokens));
+            m.cache_write_1h_tokens = Some(m.cache_write_1h_tokens.unwrap_or(0).saturating_add(*cache_write_1h_tokens));
+        }
         let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
         let (conv, sid, vendor) = (h.conv.clone(), h.sid, h.vendor);
         match event {
@@ -545,6 +617,14 @@ impl Core {
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);
         self.add_spend(&h.conv, cost);
         let (ok, mut text) = helper::report(ok, &h.report, &h.refused, error);
+        if let Some(live) = self.live.get(&h.conv) {
+            let long = text.chars().count() > 2000;
+            text = helper::short_report(&live.cwd, &text, ok);
+            if long && !h.refused.is_empty() {
+                let refused = h.refused.join(", ");
+                text.push_str(&format!("\nThe helper was refused approval for: {}.", refused.chars().take(200).collect::<String>()));
+            }
+        }
         if !h.told.is_empty() {
             text.push_str(&helper::told_note(&h.told));
         }
@@ -645,7 +725,7 @@ mod tests {
     use super::*;
     use crate::events::SessionCommand;
 
-    async fn helper_exit(vendor: Vendor, partial: bool) {
+    async fn helper_exit(vendor: Vendor, partial: bool, long_told: bool) {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let replies = Arc::new(Mutex::new(Vec::new()));
@@ -693,7 +773,7 @@ mod tests {
                         new_block: false,
                         refused: vec![],
                         waiting: vec!["pending-message".into()],
-                        told: vec![],
+                        told: if long_told { vec!["Keep the retries bounded.".into()] } else { vec![] },
                         held: None,
                         earlier_turn: false,
                         stopping: false,
@@ -703,6 +783,10 @@ mod tests {
                 );
                 if partial {
                     core.helper_event("call", 42, EngineEvent::Text("Keep these partial words.".into()));
+                }
+                if long_told {
+                    core.live.get_mut(&conv).unwrap().cwd = dir.path().into();
+                    core.helper_event("call", 42, EngineEvent::Text("Long report. ".repeat(250)));
                 }
                 core.helper_event("call", 41, EngineEvent::WriterExit { confirmed: true });
                 assert!(core.helpers.contains_key("call"), "a replaced process cannot end the current helper");
@@ -715,6 +799,10 @@ mod tests {
                 assert_eq!(call, "call");
                 assert!(!ok);
                 assert_eq!(text.contains("Keep these partial words."), partial);
+                if long_told {
+                    assert!(text.contains("Full report: .faber/verify/helper-"), "{text}");
+                    assert!(text.ends_with(&helper::told_note(&["Keep the retries bounded.".into()])), "{text}");
+                }
                 let reply = core.turn(&conv).unwrap();
                 assert_eq!(reply.incomplete, Some(true), "unknown helper spend must not make the caller's known cost look exact");
                 assert_eq!(reply.cost_usd, Some(0.01));
@@ -729,18 +817,23 @@ mod tests {
 
     #[tokio::test]
     async fn cli_lifetime_codex_helper_exit_without_words_releases_its_claude_caller() {
-        helper_exit(Vendor::Codex, false).await;
+        helper_exit(Vendor::Codex, false, false).await;
     }
     #[tokio::test]
     async fn cli_lifetime_codex_helper_exit_keeps_partial_words_and_releases_its_claude_caller() {
-        helper_exit(Vendor::Codex, true).await;
+        helper_exit(Vendor::Codex, true, false).await;
     }
     #[tokio::test]
     async fn cli_lifetime_claude_helper_exit_without_words_releases_its_codex_caller() {
-        helper_exit(Vendor::Claude, false).await;
+        helper_exit(Vendor::Claude, false, false).await;
     }
     #[tokio::test]
     async fn cli_lifetime_claude_helper_exit_keeps_partial_words_and_releases_its_codex_caller() {
-        helper_exit(Vendor::Claude, true).await;
+        helper_exit(Vendor::Claude, true, false).await;
+    }
+
+    #[tokio::test]
+    async fn helper_jobs_keep_person_note_after_shortening_report() {
+        helper_exit(Vendor::Claude, false, true).await;
     }
 }

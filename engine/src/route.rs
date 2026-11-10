@@ -171,7 +171,7 @@ pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
 }
 
 /// The bar a task must clear: (general intelligence, agentic work). Projects always have an agent bar.
-fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
+pub(crate) fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
     let (iq, agent): (u8, u8) = match (level, kind) {
         ("easy", "code") => (0, 15),
         ("easy", _) => (0, 0),

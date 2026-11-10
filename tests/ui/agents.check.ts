@@ -349,6 +349,21 @@ check('helper step: a helper call collects the other AI’s commands, is named b
   equal(agentSteps([AGENT], 'Codex')[0].helper, false);
 });
 
+check('helper row shows the selected model and effort', () => {
+  useLanguage('en');
+  const acts: NonNullable<Message['acts']> = [{ kind: 'helper', actor: { who: 'ai', vendor: 'claude', model: 'claude-haiku-5-5', role: 'helper' }, what: 'act.helper.started', params: { call: 'h1', effort: 'medium', job: 'read' } }];
+  const root = document.createElement('div');
+  document.body.append(root);
+  const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools: [HELPER], acts };
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
+  try {
+    ok(root.querySelector('.agent-meta')!.textContent!.includes('Reading · Haiku 5.5 · medium effort'));
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('helper step: in a reply on Claude Code the helper row names Codex, and its report is the helper’s own words', async () => {
   useLanguage('en');
   const root = document.createElement('div');
