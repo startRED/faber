@@ -1,16 +1,27 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { verdict, failures, message as baseMessage, tipPassed } from './base.mjs';
 
 const words = (file) => file.startsWith('docs/') || file.endsWith('.md');
-export function proofsFor(files) {
+export function localeNeeded(files, diff, english) {
+  if (files.includes('ui/locales/en.ts')) return true;
+  const keys = [...english.matchAll(/^  ['"]([^'"]+)['"]:/gm)].map((m) => m[1]);
+  const removed = diff.split('\n').filter((line) => line.startsWith('-') && !/^--- (a\/|\/dev\/null)/.test(line)).map((line) => line.slice(1));
+  return removed.some((line) => {
+    const literals = [...line.matchAll(/['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
+    // Any removed `${` selects the check: a key built over several lines has no single line with both marks.
+    return line.includes('${') || keys.some((key) => line.includes(key) || literals.some((literal) => key.startsWith(literal)) || key.split('.').slice(0, -1).some((_, i, parts) => line.includes(parts.slice(0, i + 1).join('.') + '.')));
+  });
+}
+export function proofsFor(files, locale = false) {
   if (files.every(words)) return [['npm', 'run', 'docs']];
   const proofs = [['npm', 'run', 'lint'], ['npm', 'run', 'typecheck'], ['npm', 'run', 'docs'],
     ['npm', 'run', 'build'], ['cargo', 'fmt', '--all', '--check']];
   if (files.some((f) => f.startsWith('scripts/'))) proofs.push(['npm', 'run', 'test:scripts']);
   if (files.some((f) => /(^|\/)(Cargo\.toml|Cargo\.lock)$|\.rs$/.test(f)))
     proofs.push(['node', 'scripts/cargo.mjs', 'check', '--workspace', '--all-targets']);
+  if (locale) proofs.push(['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-engine', '--test', 'engine', 'every_english_text_is_shown_somewhere']);
   return proofs;
 }
 export function withTrailer(message, number) {
@@ -23,6 +34,39 @@ const run = (cmd, args, options = {}) => execFileSync(cmd, args, {
 });
 const git = (...args) => run('git', args).trim();
 const list = (text) => text.split('\0').filter(Boolean);
+export function temporaryWorktree(original, directory = resolve('.faber/verify'), execute = run) {
+  const source = execute('git', ['rev-parse', '--absolute-git-dir']).trim();
+  directory = resolve(directory);
+  mkdirSync(directory, { recursive: true });
+  const dir = mkdtempSync(join(directory, 'ship-'));
+  const sourceGit = (...args) => execute('git', [`--git-dir=${source}`, ...args]).trim();
+  const env = { ...process.env };
+  // The caller may keep its identity in config.worktree; inherit it without changing the shared configuration.
+  for (const [key, field] of [['user.name', 'NAME'], ['user.email', 'EMAIL']]) {
+    let value;
+    try { value = sourceGit('config', '--get', key); } catch { /* Git can use its normal identity fallback. */ }
+    if (value) for (const role of ['AUTHOR', 'COMMITTER']) env[`GIT_${role}_${field}`] ??= value;
+  }
+  const remove = () => {
+    if (dirname(dir) !== directory) throw Error('Temporary worktree is outside the verification folder.');
+    sourceGit('worktree', 'remove', '--force', '--force', dir);
+  };
+  try {
+    // Reuse objects, but give each attempt its own detached HEAD, index and worktree-only fetch ref.
+    sourceGit('worktree', 'add', '--quiet', '--detach', '--no-checkout', '--lock', dir, original);
+    const marker = readFileSync(join(dir, '.git'), 'utf8').match(/^gitdir: (.+)\r?\n?$/);
+    if (!marker) throw Error('Temporary worktree has no valid Git directory.');
+    const gitDir = resolve(dir, marker[1].trim());
+    // An explicit Git directory fails closed instead of discovering the caller's repository if this folder disappears.
+    env.GIT_DIR = gitDir;
+    env.GIT_WORK_TREE = dir;
+    const git = (...args) => execute('git', [`--git-dir=${gitDir}`, `--work-tree=${dir}`, ...args], { cwd: dir, env }).trim();
+    return { dir, env, gitDir, git, remove };
+  } catch (error) {
+    try { remove(); } catch (cleanup) { console.error(`Temporary worktree retained at ${dir}: ${cleanup.message}`); }
+    throw error;
+  }
+}
 function redBase() {
   try {
     const fields = 'status,conclusion,headSha,databaseId,createdAt,displayTitle,url';
@@ -46,7 +90,14 @@ function redBase() {
     return baseMessage(red, checks);
   } catch { return ''; } // Match base.mjs: unknown status does not block.
 }
-function proof(args, cwd) {
+export function proofEnvironment(directory, inherited = process.env) {
+  const env = { ...inherited };
+  // Proofs create their own Git fixtures; pinning GIT_DIR would make those fixtures operate on the candidate instead.
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE']) delete env[key];
+  env.GIT_CEILING_DIRECTORIES = [dirname(directory), env.GIT_CEILING_DIRECTORIES].filter(Boolean).join(delimiter);
+  return env;
+}
+export function proof(args, cwd, env, execute = spawnSync) {
   console.log(`Checking: ${args.join(' ')}`);
   // npm is a .cmd shim on Windows; use its JavaScript entry point without a shell.
   let [cmd, ...rest] = args;
@@ -55,13 +106,13 @@ function proof(args, cwd) {
     cmd = process.execPath;
     rest = [resolve(npm, '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'), ...rest];
   }
-  const result = spawnSync(cmd, rest, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 });
+  const result = execute(cmd, rest, { cwd, env, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 });
   if (result.status === 0) return true;
   console.error(`${args.join(' ')} failed:\n${(result.stdout + '\n' + result.stderr).split('\n').slice(-40).join('\n')}${result.error || ''}`);
   return false;
 }
 export function main(args) {
-  let dir;
+  let workspace;
   try {
     const dry = args.includes('--dry-run');
     const idx = args.indexOf('--message-file');
@@ -74,38 +125,32 @@ export function main(args) {
     let pr;
     try { const p = JSON.parse(run('gh', ['pr', 'view', '--json', 'number,state'])); if (p.state === 'OPEN') pr = p.number; } catch { /* A branch need not have a pull request. */ }
     const remote = git('remote', 'get-url', 'origin');
-    // A private clone keeps the branch and its index untouched, including on failure.
-    mkdirSync('.faber/verify', { recursive: true });
-    dir = mkdtempSync(resolve('.faber/verify/ship-'));
-    run('git', ['clone', '--quiet', '--no-hardlinks', '--no-checkout', '.', dir]);
-    const g = (...a) => run('git', a, { cwd: dir }).trim();
-    g('remote', 'set-url', 'origin', remote);
-    // Local Git identity need not be globally configured.
-    for (const key of ['user.name', 'user.email']) {
-      let value = '';
-      try { value = git('config', '--get', key); } catch { /* Unset here: the clone falls back to the global identity. */ }
-      if (value) g('config', key, value);
-    }
+    workspace = temporaryWorktree(original);
+    const { dir, git: g } = workspace;
+    const proofEnv = proofEnvironment(dir);
     if (existsSync('node_modules')) symlinkSync(resolve('node_modules'), join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     for (let attempt = 1; attempt <= 3; attempt++) {
-      g('fetch', 'origin', 'phase-1-base');
-      const base = g('rev-parse', 'origin/phase-1-base');
+      g('fetch', '--no-tags', '--no-write-fetch-head', remote, '+refs/heads/phase-1-base:refs/worktree/faber-ship-base');
+      const base = g('rev-parse', 'refs/worktree/faber-ship-base');
       const ancestor = g('merge-base', base, original);
       const changed = list(g('diff', '--name-only', '-z', ancestor, original));
       if (!changed.length || g('rev-list', '--count', `${base}..${original}`) === '0') throw Error('Nothing is ahead of origin/phase-1-base.');
       g('checkout', '--quiet', '--detach', base);
       g('merge', '--squash', original);
-      run('git', ['commit', '--quiet', '-F', '-'], { cwd: dir, input: withTrailer(msg, pr) });
-      run(process.execPath, ['scripts/numbers.mjs', 'assign', '--amend'], { cwd: dir });
+      run('git', [`--git-dir=${workspace.gitDir}`, `--work-tree=${dir}`, 'commit', '--quiet', '-F', '-'], { cwd: dir, env: workspace.env, input: withTrailer(msg, pr) });
+      run(process.execPath, ['scripts/numbers.mjs', 'assign', '--amend', '--base', base], {
+        cwd: dir, env: workspace.env,
+      });
       const finalFiles = list(g('diff', '--name-only', '-z', base, 'HEAD'));
       // Every candidate tree is proven again: a base change in another file can still break this one.
-      const proofs = proofsFor(finalFiles);
+      const diff = g('diff', '--no-ext-diff', '--unified=0', base, 'HEAD', '--', 'ui/', ':(exclude)ui/locales/');
+      const proofs = proofsFor(finalFiles, localeNeeded(finalFiles, diff, readFileSync(join(dir, 'ui/locales/en.ts'), 'utf8')));
       // Without installed packages lint and typecheck fail on files the change never touched; say why instead.
       if (proofs.length > 1 && !existsSync('node_modules')) throw Error('node_modules is missing here: run `npm ci` first.');
-      for (const args of proofs) if (!proof(args, dir)) return 1;
+      for (const args of proofs) if (!proof(args, dir, proofEnv)) return 1;
       const sha = g('rev-parse', 'HEAD');
       if (dry) { console.log(`Dry run: ${sha} ${g('log', '-1', '--format=%s')}`); return 0; }
-      try { g('push', 'origin', 'HEAD:refs/heads/phase-1-base'); }
+      try { g('push', remote, 'HEAD:refs/heads/phase-1-base'); }
       catch (e) {
         const error = String(e.stderr || e.message);
         if (!/non-fast-forward|fetch first/i.test(error)) { console.error(error); return 2; }
@@ -121,6 +166,9 @@ export function main(args) {
     console.error('Push failed after 3 attempts because phase-1-base kept moving.');
     return 2;
   } catch (e) { console.error(String(e.stderr || e.message)); return 1; }
-  finally { if (dir) rmSync(dir, { recursive: true, force: true }); }
+  finally {
+    if (workspace) try { workspace.remove(); }
+    catch (error) { console.error(`Temporary worktree retained at ${workspace.dir}: ${error.message}`); return 1; }
+  }
 }
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) process.exitCode = main(process.argv.slice(2));

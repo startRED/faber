@@ -2,7 +2,7 @@
 // change lands, never in a branch: parallel lanes that each took "the next one" collided at every merge, and lanes that
 // each appended to the same lines conflicted at every merge (docs/dev/workflow.md#numbers).
 //
-//   node scripts/numbers.mjs assign [--amend]   folds docs/next/*.json in, numbers every placeholder after a fresh
+//   node scripts/numbers.mjs assign [--amend] [--base <sha>] folds docs/next/*.json in, numbers every placeholder after a fresh
 //                                               origin/phase-1-base, and commits; --amend puts it in the last commit and
 //                                               numbers its message too (scripts/land.mjs runs this)
 //   node scripts/numbers.mjs check [--base]     fails on a decision number used twice or a fragment that cannot fold;
@@ -217,16 +217,28 @@ function fragmentProblems() {
   }
 }
 
-function assign(amend) {
+export function assignmentOptions(args) {
+  let amend = false;
+  let base;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--amend' && !amend) amend = true;
+    else if (args[i] === '--base' && !base && /^[0-9a-f]{40}$/i.test(args[i + 1] ?? '')) base = args[++i];
+    else throw Error('Usage: numbers.mjs assign [--amend] [--base <full commit SHA>]');
+  }
+  return { amend, base };
+}
+
+function assign(amend, fixedBase) {
   if (git('status', '--porcelain').trim()) {
     console.error('Commit or set aside your changes first: the numbers go in a commit of their own.');
     return 1;
   }
-  git('fetch', '--quiet', 'origin', 'phase-1-base');
+  if (!fixedBase) git('fetch', '--quiet', 'origin', 'phase-1-base');
+  const base = fixedBase ?? BASE;
   try {
-    git('merge-base', '--is-ancestor', BASE, 'HEAD');
+    git('merge-base', '--is-ancestor', base, 'HEAD');
   } catch {
-    console.error(`This branch is behind ${BASE}. Bring it in first (git merge ${BASE}), then run this again.`);
+    console.error(`This branch is behind ${base}. Bring it in first (git merge ${base}), then run this again.`);
     return 1;
   }
   const broken = fragmentProblems();
@@ -238,8 +250,8 @@ function assign(amend) {
   foldTree(found);
   // The tree holds the base, so its highest numbers are at least the base's; one written by hand in the branch counts too.
   const top = {
-    decision: Math.max(topDecision(git('show', `${BASE}:docs/decisions.md`)), topDecision(readFileSync('docs/decisions.md', 'utf8'))),
-    note: Math.max(topNote(git('show', `${BASE}:ui/locales/en.ts`)), topNote(readFileSync(`${LOCALES}/en.ts`, 'utf8'))),
+    decision: Math.max(topDecision(git('show', `${base}:docs/decisions.md`)), topDecision(readFileSync('docs/decisions.md', 'utf8'))),
+    note: Math.max(topNote(git('show', `${base}:ui/locales/en.ts`)), topNote(readFileSync(`${LOCALES}/en.ts`, 'utf8'))),
   };
   const files = candidates();
   const texts = files.map((f) => readFileSync(f, 'utf8'));
@@ -290,11 +302,14 @@ function check(base) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(join(import.meta.dirname, 'numbers.mjs'))) {
-  const [command, flag] = process.argv.slice(2);
-  if (command === 'assign') process.exitCode = assign(flag === '--amend');
-  else if (command === 'check') process.exitCode = check(flag === '--base');
+  const [command, ...args] = process.argv.slice(2);
+  if (command === 'assign') {
+    try { const { amend, base } = assignmentOptions(args); process.exitCode = assign(amend, base); }
+    catch (error) { console.error(error.message); process.exitCode = 2; }
+  }
+  else if (command === 'check') process.exitCode = check(args[0] === '--base');
   else {
-    console.error('usage: node scripts/numbers.mjs assign [--amend] | check [--base]');
+    console.error('usage: node scripts/numbers.mjs assign [--amend] [--base <sha>] | check [--base]');
     process.exitCode = 2;
   }
 }

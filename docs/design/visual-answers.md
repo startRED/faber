@@ -3,9 +3,22 @@
 The shared reply card and running-column pane, in Chat and Projects. Native inline pieces keep their existing
 controls; these rules extend the large-page and drawing viewer, never add another viewer.
 
+## Preview in the conversation
+
+- Preview opens the saved page or drawing inside its reply card, leaving the request, answer and composer usable.
+  It never opens the running column or moves focus there. Cards stay lazy until Preview is chosen; there is one
+  selected visual frame across the app, so another card replaces the previous preview rather than adding frames.
+- The preview shows the beginning of the page at the conversation's actual reading width in a 320 px region. It is
+  a thumbnail: its frame is inert, excluded from Tab and pointer input. Expand preview opens the existing interactive
+  pane at the card's exact saved version. The thumbnail is disposed before that view takes over; no form input can
+  have been entered in the thumbnail. Version navigation and interaction remain in the existing expanded pane.
+- Close preview removes its frame and releases the visual lease. Switching conversations also closes it. The same
+  native single-use origin, sandbox, resource policy, loading timeout, error path and source limits serve both sizes.
+  There is no second renderer, dependency, process, polling loop, animation or saved setting.
+
 ## Reply pages and isolation
 
-- A visual answer opens from its reply card in the same pane slot as a browser page: the existing back arrow, the
+- An expanded visual answer opens from its reply card in the same pane slot as a browser page: the existing back arrow, the
   answer's name and close in the head. It excludes the browser, agent, Changes, Commands, quick-question and file views.
   Its left edge uses the column's existing resize and saved width, including its keyboard controls and 720 px overlay rules.
   Version arrows in the head surround a quiet "2 of 3"; opening an answer normally starts at its latest version, while

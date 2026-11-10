@@ -27,7 +27,8 @@ env:
 # A newer push to the same pull request or queue branch makes its older run pointless. Pushes to the shared branches keep
 # every run, so main can follow the newest green commit of phase-1-base (R127) even while pushes keep coming.
 concurrency:
-  group: ci-${{ github.ref }}
+  # GitHub replaces pending members even when cancellation is off; only superseded PR/queue runs share a group.
+  group: ci-${{ github.ref }}-${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/queue/')) && 'latest' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/queue/') }}
 
 jobs:
@@ -284,8 +285,7 @@ jobs:
           shared-key: app
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
-      # src-tauri/build.rs makes an empty dist/ when there is none, and the test build refuses a changed dist/.
-      - run: npm run build
+      # The runner builds dist-test itself; the check jobs already validate the independent production build.
       - run: cargo t --build-only
       # Exactly the programs `--prebuilt` checks for (testkit/src/testbuild.rs, `built_programs`).
       - uses: actions/upload-artifact@v7
@@ -319,6 +319,7 @@ jobs:
           shared-key: electron-app
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
+      # Electron's package has no install lifecycle script; prepare its binary explicitly.
       - run: node node_modules/electron/install.js
       - run: cargo t --build-only
       - uses: actions/upload-artifact@v7
@@ -496,7 +497,8 @@ jobs:
         run: |
           set -e
           npm ci
-          npm run build
+          # Test-app caches build dist-test themselves; production assets are needed only by the lint caches.
+          case "${{ matrix.cache }}" in lints*) npm run build ;; esac
           case "${{ matrix.cache }}" in
             lints) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings ;;
             lints-ui) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings; cargo t --build-only ;;
@@ -614,9 +616,15 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
           git merge-base --is-ancestor origin/main "$GITHUB_SHA"
-          git push origin "$GITHUB_SHA:refs/heads/main"
+          if ! git push origin "$GITHUB_SHA:refs/heads/main"; then
+            # Another independently proven commit may have reached main while this job was preparing its push.
+            git fetch --quiet origin main
+            if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
+            exit 1
+          fi
           # A push made with this token starts no workflow, so main's warm run is started by hand (R165).
           gh workflow run ci.yml --ref main -f warm=true
           # A full base check starts the preview after the checked commit reaches main.

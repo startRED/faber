@@ -20,6 +20,8 @@ Quota handoff reasons name the exhausted AI and its saved model, then the AI tak
 
 ## Answers
 
+With only Codex connected and no reported model list, Auto keeps the sole-subscription reason (`reason.autoOnly`). The held-recording screen check verifies that reason and the CLI-reported model before the first word, then preserves the model name and header height through completion and reopening.
+
 If Electron's engine process exits unexpectedly, it restarts and the live screen refreshes engine state and the open conversation after the replacement answers. The composer stays mounted, retaining newer text whose storage write failed and its existing dirty protection; process-local running/background revisions start over (`electron/recovery.test.mjs`, `electron/migration.test.mjs`). The main process allows at most three restarts per minute; 30 seconds of host uptime resets that count, even when short-lived replacements answer state. An unrequested exit with code 0 or repeated failures closes the app. No message is resent automatically; interrupted replies keep their existing recovery actions. Every normal Quit waits for confirmed engine exit, requesting termination after 60 seconds. Failed termination leaves the window, panes and tray available for another Quit attempt, without a new dialog or motion; engine input remains closed to new calls (`electron/quit-shutdown.test.mjs`, `electron/quit-admission.test.mjs`).
 
 Go back uses the same file history for non-temporary chats with or without a chosen folder; see
@@ -38,7 +40,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
 - Native visual pieces, HTML/SVG cards and their web-access rules are in [visual-answers.md](visual-answers.md).
 - The header is the vendor's mark, the model's name and its effort in the quiet header ink ("· high effort"; the owner,
   2026-10-17), nothing else (Auto shows its reason beside the name only while choosing). Auto's reason is its
-  tooltip. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task, only when that changed the pick. A wait for quota is told once,
+  tooltip. With one usable model/effort profile after availability, quota and conversation filters, Auto answers directly and its reason says only one profile is available; no router request is made. Otherwise it uses a completed draft route or starts immediately with the previous/default choice, explaining that it did not wait for a route. A cold send shows that direct choice in the header and the Faber row, without claiming a classifier timed out; the model stays visible while streaming and after reopening. These explanations do not replace the stored route's difficulty: a conversation that was still easy remains eligible for a later draft to move it up. The pace line stays (C002); it also says, in the same calm words, when Auto started one rung up because the person often retries that kind of task, only when that changed the pick. A wait for quota is told once,
   by the quota card, never also in the header or the red note.
 - The line under an answer (its buttons, hover bar, the reply's state and why it stopped) is in [answer-line.md](answer-line.md).
 - A reply shows as it happened (`ui/timeline.ts`): stretches of the agent's words (`div.md`), steps and thinking

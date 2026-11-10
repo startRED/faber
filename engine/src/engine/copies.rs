@@ -12,6 +12,15 @@ pub type GitRunner = Arc<dyn Fn() -> Option<Box<dyn Executor + Send>> + Send + S
 /// A copy made for conversation `.0`, not yet recorded on it.
 type Made = Option<(String, WorkCopy)>;
 
+struct Sweep(Weak<Mutex<Core>>);
+impl Drop for Sweep {
+    fn drop(&mut self) {
+        if let Some(core) = self.0.upgrade() {
+            core.lock().unwrap_or_else(|e| e.into_inner()).copy_sweeps.finish();
+        }
+    }
+}
+
 /// A first message waiting for its copy: its reply, and what starts the answer once the copy is attached.
 pub(super) struct Held {
     pub(super) reply: String,
@@ -161,16 +170,37 @@ impl Engine {
         });
     }
 
-    /// Run once at start, away from the lock: the copy of a deleted conversation goes, and so does the copy of a
+    /// Run at start and idle turn boundaries, away from the lock: a deleted conversation's copy goes, and so does the copy of a
     /// conversation that is idle, clean and merged into the person's branch. That conversation keeps its record, and its
     /// next message makes the copy again in the same folder, so its CLI session resumes.
     pub fn sweep_copies(&self) {
+        if self.with(Core::start_copy_sweep) {
+            // Background thread priority must never leak into Tokio's reusable blocking pool.
+            std::thread::scope(|scope| {
+                let result = std::thread::Builder::new().name("project-storage".into()).spawn_scoped(scope, || {
+                    let _runtime = self.runtime.enter();
+                    self.sweep_project_storage();
+                });
+                if let Ok(worker) = result {
+                    let _ = worker.join();
+                } else {
+                    self.with(|c| c.copy_sweeps.finish());
+                }
+            });
+        }
+    }
+
+    fn sweep_project_storage(&self) {
+        let _finish = Sweep(Arc::downgrade(&self.core));
         // Linux has no background class here yet: the sweep keeps its normal priority there.
         #[cfg(any(windows, target_os = "macos"))]
         let _background = faber_winproc::background_thread();
         let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
         let Some(mut exec) = run() else { return };
         for id in copy::found(&data) {
+            if !self.with(|c| c.project_storage_idle()) {
+                break;
+            }
             let known = data.join("conversations").join(format!("{id}.json")).exists() || self.with(|c| c.convs.contains_key(&id));
             if !known {
                 // A conversation is deleted only once its copy is saved or the person said so: what is left is removed.
@@ -207,10 +237,43 @@ impl Engine {
                 });
             }
         }
+        let roots = self.with(|c| c.store.projects().into_iter().map(|p| PathBuf::from(p.path)).collect::<Vec<_>>());
+        crate::project::maintenance::run(&mut *exec, &roots, || self.with(|c| c.project_storage_idle()));
     }
 }
 
 impl Core {
+    fn project_storage_idle(&self) -> bool {
+        !self.closing
+            && self.agent_installs == 0
+            && self.goals.running.is_empty()
+            && self.copying.is_empty()
+            && self.verifier.as_ref().is_none_or(|v| v.idle() && !v.game_in_front())
+            && self.convs.keys().all(|id| self.session_idle(id))
+    }
+
+    fn start_copy_sweep(&mut self) -> bool {
+        self.git.is_some() && self.project_storage_idle() && self.copy_sweeps.begin(std::time::Instant::now())
+    }
+
+    pub(super) fn schedule_copy_sweep(&mut self) {
+        if !self.start_copy_sweep() {
+            return;
+        }
+        let Some(core) = self.me.upgrade() else {
+            self.copy_sweeps.finish();
+            return;
+        };
+        let engine = Engine { core, runtime: self.opts.runtime.clone() };
+        let result = std::thread::Builder::new().name("project-storage".into()).spawn(move || {
+            let _runtime = engine.runtime.enter();
+            engine.sweep_project_storage();
+        });
+        if result.is_err() {
+            self.copy_sweeps.finish();
+        }
+    }
+
     /// The project a conversation belongs to.
     pub(super) fn project_of(&self, id: Option<&str>) -> Option<Project> {
         let id = id?;

@@ -17,7 +17,11 @@ fn test_secret() -> Arc<faber_channel::secret::Secret> {
 }
 
 struct NoWindow;
-impl Shell for NoWindow {}
+impl Shell for NoWindow {
+    fn version(&self) -> String {
+        "9.8.7-preview.2".into()
+    }
+}
 
 async fn client(host: &Arc<faber_host::Host>, depth: u32) -> Client {
     let (ours, theirs) = tokio::io::duplex(1 << 16);
@@ -50,6 +54,7 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     let host = Arc::new(wiring.host(engine, data_dir, true, tokio::runtime::Handle::current()));
 
     let person = client(&host, 0).await;
+    assert_eq!(person.offer["version"], "9.8.7-preview.2", "the channel reports the running shell's version");
     let refusal = person.call_detailed("save_settings", json!({"patch": {"appearance": {"base": "nowhere"}}})).await.unwrap().unwrap_err();
     assert_eq!(refusal.key, "error.look.fileInvalid");
     assert_eq!(refusal.detail.as_deref(), Some("base"));

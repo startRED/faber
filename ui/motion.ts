@@ -268,7 +268,11 @@ export function animateList(root: HTMLElement, subtree = false): void {
       before = next;
       sidebarClosing = false;
     };
-    const observer = new MutationObserver(update);
+    // The ring is not a list item; inserting it must not restart the card's arrival.
+    const observer = new MutationObserver(root.matches('.tour') ? (records) => {
+      if (records.some((record) => [...record.addedNodes, ...record.removedNodes]
+        .some((node) => node instanceof HTMLElement && !node.matches('.tour-ring')))) update();
+    } : update);
     const sideObserver = side ? new MutationObserver(() => {
       const open = side.classList.contains('shown');
       sidebarClosing = sideWasOpen && !open && matchMedia('(max-width: 899px)').matches;
@@ -293,7 +297,12 @@ export function animateList(root: HTMLElement, subtree = false): void {
     }) : undefined;
     reflow?.observe(root);
     observer.observe(root, { childList: true, subtree, ...(root.matches('.shell') ? { attributes: true, attributeFilter: ['class'] } : {}) });
-    if (root.matches('.rc-body, .s-main, .tour')) { before.clear(); update(); }
+    if (root.matches('.rc-body, .s-main, .tour')) {
+      before.clear();
+      // The coach measures its anchor on mount; hidden coordinates must never become a cross-screen FLIP.
+      if (root.matches('.tour')) queueMicrotask(update);
+      else update();
+    }
     root.addEventListener('scroll', capture, true);
     root.addEventListener('transitionend', transitioned);
     const unwatchResize = watchResize(resize);

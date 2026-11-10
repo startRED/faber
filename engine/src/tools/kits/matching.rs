@@ -2,6 +2,8 @@ use super::Item;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+const PRODUCT_DEMOS: &str = "stageshow|product demo|product illustration|animated demo|illustrated interface|demo animada|demo animado|demonstracao animada|ilustracao de produto|demostracion animada|ilustracion de producto|demo animee|illustration de produit|produktdemo|produktillustration";
+
 /// Stack tags are authored here alongside the pinned catalog, not read from downloaded skill text.
 fn item_stack(id: &str) -> Option<&'static str> {
     match id {
@@ -43,6 +45,7 @@ pub(super) fn item_capability(id: &str) -> &'static str {
         "skill-creator" => "Create or improve an agent instruction skill",
         "emil-design-eng" => "Polish interface interactions and visual details",
         "animation-performance" => "Diagnose and improve interface animation performance",
+        "stageshow" => "Create illustrated product demos and rehearse their motion",
         "supabase-postgres-best-practices" => "Optimize Postgres database queries and schema",
         "stripe-best-practices" => "Implement Stripe billing and payment integrations",
         "workers-best-practices" => "Implement Cloudflare Workers services",
@@ -70,6 +73,7 @@ pub(super) fn matches_task(item: &Item, request: &str, stacks: &BTreeSet<&str>) 
     let has = |terms: &str| terms.split('|').any(|term| contains_term(&text, term));
     // A shared job is a shortlist, not permission to load unrelated specializations.
     let intent = match item.id.as_str() {
+        "stageshow" => Some(PRODUCT_DEMOS),
         "playwright-mcp" => Some(
             "playwright|browser automation|automate browser|automacao de navegador|automatizar navegador|automatizacion del navegador|automatisation du navigateur|browserautomatisierung",
         ),
@@ -386,6 +390,7 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
     }
     let phrase = |terms: &str| terms.split('|').any(|term| contains_term(&text, term));
     for (job, terms) in [
+        ("design", PRODUCT_DEMOS),
         (
             "testing",
             "browser automation|automate browser|automacao de navegador|automatizar navegador|automatizacion del navegador|automatisation du navigateur|browserautomatisierung",
@@ -432,7 +437,7 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
     if artifact && (creation || improvement) {
         jobs.insert("design".into());
     }
-    if jobs.contains("database") && !artifact && !has("ui ux interface frontend css") {
+    if jobs.contains("database") && !artifact && !has("ui ux interface frontend css") && !phrase(PRODUCT_DEMOS) {
         jobs.remove("design");
     }
     if artifact

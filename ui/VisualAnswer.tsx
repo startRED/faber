@@ -13,6 +13,7 @@ export interface OpenVisual {
   messageId?: string;
   block?: number;
   file?: string;
+  inline?: boolean;
 }
 const [openedVisual, showVisual] = createSignal<OpenVisual>();
 export { openedVisual, showVisual };
@@ -44,12 +45,23 @@ function VisualCode(props: { conversationId: string; version: VisualVersion; cod
 
 function VisualCard(props: { answer: VisualAnswer; version: VisualVersion; conversationId: string; code: string }) {
   const [code, setCode] = createSignal(false);
+  const selection = (): OpenVisual => ({ conversationId: props.conversationId, answerId: props.answer.id, messageId: props.version.messageId, block: props.version.block, ...(props.version.file ? { file: props.version.file } : {}) });
+  const preview = () => {
+    const open = openedVisual();
+    return open?.inline && open.conversationId === props.conversationId && open.answerId === props.answer.id && open.messageId === props.version.messageId && open.block === props.version.block && open.file === props.version.file ? open : undefined;
+  };
   return <div class="visual-card">
     <div class="visual-card-head">
       <Icon name="sheet" />
       <span><b>{visualName(props.answer)}</b><small>{t(props.version.kind === 'html' ? 'visual.page' : 'visual.drawing')}</small></span>
-      <button class="btn visual-open" onClick={() => showVisual({ conversationId: props.conversationId, answerId: props.answer.id, messageId: props.version.messageId, block: props.version.block, ...(props.version.file ? { file: props.version.file } : {}) })}>{t('visual.open')}</button>
+      <button class="btn visual-open" aria-expanded={!!preview()} onClick={() => showVisual(preview() ? undefined : { ...selection(), inline: true })}>{t(preview() ? 'visual.hidePreview' : 'visual.preview')}</button>
     </div>
+    <Show when={preview()}>{(open) =>
+      <div class="visual-preview">
+        <VisualPane answer={props.answer} open={open()} preview onBack={() => showVisual(undefined)} onClose={() => showVisual(undefined)} />
+        <button class="visual-expand" onClick={() => showVisual(selection())}><span>{t('visual.expand')}</span></button>
+      </div>
+    }</Show>
     <Show when={props.version.file && props.version.kind !== 'mermaid'}><p class="side-meta">{t('visual.fileOnly')}</p></Show>
     <details onToggle={(e) => setCode(e.currentTarget.open)}>
       <summary>{t('visual.code')}</summary>
@@ -250,7 +262,7 @@ export function visualDocument(source: string, live = false): string {
 }
 
 /** One frame navigates between versions; the column's lifecycle releases it on back, close or navigation. */
-export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBack: () => void; onClose: () => void }) {
+export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; preview?: boolean; onBack: () => void; onClose: () => void }) {
   let frame: HTMLIFrameElement | undefined;
   // WebView2 can drop a navigation asked while the frame's previous one still loads, leaving the old page under the new
   // counter: so one navigation at a time, the newest page waits for the frame's load, and a silent one gets a new frame.
@@ -353,22 +365,22 @@ export function VisualPane(props: { answer: VisualAnswer; open: OpenVisual; onBa
   });
   const move = (by: number) => setPicked(Math.max(0, Math.min(at() + by, props.answer.versions.length - 1)));
   return <div class="visual-pane">
-    <div class="rc-head side-head">
+    <Show when={!props.preview}><div class="rc-head side-head">
       <button class="iconbtn back" aria-label={t('agent.back')} title={t('agent.back')} onClick={props.onBack}><Icon name="left" /></button>
       <h2 id="running-title" class="display" title={visualName(props.answer)}>{visualName(props.answer)}</h2>
       <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={props.onClose}><Icon name="close" /></button>
-    </div>
-    <div class="visual-toolbar" role="group" aria-label={t('visual.versions')} onKeyDown={(e) => {
+    </div></Show>
+    <div class="visual-toolbar" role={props.preview ? undefined : 'group'} aria-label={props.preview ? undefined : t('visual.versions')} onKeyDown={(e) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault(); move(e.key === 'ArrowLeft' ? -1 : 1);
     }}>
-      <button class="iconbtn visual-prev" aria-label={t('visual.previous')} title={t('visual.previous')} disabled={at() === 0} onClick={() => move(-1)}><Icon name="left" /></button>
+      <Show when={!props.preview}><button class="iconbtn visual-prev" aria-label={t('visual.previous')} title={t('visual.previous')} disabled={at() === 0} onClick={() => move(-1)}><Icon name="left" /></button>
       <span class="visual-version num" aria-live="polite">{t('visual.version', { at: at() + 1, count: props.answer.versions.length })}</span>
-      <button class="iconbtn visual-next" aria-label={t('visual.next')} title={t('visual.next')} disabled={at() === props.answer.versions.length - 1} onClick={() => move(1)}><Icon name="right" /></button>
+      <button class="iconbtn visual-next" aria-label={t('visual.next')} title={t('visual.next')} disabled={at() === props.answer.versions.length - 1} onClick={() => move(1)}><Icon name="right" /></button></Show>
       <span class="side-meta">{t(!page.error && !navigationFailed() && page()?.live ? 'visual.live' : 'visual.offline')}</span>
     </div>
     <Show when={!page.error && !navigationFailed()} fallback={<p class="side-meta" role="alert">{t('visual.failed')}</p>}>
-      <Show when={page() && !rebuilding()}><iframe ref={created} onLoad={loaded} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" src={untrack(() => page()!.url)} /></Show>
+      <Show when={page() && !rebuilding()}><iframe ref={created} onLoad={loaded} class="visual-frame" title={visualName(props.answer)} sandbox="allow-scripts" referrerPolicy="no-referrer" inert={props.preview} tabIndex={props.preview ? -1 : undefined} src={untrack(() => page()!.url)} /></Show>
     </Show>
   </div>;
 }

@@ -2,6 +2,11 @@
 
 The published contract of the Projects area: screens, separate copies, stored records and how checks run.
 
+After edits, checks or a plan, both drivers tell the agent to record its conclusion before its closing message, reusing
+successful checks while their inputs and environment are unchanged. The conclusion still requires evidence for done;
+the bounded missing-conclusion request remains as recovery (R509). This instruction change does not prove a measured
+token saving without a live comparison (`engine/src/progress.rs`, `both_drivers_request_a_conclusion_before_closing_and_reuse_current_checks`).
+
 ## Projects
 
 The engine types live in `engine/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
@@ -105,6 +110,9 @@ file under its instruction name. Windows refuses in-place writers through replac
 final check, or a previously opened writer on Unix, remains the accepted normal editor window (project-memory R333).
 
 ### Separate copies
+
+Copies and registered projects share the [portable Git workflow](../product/git-workflow.md): idle, rate-limited
+housekeeping and safe retirement at startup and turn boundaries, with no extra screen, timer or permanent process.
 
 A project conversation works in a separate copy of the repository (R201, `engine/src/project/copy.rs`): a git
 worktree in `<data>/copies/<conversation id>` on the branch `faber/<a few words>-<4 characters of the id>`, made with the

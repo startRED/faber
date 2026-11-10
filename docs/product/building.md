@@ -13,6 +13,10 @@ sees approval requests only, as described in [recording qualification](../dev/pl
 
 ## Building software: one voice, a team behind it
 
+Every project receives the same [efficient Git workflow](git-workflow.md): shared-object worktrees, idle incremental
+housekeeping, safe copy retirement, existing package-manager caches and affected checks. It respects each project's
+instructions and pipeline and needs no maintainer-specific paths or tools.
+
 For frontend work, the existing guide delivery provides Faber's original `frontend-craft` and `frontend-proof`
 skills ([contract](frontend.md)): project-aware composition and interaction states, followed by task, accessibility,
 layout and resource evidence. They complement installed design skills and never impose Faber's own desktop theme

@@ -87,6 +87,29 @@ test('bad documents and Rust formatting stop expensive jobs before they start', 
   assert.match(gate, /\[ "\$PREFLIGHT" = success \].*exit 1/);
 });
 
+test('shared-base proofs have their own groups while obsolete PR and queue runs still cancel', () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const concurrency = ci.split('\nconcurrency:\n')[1].split('\njobs:')[0];
+  assert.match(concurrency, /group: ci-\$\{\{ github\.ref \}\}-\$\{\{ \(github\.event_name == 'pull_request' \|\| startsWith\(github\.ref, 'refs\/heads\/queue\/'\)\) && 'latest' \|\| github\.run_id \}\}/);
+  assert.match(concurrency, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| startsWith\(github\.ref, 'refs\/heads\/queue\/'\) \}\}/);
+});
+
+test('test-app jobs build only test assets and keep the production build in independent checks', () => {
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const job = (name) => ci.split(`\n  ${name}:`)[1]?.split(/\n  [a-z][\w-]*:/)[0] ?? '';
+  assert.match(job('app'), /cargo t --build-only/);
+  assert.doesNotMatch(job('app'), /run: npm run build/);
+  assert.match(job('check'), /run: npm run build/);
+  for (const name of ['electron-app', 'electron']) {
+    assert.match(job(name), /ELECTRON_SKIP_BINARY_DOWNLOAD: ''/);
+    assert.match(job(name), /run: npm ci/);
+    assert.match(job(name), /run: node node_modules\/electron\/install\.js/);
+  }
+  const main = job('main');
+  assert.match(main, /if ! git push origin "\$GITHUB_SHA:refs\/heads\/main"; then\n\s+#.*\n\s+git fetch --quiet origin main\n\s+if git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main; then exit 0; fi/);
+  assert.doesNotMatch(main, /git push.*--force/);
+});
+
 test('a green workflow change asks for finish instead of splitting and rechecking it', (t) => {
   const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
   const report = ci.split('\n  report:')[1].split('\n  train:')[0];

@@ -364,6 +364,13 @@ svg.i.sm { width: 14px; height: 14px; }
 .visual-card-head > .i { flex-shrink: 0; color: var(--ink-3); }
 .visual-card details > summary { padding: 4px 12px 10px; color: var(--ink-3); font-size: var(--fs-sm); cursor: default; }
 .visual-card .codeblock { border-radius: 0; margin: 0; }
+.visual-preview { position: relative; display: flex; height: 320px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.visual-preview .visual-toolbar { padding: 6px 12px; }
+.visual-preview .visual-frame { pointer-events: none; }
+.visual-expand { position: absolute; inset: 0; display: flex; align-items: end; justify-content: end; padding: 12px; }
+.visual-expand span { padding: 6px 12px; border-radius: var(--r-sm); background: var(--card-bg); color: var(--ink); box-shadow: var(--card-shadow); font-size: var(--fs-sm); }
+.visual-expand:hover span { background: var(--s3); }
+.visual-expand:focus-visible { outline-offset: -3px; }
 .side-body { gap: 12px; font-size: var(--fs-sm); }
 .side-meta { margin: 0; color: var(--ink-3); }
 .side-body[data-state='stuck'] .side-meta, .side-body .agent-why { color: var(--amber-ink); }

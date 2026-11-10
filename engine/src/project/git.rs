@@ -71,6 +71,10 @@ pub struct Output {
 }
 pub trait Executor {
     fn execute(&mut self, call: &Invocation) -> Result<Output, GitError>;
+    /// The real runner contains Git's housekeeping children and limits their memory and lifetime.
+    fn maintain(&mut self, root: &Path) -> Result<(), GitError> {
+        self.execute(&super::maintenance::invocation(root)).and_then(|out| if out.success { Ok(()) } else { Err(GitError::Command) })
+    }
     /// At most `limit + 1` bytes; the extra byte tells a reader the output did not fit.
     fn execute_bounded(&mut self, call: &Invocation, limit: usize) -> Result<Output, GitError> {
         self.execute_window(call, 0, limit)
@@ -143,6 +147,19 @@ impl Process {
         }
         command
     }
+
+    fn overrides(&self, call: &Invocation, deadline: Instant) -> Result<Vec<String>, GitError> {
+        let query = Invocation::new(
+            &call.cwd,
+            &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
+        );
+        let scope = repository_options(&call.args);
+        let found = capped(self.command(&query).args(&scope).args(&query.args), 0, 64 * 1024, deadline)?;
+        if (found.0 != Some(0) && found.0 != Some(1)) || found.1.len() > 64 * 1024 {
+            return Err(GitError::Command);
+        }
+        config_overrides(&found.1)
+    }
 }
 
 fn install_dirs(windows: bool, env: &dyn Fn(&str) -> Option<String>) -> String {
@@ -163,22 +180,34 @@ fn successful(call: &Invocation, code: Option<i32>) -> bool {
 }
 
 impl Executor for Process {
+    fn maintain(&mut self, root: &Path) -> Result<(), GitError> {
+        let call = super::maintenance::invocation(root);
+        let mut command = tokio::process::Command::from(self.command(&call));
+        command.args(self.overrides(&call, Instant::now() + COMMAND_TIME)?).args(&call.args);
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| GitError::Process)?;
+        runtime.block_on(async move {
+            let process = crate::proc::spawn_check(command, Some(256 * 1024 * 1024)).map_err(|_| GitError::Process)?;
+            let (cancel, cancelled) = tokio::sync::oneshot::channel();
+            let result = crate::proc::command_output(process, cancelled);
+            tokio::pin!(result);
+            let output = tokio::select! {
+                output = &mut result => output,
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    let _ = cancel.send(());
+                    result.await
+                }
+            };
+            finish_maintenance(output).await
+        })
+    }
+
     fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
         // Existing copy operations can take longer than a read-only changes request.
         if call.deadline.is_some() {
             return self.execute_bounded(call, usize::MAX);
         }
-        let query = Invocation::new(
-            &call.cwd,
-            &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
-        );
-        let scope = repository_options(&call.args);
-        let found = self.command(&query).args(&scope).args(&query.args).output().map_err(|_| GitError::Process)?;
-        if !found.status.success() && found.status.code() != Some(1) {
-            return Err(GitError::Command);
-        }
         let mut command = self.command(call);
-        command.args(config_overrides(&found.stdout)?);
+        command.args(self.overrides(call, Instant::now() + COMMAND_TIME)?);
         let out = command.args(&call.args).output().map_err(|_| GitError::Process)?;
         Ok(Output { success: successful(call, out.status.code()), stdout: out.stdout })
     }
@@ -189,21 +218,21 @@ impl Executor for Process {
         if deadline <= now {
             return Err(GitError::Command);
         }
-        // Discover only command-bearing config names, then disable every configured filter and hook.
-        let query = Invocation::new(
-            &call.cwd,
-            &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
-        );
-        let scope = repository_options(&call.args);
-        let found = capped(self.command(&query).args(&scope).args(&query.args), 0, 64 * 1024, deadline)?;
-        if found.0 != Some(0) && found.0 != Some(1) || found.1.len() > 64 * 1024 {
-            return Err(GitError::Command);
-        }
         let mut command = self.command(call);
-        command.args(config_overrides(&found.1)?).args(&call.args);
+        command.args(self.overrides(call, deadline)?).args(&call.args);
         let (code, stdout) = capped(&mut command, skip, limit, deadline)?;
         Ok(Output { success: successful(call, code) || stdout.len() > limit, stdout })
     }
+}
+
+async fn finish_maintenance(output: crate::proc::CommandOutput) -> Result<(), GitError> {
+    if let Some(tree) = output.unresolved {
+        while tree.retire().await.is_err() {
+            // A failed OS query must not release the last identity of a possibly live maintenance child.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+    if output.success { Ok(()) } else { Err(GitError::Command) }
 }
 
 trait RunningChild {
@@ -335,6 +364,33 @@ pub fn config_overrides(keys: &[u8]) -> Result<Vec<String>, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn maintenance_retains_unconfirmed_children_until_the_owned_tree_is_gone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let queries = std::sync::Arc::new(AtomicUsize::new(0));
+        let seen = queries.clone();
+        let job = crate::proc::Containment::scripted(
+            move || if seen.fetch_add(1, Ordering::Relaxed) == 0 { Err(std::io::Error::other("query unavailable")) } else { Ok(true) },
+            || {},
+        );
+        let tree = job.owned_tree();
+        drop(job);
+        let worker = tokio::spawn(finish_maintenance(crate::proc::CommandOutput {
+            success: false,
+            text: String::new(),
+            confirmed: false,
+            unresolved: tree,
+        }));
+        tokio::task::yield_now().await;
+        assert!(!worker.is_finished());
+        assert_eq!(queries.load(Ordering::Relaxed), 1);
+        tokio::time::advance(Duration::from_millis(900)).await;
+        assert_eq!(queries.load(Ordering::Relaxed), 1, "an unavailable OS query must not spin");
+        tokio::time::advance(Duration::from_millis(100)).await;
+        assert_eq!(worker.await.unwrap(), Err(GitError::Command));
+        assert_eq!(queries.load(Ordering::Relaxed), 2);
+    }
 
     #[test]
     fn git_installed_while_faber_is_open_is_found_without_a_new_path() {

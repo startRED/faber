@@ -2,6 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+export function failureAction(jobs) {
+  const required = jobs.filter((j) => /^(changes$|preflight$|docs$|check \(|app$|costs$|ui$|screen \()/.test(j.name));
+  // A job that ran on a runner and has a failed step is the commit's own failure. Cancelled, timed-out or never-started
+  // jobs say nothing either way: a failed job often cancels its siblings, so they must not hide it.
+  const confirmed = (j) => j.conclusion === 'failure' && j.runner_id && j.steps?.some((step) => step.conclusion === 'failure');
+  return required.some(confirmed) ? 'revert' : 'skip';
+}
+
 // `parentGate` is the parent's gate job, not its whole run: advisory jobs (Electron) may fail beside a green gate.
 // `fixedLater` means a commit landed after this one already has a green gate, so a revert would undo work it relies on.
 export function decide({ subject, parentGate, reverted, fixedLater, runnerUnavailable }) {
@@ -42,6 +50,8 @@ export function main() {
     const message = git('show', '-s', '--format=%B', sha);
     const parent = git('rev-parse', `${sha}^`);
     const runnerUnavailable = process.env.RUNNER_UNAVAILABLE === 'true';
+    const jobs = JSON.parse(gh('api', '--paginate', '--slurp', `repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`)).flatMap((page) => page.jobs);
+    if (failureAction(jobs) !== 'revert') { summary('skip: no confirmed required failure'); return 0; }
     const reverted = revertsOf(git('log', '--format=%B%x00', `${sha}..origin/phase-1-base`), sha);
     const early = decide({ subject, reverted, runnerUnavailable });
     if (early === 'skip' || early === 'stale') { summary(`${early}: ${sha}`); return 0; }

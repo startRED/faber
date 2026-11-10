@@ -5,11 +5,21 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import test from 'node:test';
-import { FRAGMENTS, fold, numbered, placeholdersIn, plan, problems, quoted, SKIP, topDecision, topNote, twiceUsed } from './numbers.mjs';
+import { assignmentOptions, FRAGMENTS, fold, numbered, placeholdersIn, plan, problems, quoted, SKIP, topDecision, topNote, twiceUsed } from './numbers.mjs';
 import { body, entries } from './release-notes.mjs';
 
 const decisions = '| R | Date |\n| :--- | :--- |\n| R160 | 2026-10-16 | A. |\n| R161 | 2026-10-16 | B. |\n';
 const locale = "  'notes.14.new': 'A.',\n  \"notes.15.fixed\": \"B.\",\n";
+
+test('numbering accepts an exact shipping base while retaining the ordinary fresh-base options', () => {
+  const sha = '0123456789abcdef0123456789abcdef01234567';
+  assert.deepEqual(assignmentOptions([]), { amend: false, base: undefined });
+  assert.deepEqual(assignmentOptions(['--amend']), { amend: true, base: undefined });
+  assert.deepEqual(assignmentOptions(['--amend', '--base', sha]), { amend: true, base: sha });
+  assert.deepEqual(assignmentOptions(['--base', sha, '--amend']), { amend: true, base: sha });
+  for (const args of [['--base'], ['--base', 'origin/main'], ['--base', '-oops'], ['--amend', '--amend'], ['--base', sha, '--base', sha]])
+    assert.throws(() => assignmentOptions(args), /Usage:/);
+});
 
 test('the next numbers follow the highest decision and entry of the base', () => {
   assert.equal(topDecision(decisions), 161);

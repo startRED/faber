@@ -2,13 +2,10 @@
 
 Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
 
-The runner finds the repository from its current folder or an ancestor with the workspace, testkit and engine manifests.
-Run it inside the intended checkout, even with a warmed `CARGO_TARGET_DIR`; outside Faber it fails.
-The fake CLI stays beside the runner executable, and the configured target folder is preserved.
+The runner finds the repository from the current folder or an ancestor with the workspace, testkit and engine manifests. Run it in the intended checkout; outside Faber it fails even with a warm `CARGO_TARGET_DIR`. The fake CLI stays beside the runner, and the configured target folder is preserved.
 
-`Launch::claude_recording` and `codex_recording` select separate fake replays for a main agent and its helper.
-They pass `--faber-recording <path>` to the fake; unset overrides use `Launch::recording`. The sandbox, hidden
-desktop and real CLI isolation stay the same.
+`Launch::claude_recording` and `codex_recording` select fake replays for the main agent and helper via
+`--faber-recording <path>`; unset overrides use `Launch::recording`. Isolation stays the same.
 
 ## Screen tests
 
@@ -45,8 +42,7 @@ page's whole event loop partway through a run on CI. So the macOS test build (`t
 corner under every other window, ignores the mouse, never takes focus, and sets WebKit's inactive scheduling policy to
 `Disabled` (`background_throttling`, macOS 14+). Windows keeps the offscreen place and its own desktop.
 
-The four audited ancestor folders use compact names: WebView2 adds nested database paths, and long Windows paths caused
-an IndexedDB backing-store open failure. This keeps every audit level and all data inside the sandbox.
+The four audited ancestor folders use compact names: long Windows paths broke WebView2 IndexedDB. All audit levels and data stay in the sandbox.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
@@ -56,8 +52,7 @@ audit's 15 s, so the cleanup ends that tree through the app's job and waits unti
 private memory) with one `NtQuerySystemInformation` call (`faber_winproc::processes`, the one crate allowed unsafe code),
 which takes a few milliseconds; the WMI query it replaced took 150-200 ms, and a scenario takes 9 to 49 of these lists.
 The tree is still followed by parent and start time, so a pid the system reused is never mistaken for one of the app's.
-Each per-process memory note includes exact private working-set bytes beside its rounded MB value. These rows are a
-separate later snapshot, not a breakdown of the largest of the three preceding whole-tree samples.
+Per-process memory notes include exact bytes and rounded MB. These later snapshots do not break down the preceding whole-tree samples.
 After a visual-frame collection or post-close memory assertion fails, the runner records owned process memory,
 aggregate page heap and process roles from that fixture's own loopback browser. Browser queries have separate
 three-second deadlines; their errors and capture delay remain evidence, never a substitute for the original failure.
@@ -66,8 +61,8 @@ of an earlier failure. Process enumeration may also delay reporting; no memory l
 A page wait (`Cdp::settle`) runs inside the page: one DevTools call of up to two seconds reads the condition again at
 every change of the document (at most every 16 ms, and every 50 ms without a change), instead of one call every 100 ms
 from the runner. A condition the page cannot wrap, statements rather than one expression, is asked every 100 ms as before. The checks and the hooks that report them exist only in the test build
-(`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
-only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
+(`--features test-hooks`, `vite build --mode test`); production `dist/` has none. CI's [shared-base proofs](landing.md#fast-lane)
+stay independent; each run picks jobs by changed files (R163), with the same rules as
 `cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
 `.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, the test files of the engine
 and the shell need only the `rust` suite, the queue's own scripts and the scripts' tests only the lints (rule `lints`), a
@@ -107,7 +102,7 @@ nothing stops a program from opening its own connection; blocking outbound traff
 
 ### Quarantine
 
-Put a check that failed and later passed on the same commit in `testkit/quarantine.txt`, with its reason, date and run or pull request. It still runs everywhere. On GitHub Actions outside the nightly schedule, a listed failure is reported and counted but does not fail the run. Locally and nightly it fails as usual. The person fixing the check removes it from the list once fixed.
+Put a check that failed and later passed on the same commit in `testkit/quarantine.txt`, with its reason, date and run or pull request. It still runs everywhere. On GitHub Actions outside the nightly schedule, a listed failure is reported and counted but does not fail the run. Locally and nightly it fails as usual. The person fixing the check removes it from the list once fixed. The retained-layout and long-answer memory checks are quarantined until their measurements are reliable; a person must inspect their failures. The motion sentinel blocks because its visual rehearsal found a real recorder defect.
 
 ### Parallel scenarios
 

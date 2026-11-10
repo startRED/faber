@@ -82,6 +82,9 @@ Until 2026-11-14 (R489) the process machinery changes only to fix a red base or 
 task files and CI, and 124 task files written in one day while 122 waited. A change it does need names the red run or the
 blocked pull request in its body. On 2026-11-05 the owner let the lean plan
 (`docs/superpowers/plans/2026-11-05-lean-faber.md`) change it, since that plan removes machinery; the fast lane is its first step.
+On 2026-11-07 the owner explicitly authorized Git-efficiency improvements to Faber's own delivery and CI, as well as
+the portable project workflow Faber runs on other people's computers. This permits the shared-object delivery and
+independent shared-base proofs documented in [landing](landing.md#fast-lane); unrelated process changes remain frozen.
 
 ## Board
 

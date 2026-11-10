@@ -54,6 +54,17 @@ universal quality standard. No new dependency is required by these skills.
 
 ## Evidence and limits
 
+Illustrated product demos use the existing optional Stageshow catalog entry, pinned to its upstream source and
+verified by the same install path as other skills. The original [Faber demo](../../demos/faber/README.md) runs in a
+separate local workspace; its React kit and dependencies never enter Faber's application bundle. The scene labels
+its synthetic conversation and uses the app's existing visual tokens. It is presentation evidence, not a real CLI run.
+Agents copy the needed runtime/example files into the task workspace before editing or installing dependencies;
+the verified Catalog snapshot stays a reference, so a rehearsal does not invalidate an installed skill.
+
+The first-party craft/proof instructions distinguish this task from an operational interface, ask for a separate
+narrow composition and reduced-motion still, and require a before/during/after rehearsal with trustworthy coverage.
+An empty, gapped or unfinished capture cannot establish a pass, including when a third-party tool prints one.
+
 The delivery checks live inside `engine/src/guide.rs` and `engine/src/engine/kits.rs`: file creation/repair, lazy
 discovery, both vendors and areas, isolated requests, guarded modes, unchanged/resumed sessions and directory safety.
 The existing guide checks still cover its words and screen language. These checks establish delivery, not a measured

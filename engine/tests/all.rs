@@ -7,6 +7,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 // Shared by the files below, which `use crate::support` and `use crate::loopback`.
+#[path = "auxiliary.rs"]
+mod auxiliary;
 #[path = "dry_run.rs"]
 mod dry_run;
 mod loopback;
@@ -66,6 +68,8 @@ mod export;
 mod failed_writes;
 #[path = "failure.rs"]
 mod failure;
+#[path = "git_maintenance.rs"]
+mod git_maintenance;
 #[path = "goals.rs"]
 mod goals;
 #[path = "groups.rs"]

@@ -514,6 +514,7 @@ struct Core {
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
     git_missing: bool,
+    copy_sweeps: crate::project::maintenance::Sweeps,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
@@ -844,6 +845,7 @@ impl Engine {
                 test_items: Vec::new(),
                 git: None,
                 git_missing: false,
+                copy_sweeps: Default::default(),
                 rewind,
                 unclean_exit,
                 project_states: Mutex::new(HashMap::new()),
@@ -1730,6 +1732,7 @@ impl Engine {
     pub fn is_working(&self) -> bool {
         self.with(|c| {
             !c.running.items.is_empty()
+                || c.copy_sweeps.running()
                 // An install the agent was allowed to make goes on after Stop, with nothing in the list.
                 || c.agent_installs > 0
                 // A standing goal's check runs for a while with nothing in the list.
@@ -3907,7 +3910,7 @@ impl Core {
             archive::restore(c, reopened);
             return Err(error);
         }
-        self.draft_routes.remove(id);
+        self.sent_draft(id);
         if reopened.is_some() {
             self.list_changed();
         }
@@ -3983,6 +3986,7 @@ impl Core {
 
     /// Hands a message to the running turn; the CLI takes it in at its next step (`taken_in`) or refuses it (`steer_failed`).
     fn steer(&mut self, id: &str, item: &mut QueuedTurn) {
+        self.sent_draft(id);
         if self.prepare_rewind_steer(id, item) {
             return;
         }
@@ -4382,7 +4386,7 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
-            let route = self.route_for(&item.text, images.len() + attachments_len, only);
+            let route = self.route_for(id, &item.text, images.len() + attachments_len, only);
             self.push(id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.to_string(), images);
             tokio::spawn(async move {
@@ -5429,7 +5433,7 @@ impl Core {
             }
             return Err(error);
         }
-        self.draft_routes.remove(&id);
+        self.sent_draft(&id);
         if previous.0 == 0 && previous.1.is_empty() {
             self.track_title(&id);
         }
@@ -5460,7 +5464,7 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
-            let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
+            let route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
