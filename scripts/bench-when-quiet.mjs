@@ -61,7 +61,14 @@ export function claudeWeekly(receipt, now) {
 }
 
 export function subscriptionEnv(env) {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !billed.test(key)));
+  const child = Object.fromEntries(Object.entries(env).filter(([key]) => !billed.test(key)));
+  for (const key of Object.keys(child)) if (key.toUpperCase() === 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC') {
+    // The CLI treats quota traffic as nonessential; keep its telemetry opt-out without blocking the usage endpoint.
+    delete child[key];
+    child.DISABLE_TELEMETRY = '1';
+    child.DISABLE_ERROR_REPORTING = '1';
+  }
+  return child;
 }
 
 export function cpuSnapshot(cpus = os.cpus()) {

@@ -188,6 +188,17 @@ test('billing variables are removed case-insensitively without changing the pare
   assert.equal(CAP_USD, 25);
 });
 
+test('quota reads allow usage traffic while preserving the inherited telemetry opt-out', () => {
+  for (const name of ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'claude_code_disable_nonessential_traffic']) {
+    const parent = { Path: 'tools', [name]: '1', DISABLE_TELEMETRY: '1', CLAUDE_CONFIG_DIR: 'custom-sign-in' };
+    assert.deepEqual(subscriptionEnv(parent), {
+      Path: 'tools', CLAUDE_CONFIG_DIR: 'custom-sign-in', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
+    });
+    assert.equal(parent[name], '1');
+    assert.equal(parent.DISABLE_ERROR_REPORTING, undefined);
+  }
+});
+
 test('Codex-only weekly admission accepts an unpaired app reading and rejects missing or invalid windows', () => {
   const receipt = { readings: [{ vendor: 'codex', source: 'app account/rateLimits/read', completedAt: 100,
     windows: [{ window: 'seven_day', used: 0.43, resetsAt: 1000 }] }] };
