@@ -150,7 +150,9 @@ pub fn coverage_problem(out: &Value, names: &[&str]) -> Option<String> {
         return Some("the probe did not return its animation trace".into());
     }
     if names.is_empty() || out["settled"] != json!(true) {
-        return Some("the interaction never settled, or no surfaces were requested".into());
+        let holding: Vec<&str> = out["holding"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let held = if holding.is_empty() { String::new() } else { format!(" (still running: {})", holding.join(", ")) };
+        return Some(format!("the interaction never settled, or no surfaces were requested{held}"));
     }
     for name in names {
         let Some(rows) = out["samples"][name].as_array().filter(|r| r.len() >= 3) else {

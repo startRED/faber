@@ -50,11 +50,26 @@ fn compact_catalog(ctx: &mut Ctx) -> Result {
 
 pub const EXTERNAL_LINKS: &str = "ux audit: open-link records URLs in the hidden sandbox without starting a browser";
 
-fn scheduler_browser(row: &crate::proctree::ProcRow, rows: &[crate::proctree::ProcRow], app_tree: &[crate::proctree::ProcRow]) -> bool {
+const BROWSERS: [&str; 6] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe"];
+
+fn browser(row: &crate::proctree::ProcRow) -> bool {
+    BROWSERS.contains(&row.name.to_ascii_lowercase().as_str())
+}
+
+/// A new browser process Faber did not start: outside the app's tree, and started by the system's scheduler (an update
+/// task) or by a browser that was already running before the links were opened (its own tab or helper process; on CI,
+/// 10/11/2026, a Firefox open on the runner started one mid-check).
+fn not_ours(
+    row: &crate::proctree::ProcRow,
+    rows: &[crate::proctree::ProcRow],
+    app_tree: &[crate::proctree::ProcRow],
+    before: &[crate::proctree::ProcRow],
+) -> bool {
     !crate::proctree::same_process(row, app_tree)
         && rows.iter().find(|parent| parent.pid == row.parent).is_some_and(|parent| {
             parent.born <= row.born
-                && matches!(parent.name.to_ascii_lowercase().as_str(), "svchost.exe" | "taskhostw.exe" | "taskeng.exe" | "services.exe")
+                && (matches!(parent.name.to_ascii_lowercase().as_str(), "svchost.exe" | "taskhostw.exe" | "taskeng.exe" | "services.exe")
+                    || (browser(parent) && crate::proctree::same_process(parent, before)))
         })
 }
 
@@ -82,13 +97,7 @@ fn external_links(ctx: &mut Ctx) -> Result {
         let app_tree = crate::proctree::descendants(&rows, app.pid);
         let new_browsers: Vec<_> = rows
             .iter()
-            .filter(|p| {
-                matches!(
-                    p.name.to_ascii_lowercase().as_str(),
-                    "chrome.exe" | "msedge.exe" | "firefox.exe" | "brave.exe" | "opera.exe" | "vivaldi.exe"
-                ) && !crate::proctree::same_process(p, &before)
-                    && !scheduler_browser(p, &rows, &app_tree)
-            })
+            .filter(|p| browser(p) && !crate::proctree::same_process(p, &before) && !not_ours(p, &rows, &app_tree, &before))
             .map(|p| (p, rows.iter().find(|parent| parent.pid == p.parent).map(|parent| parent.name.as_str())))
             .collect();
         ensure(new_browsers.is_empty(), || format!("open-link started browser processes (process, parent name): {new_browsers:?}"))?;
@@ -129,24 +138,34 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn only_scheduler_browsers_outside_the_app_tree_are_ignored() {
+    fn only_browsers_the_scheduler_or_an_open_browser_started_outside_the_app_tree_are_ignored() {
         use crate::proctree::{ProcRow, descendants};
         let row = |pid, parent, name: &str| ProcRow { pid, parent, name: name.into(), born: u64::from(pid) };
         for name in ["svchost.exe", "TASKHOSTW.EXE", "taskeng.exe", "services.exe"] {
             let rows = [row(1, 0, "faber.exe"), row(2, 0, name), row(3, 2, "firefox.exe")];
-            assert!(scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+            assert!(not_ours(&rows[2], &rows, &descendants(&rows, 1), &[]));
             let rows = [row(1, 0, "faber.exe"), row(2, 1, name), row(3, 2, "firefox.exe")];
-            assert!(!scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+            assert!(!not_ours(&rows[2], &rows, &descendants(&rows, 1), &[]));
         }
         // A scheduler process that appeared after the browser may only have reused its parent's pid.
         let rows = [row(1, 0, "faber.exe"), ProcRow { born: 9, ..row(2, 0, "svchost.exe") }, row(3, 2, "firefox.exe")];
-        assert!(!scheduler_browser(&rows[2], &rows, &descendants(&rows, 1)));
+        assert!(!not_ours(&rows[2], &rows, &descendants(&rows, 1), &[]));
         let rows =
             [row(1, 0, "faber.exe"), row(2, 0, "other.exe"), row(3, 1, "firefox.exe"), row(4, 2, "firefox.exe"), row(5, 99, "firefox.exe")];
         let tree = descendants(&rows, 1);
         for browser in &rows[2..] {
-            assert!(!scheduler_browser(browser, &rows, &tree));
+            assert!(!not_ours(browser, &rows, &tree, &[]));
         }
+        // A browser already open before the links were opened starts its own tab process: not Faber's. Faber's own
+        // browser, or one that is new itself, still counts, whoever its child is.
+        let open = row(2, 0, "firefox.exe");
+        let rows = [row(1, 0, "faber.exe"), open.clone(), row(3, 2, "firefox.exe")];
+        assert!(not_ours(&rows[2], &rows, &descendants(&rows, 1), std::slice::from_ref(&open)));
+        assert!(!not_ours(&rows[2], &rows, &descendants(&rows, 1), &[]), "a browser that is new itself is not an excuse");
+        let rows = [row(1, 0, "faber.exe"), row(2, 1, "firefox.exe"), row(3, 2, "firefox.exe")];
+        assert!(!not_ours(&rows[2], &rows, &descendants(&rows, 1), &rows[1..2]), "a browser Faber started is never excused");
+        let rows = [row(1, 0, "faber.exe"), open.clone(), row(3, 2, "notepad.exe"), row(4, 3, "firefox.exe")];
+        assert!(!not_ours(&rows[3], &rows, &descendants(&rows, 1), std::slice::from_ref(&open)), "only a browser parent excuses");
     }
 
     #[test]

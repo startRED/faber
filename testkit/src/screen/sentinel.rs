@@ -97,6 +97,8 @@ fn clock_and_slow(page: &mut Page) -> Result {
 struct Watched {
     samples: Vec<Vec<Sample>>,
     anims: Vec<Anim>,
+    /// Animations that ran while it was watched but moved none of the watched surfaces, so it never waited for them.
+    elsewhere: Vec<String>,
 }
 
 /// Samples these surfaces on every frame while `act` runs, until they rest. The raw numbers are kept as the finding's
@@ -138,6 +140,7 @@ fn watch(ctx: &mut Ctx, label: &str, page: &mut Page, names: &[&str], act: impl 
     Ok(Watched {
         samples: names.iter().map(|n| sentinel::samples(&out["samples"][n])).collect(),
         anims: sentinel::anims(&out["animations"]),
+        elsewhere: out["elsewhere"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect(),
     })
 }
 
@@ -616,6 +619,20 @@ fn motion(ctx: &mut Ctx) -> Result {
         p.eval("document.querySelector('.run-btn').animate([{ transform: 'translateX(40px)' }, { transform: 'none' }], { duration: 400 }); true").map(drop)
     })?;
     caught("a 400 ms slide under reduced motion (M6)", !sentinel::reduced_problems("reduced", &w.anims).is_empty())?;
+    click(page, ".run-btn")?;
+    pause(0.6);
+    // Motion that moves nothing watched never holds the wait. The home screen's 1.1 s entrance, still playing behind
+    // Settings at a quarter speed, made "appearance opens" give up at 4 s in 14 of 40 CI runs (7 to 10/11/2026). A 3 s
+    // animation outside the column runs 12 s here: waiting for it would fail this watch.
+    let w = watch(ctx, "planted elsewhere", page, &["running"], |p| {
+        click(p, ".run-btn")?;
+        p.eval("(() => { const el = document.createElement('div'); el.className = 'planted-elsewhere'; document.body.append(el); el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 3000 }); return true; })()").map(drop)
+    })?;
+    caught(
+        "an animation outside the watched surface (noted, not waited for)",
+        w.elsewhere.iter().any(|e| e.starts_with("div.planted-elsewhere")),
+    )?;
+    page.eval("document.querySelector('.planted-elsewhere')?.remove(); true")?;
     click(page, ".run-btn")?;
     pause(0.6);
     system_motion(page, false)?;

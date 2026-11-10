@@ -50,6 +50,9 @@
 
   const skip = new Set(['offset', 'easing', 'composite', 'computedOffset']);
   let run = null;
+  const named = (target) => target ? `${target.tagName.toLowerCase()}${target.className && typeof target.className === 'string' ? '.' + target.className.trim().split(/\s+/).join('.') : ''}` : '?';
+  // A running animation, for the trace: what it moves, its name and its length.
+  const running = (a) => `${named(a.effect?.target)} ${a.animationName ?? a.transitionProperty ?? a.constructor.name} ${Number(a.effect?.getTiming().duration) || 0}ms`;
 
   // Starts sampling these surfaces on every frame, and noting each animation that starts.
   const start = (names) => {
@@ -74,7 +77,7 @@
         const timing = animation.effect.getTiming();
         const target = animation.effect.target;
         current.animations.push({
-          target: target ? `${target.tagName.toLowerCase()}${target.className && typeof target.className === 'string' ? '.' + target.className.trim().split(/\s+/).join('.') : ''}` : '?',
+          target: named(target),
           props: [...new Set(animation.effect.getKeyframes().flatMap((k) => Object.keys(k)).filter((k) => !skip.has(k)))],
           ms: Number(timing.duration) + Number(timing.delay || 0),
           infinite: timing.iterations === Infinity,
@@ -95,17 +98,28 @@
       for (let i = rows.length - 1; i > 0; i--) if (rows[i].slice(1).some((v, k) => Math.abs(v - rows[i - 1][k + 1]) > 0.01)) return rows[i][0];
       return 0;
     }));
+    // Only motion that can move a watched surface holds the wait: an animation inside one of its elements (exit copies
+    // included) or on an element that holds one. Anything else on the page, such as the home screen's entrance playing
+    // behind Settings, moves nothing being measured; it is noted as `elsewhere`, never waited for.
+    const surfaces = () => roots().flatMap((root) => current.names.flatMap((n) => [...root.querySelectorAll(`[data-surface="${n}"]`)]));
+    const touches = (target, els) => !!target && els.some((el) => el.contains(target) || target.contains(el));
+    const elsewhere = new Set();
     const poll = () => {
       const now = performance.now() - current.began;
       const waited = performance.now() - began;
       const quietFor = now - last();
-      const moving = animations().some((a) => a.effect?.getTiming().iterations !== Infinity && (a.pending || a.playState === 'running'));
+      const els = surfaces();
+      const live = animations().filter((a) => a.effect?.getTiming().iterations !== Infinity && (a.pending || a.playState === 'running'));
+      const moving = live.some((a) => touches(a.effect?.target, els));
+      for (const a of live) if (!touches(a.effect?.target, els)) elsewhere.add(running(a));
       const settled = waited >= least && quietFor >= quiet && !moving;
       if (settled || waited >= most) {
         current.stop = true;
         current.stopTasks?.();
         run = null;
-        resolve({ samples: current.samples, animations: current.animations, longTasks: current.longTasks, longTasksSupported: current.longTasksSupported, elapsed: now, settled, quietFor });
+        // What still held the wait when it gave up, so a trace that never settled names its cause.
+        const holding = settled ? [] : live.filter((a) => touches(a.effect?.target, els)).map(running);
+        resolve({ samples: current.samples, animations: current.animations, longTasks: current.longTasks, longTasksSupported: current.longTasksSupported, elapsed: now, settled, quietFor, elsewhere: [...elsewhere], holding });
       } else setTimeout(poll, 50);
     };
     poll();
