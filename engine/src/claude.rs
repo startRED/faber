@@ -458,6 +458,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
         if launch.area == Area::Project {
             words.push_str(crate::persona::PROJECT_DETAILS);
+            if launch.helper == crate::helper::Helper::Is {
+                words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
+            }
             if let Some(card) = &tools.start_card {
                 words.push_str("\n\n");
                 words.push_str(card);

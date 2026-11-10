@@ -347,12 +347,10 @@ mod tests {
                 "{name} is refused elsewhere"
             );
         }
+        assert!(matches!(call("wrap_up", offered), Mcp::Call { tool, .. } if tool == "wrap_up"), "legacy calls remain available");
         let Mcp::Answer(list) = mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), offered) else { panic!() };
         let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(
-            names,
-            ["review", "plan", "status", "wrap_up", "judge_creative", "settings", "quota", "catalog", "memory_search", "offer_bigger"]
-        );
+        assert_eq!(names, ["review", "plan", "status", "judge_creative", "settings", "quota", "catalog", "memory_search", "offer_bigger"]);
     }
 
     #[test]
