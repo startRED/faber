@@ -1286,6 +1286,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_continuation_flushes_held_text_before_resetting_the_stream() {
+        let dir = crate::workspace::TestRoot::new();
+        let folder = dir.path().canonicalize().unwrap();
+        let (spawn, _, _) = fake();
+        let engine = engine(&dir, spawn);
+        let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+        engine.with(|core| {
+            conversation(core, Area::Project, Some(&project.id), &folder, "Continue");
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "First".into(), vec![], true).unwrap();
+            let sid = core.live["kit"].sid;
+            core.handle("kit", sid, EngineEvent::Text("Earlier <".into()));
+            core.rewind.captured_for_test("reply");
+            core.start("kit", "reply", &pick(Vendor::Claude), "Again".into(), vec![], true).unwrap();
+            assert_eq!(core.convs["kit"].messages.last().unwrap().text, "Earlier <");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn project_facts_leave_chat_warming_unchanged() {
         let dir = crate::workspace::TestRoot::new();
         let folder = dir.path().canonicalize().unwrap();
