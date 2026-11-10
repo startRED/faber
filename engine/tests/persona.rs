@@ -174,7 +174,7 @@ fn every_project_receives_the_portable_git_workflow_without_changing_chat() {
         "do not make another full clone for each task",
         "never share a writable dependency tree between incompatible lockfiles or toolchains",
         "reuse passes only while their inputs and environment are unchanged",
-        "When checks are declared, use verify full before delivery and after environment, toolchain or installed dependency changes",
+        "Use verify full before delivery and after environment, toolchain or installed dependency changes",
         "exact revision being delivered",
         "never silently update the person's checkout",
         "without removing required checks or replacing its pipeline",
