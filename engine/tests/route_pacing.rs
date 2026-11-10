@@ -1,5 +1,5 @@
 use faber_engine::model::Vendor;
-use faber_engine::route::{Asked, Factor, PROFILES, Profile, asked, candidates, choose, choose_paced};
+use faber_engine::route::{Asked, Factor, PROFILES, Profile, Reading, asked, candidates, choose, choose_paced, read_cost};
 
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
@@ -9,7 +9,7 @@ fn all() -> Vec<Profile> {
 
 /// Every profile of a vendor gets that vendor's multiplier; `step_ok` as given for Claude.
 fn by_vendor(claude: f64, codex: f64) -> impl Fn(&Profile) -> Factor {
-    move |p| Factor { m: if p.vendor == Vendor::Claude { claude } else { codex }, w: 1.0, step_ok: true }
+    move |p| Factor { m: if p.vendor == Vendor::Claude { claude } else { codex }, w: 1.0, step_ok: true, read: 0.0 }
 }
 
 fn paced(
@@ -76,7 +76,12 @@ fn a_vendor_ahead_of_its_daily_line_is_priced_up_and_the_answer_says_it_is_fast_
 #[test]
 fn only_a_vendor_near_its_limit_is_said_to_be_running_low() {
     // A window past 90% leaves under one day of the daily line (R88: 100% / 7 = 14.3%): that is near the limit.
-    let near = |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { 1.0 } else { 25.0 }, w: 1.0, step_ok: p.vendor == Vendor::Claude };
+    let near = |p: &Profile| Factor {
+        m: if p.vendor == Vendor::Claude { 1.0 } else { 25.0 },
+        w: 1.0,
+        step_ok: p.vendor == Vendor::Claude,
+        read: 0.0,
+    };
     let (m, _, pace) = paced("code", "medium", &all(), &near);
     assert_eq!(m, SONNET_MEDIUM.0);
     assert_eq!(pace, Some(("low".to_string(), Vendor::Codex)));
@@ -93,14 +98,18 @@ fn a_step_over_the_time_cap_is_not_taken() {
 
 #[test]
 fn a_vendor_with_a_window_above_ninety_percent_gets_no_step() {
-    let no_step =
-        |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { 0.1 } else { 1.0 }, w: 1.0, step_ok: p.vendor != Vendor::Claude };
+    let no_step = |p: &Profile| Factor {
+        m: if p.vendor == Vendor::Claude { 0.1 } else { 1.0 },
+        w: 1.0,
+        step_ok: p.vendor != Vendor::Claude,
+        read: 0.0,
+    };
     assert_eq!(pick("code", "hard", &all(), &no_step), SONNET_HIGH);
 }
 
 #[test]
 fn learned_weights_change_the_pick_but_never_show_a_reason() {
-    let weighted = |p: &Profile| Factor { m: 1.0, w: if p.vendor == Vendor::Claude { 0.5 } else { 2.0 }, step_ok: true };
+    let weighted = |p: &Profile| Factor { m: 1.0, w: if p.vendor == Vendor::Claude { 0.5 } else { 2.0 }, step_ok: true, read: 0.0 };
     let (m, e, pace) = paced("code", "medium", &all(), &weighted);
     assert_eq!((m, e), SONNET_MEDIUM);
     assert_eq!(pace, None);
@@ -164,4 +173,47 @@ fn the_router_line_is_read_without_the_table() {
 fn luna_at_medium_is_thirty() {
     let luna = PROFILES.iter().find(|p| p.model == "gpt-6-luna").unwrap();
     assert_eq!(luna.iq, 30);
+}
+
+fn two(a: (&str, &str), b: (&str, &str)) -> Vec<Profile> {
+    PROFILES.into_iter().filter(|p| (p.model, p.effort) == a || (p.model, p.effort) == b).collect()
+}
+
+fn reading_on(claude: f64, reading: Reading) -> impl Fn(&Profile) -> Factor {
+    move |p| Factor { read: read_cost(p, &reading), ..by_vendor(claude, 1.0)(p) }
+}
+
+#[test]
+fn what_a_model_already_holds_is_read_from_its_cache_and_fresh_everywhere_else() {
+    let sol = *PROFILES.iter().find(|p| (p.model, p.effort) == ("gpt-6.1-sol", "medium")).unwrap();
+    let opus = *PROFILES.iter().find(|p| (p.model, p.effort) == ("claude-opus-5-5", "medium")).unwrap();
+    let long = Reading::of(0, 0, 0, 600_000, Some("gpt-6.1-sol"));
+    assert!(read_cost(&sol, &long) * 10.0 < read_cost(&opus, &long), "a cached read is about a tenth of a fresh one");
+    assert_eq!(read_cost(&sol, &Reading::default()), 0.0);
+    // A model the table does not know holds nothing Auto can price, so nothing counts as held.
+    assert_eq!(Reading::of(0, 0, 0, 600_000, Some("sonnet")), Reading::default());
+    // A page reads for almost nothing next to a task's own price; a book does not.
+    let page = Reading::of(4_000, 0, 0, 0, None);
+    let book = Reading::of(0, 0, 2_000_000, 0, None);
+    assert!(read_cost(&opus, &page) < opus.cost as f64 / 100.0);
+    assert!(read_cost(&opus, &book) > opus.cost as f64);
+}
+
+#[test]
+fn spare_quota_does_not_move_a_long_conversation_off_the_model_that_holds_it() {
+    let from = two(("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium"));
+    let spare = 0.3;
+    assert_eq!(pick("research", "hard", &from, &by_vendor(spare, 1.0)).0, "claude-opus-5-5", "a short read takes the spare quota");
+    let held = Reading::of(200, 0, 0, 600_000, Some("gpt-6.1-sol"));
+    let (model, _, pace) = paced("research", "hard", &from, &reading_on(spare, held));
+    assert_eq!((model, pace), ("gpt-6.1-sol", None), "reading 600k fresh on Opus costs more than the quota saves");
+}
+
+#[test]
+fn a_long_read_goes_past_a_price_tier_only_when_it_has_to() {
+    // Haiku costs five times as much a token above 100k: the same 300k document weighs far more there than 90k does.
+    let haiku = *PROFILES.iter().find(|p| p.model == "claude-haiku-5-5").unwrap();
+    let small = read_cost(&haiku, &Reading::of(0, 0, 360_000, 0, None));
+    let large = read_cost(&haiku, &Reading::of(0, 0, 1_200_000, 0, None));
+    assert!(large > small * 3.0 * 4.0, "{large} vs {small}");
 }

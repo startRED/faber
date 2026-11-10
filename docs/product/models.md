@@ -34,6 +34,12 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   27/10/2026 and Claude Fable 5.2, the strongest and dearest rung, on 10/11/2026; compiled in for now) and move
   to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
   manifest, so a new model joins without an app release.
+- **Long reads are priced by the token** (`engine/src/route.rs`, `read_cost`). Per-task prices assume a typical read; a
+  message with a long document or many pictures, or a long conversation moved to another model, reads far more, so each
+  model's cost adds what that read costs at its own price per token (its long-prompt tiers included), with the context
+  the conversation's model already holds read from its cache. The bar does not move: a long read only changes which of the
+  models that clear it is cheapest, and keeps a long conversation on its model when spare quota elsewhere would not pay for
+  reading it all again.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
 - Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message

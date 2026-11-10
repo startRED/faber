@@ -370,13 +370,13 @@ fn the_lift_respects_the_quota_rules_of_the_vendor_it_would_use() {
     let all = both();
     let base = usual("code", "medium", &all);
     // No step up from a vendor with a window past 90%: every candidate is refused, so the table's pick stands.
-    let no_step = |_: &Profile| Factor { m: 1.0, w: 1.0, step_ok: false };
+    let no_step = |_: &Profile| Factor { m: 1.0, w: 1.0, step_ok: false, read: 0.0 };
     assert_eq!(lifted(base.clone(), &all, &no_step), base);
     // None from a vendor that is being used ahead of its daily line.
-    let fast = |_: &Profile| Factor { m: 4.0, w: 1.0, step_ok: true };
+    let fast = |_: &Profile| Factor { m: 4.0, w: 1.0, step_ok: true, read: 0.0 };
     assert_eq!(lifted(base.clone(), &all, &fast), base);
     // Only the vendor with room is used.
-    let codex_only_has_room = |p: &Profile| Factor { m: 1.0, w: 1.0, step_ok: p.vendor == Vendor::Codex };
+    let codex_only_has_room = |p: &Profile| Factor { m: 1.0, w: 1.0, step_ok: p.vendor == Vendor::Codex, read: 0.0 };
     let up = lifted(base.clone(), &all, &codex_only_has_room);
     assert_eq!(up.profile.vendor, Vendor::Codex);
     // A step over the time cap is not taken: hard research caps at one minute, and ChatGPT's strongest takes longer.
@@ -387,7 +387,7 @@ fn the_lift_respects_the_quota_rules_of_the_vendor_it_would_use() {
 
 /// Quota to spare at Claude makes it cheap: the table buys Claude's step up on its own, with no learning in it.
 fn claude_has_spare_quota(p: &Profile) -> Factor {
-    Factor { m: if p.vendor == Vendor::Claude { 0.1 } else { 1.0 }, w: 1.0, step_ok: true }
+    Factor { m: if p.vendor == Vendor::Claude { 0.1 } else { 1.0 }, w: 1.0, step_ok: true, read: 0.0 }
 }
 
 #[test]

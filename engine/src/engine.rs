@@ -4386,6 +4386,7 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
+            let reading = self.reading(id, item.text.chars().count(), images.len(), 0, before.as_ref());
             let route = self.route_for(id, &item.text, images.len() + attachments_len, only);
             self.push(id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.to_string(), images);
@@ -4396,7 +4397,7 @@ impl Core {
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
-                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref(), &reading));
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });
@@ -5464,6 +5465,8 @@ impl Core {
         );
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
+            let file_bytes = req.files.iter().map(|f| f.base64.len() / 4 * 3).sum();
+            let reading = self.reading(&id, req.text.chars().count(), req.images.len(), file_bytes, before.as_ref());
             let route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
@@ -5476,7 +5479,7 @@ impl Core {
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
-                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref()));
+                    let routed = verdict.and_then(|(v, _)| core.table_at(&v, only, before.as_ref(), &reading));
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
             });

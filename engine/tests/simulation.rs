@@ -132,7 +132,7 @@ fn run(seed: u64, paced: bool) -> Outcome {
                 }
                 let factor = |p: &Profile| {
                     let s = &snaps[vendor_index(p.vendor)];
-                    Factor { m: s.profile_m(family_of(p.model), &shape, 0, now), w: 1.0, step_ok: s.step_ok(now) }
+                    Factor { m: s.profile_m(family_of(p.model), &shape, 0, now), w: 1.0, step_ok: s.step_ok(now), read: 0.0 }
                 };
                 let routed = if paced {
                     choose_paced(kind, level, "glance", 0.9, &open, &factor)

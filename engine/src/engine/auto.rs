@@ -4,7 +4,9 @@
 use super::*;
 use crate::auto_learned::{self, Signal};
 use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
-use crate::route::{Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Routed, asked, candidates, choose_paced, lifted, question};
+use crate::route::{
+    Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_paced, lifted, question, read_cost,
+};
 use crate::router::pinned;
 use tokio::sync::oneshot;
 
@@ -105,19 +107,31 @@ impl Core {
     /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the
     /// pool; with every multiplier and weight at 1 the pick is exactly the table without quota (`choose`).
     pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
-        self.table_for(verdict, only, false, false, |_| true)
+        self.table_for(verdict, only, false, false, &Reading::default(), |_| true)
     }
 
     /// The same pick for the first message of a conversation, one rung up for a kind of task the person keeps redoing. Only a
     /// conversation's start learns: rule 3 lets nothing else change a model.
-    pub(super) fn table_first(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
-        self.table_for(verdict, only, false, true, |_| true)
+    pub(super) fn table_first(&self, verdict: &Asked, only: Option<Vendor>, reading: &Reading) -> Option<Routed> {
+        self.table_for(verdict, only, false, true, reading, |_| true)
+    }
+
+    /// What the next answer of conversation `id` must read: the new message (`chars` of text, `images`, `file_bytes` of
+    /// files) and the context its agent holds on the model it has been answering with (`before`).
+    pub(super) fn reading(&self, id: &str, chars: usize, images: usize, file_bytes: usize, before: Option<&Pick>) -> Reading {
+        let held = self.convs.get(id).and_then(|c| c.context).map_or(0, |c| c.used);
+        let on = before.and_then(|p| p.model.as_deref().map(|m| pinned(p.vendor, m)));
+        Reading::of(chars, images, file_bytes, held, on)
     }
 
     /// The pick of a message that may be the first of its conversation (`before` is the model so far, none for the first); a
     /// conversation under way only moves up.
-    pub(super) fn table_at(&self, verdict: &Asked, only: Option<Vendor>, before: Option<&Pick>) -> Option<Routed> {
-        let routed = if before.is_none() { self.table_first(verdict, only) } else { self.table(verdict, only) };
+    pub(super) fn table_at(&self, verdict: &Asked, only: Option<Vendor>, before: Option<&Pick>, reading: &Reading) -> Option<Routed> {
+        let routed = if before.is_none() {
+            self.table_first(verdict, only, reading)
+        } else {
+            self.table_for(verdict, only, false, false, reading, |_| true)
+        };
         routed.filter(|r| before.is_none_or(|p| !r.weaker_than(p)))
     }
 
@@ -127,6 +141,7 @@ impl Core {
         only: Option<Vendor>,
         mission: bool,
         learned: bool,
+        reading: &Reading,
         eligible: impl Fn(&Profile) -> bool,
     ) -> Option<Routed> {
         let now = self.secs();
@@ -150,6 +165,7 @@ impl Core {
                 m: snap.profile_m(family_of(p.model), shape, self.utc_offset, now),
                 w: self.ledger.of(p.vendor).weights.w.get(p.model).copied().unwrap_or(1.0),
                 step_ok: snap.step_ok(now),
+                read: read_cost(p, reading),
             }
         };
         let routed = choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)?;
@@ -278,7 +294,7 @@ impl Core {
         }
         // A new conversation's CLI gets ready for the pick of this moment; the pick at dispatch may differ, and then the
         // process started here is replaced.
-        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table_first(&v, only)), warm)
+        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table_first(&v, only, &Reading::default())), warm)
             && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
         {
             self.warm_launch(&id, &r.pick());

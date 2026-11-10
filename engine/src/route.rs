@@ -220,10 +220,56 @@ pub struct Factor {
     pub w: f64,
     /// False when any vendor-wide window is above 0.90: such a vendor gets no step up.
     pub step_ok: bool,
+    /// What reading the request costs on this profile before it can think, in `Profile::cost` units (`read_cost`). Added
+    /// to the cost before the weight and the quota multiply it, so a long read goes to the model cheapest per token among
+    /// those that clear the bar.
+    pub read: f64,
 }
 
 impl Factor {
-    pub const NEUTRAL: Factor = Factor { m: 1.0, w: 1.0, step_ok: true };
+    pub const NEUTRAL: Factor = Factor { m: 1.0, w: 1.0, step_ok: true, read: 0.0 };
+}
+
+/// What an answer must read before it can think: the new message with its files and images, and the conversation its
+/// agent already holds. Per-task prices (`Profile::cost`) assume a typical read; a message with a long document, or a long
+/// conversation moved to another model, reads far more, and there the price per token decides.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Reading {
+    /// Tokens no model has cached yet.
+    pub fresh: u64,
+    /// Tokens of the conversation so far: cached on `on`, the model answering it, and read fresh by any other.
+    pub held: u64,
+    pub on: Option<&'static str>,
+}
+
+// ponytail: estimates, not counts: four characters or bytes a token, and a typical picture. Good enough to tell a page
+// from a book; the CLI's own count replaces them once the answer runs.
+const CHARS_PER_TOKEN: u64 = 4;
+const IMAGE_TOKENS: u64 = 1_600;
+
+impl Reading {
+    /// `chars` of request text, `images`, `file_bytes` of attached files, and the `held` context of the conversation's
+    /// model `on` (any model, in the table or not).
+    pub fn of(chars: usize, images: usize, file_bytes: usize, held: u64, on: Option<&str>) -> Reading {
+        let fresh = (chars + file_bytes) as u64 / CHARS_PER_TOKEN + images as u64 * IMAGE_TOKENS;
+        let on = on.and_then(|m| PROFILES.iter().find(|p| p.model == m)).map(|p| p.model);
+        Reading { fresh, held: if on.is_some() { held } else { 0 }, on }
+    }
+}
+
+/// US$ of one `Profile::cost` unit: Opus 5.5 high costs US$3.46 per Intelligence Index task on Artificial Analysis
+/// (10/11/2026) and 1.82 in the table.
+const USD_PER_COST: f64 = 3.46 / 1.82;
+
+/// What `reading` costs on a profile, in `Profile::cost` units, at its API price per token (`usage::api_price_for_prompt`,
+/// with its long-prompt tiers): what its own model holds is read from cache, the rest is written to it. A model with no
+/// known price reads for free, as before.
+pub fn read_cost(p: &Profile, reading: &Reading) -> f64 {
+    let (fresh, cached) = if reading.on == Some(p.model) { (reading.fresh, reading.held) } else { (reading.fresh + reading.held, 0) };
+    let prompt = fresh + cached;
+    // Claude Code writes its cache for an hour; Codex prices a write as plain input.
+    let hour = if p.vendor == Vendor::Claude { fresh } else { 0 };
+    crate::usage::api_price_for_prompt(p.model, prompt, 0, cached, fresh, hour, prompt).unwrap_or(0.0) / USD_PER_COST
 }
 
 fn clears(p: &Profile, bar: (u8, u8)) -> bool {
@@ -247,7 +293,7 @@ fn cheapest(
             let f = factor(p);
             let f_m = if matters { f.m } else { f.m.max(1.0) };
             let step = steps && matters && next != own && clears(p, next) && p.secs <= cap && f.step_ok;
-            let price = p.cost as f64 * f.w * f_m * if step { f_m.min(1.0) } else { 1.0 };
+            let price = (p.cost as f64 + f.read) * f.w * f_m * if step { f_m.min(1.0) } else { 1.0 };
             (*p, price, step)
         })
         .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.secs.total_cmp(&b.0.secs)))
@@ -266,12 +312,24 @@ pub fn choose(
     confidence: f64,
     candidates: &[Profile],
 ) -> Option<Routed> {
+    choose_reading(kind, difficulty, check, confidence, candidates, &|_| 0.0)
+}
+
+/// `choose` with what reading the request costs on each profile (`Factor::read`), and no quota.
+fn choose_reading(
+    kind: &'static str,
+    difficulty: &'static str,
+    check: &'static str,
+    confidence: f64,
+    candidates: &[Profile],
+    read: &dyn Fn(&Profile) -> f64,
+) -> Option<Routed> {
     let level = level_of(kind, difficulty, check, confidence);
-    let (profile, price) = match cheapest(kind, level, candidates, &|_| Factor::NEUTRAL, false) {
+    let (profile, price) = match cheapest(kind, level, candidates, &|p| Factor { read: read(p), ..Factor::NEUTRAL }, false) {
         Some((p, price, _)) => (p, price),
         None => {
             let p = strongest(candidates)?;
-            (p, p.cost as f64)
+            (p, p.cost as f64 + read(&p))
         }
     };
     Some(Routed { profile, kind, difficulty, check, confidence, price, pace: None })
@@ -290,7 +348,7 @@ pub fn choose_paced(
     factor: &dyn Fn(&Profile) -> Factor,
 ) -> Option<Routed> {
     let level = level_of(kind, difficulty, check, confidence);
-    let usual = choose(kind, difficulty, check, confidence, candidates)?;
+    let usual = choose_reading(kind, difficulty, check, confidence, candidates, &|p| factor(p).read)?;
     let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true) else {
         return Some(usual);
     };
