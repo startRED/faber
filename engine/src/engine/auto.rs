@@ -5,8 +5,7 @@ use super::*;
 use crate::auto_learned::{self, Signal};
 use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
 use crate::route::{
-    Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_paced_scoped, lifted, question,
-    read_cost,
+    Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_paced, lifted, question, read_cost,
 };
 use crate::router::pinned;
 use tokio::sync::oneshot;
@@ -107,14 +106,14 @@ impl Core {
 
     /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the
     /// pool; with every multiplier and weight at 1 the pick is exactly the table without quota (`choose`).
-    pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>, project: bool) -> Option<Routed> {
-        self.table_for(verdict, only, false, false, project, &Reading::default(), |_| true)
+    pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
+        self.table_for(verdict, only, false, false, &Reading::default(), |_| true)
     }
 
     /// The same pick for the first message of a conversation, one rung up for a kind of task the person keeps redoing. Only a
     /// conversation's start learns: rule 3 lets nothing else change a model.
-    pub(super) fn table_first(&self, verdict: &Asked, only: Option<Vendor>, project: bool, reading: &Reading) -> Option<Routed> {
-        self.table_for(verdict, only, false, true, project, reading, |_| true)
+    pub(super) fn table_first(&self, verdict: &Asked, only: Option<Vendor>, reading: &Reading) -> Option<Routed> {
+        self.table_for(verdict, only, false, true, reading, |_| true)
     }
 
     /// What the next answer of conversation `id` must read: the new message (`chars` of text, `images`, `file_bytes` of
@@ -127,18 +126,11 @@ impl Core {
 
     /// The pick of a message that may be the first of its conversation (`before` is the model so far, none for the first); a
     /// conversation under way only moves up.
-    pub(super) fn table_at(
-        &self,
-        verdict: &Asked,
-        only: Option<Vendor>,
-        before: Option<&Pick>,
-        project: bool,
-        reading: &Reading,
-    ) -> Option<Routed> {
+    pub(super) fn table_at(&self, verdict: &Asked, only: Option<Vendor>, before: Option<&Pick>, reading: &Reading) -> Option<Routed> {
         let routed = if before.is_none() {
-            self.table_first(verdict, only, project, reading)
+            self.table_first(verdict, only, reading)
         } else {
-            self.table_for(verdict, only, false, false, project, reading, |_| true)
+            self.table_for(verdict, only, false, false, reading, |_| true)
         };
         routed.filter(|r| before.is_none_or(|p| !r.weaker_than(p)))
     }
@@ -149,7 +141,6 @@ impl Core {
         only: Option<Vendor>,
         mission: bool,
         learned: bool,
-        project: bool,
         reading: &Reading,
         eligible: impl Fn(&Profile) -> bool,
     ) -> Option<Routed> {
@@ -177,16 +168,7 @@ impl Core {
                 read: read_cost(p, reading),
             }
         };
-        let routed = choose_paced_scoped(
-            verdict.kind,
-            verdict.difficulty,
-            verdict.check,
-            verdict.scope,
-            verdict.confidence,
-            project,
-            &usable,
-            &factor,
-        )?;
+        let routed = choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)?;
         Some(if learned && self.learned.lifted(routed.kind, now as u64) { lifted(routed, &usable, &factor) } else { routed })
     }
 
@@ -312,14 +294,8 @@ impl Core {
         }
         // A new conversation's CLI gets ready for the pick of this moment; the pick at dispatch may differ, and then the
         // process started here is replaced.
-        if let (Some(r), Some(id)) = (
-            warm.as_ref().and_then(|id| {
-                verdict.and_then(|v| {
-                    self.table_first(&v, only, self.convs.get(id).is_some_and(|c| c.area == Area::Project), &Reading::default())
-                })
-            }),
-            warm,
-        ) && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
+        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table_first(&v, only, &Reading::default())), warm)
+            && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
         {
             self.warm_launch(&id, &r.pick());
         }
@@ -581,8 +557,6 @@ impl Core {
         }
         if let (Some(r), Some(t)) = (&routed, self.transfers.get_mut(id)) {
             t.check = r.check;
-            t.scope = r.scope;
-            t.confidence = r.confidence;
         }
         // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
         let from_router = routed.is_some();
@@ -1208,7 +1182,7 @@ mod tests {
         );
         engine.with(|core| {
             let verdict = asked(r#"{"kind":"code","difficulty":"easy","confidence":0.95}"#).unwrap();
-            assert!(core.table(&verdict, None, false).is_some(), "the route must have a launchable pick");
+            assert!(core.table(&verdict, None).is_some(), "the route must have a launchable pick");
             for area in [Area::Project, Area::Chat] {
                 let conversation = serde_json::from_value(serde_json::json!({
                     "id":"draft", "title":"Draft", "area": area, "projectId": project.id, "workingFolder": data.path(),

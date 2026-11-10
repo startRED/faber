@@ -114,14 +114,6 @@ pub struct Recovery {
     /// The router's `check` for the request; files from before it was kept read as `glance`.
     #[serde(default = "glance")]
     pub check: String,
-    #[serde(default)]
-    pub scope: String,
-    #[serde(default = "recovery_confidence")]
-    pub confidence: f64,
-}
-
-fn recovery_confidence() -> f64 {
-    0.95
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

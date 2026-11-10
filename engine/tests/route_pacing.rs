@@ -165,7 +165,7 @@ fn the_best_price_never_rises_when_a_vendor_gets_cheaper() {
 #[test]
 fn the_router_line_is_read_without_the_table() {
     let a = asked("Sure.\n{\"kind\":\"code\",\"difficulty\":\"hard\",\"confidence\":0.8}").unwrap();
-    assert_eq!(a, Asked { kind: "code", difficulty: "hard", check: "glance", scope: "tight", confidence: 0.8 });
+    assert_eq!(a, Asked { kind: "code", difficulty: "hard", check: "glance", confidence: 0.8 });
     assert_eq!(asked("no verdict"), None);
 }
 

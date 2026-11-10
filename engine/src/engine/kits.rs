@@ -3976,8 +3976,6 @@ mod tests {
                         retried: false,
                         moving: false,
                         check: "glance",
-                        scope: "tight",
-                        confidence: 0.95,
                     },
                 );
                 if already_recovering {

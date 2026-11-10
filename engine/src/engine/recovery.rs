@@ -20,8 +20,6 @@ pub(super) struct Transfer {
     pub moving: bool,
     /// The router's `check` for this request (`route::CHECKS`); `glance` when no verdict was read.
     pub check: &'static str,
-    pub scope: &'static str,
-    pub confidence: f64,
 }
 
 pub(super) fn with_attachments(text: &str, area: Area, shown: &[String]) -> String {
@@ -184,8 +182,6 @@ impl Core {
                 by_hand: true,
                 retried: false,
                 check: "glance".into(),
-                scope: "tight".into(),
-                confidence: 0.95,
             }
         });
         self.transfers.insert(
@@ -201,8 +197,6 @@ impl Core {
                 retried: saved.retried,
                 moving: false,
                 check: CHECKS.into_iter().find(|c| *c == saved.check).unwrap_or("glance"),
-                scope: if saved.scope == "open" { "open" } else { "tight" },
-                confidence: saved.confidence,
             },
         );
         if let Some(m) = c.messages.last_mut() {
@@ -251,14 +245,13 @@ impl Core {
     }
 
     // The reason key does not keep the router's `check`, so the transfer carries it.
-    fn verdict(pick: &Pick, check: &'static str, scope: &'static str, confidence: f64) -> Asked {
+    fn verdict(pick: &Pick, check: &'static str) -> Asked {
         let words: Vec<&str> = pick.reason.split('.').collect();
         Asked {
             kind: KINDS.into_iter().find(|k| words.contains(k)).unwrap_or("chat"),
             difficulty: LEVELS.into_iter().find(|k| words.contains(k)).unwrap_or("medium"),
             check,
-            scope,
-            confidence,
+            confidence: 0.95,
         }
     }
 
@@ -283,12 +276,9 @@ impl Core {
             self.move_failed(id, &t.reply);
             return Ok(());
         }
-        let verdict = Self::verdict(&t.pick, t.check, t.scope, t.confidence);
-        let own = self.table(&verdict, Some(t.pick.vendor), self.convs.get(id).is_some_and(|c| c.area == Area::Project));
-        let other = Vendor::ALL
-            .into_iter()
-            .find(|v| *v != t.pick.vendor)
-            .and_then(|v| self.table(&verdict, Some(v), self.convs.get(id).is_some_and(|c| c.area == Area::Project)));
+        let verdict = Self::verdict(&t.pick, t.check);
+        let own = self.table(&verdict, Some(t.pick.vendor));
+        let other = Vendor::ALL.into_iter().find(|v| *v != t.pick.vendor).and_then(|v| self.table(&verdict, Some(v)));
         let Some(routed) = own.or(other) else { return self.queue(id) };
         let pick = routed.pick();
         let moved = pick.vendor != t.pick.vendor;
@@ -588,8 +578,6 @@ mod tests {
                     retried,
                     moving: false,
                     check: "glance",
-                    scope: "tight",
-                    confidence: 0.95,
                 },
             );
             c.live.insert(
