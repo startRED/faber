@@ -137,8 +137,15 @@ export function verifiedQuota(receipt, vendors = ['claude', 'codex']) {
         Number.isFinite(w.resetsAt) && w.resetsAt > r.completedAt)));
 }
 
+// Repeated Claude usage reads within minutes can come back without the per-model rows the reader requires
+// (engine/src/account.rs usage_events) and are refused as unreceipted; that one reading is retried after a pause.
+export const QUOTA_RETRIES = 3;
+export const QUOTA_RETRY_MS = 3 * 60_000;
+const unreceipted = (receipt) => receipt?.readings?.length === 1 && /no verified local quota receipt/.test(receipt.readings[0].error ?? '');
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // The same per-request sequence serves both subscription modes; I/O is injectable for quota-free proofs.
-export async function subscriptionRequests({ claudeOnly, attempt, evidence, invoke, receipts, record, comparisons = [], now = Date.now, read = readFile }, deadline) {
+export async function subscriptionRequests({ claudeOnly, attempt, evidence, invoke, receipts, record, comparisons = [], now = Date.now, read = readFile, wait = pause }, deadline) {
   const vendor = claudeOnly ? 'claude' : 'codex';
   for (const request of requests) {
     let benchOutcome;
@@ -147,13 +154,21 @@ export async function subscriptionRequests({ claudeOnly, attempt, evidence, invo
       const quota = phase !== 'bench';
       const args = quota ? ['--quota-only', `--${vendor}-only`] : [`--${vendor}-only`, '--only', request,
         '--cap-usd', String(CAP_USD), '--per-run-usd', String(CAP_USD), '--dir', evidence, '--run-id', name];
-      const outcome = await invoke(args, name, deadline);
+      let outcome, receipt;
+      for (let tries = 0; ; tries++) {
+        const run = tries ? `${name}-retry-${tries}` : name;
+        outcome = await invoke(args, run, deadline);
+        if (!quota || outcome.reason) break;
+        const output = await read(path.join(evidence, `${run}.stdout.log`), 'utf8');
+        receipt = JSON.parse(output.trim().split(/\r?\n/).findLast((line) => line.startsWith('{"readings":')) ?? 'null');
+        receipts.push({ attempt, request, phase, ...(tries ? { retry: tries } : {}), ...receipt });
+        if (!claudeOnly || tries >= QUOTA_RETRIES || !unreceipted(receipt)) break;
+        record({ event: 'quota-retry', request, phase, retry: tries + 1 });
+        await wait(QUOTA_RETRY_MS);
+      }
       if (!quota) comparisons.push({ request, ...outcome });
       if (outcome.reason) return outcome.reason === 'game' ? 'stopped: cs2 started' : outcome.reason;
       if (quota) {
-        const output = await read(path.join(evidence, `${name}.stdout.log`), 'utf8');
-        const receipt = JSON.parse(output.trim().split(/\r?\n/).findLast((line) => line.startsWith('{"readings":')) ?? 'null');
-        receipts.push({ attempt, request, phase, ...receipt });
         const used = claudeOnly ? claudeWeekly(receipt, now()) : codexWeekly(receipt);
         record({ event: 'weekly-quota', request, phase, used });
         if (outcome.code !== 0) return `${vendor} quota reader exited ${outcome.code}`;
@@ -174,7 +189,7 @@ export function claudeReport(summary, results, evidence) {
   const cell = (value) => String(value).replaceAll('|', '\\|').replaceAll(/\r?\n/g, ' ');
   const tokens = (usage) => usage ? ['input', 'output', 'cache_read', 'cache_write'].reduce((n, key) => n + (usage[key] ?? 0), 0) : 'unknown';
   const quota = (request, phase) => {
-    const r = summary.receipts.find((r) => r.request === request && r.phase === phase)?.readings?.[0];
+    const r = summary.receipts.findLast((r) => r.request === request && r.phase === phase)?.readings?.[0];
     if (!r) return 'not read';
     const w = r.windows?.find((w) => w.window === 'seven_day');
     return w && Number.isFinite(w.used) && Number.isFinite(w.resetsAt) && Number.isFinite(r.completedAt) ?

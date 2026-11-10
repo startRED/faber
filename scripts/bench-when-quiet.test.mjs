@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CAP_USD, CLAUDE_DEADLINE, CLAUDE_EVIDENCE, CLAUDE_RESET, CODEX_EVIDENCE, LIMIT_MS, POLL_MS, QUIET_MS, claudeReport, claudeWeekly, codexWeekly, cpuPercent, cpuSnapshot, killArgs, quietSince, subscriptionEnv, subscriptionRequests, verifiedQuota, watch, watcherOptions } from './bench-when-quiet.mjs';
+import { CAP_USD, CLAUDE_DEADLINE, CLAUDE_EVIDENCE, CLAUDE_RESET, CODEX_EVIDENCE, LIMIT_MS, POLL_MS, QUIET_MS, QUOTA_RETRIES, QUOTA_RETRY_MS, claudeReport, claudeWeekly, codexWeekly, cpuPercent, cpuSnapshot, killArgs, quietSince, subscriptionEnv, subscriptionRequests, verifiedQuota, watch, watcherOptions } from './bench-when-quiet.mjs';
 
 test('Codex workspaces stay outside credential-folder ancestors even when the checkout is inside .claude', () => {
   for (const folder of [CODEX_EVIDENCE, CLAUDE_EVIDENCE])
@@ -235,4 +235,42 @@ test('unverified, duplicate, missing or spent quota receipts cannot authorize an
     const invalid = structuredClone(receipt); change(invalid);
     assert.equal(verifiedQuota(invalid), false);
   }
+});
+
+test('an unreceipted Claude reading is retried after a pause; persistent ones still stop before more model work', async () => {
+  const unreceipted = { readings: [{ vendor: 'claude', unknownCost: true, windows: [],
+    error: 'app claude_limits returned no verified local quota receipt; spending is unknown, no more readings admitted' }] };
+  for (const failures of [1, QUOTA_RETRIES + 1]) {
+    const calls = [], waits = [], events = [], receipts = [];
+    let reads = 0;
+    const run = () => subscriptionRequests({
+      claudeOnly: true, attempt: 1, evidence: 'fake', receipts, record: (e) => events.push(e), now: () => CLAUDE_RESET + 120_000,
+      wait: async (ms) => { waits.push(ms); },
+      invoke: async (args, name) => { calls.push(name); return { code: 0 }; },
+      read: async (file) => {
+        if (file.endsWith('results.json')) return JSON.stringify({ rows: [{ plain: {}, faber: {} }] });
+        return JSON.stringify(reads++ < failures ? unreceipted : claudeReceipt(0.1));
+      },
+    }, CLAUDE_DEADLINE);
+    if (failures > QUOTA_RETRIES) {
+      await assert.rejects(run, /quota receipt missing or invalid/);
+      assert.deepEqual(calls, ['', '-retry-1', '-retry-2', '-retry-3'].map((s) => `attempt-1-organize-folder-before${s}`));
+      continue;
+    }
+    assert.equal(await run(), 'finished');
+    assert.deepEqual(calls.slice(0, 3), ['attempt-1-organize-folder-before', 'attempt-1-organize-folder-before-retry-1', 'attempt-1-organize-folder-bench']);
+    assert.deepEqual(waits, [QUOTA_RETRY_MS]);
+    assert.deepEqual(events.filter((e) => e.event === 'quota-retry'), [{ event: 'quota-retry', request: 'organize-folder', phase: 'before', retry: 1 }]);
+    assert.equal(receipts.length, 17);
+  }
+});
+
+test('Codex readings are never retried', async () => {
+  const calls = [];
+  await assert.rejects(() => subscriptionRequests({
+    claudeOnly: false, attempt: 1, evidence: 'fake', receipts: [], record() {}, wait: async () => assert.fail('no wait'),
+    invoke: async (args, name) => { calls.push(name); return { code: 0 }; },
+    read: async () => JSON.stringify({ readings: [{ vendor: 'codex', error: 'no verified local quota receipt', windows: [] }] }),
+  }, CLAUDE_DEADLINE));
+  assert.equal(calls.length, 1);
 });
