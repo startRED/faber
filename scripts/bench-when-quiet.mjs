@@ -150,7 +150,7 @@ export async function subscriptionRequests({ claudeOnly, attempt, evidence, invo
         const used = claudeOnly ? claudeWeekly(receipt, now()) : codexWeekly(receipt);
         record({ event: 'weekly-quota', request, phase, used });
         if (outcome.code !== 0) return `${vendor} quota reader exited ${outcome.code}`;
-        const threshold = claudeOnly ? 0.25 : 0.70;
+        const threshold = claudeOnly ? 0.25 : 0.78;
         if (used > threshold) return `stopped: ${vendor} weekly ${(used * 100).toFixed(1)}% used exceeds ${threshold * 100}%`;
       } else {
         benchOutcome = outcome;
@@ -405,7 +405,7 @@ async function main() {
     process.removeListener('SIGTERM', stop);
     const summary = { result, blocker, started: new Date(started).toISOString(), ended: new Date().toISOString(), codexOnly, claudeOnly,
       notBefore: notBefore ? new Date(notBefore).toISOString() : null, deadline: deadline ? new Date(deadline).toISOString() : null,
-      capUsd: subscriptionOnly ? null : CAP_USD, weeklyStopUsed: claudeOnly ? 0.25 : codexOnly ? 0.70 : null, attempts, receipts, comparisons };
+      capUsd: subscriptionOnly ? null : CAP_USD, weeklyStopUsed: claudeOnly ? 0.25 : codexOnly ? 0.78 : null, attempts, receipts, comparisons };
     await writeFile(path.join(evidence, 'summary.json'), JSON.stringify(summary, null, 2));
     if (claudeOnly) {
       const results = [];

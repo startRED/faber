@@ -84,12 +84,12 @@ test('subscription requests preserve Codex sequencing and enforce Claude 25% bef
         },
         read: async (file) => {
           if (file.endsWith('results.json')) return JSON.stringify({ rows: [{ plain: {}, faber: {} }] });
-          const receipt = claudeReceipt(readings++ === stopAt ? (claudeOnly ? 0.251 : 0.701) : (claudeOnly ? 0.25 : 0.70));
+          const receipt = claudeReceipt(readings++ === stopAt ? (claudeOnly ? 0.251 : 0.781) : (claudeOnly ? 0.25 : 0.78));
           if (!claudeOnly) { receipt.readings[0].vendor = 'codex'; receipt.readings[0].source = 'app account/rateLimits/read'; }
           return JSON.stringify(receipt);
         },
       }, CLAUDE_DEADLINE);
-      assert.equal(result, stopAt === 16 ? 'finished' : `stopped: ${vendor} weekly ${claudeOnly ? '25.1% used exceeds 25%' : '70.1% used exceeds 70%'}`);
+      assert.equal(result, stopAt === 16 ? 'finished' : `stopped: ${vendor} weekly ${claudeOnly ? '25.1% used exceeds 25%' : '78.1% used exceeds 78%'}`);
       assert.equal(calls.length, stopAt === 0 ? 1 : stopAt === 1 ? 3 : 24);
       assert.equal(receipts.length, stopAt === 16 ? 16 : stopAt + 1);
       assert.equal(calls[0], 'attempt-1-organize-folder-before');
