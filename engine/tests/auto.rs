@@ -168,6 +168,7 @@ async fn a_failed_router_keeps_the_previous_choice() {
     let (engine, mut rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn, ask);
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
+    draft(&engine, Some(&id), "A harder follow-up").await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("A harder follow-up") }).unwrap();
     let second = routed(&engine, &id, 1).await;
     assert_eq!(second.model, first.model);
@@ -266,6 +267,7 @@ async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does()
     let (engine, mut rx) = engine(&dir, Vendor::Claude, f.spawn.clone(), ask);
     let id = engine.send(auto(SKY)).unwrap();
     finished(&mut rx).await;
+    draft(&engine, Some(&id), "Now refactor my billing service").await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
     let second = routed(&engine, &id, 1).await;
     engine.shutdown();
@@ -414,9 +416,9 @@ async fn a_draft_is_routed_at_most_twice_while_typing_and_sending_starts_the_cou
     assert_eq!(calls.lock().unwrap().len() - sent, 2, "sending reset the count");
 }
 
-/// Rule 3 of models.md: with nothing asked for, a conversation keeps its process, model and effort from one message to the next.
+/// Rule 3: without a finished draft verdict, Auto keeps the model, effort and live process.
 #[tokio::test]
-async fn a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first() {
+async fn a_second_message_without_a_verdict_keeps_the_process_model_and_effort() {
     let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let f = fake(support::claude_two_turns("req"));
@@ -453,4 +455,487 @@ async fn a_second_message_keeps_the_process_the_model_and_the_effort_of_the_firs
     assert_eq!(calls.lock().unwrap().len(), 1, "only the first message was routed");
     assert_eq!((one.model.clone(), one.effort.clone()), (two.model.clone(), two.effort.clone()));
     assert!(flag(&launches[0], "--model").is_some() && flag(&launches[0], "--effort").is_some());
+}
+
+/// Wait for an injected draft verdict to settle, without adding any wait to the send path.
+async fn draft(engine: &Engine, id: Option<&str>, text: &str) {
+    engine.route_draft(
+        WarmRequest { conversation_id: id.map(str::to_owned), area: Area::Chat, project_id: None, choice: auto("").choice },
+        text.into(),
+    );
+    tokio::time::sleep(Duration::from_millis(80)).await;
+}
+
+/// A protocol fake that accepts arbitrary turns and resumes, recording the actual CLI boundary.
+struct EffortCli {
+    spawn: Spawner,
+    args: Arc<Mutex<Vec<Vec<String>>>>,
+    sent: Arc<Mutex<Vec<serde_json::Value>>>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl EffortCli {
+    fn new(hold_first: bool) -> Self {
+        use faber_engine::proc::Proc;
+        use serde_json::{Value, json};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let args: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
+        let sent: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let hold = Arc::new(std::sync::atomic::AtomicBool::new(hold_first));
+        let (launches, wire, gate) = (args.clone(), sent.clone(), release.clone());
+        let spawn: Spawner = Arc::new(move |_, argv, _| {
+            launches.lock().unwrap().push(argv.to_vec());
+            let model = flag(argv, "--model").unwrap_or_default();
+            let (stdin, incoming) = tokio::io::duplex(65536);
+            let (mut outgoing, stdout) = tokio::io::duplex(65536);
+            let (wire, gate, hold) = (wire.clone(), gate.clone(), hold.clone());
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(incoming).lines();
+                let mut model = model;
+                let mut thread = String::new();
+                let mut count = 0;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let msg: Value = serde_json::from_str(&line).unwrap();
+                    wire.lock().unwrap().push(msg.clone());
+                    let mut replies = vec![];
+                    if msg["type"] == "user" {
+                        count += 1;
+                        replies.push(json!({"type":"system", "subtype":"init", "session_id":"effort-session", "model":model}));
+                        replies.push(json!({"type":"stream_event", "parent_tool_use_id":null,
+                            "event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"answer"}}}));
+                        replies.push(json!({"type":"result", "subtype":"success", "session_id":"effort-session",
+                            "result":"answer", "is_error":false}));
+                    }
+                    let result = match msg["method"].as_str() {
+                        Some("initialize") => Some(json!({})),
+                        Some("config/read") => Some(json!({"config":{}})),
+                        Some("thread/start" | "thread/resume") => {
+                            model = msg["params"]["model"].as_str().unwrap_or(&model).to_owned();
+                            thread = msg["params"]["threadId"].as_str().unwrap_or("effort-thread").to_owned();
+                            Some(json!({"thread":{"id":thread,"model":model}}))
+                        }
+                        Some("turn/start") => {
+                            count += 1;
+                            Some(json!({"turn":{"id":format!("turn-{count}")}}))
+                        }
+                        Some("turn/steer") => Some(json!({"turnId":format!("turn-{count}")})),
+                        _ => None,
+                    };
+                    if let Some(result) = result {
+                        replies.push(json!({"id":msg["id"],"result":result}));
+                        if msg["method"] == "turn/start" {
+                            let turn = format!("turn-{count}");
+                            replies.push(json!({"method":"turn/started","params":{"threadId":thread,"turn":{"id":turn}}}));
+                            replies.push(json!({"method":"item/agentMessage/delta","params":{
+                                "threadId":thread,"turnId":turn,"itemId":"answer","delta":"answer"}}));
+                            replies.push(json!({"method":"turn/completed","params":{
+                                "threadId":thread,"turn":{"id":turn,"status":"completed","items":[]}}}));
+                        }
+                    }
+                    for reply in replies {
+                        if count == 1
+                            && (reply["type"] == "result" || reply["method"] == "turn/completed")
+                            && hold.swap(false, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            gate.notified().await;
+                        }
+                        if outgoing.write_all(format!("{reply}\n").as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+            Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+        });
+        Self { spawn, args, sent, release }
+    }
+
+    fn efforts(&self) -> Vec<String> {
+        self.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| v["method"] == "turn/start")
+            .map(|v| v["params"]["effort"].as_str().unwrap().into())
+            .collect()
+    }
+}
+
+fn json_router(verdict: Arc<Mutex<Option<String>>>) -> Ask {
+    Arc::new(move |_| {
+        let value = verdict.lock().unwrap().clone();
+        Box::pin(async move { value })
+    })
+}
+
+fn set_verdict(verdict: &Mutex<Option<String>>, kind: &str, difficulty: &str, check: &str, scope: &str, confidence: f64) {
+    *verdict.lock().unwrap() =
+        Some(serde_json::json!({"kind":kind,"difficulty":difficulty,"check":check,"scope":scope,"confidence":confidence}).to_string());
+}
+
+async fn next_effort(engine: &Engine, rx: &mut UnboundedReceiver<AppEvent>, id: &str, text: &str) -> Message {
+    draft(engine, Some(id), text).await;
+    engine.send(SendRequest { conversation_id: Some(id.into()), ..auto(text) }).unwrap();
+    let answer = finished(rx).await;
+    assert_eq!(answer.status, Some(Status::Done), "{answer:?}");
+    answer
+}
+
+async fn first_word(rx: &mut UnboundedReceiver<AppEvent>, start: std::time::Instant) -> (Message, Duration) {
+    let mut first = None;
+    loop {
+        let event = tokio::time::timeout(support::DEADLINE, rx.recv()).await.unwrap().unwrap();
+        if let AppEvent::Message { message, .. } = event
+            && message.role == Role::Assistant
+        {
+            if !message.text.is_empty() {
+                first.get_or_insert_with(|| start.elapsed());
+            }
+            if message.status == Some(Status::Done) {
+                return (*message, first.expect("fake answer had no visible text"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn auto_effort_ten_mixed_messages_keep_model_vendor_and_deliver_each_effort_to_codex() {
+    let dir = support::DataFolder::new();
+    let cli = EffortCli::new(false);
+    let verdict = Arc::new(Mutex::new(None));
+    set_verdict(&verdict, "code", "hard", "machine", "open", 0.95);
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, cli.spawn.clone(), json_router(verdict.clone()));
+    let id = engine.send(auto("hard first")).unwrap();
+    let first = finished(&mut rx).await;
+    assert_eq!((first.model.as_deref(), first.effort.as_deref()), (Some("gpt-6.1-sol"), Some("high")));
+    assert!(!first.reason.as_deref().unwrap().starts_with("reason.autoEffort"));
+    let cases = [
+        ("chat", "easy", "glance", "tight", 0.95, "low", Some("reason.autoEffortLowered")),
+        ("math", "medium", "machine", "tight", 0.95, "medium", Some("reason.autoEffortRaised")),
+        ("code", "hard", "machine", "open", 0.95, "high", Some("reason.autoEffortRaised")),
+        ("chat", "easy", "blind", "tight", 0.95, "high", None),
+        ("chat", "easy", "glance", "tight", 0.69, "high", None),
+        ("chat", "easy", "glance", "tight", 0.7, "low", Some("reason.autoEffortLowered")),
+        ("code", "hard", "machine", "open", 0.95, "high", Some("reason.autoEffortRaised")),
+        ("chat", "easy", "glance", "tight", 0.95, "low", Some("reason.autoEffortLowered")),
+        ("chat", "easy", "glance", "tight", 0.95, "low", None),
+    ];
+    for (i, (kind, level, check, scope, confidence, effort, reason)) in cases.into_iter().enumerate() {
+        set_verdict(&verdict, kind, level, check, scope, confidence);
+        let reply = next_effort(&engine, &mut rx, &id, &format!("follow-up {i}")).await;
+        assert_eq!((reply.vendor, reply.model.as_ref()), (first.vendor, first.model.as_ref()));
+        assert_eq!(reply.effort.as_deref(), Some(effort), "message {i}: {reply:?}");
+        assert_eq!(reply.reason.as_deref().filter(|r| r.starts_with("reason.autoEffort")), reason);
+        let act = reply.acts.last().unwrap();
+        assert!(act.change.is_none(), "effort selection adds no picker control");
+        for (key, value) in [("kind", kind), ("difficulty", level), ("scope", scope), ("check", check)] {
+            assert_eq!(act.params.get(key).map(String::as_str), Some(value));
+        }
+        assert_eq!(cli.efforts().last().map(String::as_str), Some(effort));
+    }
+    assert_eq!(cli.efforts().len(), 10);
+    assert_eq!(cli.args.lock().unwrap().len(), 1, "effort changes reuse the Codex app-server process");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn auto_effort_claude_reductions_need_two_messages_and_resume_but_raises_are_immediate() {
+    let dir = support::DataFolder::new();
+    let cli = EffortCli::new(false);
+    let verdict = Arc::new(Mutex::new(None));
+    set_verdict(&verdict, "code", "hard", "machine", "tight", 0.95);
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, cli.spawn.clone(), json_router(verdict.clone()));
+    let start = std::time::Instant::now();
+    let id = engine.send(auto("hard first")).unwrap();
+    let (first, cold) = first_word(&mut rx, start).await;
+    assert_eq!((first.model.as_deref(), first.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+    set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
+    draft(&engine, Some(&id), "first easy").await;
+    let start = std::time::Instant::now();
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("first easy") }).unwrap();
+    let (held, warm) = first_word(&mut rx, start).await;
+    assert_eq!(held.effort.as_deref(), Some("high"));
+    assert!(!held.reason.unwrap().starts_with("reason.autoEffort"));
+    assert_eq!(cli.args.lock().unwrap().len(), 1);
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("gap without a verdict") }).unwrap();
+    assert_eq!(finished(&mut rx).await.effort.as_deref(), Some("high"));
+    let held = next_effort(&engine, &mut rx, &id, "easy after the gap").await;
+    assert_eq!(held.effort.as_deref(), Some("high"), "a gap breaks consecutive reductions");
+    for (text, check, confidence) in [("blind easy", "blind", 0.95), ("unsure easy", "glance", 0.69)] {
+        set_verdict(&verdict, "chat", "easy", check, "tight", confidence);
+        let held = next_effort(&engine, &mut rx, &id, text).await;
+        assert_eq!(held.effort.as_deref(), Some("high"));
+    }
+    set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
+    assert_eq!(next_effort(&engine, &mut rx, &id, "easy after the veto").await.effort.as_deref(), Some("high"));
+    draft(&engine, Some(&id), "second easy").await;
+    let start = std::time::Instant::now();
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("second easy") }).unwrap();
+    let (lower, resumed) = first_word(&mut rx, start).await;
+    assert_eq!(lower.effort.as_deref(), Some("medium"));
+    assert_eq!(lower.reason.as_deref(), Some("reason.autoEffortLowered"));
+    set_verdict(&verdict, "code", "hard", "machine", "tight", 0.95);
+    let raised = next_effort(&engine, &mut rx, &id, "hard again").await;
+    assert_eq!(raised.effort.as_deref(), Some("high"));
+    assert_eq!(raised.reason.as_deref(), Some("reason.autoEffortRaised"));
+    assert_eq!(raised.model, first.model);
+    assert_eq!(next_effort(&engine, &mut rx, &id, "still hard").await.reason.as_deref(), Some("reason.route.code.hard"));
+    let messages = engine.open(&id).unwrap().messages;
+    let answers: Vec<_> = messages.iter().filter(|m| m.role == Role::Assistant).collect();
+    assert_eq!(answers.len(), 10);
+    assert!(answers.iter().all(|m| m.vendor == first.vendor && m.model == first.model));
+    let launches = cli.args.lock().unwrap().clone();
+    assert_eq!(launches.len(), 3);
+    assert_eq!(flag(&launches[1], "--effort").as_deref(), Some("medium"));
+    assert_eq!(flag(&launches[2], "--effort").as_deref(), Some("high"));
+    for args in &launches[1..] {
+        assert_eq!(flag(args, "--model"), first.model);
+        assert_eq!(flag(args, "--resume").as_deref(), Some("effort-session"));
+    }
+    eprintln!(
+        "auto_effort fake Claude send-to-first-visible-text: cold_ms={:.3}, warm_ms={:.3}, resumed_ms={:.3}; real CLI startup/inference excluded",
+        cold.as_secs_f64() * 1000.0,
+        warm.as_secs_f64() * 1000.0,
+        resumed.as_secs_f64() * 1000.0
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn auto_effort_no_verdict_and_hand_picked_effort_are_untouched() {
+    let dir = support::DataFolder::new();
+    let cli = EffortCli::new(false);
+    let verdict = Arc::new(Mutex::new(None));
+    set_verdict(&verdict, "math", "medium", "machine", "tight", 0.95);
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, cli.spawn.clone(), json_router(verdict.clone()));
+    let id = engine.send(auto("medium first")).unwrap();
+    let first = finished(&mut rx).await;
+    assert_eq!(first.effort.as_deref(), Some("medium"));
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("no ready verdict") }).unwrap();
+    let unchanged = finished(&mut rx).await;
+    assert_eq!(unchanged.effort, first.effort);
+    assert!(!unchanged.reason.unwrap().starts_with("reason.autoEffort"));
+    set_verdict(&verdict, "code", "hard", "machine", "open", 0.95);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    engine.note_account_events(
+        Vendor::Codex,
+        vec![faber_engine::events::EngineEvent::Quota { window: "five_hour".into(), used: 0.75, resets_at: now + 18_000.0 }],
+    );
+    let higher = next_effort(&engine, &mut rx, &id, "hard follow-up").await;
+    assert_eq!(higher.effort.as_deref(), Some("high"));
+    assert_eq!(higher.model, first.model);
+    // A previously classified easy draft cannot override a manual picker choice.
+    set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
+    draft(&engine, Some(&id), "manual now").await;
+    let choice = Choice { vendor: "codex".into(), model: first.model.clone(), effort: Some(faber_engine::router::Effort::High) };
+    engine.send(SendRequest { conversation_id: Some(id.clone()), choice: choice.clone(), ..auto("manual now") }).unwrap();
+    assert_eq!(finished(&mut rx).await.effort.as_deref(), Some("high"));
+    engine.route_draft(
+        WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: choice.clone() },
+        "still manual".into(),
+    );
+    engine.send(SendRequest { conversation_id: Some(id.clone()), choice, ..auto("still manual") }).unwrap();
+    let manual = finished(&mut rx).await;
+    assert_eq!((manual.model, manual.effort, manual.reason), (first.model, Some("high".into()), Some("reason.chosen".into())));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn auto_effort_model_below_the_bar_offers_a_stronger_branch_once() {
+    let dir = support::DataFolder::new();
+    let cli = EffortCli::new(false);
+    let verdict = Arc::new(Mutex::new(None));
+    set_verdict(&verdict, "writing", "medium", "glance", "tight", 0.95);
+    let (engine, mut rx) = engine(&dir, Vendor::Claude, cli.spawn.clone(), json_router(verdict.clone()));
+    let id = engine.send(auto("medium first")).unwrap();
+    let first = finished(&mut rx).await;
+    assert_eq!(first.model.as_deref(), Some("claude-sonnet-5-5"));
+    set_verdict(&verdict, "code", "hard", "blind", "open", 0.95);
+    let reply = next_effort(&engine, &mut rx, &id, "frontier follow-up").await;
+    assert_eq!((reply.model, reply.effort), (first.model, Some("high".into())));
+    let offer = reply.nudge.expect("a stronger branch must be offered");
+    assert_eq!(offer.reason, "nudge.modelBar");
+    assert_eq!(offer.vendor, Vendor::Claude);
+    assert_ne!(offer.model, "claude-sonnet-5-5");
+    for text in ["frontier again", "frontier once more"] {
+        let reply = next_effort(&engine, &mut rx, &id, text).await;
+        assert_eq!((reply.model.as_deref(), reply.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+        assert!(reply.nudge.is_none(), "an ignored offer must not repeat");
+        assert!(reply.acts.iter().any(|a| a.params.get("modelBar").is_some_and(|v| v == "unmet")), "route metadata stays");
+    }
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn auto_effort_queued_and_steered_messages_never_change_the_running_answer() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        for steer in [false, true] {
+            let dir = support::DataFolder::new();
+            let cli = EffortCli::new(true);
+            let verdict = Arc::new(Mutex::new(None));
+            set_verdict(&verdict, "math", "medium", "machine", "tight", 0.95);
+            let (engine, _rx) = engine(&dir, vendor, cli.spawn.clone(), json_router(verdict.clone()));
+            let id = engine.send(auto("medium running")).unwrap();
+            support::until("the first fake answer did not start", || engine.open(&id).is_some_and(|c| !c.messages[1].text.is_empty()))
+                .await;
+            let before = engine.open(&id).unwrap().messages[1].clone();
+            set_verdict(&verdict, "code", "hard", "blind", "open", 0.95);
+            draft(&engine, Some(&id), "hard while running").await;
+            engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("hard while running") }).unwrap();
+            let c = engine.open(&id).unwrap();
+            assert_eq!(c.queued.len(), 1);
+            if steer {
+                engine.send_queued(&id, &c.queued[0].id).unwrap();
+            }
+            let after = engine.open(&id).unwrap().messages[1].clone();
+            assert_eq!(
+                (after.vendor, after.model, after.effort, after.reason),
+                (before.vendor, before.model, before.effort, before.reason)
+            );
+            assert_eq!(cli.args.lock().unwrap().len(), 1, "a queued/steered message must not restart the running answer");
+            if vendor == Vendor::Codex {
+                assert_eq!(cli.efforts().len(), 1);
+            }
+            engine.shutdown();
+            cli.release.notify_one();
+        }
+    }
+}
+
+#[tokio::test]
+async fn auto_effort_queued_messages_keep_their_own_finished_verdicts() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let dir = support::DataFolder::new();
+        let cli = EffortCli::new(true);
+        let verdict = Arc::new(Mutex::new(None));
+        set_verdict(&verdict, if vendor == Vendor::Codex { "math" } else { "writing" }, "medium", "machine", "tight", 0.95);
+        let (engine, mut rx) = engine(&dir, vendor, cli.spawn.clone(), json_router(verdict.clone()));
+        let id = engine.send(auto("medium running")).unwrap();
+        support::until("the first fake answer did not start", || engine.open(&id).is_some_and(|c| !c.messages[1].text.is_empty())).await;
+        let first = engine.open(&id).unwrap().messages[1].clone();
+        assert_eq!(first.effort.as_deref(), Some("medium"));
+        set_verdict(&verdict, "code", "hard", "machine", "open", 0.95);
+        draft(&engine, Some(&id), "hard queued").await;
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("hard queued") }).unwrap();
+        // The next draft replaces the shared classifier result before the queue can drain.
+        set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
+        draft(&engine, Some(&id), "easy queued").await;
+        engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("easy queued") }).unwrap();
+        set_verdict(&verdict, "writing", "medium", "glance", "tight", 0.95);
+        draft(&engine, Some(&id), "medium unsent").await;
+        assert_eq!(engine.open(&id).unwrap().messages[1].effort, first.effort);
+        cli.release.notify_one();
+        assert_eq!(finished(&mut rx).await.effort, first.effort);
+        let queued = finished(&mut rx).await;
+        assert_eq!(queued.status, Some(Status::Done));
+        assert_eq!((queued.vendor, queued.model, queued.effort.as_deref()), (first.vendor, first.model, Some("high")));
+        assert_eq!(queued.reason.as_deref(), Some("reason.autoEffortRaised"));
+        let easy = finished(&mut rx).await;
+        assert_eq!(easy.status, Some(Status::Done));
+        assert_eq!(easy.effort.as_deref(), Some(if vendor == Vendor::Codex { "low" } else { "high" }));
+        if vendor == Vendor::Codex {
+            assert_eq!(cli.efforts(), vec!["medium", "high", "low"]);
+        } else {
+            let args = cli.args.lock().unwrap();
+            assert_eq!(args.len(), 2);
+            assert_eq!(flag(&args[1], "--effort").as_deref(), Some("high"));
+            assert_eq!(flag(&args[1], "--resume").as_deref(), Some("effort-session"));
+        }
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn auto_effort_queued_messages_ignore_late_and_edited_verdicts() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        for edit in [false, true] {
+            let dir = support::DataFolder::new();
+            let cli = EffortCli::new(true);
+            let gate = Arc::new(tokio::sync::Notify::new());
+            let (pending, calls) = (gate.clone(), Calls::default());
+            let seen = calls.clone();
+            let ask: Ask = Arc::new(move |text| {
+                let pending = pending.clone();
+                seen.lock().unwrap().push(text.clone());
+                Box::pin(async move {
+                    if text == "hard queued" && !edit {
+                        pending.notified().await;
+                    }
+                    Some(
+                        if text == "hard queued" {
+                            r#"{"kind":"code","difficulty":"hard","check":"machine","scope":"open","confidence":0.95}"#
+                        } else if vendor == Vendor::Codex {
+                            r#"{"kind":"math","difficulty":"medium","check":"machine","scope":"tight","confidence":0.95}"#
+                        } else {
+                            r#"{"kind":"writing","difficulty":"medium","check":"glance","scope":"tight","confidence":0.95}"#
+                        }
+                        .into(),
+                    )
+                })
+            });
+            let (engine, mut rx) = engine(&dir, vendor, cli.spawn.clone(), ask);
+            let id = engine.send(auto("medium running")).unwrap();
+            support::until("the first fake answer did not start", || engine.open(&id).is_some_and(|c| !c.messages[1].text.is_empty()))
+                .await;
+            let first = engine.open(&id).unwrap().messages[1].clone();
+            assert_eq!(first.effort.as_deref(), Some("medium"));
+            draft(&engine, Some(&id), "hard queued").await;
+            engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("hard queued") }).unwrap();
+            if edit {
+                let turn = engine.open(&id).unwrap().queued[0].id.clone();
+                engine.edit_queued(&id, &turn, "edited easy").unwrap();
+            } else {
+                gate.notify_one();
+                tokio::time::sleep(Duration::from_millis(80)).await;
+            }
+            cli.release.notify_one();
+            assert_eq!(finished(&mut rx).await.effort, first.effort);
+            let queued = finished(&mut rx).await;
+            assert_eq!(queued.status, Some(Status::Done));
+            assert_eq!(queued.effort, first.effort, "late or stale verdicts must not change effort");
+            assert!(!queued.reason.unwrap().starts_with("reason.autoEffort"));
+            assert_eq!(calls.lock().unwrap().len(), 2, "queue dispatch must not start another classification");
+            engine.shutdown();
+        }
+    }
+}
+
+#[tokio::test]
+async fn auto_effort_pending_verdict_never_holds_a_send_or_changes_its_answer_later() {
+    let dir = support::DataFolder::new();
+    let cli = EffortCli::new(false);
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let pending = gate.clone();
+    let ask: Ask = Arc::new(move |text| {
+        let pending = pending.clone();
+        Box::pin(async move {
+            if text == "pending easy" {
+                pending.notified().await;
+            }
+            Some(
+                if text == "pending easy" {
+                    r#"{"kind":"chat","difficulty":"easy","check":"glance","confidence":0.95}"#
+                } else {
+                    r#"{"kind":"code","difficulty":"hard","scope":"open","check":"machine","confidence":0.95}"#
+                }
+                .into(),
+            )
+        })
+    });
+    let (engine, mut rx) = engine(&dir, Vendor::Codex, cli.spawn.clone(), ask);
+    let id = engine.send(auto("hard first")).unwrap();
+    let first = finished(&mut rx).await;
+    draft(&engine, Some(&id), "pending easy").await;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("pending easy") }).unwrap();
+    // The router stays blocked until after the answer ends: no timeout can produce a lower effort.
+    let reply = tokio::time::timeout(Duration::from_secs(1), finished(&mut rx)).await.expect("send waited for a pending verdict");
+    assert_eq!(reply.effort, first.effort);
+    gate.notify_one();
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let saved = engine.open(&id).unwrap().messages[3].clone();
+    assert_eq!(saved.effort, first.effort);
+    assert!(!saved.reason.unwrap().starts_with("reason.autoEffort"));
+    assert_eq!(cli.efforts(), vec!["high", "high"]);
+    engine.shutdown();
 }

@@ -31,6 +31,7 @@ import './pin.check.ts';
 import './chat-groups.check.ts';
 import './hole.check.ts';
 import './effort.check.ts';
+import './auto-effort.check.ts';
 import './first-frame.check.ts';
 import './file-at-line.check.ts';
 import './follow.check.ts';

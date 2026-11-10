@@ -586,6 +586,7 @@ struct Core {
     /// Auto's route for the latest first message or draft.
     guess: Option<auto::Guess>,
     next_draft: Option<auto::Draft>,
+    queued_routes: HashMap<String, auto::QueuedRoute>,
     spare: Option<auto::Spare>,
     /// What Auto learned from the answers the person redid or kept (`auto-learned.json`).
     learned: crate::auto_learned::Learned,
@@ -790,6 +791,7 @@ impl Engine {
                 running: Running::default(),
                 guess: None,
                 next_draft: None,
+                queued_routes: HashMap::new(),
                 spare: None,
                 learned,
                 ledger,
@@ -3522,6 +3524,11 @@ impl Core {
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
+                let model_bar_offered = self.convs.get(conv).is_some_and(|c| {
+                    c.messages
+                        .iter()
+                        .any(|m| Some(&m.id) != turn_id.as_ref() && m.nudge.as_ref().is_some_and(|n| n.reason == "nudge.modelBar"))
+                });
                 let mut looked = None;
                 let mut offered = None;
                 if let Some(m) = self.turn(conv) {
@@ -3553,7 +3560,7 @@ impl Core {
                     } else {
                         m.permissions = None;
                     }
-                    m.nudge = nudge::of(m, area, &can_run);
+                    m.nudge = nudge::of(m, area, &can_run).filter(|n| n.reason != "nudge.modelBar" || !model_bar_offered);
                     m.look = crate::look::of(m);
                     looked = ok.then(|| m.id.clone());
                     offered = m.look.as_ref().map(|l| l.reason.clone());
@@ -3908,6 +3915,7 @@ impl Core {
     }
 
     fn emit_queue(&mut self, conv: &str) {
+        self.forget_queued_routes(conv);
         self.refill_parent_reports(conv);
         if let Some(c) = self.convs.get(conv) {
             (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
@@ -3960,6 +3968,7 @@ impl Core {
             archive::restore(c, reopened);
             return Err(error);
         }
+        self.remember_queued_route(id);
         self.sent_draft(id);
         if reopened.is_some() {
             self.list_changed();
@@ -4103,6 +4112,7 @@ impl Core {
         question.rewind = point;
         reply.vendor = Some(vendor);
         reply.model = model;
+        reply.reason = same_as_before(c, self.live.get(conv)).map(|p| p.reason);
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         reply.finished_at = None;
@@ -4221,6 +4231,7 @@ impl Core {
         let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
         let item = c.queued.iter_mut().find(|q| q.id == turn_id && !q.sending).ok_or("error.queueChanged")?;
         item.text = text.into();
+        self.queued_routes.remove(turn_id);
         c.updated_at = now();
         self.save(id);
         self.emit_queue(id);
@@ -4420,7 +4431,6 @@ impl Core {
             return Err(error);
         }
         let images = item.images.unwrap_or_default();
-        let attachments_len = item.attachments.as_ref().map_or(0, |a| a.len());
         self.transfers.insert(
             id.to_string(),
             recovery::Transfer {
@@ -4441,7 +4451,17 @@ impl Core {
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let reading = self.reading(id, item.text.chars().count(), images.len(), 0, before.as_ref());
-            let route = self.route_for(id, &item.text, images.len() + attachments_len, only);
+            let mut route = self.queued_route(&item.id, only);
+            if before.is_some() {
+                let verdict = route.try_recv().ok().flatten();
+                let failed = verdict.as_ref().is_some_and(|(v, _)| v.is_none());
+                let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                let routed = verdict.and_then(|(v, _)| v).and_then(|v| {
+                    self.table_at(id, &v, only, before.as_ref(), self.convs.get(id).is_some_and(|c| c.area == Area::Project), &reading)
+                });
+                self.after_route(id, &reply_id, routed, (pick, actor, failed), text, images);
+                return Ok(());
+            }
             self.push(id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.to_string(), images);
             tokio::spawn(async move {
@@ -4452,7 +4472,14 @@ impl Core {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
                     let routed = verdict.and_then(|(v, _)| {
-                        core.table_at(&v, only, before.as_ref(), core.convs.get(&conv).is_some_and(|c| c.area == Area::Project), &reading)
+                        core.table_at(
+                            &conv,
+                            &v,
+                            only,
+                            before.as_ref(),
+                            core.convs.get(&conv).is_some_and(|c| c.area == Area::Project),
+                            &reading,
+                        )
                     });
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
@@ -5528,7 +5555,17 @@ impl Core {
             let only = before.as_ref().map(|p| p.vendor);
             let file_bytes = req.files.iter().map(|f| f.base64.len() / 4 * 3).sum();
             let reading = self.reading(&id, req.text.chars().count(), req.images.len(), file_bytes, before.as_ref());
-            let route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
+            let mut route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
+            if before.is_some() {
+                let verdict = route.try_recv().ok().flatten();
+                let failed = verdict.as_ref().is_some_and(|(v, _)| v.is_none());
+                let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
+                let routed = verdict.and_then(|(v, _)| v).and_then(|v| {
+                    self.table_at(&id, &v, only, before.as_ref(), self.convs.get(&id).is_some_and(|c| c.area == Area::Project), &reading)
+                });
+                self.after_route(&id, &reply_id, routed, (pick, actor, failed), text, req.images);
+                return Ok(id);
+            }
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
@@ -5541,7 +5578,14 @@ impl Core {
                     // conversation under way only moves up.
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
                     let routed = verdict.and_then(|(v, _)| {
-                        core.table_at(&v, only, before.as_ref(), core.convs.get(&conv).is_some_and(|c| c.area == Area::Project), &reading)
+                        core.table_at(
+                            &conv,
+                            &v,
+                            only,
+                            before.as_ref(),
+                            core.convs.get(&conv).is_some_and(|c| c.area == Area::Project),
+                            &reading,
+                        )
                     });
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
                 }
@@ -5720,13 +5764,7 @@ impl Core {
         let pick = match (req.choice.vendor == "auto", self.convs.get(&id)) {
             // The route decides who answers a first message; until then only the router's own process gets ready.
             (true, Some(c)) if c.messages.is_empty() => return self.warm_router(),
-            (true, Some(c)) => {
-                let pick = same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback);
-                if self.next_route(&id).is_some() {
-                    self.warm_router();
-                }
-                pick
-            }
+            (true, Some(c)) => same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback),
             _ => fallback,
         };
         self.warm_launch(&id, &pick);
@@ -5929,6 +5967,7 @@ impl Core {
                 self.old_inputs_deleted.insert(id.to_string());
             }
             self.convs.remove(id);
+            self.forget_queued_routes(id);
             self.try_seal_rewind(id);
             // Clearing leftovers is best-effort: the conversation is already gone and nothing reads these folders again.
             if !temporary {
@@ -6085,7 +6124,12 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let live = live.filter(|l| l.vendor == vendor);
     let effort = live.map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let model = live.map_or_else(|| last.model.clone(), |l| l.model.clone());
-    let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
+    let reason = last
+        .reason
+        .clone()
+        .filter(|r| r != "reason.routing" && !r.starts_with("reason.autoEffort"))
+        .or_else(|| last.acts.iter().rev().find_map(|a| a.why.clone().filter(|r| r.starts_with("reason.route."))))
+        .unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model, effort, reason, pace: None })
 }
 

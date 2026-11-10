@@ -270,6 +270,8 @@ pub fn of(m: &Message, area: Area, allowed: &[Profile]) -> Option<Nudge> {
     let last_check = tools.iter().rposition(|t| is_check(t) && !t.declined);
     let reason = if last_check.is_some_and(|i| tools[i].ok == Some(false)) {
         "nudge.failedCheck"
+    } else if m.moved_from.is_none() && m.acts.iter().any(|a| a.params.get("modelBar").is_some_and(|v| v == "unmet")) {
+        "nudge.modelBar"
     } else if area == Area::Project {
         // A refused edit (ok = false) changed nothing; only the last edit to source decides.
         let last_edit = tools.iter().rposition(|t| t.ok != Some(false) && edited(t).into_iter().any(is_source));
@@ -379,6 +381,18 @@ mod tests {
 
     fn why(m: &Message, area: Area) -> Option<String> {
         of(m, area, &PROFILES).map(|n| n.reason)
+    }
+
+    #[test]
+    fn a_model_bar_offer_does_not_follow_a_quota_handover() {
+        let mut m = turn(vec![]);
+        m.effort = Some("high".into());
+        let mut act = crate::act::FaberAct::route(&pick(Vendor::Claude, "claude-sonnet-5-5", "high"), crate::act::Actor::Faber);
+        act.params.insert("modelBar".into(), "unmet".into());
+        m.acts.push(act);
+        assert_eq!(why(&m, Area::Chat).as_deref(), Some("nudge.modelBar"));
+        m.moved_from = Some(Vendor::Codex);
+        assert_eq!(why(&m, Area::Chat), None);
     }
 
     #[test]

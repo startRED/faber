@@ -512,10 +512,11 @@ impl Core {
         }
         let waiting = c.queued.remove(0);
         self.save(conv);
+        let sent = self.dispatch_queued(conv, waiting);
         self.emit_queue(conv);
         // A refusal with a reply fails it (`fail_reply`), which decides what follows; one before any reply (the message waits
         // in the queue again) is handled here.
-        if let Err(error) = self.dispatch_queued(conv, waiting)
+        if let Err(error) = sent
             && !self.reported(conv, &error)
         {
             self.trouble(conv, &reply_id, &error);

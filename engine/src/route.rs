@@ -106,9 +106,14 @@ pub struct Routed {
     pub price: f64,
     /// Set only when the quota changed the pick (see `choose_paced`), or when what the person redid did (see `lifted`).
     pub pace: Option<PaceNote>,
+    /// Per-message target before restart hysteresis; absent for a model selection.
+    pub wanted_effort: Option<&'static str>,
 }
 
 impl Routed {
+    pub fn clears_bar(&self) -> bool {
+        clears(&self.profile, bar(self.kind, level_of(self.kind, self.difficulty, self.check, self.scope, self.confidence), self.project))
+    }
     pub fn pick(&self) -> Pick {
         Pick {
             vendor: self.profile.vendor,
@@ -349,6 +354,17 @@ pub fn choose_scoped(
     choose_reading(kind, difficulty, check, scope, confidence, project, candidates, &|_| 0.0)
 }
 
+/// Choose an effort within the current model, keeping uncertain or blind reductions at the previous effort.
+pub fn choose_effort(verdict: &Asked, project: bool, current: &Profile) -> Option<Routed> {
+    let profiles: Vec<_> = PROFILES.iter().filter(|p| p.vendor == current.vendor && p.model == current.model).copied().collect();
+    let mut chosen = choose_scoped(verdict.kind, verdict.difficulty, verdict.check, verdict.scope, verdict.confidence, project, &profiles)?;
+    if chosen.profile.cost < current.cost && (verdict.confidence < 0.7 || verdict.check == "blind") {
+        chosen.profile = *current;
+        chosen.price = current.cost as f64;
+    }
+    Some(chosen)
+}
+
 /// `choose` with what reading the request costs on each profile (`Factor::read`), and no quota.
 #[allow(clippy::too_many_arguments)]
 fn choose_reading(
@@ -369,7 +385,7 @@ fn choose_reading(
             (p, p.cost as f64 + read(&p))
         }
     };
-    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace: None })
+    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace: None, wanted_effort: None })
 }
 
 /// The table with the quota in it. Every candidate that clears the task's own bar is in the pool at `cost x w x f`, where
@@ -415,7 +431,7 @@ pub fn choose_paced_scoped(
     } else {
         None
     };
-    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace })
+    Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace, wanted_effort: None })
 }
 
 /// What the person's own redoing adds to the table's pick: for a kind of task they keep redoing (`auto_learned`), one rung up.

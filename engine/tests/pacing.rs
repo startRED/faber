@@ -14,7 +14,7 @@ use faber_engine::model::{Area, Message, PaceNote, Role, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::signals::Signals;
-use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -379,6 +379,11 @@ async fn an_easy_start_still_moves_up_after_a_turn_that_carried_a_quota_reason()
     assert!(r.claude.args.lock().unwrap()[0].iter().any(|a| a == "claude-haiku-5-5"));
     assert_eq!(first.reason.as_deref(), Some("reason.route.chat.easy"));
     assert_eq!(first.pace, Some(PaceNote { kind: "low".into(), vendor: Vendor::Codex }));
+    r.engine.route_draft(
+        WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: auto("").choice },
+        "Now refactor my billing service".into(),
+    );
+    tokio::time::sleep(Duration::from_millis(80)).await;
     r.engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
     let (second, went) = r.went(&id, 1).await;
     assert_eq!(second.reason.as_deref(), Some("reason.route.code.hard"));

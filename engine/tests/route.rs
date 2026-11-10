@@ -4,6 +4,49 @@ use faber_engine::router::Pick;
 
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
+#[test]
+fn effort_stays_in_the_model_and_only_confident_visible_work_can_lower_it() {
+    use faber_engine::route::{Asked, PROFILES, choose_effort};
+    let current = PROFILES.iter().find(|p| p.model == "gpt-6.1-sol" && p.effort == "high").unwrap();
+    let easy = Asked { kind: "chat", difficulty: "easy", check: "glance", scope: "tight", confidence: 0.9 };
+    let selected = choose_effort(&easy, false, current).unwrap().profile;
+    assert_eq!((selected.vendor, selected.model, selected.effort), (current.vendor, current.model, "low"));
+    for verdict in [Asked { confidence: 0.69, ..easy }, Asked { check: "blind", ..easy }] {
+        assert_eq!(choose_effort(&verdict, false, current).unwrap().profile, *current);
+    }
+    assert_eq!(choose_effort(&Asked { confidence: 0.7, ..easy }, false, current).unwrap().profile, selected);
+    let low = &selected;
+    let hard = Asked { kind: "code", difficulty: "hard", scope: "open", ..easy };
+    assert_eq!(choose_effort(&hard, true, low).unwrap().profile.effort, "high");
+    let frontier = Asked { check: "blind", ..hard };
+    assert_eq!(choose_effort(&frontier, true, low).unwrap().profile.effort, "high");
+}
+
+#[test]
+fn ten_mixed_effort_choices_keep_the_vendor_and_model() {
+    use faber_engine::route::{Asked, PROFILES, choose_effort};
+    let mut current = *PROFILES.iter().find(|p| p.model == "gpt-6.1-sol" && p.effort == "medium").unwrap();
+    let original = (current.vendor, current.model);
+    for i in 0..10 {
+        let verdict = if i % 2 == 0 {
+            Asked { kind: "code", difficulty: "hard", check: "machine", scope: "open", confidence: 0.9 }
+        } else {
+            Asked { kind: "chat", difficulty: "easy", check: "glance", scope: "tight", confidence: 0.9 }
+        };
+        current = choose_effort(&verdict, true, &current).unwrap().profile;
+        assert_eq!((current.vendor, current.model), original);
+    }
+}
+
+#[test]
+fn effort_uses_the_strongest_row_of_the_same_model_when_no_row_meets_the_bar() {
+    use faber_engine::route::{Asked, PROFILES, choose_effort};
+    let current = PROFILES.iter().find(|p| p.model == "gpt-6.1-terra" && p.effort == "low").unwrap();
+    let verdict = Asked { kind: "code", difficulty: "hard", check: "blind", scope: "open", confidence: 0.9 };
+    let selected = choose_effort(&verdict, true, current).unwrap().profile;
+    assert_eq!((selected.vendor, selected.model, selected.effort), (current.vendor, current.model, "high"));
+}
+
 fn all() -> Vec<Profile> {
     candidates(&BOTH, &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()])
 }

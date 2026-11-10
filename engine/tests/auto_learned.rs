@@ -13,7 +13,7 @@ use faber_engine::route::{Factor, PROFILES, Profile, Routed, candidates, choose,
 use faber_engine::router::Choice;
 use faber_engine::signals::Signals;
 use faber_engine::store::Store;
-use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest};
+use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -266,6 +266,11 @@ async fn what_was_learned_never_changes_a_conversation_under_way() {
         let (engine, mut rx) = engine(&dir, f.spawn.clone(), verdicts(vec![("chat", "easy"), ("code", "medium")]));
         let id = engine.send(auto(SKY)).unwrap();
         finished(&mut rx).await;
+        engine.route_draft(
+            WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: auto_choice() },
+            "Now refactor my billing service".into(),
+        );
+        tokio::time::sleep(Duration::from_millis(80)).await;
         engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
         let reply = routed(&engine, &id, 1).await;
         engine.shutdown();

@@ -5,8 +5,8 @@ use super::*;
 use crate::auto_learned::{self, Signal};
 use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
 use crate::route::{
-    Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_paced_scoped, lifted, question,
-    read_cost,
+    Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_effort, choose_paced_scoped, lifted,
+    question, read_cost,
 };
 use crate::router::pinned;
 use tokio::sync::oneshot;
@@ -20,6 +20,13 @@ const ASK_LIMIT: Duration = Duration::from_secs(30);
 const DRAFT_ROUTES: u8 = 2;
 
 type RouteAnswer = Option<(Option<Asked>, crate::act::Actor)>;
+
+/// Only the verdict ready at Send belongs to this queued message; later drafts must not replace it.
+pub(super) struct QueuedRoute {
+    conversation: String,
+    only: Option<Vendor>,
+    answer: RouteAnswer,
+}
 
 /// A route for a request, ready or on its way.
 pub(super) struct Guess {
@@ -78,17 +85,17 @@ impl Core {
             .collect()
     }
 
-    /// Whether Auto routes this conversation's next message: its first one (`Some(None)`), or the next ones while only
-    /// an easy model was needed, such as after a greeting (`Some(Some(the model so far))`). A conversation whose first
-    /// route came too late stays with the default, so a slow router does not hold up every message. ponytail: only the
-    /// step up from easy; a conversation that grows from medium to hard stays put until routing follows changes of kind.
+    /// Auto reads later drafts inside the conversation's vendor. Hand-picked and handed-over conversations keep their rules.
     pub(super) fn next_route(&self, id: &str) -> Option<Option<Pick>> {
         let c = self.convs.get(id)?;
         if c.messages.is_empty() {
             return Some(None);
         }
         let before = same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor))?;
-        (before.reason.starts_with("reason.route.") && before.reason.ends_with(".easy")).then_some(Some(before))
+        (c.choice.as_ref().is_some_and(|c| c.vendor == "auto")
+            && !before.reason.starts_with("reason.moved")
+            && before.reason != "reason.chosen")
+            .then_some(Some(before))
     }
 
     /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
@@ -125,16 +132,56 @@ impl Core {
         Reading::of(chars, images, file_bytes, held, on)
     }
 
-    /// The pick of a message that may be the first of its conversation (`before` is the model so far, none for the first); a
-    /// conversation under way only moves up.
+    /// A first model selection, the greeting exception, or a new effort inside the held model.
     pub(super) fn table_at(
         &self,
+        id: &str,
         verdict: &Asked,
         only: Option<Vendor>,
         before: Option<&Pick>,
         project: bool,
         reading: &Reading,
     ) -> Option<Routed> {
+        if let Some(before) = before {
+            let c = self.convs.get(id)?;
+            // The greeting exception ends permanently after the first non-easy answer.
+            let locked = c
+                .messages
+                .iter()
+                .filter(|m| m.role == Role::Assistant && m.model.is_some())
+                .any(|m| m.reason.as_deref().is_some_and(|r| r != "reason.routing" && !r.ends_with(".easy")));
+            if locked {
+                let current = PROFILES
+                    .iter()
+                    .find(|p| p.vendor == before.vendor && Some(p.model) == before.model.as_deref() && p.effort == before.effort)?;
+                let mut routed = choose_effort(verdict, project, current)?;
+                // Claude restarts; the pending reply is already stored, so check the held session's work.
+                let busy = before.vendor == Vendor::Claude
+                    && (self.live.get(id).is_some_and(|l| l.turn.is_some())
+                        || self.background.running_in(id)
+                        || self.helpers_in(id)
+                        || self.rewind_writing(id)
+                        || self.compacts.contains_key(id)
+                        || c.compacting
+                        || c.keep_going.is_some());
+                if routed.profile.cost < current.cost && (busy || c.resumable(before.vendor).is_none()) {
+                    routed.profile = *current;
+                    routed.price = current.cost as f64;
+                }
+                let wanted = routed.profile.effort;
+                routed.wanted_effort = Some(wanted);
+                let previous = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.effort.is_some());
+                // Claude resumes in a new process; require consecutive reductions to repay that startup.
+                if before.vendor == Vendor::Claude
+                    && routed.profile.cost < current.cost
+                    && !previous.is_some_and(|m| m.acts.iter().any(|a| a.params.get("wantedEffort").is_some_and(|e| e == wanted)))
+                {
+                    routed.profile = *current;
+                    routed.price = current.cost as f64;
+                }
+                return Some(routed);
+            }
+        }
         let routed = if before.is_none() {
             self.table_first(verdict, only, project, reading)
         } else {
@@ -274,6 +321,33 @@ impl Core {
         }
     }
 
+    pub(super) fn remember_queued_route(&mut self, id: &str) {
+        let Some(item) = self.convs.get(id).and_then(|c| c.queued.last()).filter(|q| q.choice.vendor == "auto") else { return };
+        let Some(before) = self.next_route(id) else { return };
+        let only = before.map(|p| p.vendor);
+        let attached = item.images.as_ref().map_or(0, Vec::len) + item.attachments.as_ref().map_or(0, Vec::len);
+        if let Some(answer) = self.finished_draft(&item.text, attached, only) {
+            self.queued_routes.insert(item.id.clone(), QueuedRoute { conversation: id.into(), only, answer });
+        }
+    }
+
+    /// No ready verdict at Send means fallback, even if the shared classifier has answered since then.
+    pub(super) fn queued_route(&mut self, turn: &str, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
+        let (tx, rx) = oneshot::channel();
+        let answer = self.queued_routes.remove(turn).filter(|r| r.only == only).and_then(|r| r.answer);
+        let _ = tx.send(answer);
+        rx
+    }
+
+    pub(super) fn forget_queued_routes(&mut self, id: &str) {
+        let queued = self.convs.get(id).map(|c| &c.queued);
+        self.queued_routes.retain(|turn, r| r.conversation != id || queued.is_some_and(|q| q.iter().any(|q| q.id == *turn)));
+    }
+
+    fn finished_draft(&self, request: &str, attached: usize, only: Option<Vendor>) -> Option<RouteAnswer> {
+        self.guess.as_ref().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)).and_then(|g| g.result.clone())
+    }
+
     /// A sent message uses a finished draft route; cold or pending classification never delays a send.
     pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
         self.sent_draft(id);
@@ -283,8 +357,8 @@ impl Core {
             return rx;
         }
         // An injected classifier has no CLI startup. Native routing runs while typing, never on the send's clock.
-        if self.opts.ask.is_none()
-            && !self.guess.as_ref().is_some_and(|g| attached == 0 && g.only == only && covers(&g.request, request) && g.result.is_some())
+        if (self.opts.ask.is_none() || self.convs.get(id).is_some_and(|c| c.messages.len() > 2))
+            && self.finished_draft(request, attached, only).is_none()
         {
             let _ = tx.send(None);
             return rx;
@@ -587,10 +661,18 @@ impl Core {
         }
         // The router AI is named only when its verdict made the pick; a verdict the table rejected leaves Faber's own fallback.
         let from_router = routed.is_some();
-        let mut pick = routed.map(|r| r.pick()).unwrap_or(fallback.0);
+        let previous = self
+            .convs
+            .get(id)
+            .and_then(|c| c.messages.iter().rev().find(|m| m.id != reply_id && m.role == Role::Assistant && m.effort.is_some()))
+            .map(|m| (m.vendor, m.model.clone(), m.effort.clone()));
+        let mut pick = routed.as_ref().map(|r| r.pick()).unwrap_or(fallback.0);
         let route_reason = pick.reason.starts_with("reason.route.").then(|| pick.reason.clone());
         let only = self.convs.get(id).filter(|c| c.messages.len() > 2).map(|_| pick.vendor);
-        if let [profile] = self.route_profiles(only).as_slice() {
+        if let [profile] = self.route_profiles(only).as_slice()
+            && previous.is_none()
+            && (only.is_none() || (Some(profile.model) == pick.model.as_deref() && profile.effort == pick.effort))
+        {
             let current =
                 PROFILES.iter().find(|p| p.vendor == pick.vendor && Some(p.model) == pick.model.as_deref() && p.effort == pick.effort);
             if only.is_none() || current.is_none_or(|p| (profile.iq, profile.agent) >= (p.iq, p.agent)) {
@@ -602,7 +684,7 @@ impl Core {
                     pace: None,
                 };
             }
-        } else if !from_router && !fallback.2 && self.route_profiles(only).len() > 1 {
+        } else if previous.is_none() && !from_router && !fallback.2 && self.route_profiles(only).len() > 1 {
             pick.reason = "reason.autoImmediate".into();
         }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
@@ -610,12 +692,36 @@ impl Core {
         if let Some(reason) = route_reason {
             pick.reason = reason;
         }
+        let effort_only = previous.as_ref().is_some_and(|(vendor, model, _)| *vendor == Some(pick.vendor) && *model == pick.model);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
             m.pace = pick.pace.clone();
             let mut act = crate::act::FaberAct::route(&shown_pick, if from_router { fallback.1 } else { crate::act::Actor::Faber });
+            if effort_only {
+                act.change = None;
+            }
+            if let Some(r) = &routed {
+                for (key, value) in [("kind", r.kind), ("difficulty", r.difficulty), ("scope", r.scope), ("check", r.check)] {
+                    act.params.insert(key.into(), value.into());
+                }
+                if let Some(wanted) = r.wanted_effort {
+                    act.params.insert("wantedEffort".into(), wanted.into());
+                    if !r.clears_bar() {
+                        act.params.insert("modelBar".into(), "unmet".into());
+                    }
+                }
+            }
+            if let Some((vendor, model, Some(effort))) = &previous
+                && *vendor == Some(pick.vendor)
+                && *model == pick.model
+                && *effort != pick.effort
+            {
+                let raised = ["low", "medium", "high"].iter().position(|e| *e == pick.effort)
+                    > ["low", "medium", "high"].iter().position(|e| e == effort);
+                m.reason = Some(if raised { "reason.autoEffortRaised" } else { "reason.autoEffortLowered" }.into());
+            }
             if fallback.2 && shown_pick.reason != "reason.autoSingleProfile" {
                 act.why = Some("act.why.routerTimeout".into());
             }
@@ -700,6 +806,280 @@ pub(super) fn stop_router(stop: Option<Stop>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn effort_conversation(engine: &Engine) -> (String, Pick) {
+        let id = super::super::answer::tests::seed(engine, Session::from_fn(|_| {}), &[("answer", &[])]);
+        let pick = Pick {
+            vendor: Vendor::Claude,
+            model: Some("claude-sonnet-5-5".into()),
+            effort: "high".into(),
+            reason: "reason.route.code.hard".into(),
+            pace: None,
+        };
+        engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.sessions.insert(Vendor::Claude, "saved-session".into());
+            conv.choice = Some(auto_send("").choice);
+            let m = conv.messages.last_mut().unwrap();
+            m.model = pick.model.clone();
+            m.effort = Some(pick.effort.clone());
+            m.reason = Some(pick.reason.clone());
+            m.status = Some(Status::Done);
+            let live = c.live.get_mut(&id).unwrap();
+            live.model = pick.model.clone();
+            live.effort = pick.effort.clone();
+            live.turn = None;
+            c.opts.clis.insert(Vendor::Claude, live.cli.clone());
+        });
+        (id, pick)
+    }
+
+    #[tokio::test]
+    async fn auto_effort_later_typing_opens_no_router_until_a_draft_fires() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let (id, _) = effort_conversation(&engine);
+        engine.note_account_events(
+            Vendor::Claude,
+            vec![EngineEvent::Signals(crate::signals::Signals { billing: Some(Billing::Subscription), ..Default::default() })],
+        );
+        let launches = Arc::new(Mutex::new(0));
+        engine.with(|c| {
+            let seen = launches.clone();
+            c.opts.spawn = Arc::new(move |_, _, _| {
+                *seen.lock().unwrap() += 1;
+                Err(std::io::Error::other("fake router"))
+            });
+            // Preparing the answering process is irrelevant to the router's warm-up.
+            c.convs.get_mut(&id).unwrap().working_folder = Some(dir.work().to_string_lossy().into_owned());
+        });
+        let warm = WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: auto_send("").choice };
+        engine.warm(warm.clone());
+        assert_eq!(*launches.lock().unwrap(), 0, "typing a later message must not open a spare router");
+        engine.route_draft(warm, "classify this draft".into());
+        wait_for(|| *launches.lock().unwrap() > 0).await;
+        let count = *launches.lock().unwrap();
+        engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: auto_send("").choice });
+        assert!(*launches.lock().unwrap() > count, "first-message warm-up stays enabled");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn auto_effort_busy_lowering_is_held_and_does_not_count() {
+        for busy in ["turn", "background", "writers", "compacting"] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            let (id, pick) = effort_conversation(&engine);
+            engine.with(|c| {
+                let easy = Asked { kind: "chat", difficulty: "easy", check: "glance", scope: "tight", confidence: 0.95 };
+                let prior = c.table_at(&id, &easy, Some(pick.vendor), Some(&pick), false, &Reading::default()).unwrap();
+                c.convs
+                    .get_mut(&id)
+                    .unwrap()
+                    .messages
+                    .last_mut()
+                    .unwrap()
+                    .acts
+                    .push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
+                c.convs
+                    .get_mut(&id)
+                    .unwrap()
+                    .messages
+                    .last_mut()
+                    .unwrap()
+                    .acts
+                    .last_mut()
+                    .unwrap()
+                    .params
+                    .insert("wantedEffort".into(), prior.wanted_effort.unwrap().into());
+                match busy {
+                    "turn" => c.live.get_mut(&id).unwrap().turn = Some("answer".into()),
+                    "background" => {
+                        let l = &c.live[&id];
+                        c.background.update(
+                            &id,
+                            l.sid,
+                            l.vendor,
+                            &l.session,
+                            crate::background::Update::Start {
+                                id: "shell".into(),
+                                command: "work".into(),
+                                stoppable: false,
+                                turn_ended: true,
+                            },
+                            1,
+                        );
+                    }
+                    "writers" => c.handle(&id, 1, EngineEvent::Writers { active: vec!["agent".into()], unknown: false }),
+                    _ => c.convs.get_mut(&id).unwrap().compacting = true,
+                }
+                let held = c.table_at(&id, &easy, Some(pick.vendor), Some(&pick), false, &Reading::default()).unwrap();
+                assert_eq!(held.profile.effort, "high", "{busy}: never restart over ongoing work");
+                assert_eq!(held.wanted_effort, Some("high"), "{busy}: held work must break consecutive reductions");
+                let mut lower = pick.clone();
+                lower.effort = "medium".into();
+                let hard = Asked { kind: "code", difficulty: "hard", ..easy };
+                assert_eq!(
+                    c.table_at(&id, &hard, Some(pick.vendor), Some(&lower), false, &Reading::default()).unwrap().profile.effort,
+                    "high",
+                    "raises stay immediate"
+                );
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_effort_lowering_requires_a_resumable_conversation() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for temporary in [false, true] {
+                let dir = crate::workspace::TestRoot::new();
+                let (engine, _) = super::super::answer::tests::engine(&dir);
+                let (id, mut pick) = effort_conversation(&engine);
+                pick.vendor = vendor;
+                if vendor == Vendor::Codex {
+                    pick.model = Some("gpt-6.1-sol".into());
+                }
+                engine.with(|c| {
+                    let conv = c.convs.get_mut(&id).unwrap();
+                    conv.temporary = temporary;
+                    conv.sessions.clear();
+                    if temporary {
+                        conv.sessions.insert(vendor, "saved-session".into());
+                    }
+                    let m = conv.messages.last_mut().unwrap();
+                    let mut act = crate::act::FaberAct::route(&pick, crate::act::Actor::Faber);
+                    act.params.insert("wantedEffort".into(), "medium".into());
+                    m.acts.push(act);
+                    let easy = Asked { kind: "chat", difficulty: "easy", check: "glance", scope: "tight", confidence: 0.95 };
+                    let held = c.table_at(&id, &easy, Some(vendor), Some(&pick), false, &Reading::default()).unwrap();
+                    assert_eq!(held.profile.effort, "high", "{vendor:?}, temporary={temporary}");
+                    assert_eq!(held.wanted_effort, Some("high"));
+                    pick.effort = "medium".into();
+                    let hard = Asked { kind: "code", difficulty: "hard", scope: "open", ..easy };
+                    assert_eq!(
+                        c.table_at(&id, &hard, Some(vendor), Some(&pick), false, &Reading::default()).unwrap().profile.effort,
+                        "high"
+                    );
+                });
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_effort_steering_preserves_the_plan_limit_handover_guard() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let (id, _) = effort_conversation(&engine);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().reason = Some("reason.moved.limit".into());
+            c.live.get_mut(&id).unwrap().turn = Some("answer".into());
+        });
+        queued_verdict(&engine, &id);
+        engine.with(|c| {
+            c.live.get_mut(&id).unwrap().steering.push("queued".into());
+            c.taken_in(&id, Some("queued".into()));
+            assert_eq!(c.convs[&id].messages.last().unwrap().reason.as_deref(), Some("reason.moved.limit"));
+            assert!(c.next_route(&id).is_none(), "steering must not re-enable Auto after a hand-over");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn auto_effort_no_verdict_keeps_the_previous_reason() {
+        for reason in ["reason.autoDefault", "reason.autoOnly", "reason.route.code.hard"] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            let (id, mut pick) = effort_conversation(&engine);
+            engine.note_account_events(
+                Vendor::Claude,
+                vec![EngineEvent::Signals(crate::signals::Signals { billing: Some(Billing::Subscription), ..Default::default() })],
+            );
+            pick.reason = reason.into();
+            engine.with(|c| {
+                let conv = c.convs.get_mut(&id).unwrap();
+                conv.messages.last_mut().unwrap().reason = Some(reason.into());
+                conv.messages.push(Message::new("question".into(), Role::User, "later".into(), 2));
+                let mut reply = Message::new("later".into(), Role::Assistant, String::new(), 2);
+                reply.status = Some(Status::Streaming);
+                conv.messages.push(reply);
+                c.after_route(&id, "later", None, (pick, crate::act::Actor::Faber, false), "later".into(), vec![]);
+                let reply = c.convs[&id].messages.last().unwrap();
+                assert_eq!(reply.reason.as_deref(), Some(reason));
+                assert_eq!(reply.acts.last().unwrap().why.as_deref(), Some(reason));
+            });
+            engine.shutdown();
+        }
+    }
+
+    fn queued_verdict(engine: &Engine, id: &str) {
+        engine.with(|c| {
+            let conv = c.convs.get_mut(id).unwrap();
+            conv.messages.last_mut().unwrap().status = Some(Status::Done);
+            conv.queued.push(QueuedTurn {
+                id: "queued".into(),
+                text: "hard request".into(),
+                images: None,
+                attachments: None,
+                choice: auto_send("").choice,
+                at: now(),
+                sending: false,
+                wake: None,
+            });
+            c.live.get_mut(id).unwrap().turn = None;
+            c.queued_routes.insert(
+                "queued".into(),
+                QueuedRoute {
+                    conversation: id.into(),
+                    only: Some(Vendor::Claude),
+                    answer: Some((
+                        Some(Asked { kind: "code", difficulty: "hard", check: "machine", scope: "open", confidence: 0.95 }),
+                        crate::act::Actor::Faber,
+                    )),
+                },
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn queued_verdict_survives_keep_going_dispatch_and_refused_admission() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        queued_verdict(&engine, &id);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().keep_going = Some(KeepGoing::default());
+            c.installing = true;
+            c.keep_going_after(&id, Some("reply".into()));
+            assert_eq!(c.convs[&id].queued[0].id, "queued");
+            assert!(c.queued_routes.contains_key("queued"), "refused admission must retain the ready verdict with its message");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn queued_verdicts_leave_with_edits_removal_deletion_or_consumption_and_check_the_vendor() {
+        for action in ["edit", "remove", "delete", "consume", "vendor"] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+            queued_verdict(&engine, &id);
+            match action {
+                "edit" => engine.edit_queued(&id, "queued", "changed").unwrap(),
+                "remove" => engine.remove_queued(&id, "queued"),
+                "delete" => engine.with(|c| c.remove(&id).unwrap()),
+                _ => engine.with(|c| {
+                    let vendor = if action == "vendor" { Vendor::Codex } else { Vendor::Claude };
+                    let answer = c.queued_route("queued", Some(vendor)).try_recv().unwrap();
+                    assert_eq!(answer.is_some(), action == "consume");
+                    assert!(c.queued_route("queued", Some(vendor)).try_recv().unwrap().is_none(), "a verdict is consumed once");
+                }),
+            }
+            assert!(engine.with(|c| c.queued_routes.is_empty()), "{action} must release its snapshot");
+            engine.shutdown();
+        }
+    }
 
     fn auto_send(text: &str) -> SendRequest {
         SendRequest {
@@ -924,7 +1304,8 @@ mod tests {
         engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(second_text) }).unwrap();
         let second = turn_finished(&engine, &id, 1).await;
         assert_eq!(second.model, first.model);
-        assert_eq!(second.acts[0].why.as_deref(), Some(if path == "single" { "reason.autoSingleProfile" } else { "reason.autoImmediate" }));
+        assert_eq!(second.reason, first.reason, "a later fallback silently keeps the previous reason");
+        assert_eq!(second.acts[0].why, first.reason);
         if path == "pending" {
             release.notify_one();
             draft_finished(&engine, second_text).await;

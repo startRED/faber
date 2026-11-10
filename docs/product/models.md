@@ -42,25 +42,37 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   models that clear it is cheapest, and keeps a long conversation on its model when spare quota elsewhere would not pay for
   reading it all again.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
-- Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
-  greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
+- Routing runs on the first message and reads later drafts for effort. Only while an easy model was needed (a
+  greeting first) may a later verdict also select a stronger model. Those stay with their subscription, so the CLI keeps the history. Once a message
   needed more, the conversation stays with that model. One usable model/effort profile needs no classifier. Otherwise,
   the native router runs while the person types, with up to 30 s for CLI startup and inference. Sending reuses a finished,
   still-matching draft verdict; when none is ready it starts immediately with the previous choice or everyday default,
   without opening a classifier request on send. Reusing an easy route preserves its eligibility for later drafts, even
   after an immediate send or a temporary single-profile limit; the displayed explanation is separate from that marker.
-  An injected classifier retains its bounded 2.5 s path. The answer shows the chosen model and why. While the person types, the
+  An injected classifier retains its bounded 2.5 s path on a first send; later sends only read finished verdicts. The first answer shows the chosen model and why. While the person types, the
   draft is routed at most twice per message. An accepted send, including queueing or steering into a running answer,
   resets that conversation's count and discards its queued draft classification; other conversations keep theirs
   (done, `engine/src/engine/auto.rs`).
+  Later messages never warm a spare router on keystrokes: a draft classification opens it only when it fires. Each later
+  Auto message may ask the router up to twice, where previously it asked none. The router uses a thread on the shared
+  Codex app-server when Luna is available and allowed, otherwise a separate Claude Haiku process for that request.
 - Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 58, agent 61). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. Quota and learned steps stop at frontier.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
   check (done, `engine/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
 - An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
-  model one effort higher, else the next model at medium. It runs as a new branch, so a conversation's model and effort
-  never change (done, `engine/src/nudge.rs`).
+  model one effort higher, else the next model at medium. It runs as a new branch, so the source conversation keeps its model (done, `engine/src/nudge.rs`).
+- **Each later Auto message has its own effort inside the conversation's model.** A finished verdict from typing picks the
+  cheapest sufficient effort using the same bars as a first message, or the held model's strongest row. No finished verdict
+  means the previous effort, with no wait. Raising is immediate; reducing requires confidence at least 0.7 and a non-blind
+  check, plus two consecutive matching reductions for Claude's process restart. Claude lowering is held while its session
+  has background work or is not idle. Both vendors hold lowering with no resumable session (including temporary Chat); held
+  reductions do not count toward the pair. Raises remain immediate. Manual choices and quota hand-overs keep their rules,
+  including after steering. No finished verdict keeps the previous reason silently. Later route records stay saved, but
+  their screen row appears only on an effort change or a stronger-model offer; the first answer keeps its row. Technical
+  details retain kind, difficulty, scope and check. A bar beyond the held model offers the existing stronger retry in a new
+  branch once per conversation, taken or ignored; later requests still use the held model's strongest row.
 - **The table learns from what the person retries and keeps** (done, `engine/src/auto_learned.rs`; the owner said yes, with a
   notice). Only two things count, and only for a conversation's first answer, the one Auto itself picked (later answers keep
   its model): a retry of a finished Auto answer (the same request asked again) says the pick was not good enough, and
@@ -91,15 +103,26 @@ phase.
    happens only through `codex login` or the CLI's own flow.
 2. **Always pass the permission mode, the full model id and the effort when starting a CLI session.** An omitted flag is
    a hidden choice.
-3. **Set the model and the effort before a conversation starts, and never change model, effort, tools or system prompt
-   in the middle of one without need.** The prompt cache is the biggest saving. A change of model always starts a new
-   cache, and a change of tools or system prompt invalidates everything after it. A change of effort kept the Claude cache
-   through `--resume` and cost Codex nothing measurable (13/10/2026, [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)). Facts that change travel as
-   text inside the next message, never as a system-prompt edit. A change has need when the person made it (the model
-   picker, the permission mode, a setting), when Codex's catalog tool servers were revoked or changed, when a plan limit
-   moves the conversation to the other AI (rule 4's hand-over), once when Faber's guide is new to a session (an older session, a new screen language: one line in its next message), or once when Auto met an easy request first (a greeting)
-   and the next one needed more; nothing else changes them
-   (`engine/tests/auto.rs`, `a_second_message_keeps_the_process_the_model_and_the_effort_of_the_first`).
+3. **Keep the conversation's model, tools and system prompt stable; Auto sets each message's effort inside that model.**
+   The prompt cache is the biggest saving. A model change always starts a new cache; changing tools or the system prompt
+   invalidates everything after it. Changing effort kept Claude's cache through `--resume` and cost Codex nothing measurable
+   (13/10/2026, [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)). Facts that change travel as text
+   in the next message. Auto reuses a finished draft verdict without waiting; no verdict keeps the previous effort.
+   It chooses the cheapest row of the held model that clears the same level, scope and project bars, or that model's strongest
+   row. It raises immediately; lowering needs confidence of at least 0.7 and a non-blind check. Claude's lowering also needs
+   two consecutive messages wanting the same lower row, because it starts a new process with the same model and `--resume`.
+   A busy Claude session holds reductions without counting them toward that pair. Both vendors hold reductions without a resumable session.
+   Codex uses the existing manual-change path: a resumed thread on the same app-server, with effort in `turn/start`.
+   Queued messages keep the verdict ready at Send for their own next turn; later drafts cannot replace it. Missing or
+   pending verdicts keep the previous effort, queue edits discard the old verdict, and reopening keeps the previous effort.
+   Queued or steered messages never change the running answer. Quota pacing cannot lower the held model's effort below
+   the message's bar. Hand-picked model/effort and plan-limit hand-overs keep their existing rules. The answer says when
+   effort rose or fell, only on that change; unchanged later routes stay silent and preserve the previous reason without a
+   finished verdict. Its technical details retain kind, difficulty, scope and check. If its model cannot clear the bar, the
+   completed answer offers the existing stronger retry on a new branch once per conversation when a rung is available.
+   Other changes still need the person's picker, permission mode or setting, revoked or changed Codex catalog tools,
+   a plan-limit hand-over (rule 4), Faber's guide arriving in a session, or Auto's one move up after an easy greeting.
+   Proof: `engine/tests/auto.rs`, `a_second_message_without_a_verdict_keeps_the_process_model_and_effort` and `auto_effort_`.
 4. **Hand work to another model through a written summary or a diff, not the conversation.** Thinking blocks are tied to
    the model that wrote them.
 5. **Interrupt gracefully before killing, watch for silence, and kill the whole process tree on Windows.** The stop uses

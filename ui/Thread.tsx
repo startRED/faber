@@ -572,7 +572,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const caretOn = () => working() && !waiting().length && !m().waitUntil && !runningStep() && typing();
   // The header says which model answers and how hard it thinks: the vendor's mark, the model's name from the moment it is
   // known to the end and after reopening (a model the CLI never named reads as the vendor's name), and its effort when the
-  // answer has one (the owner, 2026-10-17). Auto's reason sits in its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
+  // answer has one (the owner, 2026-10-17). Auto's reason sits in its tooltip; choosing, an effort change and a move to the other AI also show beside the name. A wait for
   // quota is said once, by the card under it.
   const standIn = () => !m().model || m().model === 'codex';
   const shown = () => (m().vendor ? (standIn() ? vendorName(m().vendor!) : prettyModel(m().model)) : t('model.auto'));
@@ -589,7 +589,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       to: message.vendor ? vendorName(message.vendor) : '',
     });
   };
-  const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
+  const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved') || m().reason!.startsWith('reason.autoEffort'));
   const wokeWhy = () => {
     const wake = woke();
     return wake ? fromEngine(wake.why, { pr: wake.pr ? `#${wake.pr}` : '', checks: (wake.checks ?? []).join(', ') }) : '';
@@ -660,7 +660,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       {/* The reply as it happened: the words, the thinking and the steps in order. The words never fold. */}
       {/* Each place keeps its node while its part grows; a place whose part changes kind swaps its child. The children read
           the part through guards, never through a Match's own accessor, which goes stale while the kind changes. */}
-      <FaberActs acts={m().acts} onChange={props.onActChange} />
+      <FaberActs acts={m().acts?.filter((act) => act.kind !== 'route'
+        || (props.messageIndex ?? 0) < 2
+        || m().reason?.startsWith('reason.autoEffort')
+        || m().nudge?.reason === 'nudge.modelBar')} onChange={props.onActChange} />
       <Index each={parts()}>
         {(part, i) => {
           const words = () => { const p = part(); return p.kind === 'text' ? p : undefined; };
