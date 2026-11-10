@@ -23,13 +23,14 @@ Each vendor's model tends to prefer its own company's models, so in Auto no mode
 name. Auto aims to pick a model that does the task well, without waste and quickly.
 
 - A small, fast model that is already running (GPT-6 Luna or Haiku at medium effort, whichever is connected) reads the
-  request alone and says what kind of task it is and how hard. It never sees the candidates.
+  request alone and says what kind of task it is, how hard, and whether its scope is tight or open. It never sees the candidates.
 - A fixed table then picks the model, tuned for quality first: each model's profile has general intelligence and
   agentic coding scores, seconds per task, and cost per task priced by the quota left on its subscription right now, so
   a nearly spent subscription hands its work to the other one (done, `engine/src/route.rs`).
 - Measured on 10/10/2026 with the real router on 22 requests, run twice: 81 of 88 picks right, half the routes under
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
+- On 10/11/2026 the updated router was checked twice on 42 hand-labelled requests. Haiku returned 84 valid lines at each effort: at medium, kind 90%, difficulty 74%, check 85% and scope 98% agreement; at low, 89%, 74%, 79% and 98%. Median time was 2.7 s for both. Luna, in one later run of the same 42 (the check first had to start one Codex server per request: it had been losing every answer after the first), returned 98% valid lines at medium and 93% at low: at medium, kind 90%, difficulty 69%, check 74% and scope 95% agreement, median 4.0 s. Haiku moved between runs by up to ten points on difficulty and check, so a difference smaller than that says nothing. These labels are one person’s judgement, not proven answers.
 - Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026, GPT-6.1 Terra on
   27/10/2026 and Claude Fable 5.2, the strongest and dearest rung, on 10/11/2026; compiled in for now) and move
   to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
@@ -52,6 +53,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   draft is routed at most twice per message. An accepted send, including queueing or steering into a running answer,
   resets that conversation's count and discards its queued draft classification; other conversations keep theirs
   (done, `engine/src/engine/auto.rs`).
+- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 58, agent 61). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. Quota and learned steps stop at frontier.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can

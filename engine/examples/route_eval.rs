@@ -21,38 +21,74 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// (request, kind, difficulty, check), written the way people type to Faber.
-const LABELLED: [(&str, &str, &str, &str); 30] = [
-    ("oi, tudo bem?", "chat", "easy", "glance"),
-    ("What's the capital of Australia?", "chat", "easy", "blind"),
-    ("Escreve um email educado pro meu chefe pedindo folga na sexta", "writing", "easy", "glance"),
-    ("Translate this paragraph into Spanish: The meeting moved to Thursday because the room was booked.", "writing", "easy", "glance"),
-    ("Write a 1,500-word short story about a lighthouse keeper who finds a radio that talks back", "writing", "medium", "glance"),
-    ("Monta um plano de estudos de 8 semanas pra eu passar no exame de inglês B2", "writing", "medium", "blind"),
-    ("Fix the typo in the README title, it says Fabre instead of Faber", "code", "easy", "glance"),
-    ("Add a dark mode toggle to the settings page of my React app", "code", "medium", "glance"),
-    ("The test suite fails on CI with a timeout in tests/api.test.ts, find out why and fix it", "code", "medium", "machine"),
-    ("Write a Python function that parses ISO 8601 durations like P3DT4H, with unit tests", "code", "medium", "machine"),
-    ("Refactor the payment module to use the new billing API across all 14 services without breaking anything", "code", "hard", "machine"),
-    ("Review this function for race conditions: it updates a shared cache from several threads without a lock", "code", "hard", "blind"),
-    ("Meu script de backup em bash às vezes apaga a pasta errada, dá uma olhada", "code", "hard", "blind"),
-    ("Is this SQL query vulnerable to injection? SELECT * FROM users WHERE name = '\" + name + \"'", "code", "medium", "blind"),
-    ("Quanto é 17% de 2.340?", "math", "easy", "machine"),
-    ("Prove that the square root of 2 is irrational", "math", "medium", "blind"),
-    ("Calcula a parcela de um financiamento de 300 mil em 360 meses a 0,9% ao mês", "math", "medium", "machine"),
-    ("Find all real solutions of x^4 - 5x^2 + 4 = 0 and check them", "math", "medium", "machine"),
-    ("What is the expected number of rolls of a fair die until two sixes appear in a row?", "math", "hard", "blind"),
-    ("Compara o iPhone 17 com o Galaxy S26 pra quem tira muita foto", "research", "medium", "blind"),
-    ("Explain how vaccines train the immune system, for a 12-year-old", "research", "easy", "glance"),
-    ("Should I pay off my car loan early or invest the money in an index fund? I'm 34 and the loan is at 6%", "research", "hard", "blind"),
-    ("Quais são os efeitos colaterais de tomar ibuprofeno junto com losartana?", "research", "hard", "blind"),
-    ("Summarise the main arguments for and against a four-day work week, with sources", "research", "medium", "blind"),
-    ("Posso ser demitido por justa causa se faltar dois dias com atestado?", "research", "hard", "blind"),
-    ("Which is better for a small online store in Brazil, Shopify or Nuvemshop?", "research", "medium", "blind"),
-    ("Make a logo for my bakery called Pão da Vó, warm colours", "image", "medium", "glance"),
-    ("Remove the background from this product photo", "image", "easy", "glance"),
-    ("Organize these 200 receipts into a spreadsheet by month and category", "other", "medium", "machine"),
-    ("Me lembra de ligar pro dentista amanhã às 10h", "other", "easy", "glance"),
+/// (request, kind, difficulty, check, scope), written the way people type to Faber.
+const LABELLED: [(&str, &str, &str, &str, &str); 42] = [
+    ("oi, tudo bem?", "chat", "easy", "glance", "tight"),
+    ("What's the capital of Australia?", "chat", "easy", "blind", "tight"),
+    ("Escreve um email educado pro meu chefe pedindo folga na sexta", "writing", "easy", "glance", "tight"),
+    (
+        "Translate this paragraph into Spanish: The meeting moved to Thursday because the room was booked.",
+        "writing",
+        "easy",
+        "glance",
+        "tight",
+    ),
+    ("Write a 1,500-word short story about a lighthouse keeper who finds a radio that talks back", "writing", "medium", "glance", "tight"),
+    ("Monta um plano de estudos de 8 semanas pra eu passar no exame de inglês B2", "writing", "medium", "blind", "tight"),
+    ("Fix the typo in the README title, it says Fabre instead of Faber", "code", "easy", "glance", "tight"),
+    ("Add a dark mode toggle to the settings page of my React app", "code", "medium", "glance", "tight"),
+    ("The test suite fails on CI with a timeout in tests/api.test.ts, find out why and fix it", "code", "medium", "machine", "tight"),
+    ("Write a Python function that parses ISO 8601 durations like P3DT4H, with unit tests", "code", "medium", "machine", "tight"),
+    (
+        "Refactor the payment module to use the new billing API across all 14 services without breaking anything",
+        "code",
+        "hard",
+        "machine",
+        "open",
+    ),
+    (
+        "Review this function for race conditions: it updates a shared cache from several threads without a lock",
+        "code",
+        "hard",
+        "blind",
+        "tight",
+    ),
+    ("Meu script de backup em bash às vezes apaga a pasta errada, dá uma olhada", "code", "hard", "blind", "tight"),
+    ("Is this SQL query vulnerable to injection? SELECT * FROM users WHERE name = '\" + name + \"'", "code", "medium", "blind", "tight"),
+    ("Quanto é 17% de 2.340?", "math", "easy", "machine", "tight"),
+    ("Prove that the square root of 2 is irrational", "math", "medium", "blind", "tight"),
+    ("Calcula a parcela de um financiamento de 300 mil em 360 meses a 0,9% ao mês", "math", "medium", "machine", "tight"),
+    ("Find all real solutions of x^4 - 5x^2 + 4 = 0 and check them", "math", "medium", "machine", "tight"),
+    ("What is the expected number of rolls of a fair die until two sixes appear in a row?", "math", "hard", "blind", "tight"),
+    ("Compara o iPhone 17 com o Galaxy S26 pra quem tira muita foto", "research", "medium", "blind", "tight"),
+    ("Explain how vaccines train the immune system, for a 12-year-old", "research", "easy", "glance", "tight"),
+    (
+        "Should I pay off my car loan early or invest the money in an index fund? I'm 34 and the loan is at 6%",
+        "research",
+        "hard",
+        "blind",
+        "tight",
+    ),
+    ("Quais são os efeitos colaterais de tomar ibuprofeno junto com losartana?", "research", "hard", "blind", "tight"),
+    ("Summarise the main arguments for and against a four-day work week, with sources", "research", "medium", "blind", "tight"),
+    ("Posso ser demitido por justa causa se faltar dois dias com atestado?", "research", "hard", "blind", "tight"),
+    ("Which is better for a small online store in Brazil, Shopify or Nuvemshop?", "research", "medium", "blind", "tight"),
+    ("Make a logo for my bakery called Pão da Vó, warm colours", "image", "medium", "glance", "tight"),
+    ("Remove the background from this product photo", "image", "easy", "glance", "tight"),
+    ("Organize these 200 receipts into a spreadsheet by month and category", "other", "medium", "machine", "tight"),
+    ("Me lembra de ligar pro dentista amanhã às 10h", "other", "easy", "glance", "tight"),
+    ("Migrate our auth system across twelve services, figure out the rollout and keep it compatible", "code", "hard", "machine", "open"),
+    ("Refatora o projeto inteiro pra separar as partes, decide o melhor jeito e testa tudo", "code", "hard", "machine", "open"),
+    ("Design the architecture for a reliable payment platform across regions", "code", "hard", "blind", "open"),
+    ("Pesquisa a fundo as evidências sobre tratamento de apneia e compara as fontes", "research", "hard", "blind", "open"),
+    ("Work through the migration plan overnight, investigate each service and verify the result", "code", "hard", "machine", "open"),
+    ("Investigue as causas da crise financeira de 2008 em várias fontes e avalie os argumentos", "research", "hard", "blind", "open"),
+    ("Review only this lock-free queue function for a race condition", "code", "hard", "blind", "tight"),
+    ("Analisa essa cláusula do contrato e diz se permite multa dupla", "research", "hard", "blind", "tight"),
+    ("Check the concurrency fix in cache.rs against the attached spec", "code", "hard", "machine", "tight"),
+    ("Summarize this 300-page report in ten bullet points", "writing", "medium", "glance", "tight"),
+    ("Ordena essa planilha enorme por data e remove linhas repetidas", "other", "medium", "machine", "tight"),
+    ("Write a long email to all 200 customers using this exact template", "writing", "medium", "glance", "tight"),
 ];
 
 fn spawner(cli: &Cli) -> Spawner {
@@ -67,10 +103,28 @@ async fn reply(rx: &mut UnboundedReceiver<EngineEvent>) -> Option<String> {
         match tokio::time::timeout(TURN_TIMEOUT, rx.recv()).await.ok()?? {
             EngineEvent::Text(t) => text.push_str(&t),
             EngineEvent::Done { ok, .. } => return ok.then_some(text),
-            EngineEvent::Error { fatal: true, .. } => return None,
+            EngineEvent::Error { fatal, message } => {
+                eprintln!("router error (fatal {fatal}): {message}");
+                if fatal {
+                    return None;
+                }
+            }
             _ => {}
         }
     }
+}
+
+fn codex_server(cli: &Cli, dir: &std::path::Path) -> CodexServer {
+    CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: cli.clone(),
+        cwd: dir.to_path_buf(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: cfg!(windows),
+        spawn: spawner(cli),
+        tools: Default::default(),
+    })
 }
 
 struct Router {
@@ -80,14 +134,16 @@ struct Router {
 }
 
 impl Router {
-    fn open(&self, vendor: Vendor, model: &str, effort: &str) -> Option<(Session, UnboundedReceiver<EngineEvent>)> {
+    fn open(&mut self, vendor: Vendor, model: &str, effort: &str) -> Option<(Session, UnboundedReceiver<EngineEvent>)> {
         let (tx, rx) = unbounded_channel();
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let (model, effort, instructions) = (Some(model.to_string()), Some(effort.to_string()), Some(INSTRUCTIONS.to_string()));
         let session = match vendor {
             Vendor::Gemini => return None,
             Vendor::Codex => {
-                let (_, server) = self.codex.as_ref()?;
+                let (cli, server) = self.codex.as_mut()?;
+                // The server ends once its last thread closes, and an open sent while it ends is lost: one server per request.
+                *server = codex_server(cli, &self.dir);
                 server.open(
                     CodexThread {
                         temporary: false,
@@ -154,6 +210,7 @@ struct Score {
     kind: u32,
     difficulty: u32,
     check: u32,
+    scope: u32,
     secs: Vec<f64>,
     misses: Vec<String>,
 }
@@ -164,26 +221,17 @@ async fn main() {
     let dir = std::env::temp_dir().join("faber-route-eval");
     std::fs::create_dir_all(&dir).expect("a folder to work in");
     let codex = find_cli("codex").map(|cli| {
-        let server = CodexServer::start(CodexServerOptions {
-            permissions: Permissions::Ask,
-            cli: cli.clone(),
-            cwd: dir.clone(),
-            area: Area::Chat,
-            user_hooks: false,
-            windows: cfg!(windows),
-            spawn: spawner(&cli),
-            tools: Default::default(),
-        });
+        let server = codex_server(&cli, &dir);
         (cli, server)
     });
-    let router = Router { dir, codex, claude: find_cli("claude") };
-    println!("| router | effort | valid JSON | kind | difficulty | check | median s | slowest s |");
-    println!("|---|---|---|---|---|---|---|---|");
+    let mut router = Router { dir, codex, claude: find_cli("claude") };
+    println!("| router | effort | valid JSON | kind | difficulty | check | scope | median s | slowest s |");
+    println!("|---|---|---|---|---|---|---|---|---|");
     for (vendor, model, _) in ROUTER {
         for effort in ["medium", "low"] {
             let mut score = Score::default();
             for _ in 0..runs {
-                for (request, kind, difficulty, check) in LABELLED {
+                for (request, kind, difficulty, check, scope) in LABELLED {
                     let Some((session, mut rx)) = router.open(vendor, model, effort) else { continue };
                     let started = Instant::now();
                     session.send(UserTurn::text(question(request, 0)));
@@ -199,6 +247,7 @@ async fn main() {
                     score.kind += u32::from(verdict.kind == kind);
                     score.difficulty += u32::from(verdict.difficulty == difficulty);
                     score.check += u32::from(verdict.check == check);
+                    score.scope += u32::from(verdict.scope == scope);
                     if verdict.check != check {
                         score.misses.push(format!("check {} (label {check}): {request}", verdict.check));
                     }
@@ -211,11 +260,12 @@ async fn main() {
             score.secs.sort_by(f64::total_cmp);
             let pct = |n: u32| format!("{:.0}%", f64::from(n) * 100.0 / f64::from(score.asked));
             println!(
-                "| {model} | {effort} | {} | {} | {} | {} | {:.1} | {:.1} |",
+                "| {model} | {effort} | {} | {} | {} | {} | {} | {:.1} | {:.1} |",
                 pct(score.valid),
                 pct(score.kind),
                 pct(score.difficulty),
                 pct(score.check),
+                pct(score.scope),
                 score.secs[score.secs.len() / 2],
                 score.secs.last().copied().unwrap_or_default()
             );
