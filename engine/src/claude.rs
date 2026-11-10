@@ -279,7 +279,7 @@ fn autocompact_window(model: &str) -> Option<String> {
 /// The same point in tokens: the size Faber's context meter counts the conversation against when it passes `--autocompact`.
 pub fn autocompact_tokens(model: &str) -> Option<u64> {
     let model = model.to_ascii_lowercase();
-    [("haiku", 150_000), ("sonnet", 300_000), ("opus", 400_000)]
+    [("haiku", 150_000), ("sonnet", 300_000), ("opus", 400_000), ("fable", 400_000)]
         .into_iter()
         .find(|(name, _)| model.contains(name))
         .map(|(_, tokens)| tokens)

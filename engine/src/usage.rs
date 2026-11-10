@@ -132,6 +132,7 @@ pub fn api_price_for_prompt(model: &str, input: u64, output: u64, read: u64, wri
         m if m.starts_with("gpt-6.1-sol") => (2.0, 0.1, 2.5, 2.5, 10.0),
         m if m.starts_with("gpt-6.1-terra") => (1.0, 0.05, 1.25, 1.25, 5.0),
         m if m.starts_with("gpt-6-luna") => (0.1, 0.01, 0.125, 0.125, 0.5),
+        m if m.starts_with("claude-fable-5-2") => (8.0, 0.2, 10.0, 16.0, 40.0),
         m if m.starts_with("claude-opus-5-5") => (4.0, 0.2, 5.0, 8.0, 20.0),
         m if m.starts_with("claude-sonnet-5-5") => (2.0, 0.1, 2.5, 4.0, 10.0),
         m if m.starts_with("claude-haiku-5-5") && prompt > 100_000 => (0.5, 0.05, 0.625, 1.0, 2.5),

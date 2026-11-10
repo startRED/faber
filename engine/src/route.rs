@@ -11,7 +11,8 @@ use crate::router::Pick;
 use serde::Deserialize;
 
 /// One way to run a model. Numbers from Artificial Analysis (artificialanalysis.ai/models/<model>-<effort>), read
-/// between 22/09 and 08/10/2026 (GPT-6.1 Terra on 27/10/2026): `iq` is the Intelligence Index, `agent` Terminal-Bench (multi-step coding and terminal
+/// between 22/09 and 08/10/2026 (GPT-6.1 Terra on 27/10/2026; Claude Fable 5.2 on 10/11/2026, scaled from AA's new per-task
+/// numbers against Opus 5.5 high on the same pages, and `agent` estimated from the index gap until AA lists Terminal-Bench): `iq` is the Intelligence Index, `agent` Terminal-Bench (multi-step coding and terminal
 /// work, %), `secs` a typical whole answer, `cost` US$ to run the index, which is how much a task weighs on the quota.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
@@ -30,7 +31,9 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 
 // No maximum effort (minutes per answer at two to three times the cost) and no model another one here beats on every
 // number. ponytail: compiled in; it moves to the live manifest (roadmap phase 4) so a new model joins without a release.
-pub const PROFILES: [Profile; 12] = [
+pub const PROFILES: [Profile; 14] = [
+    p(Vendor::Claude, "claude-fable-5-2", "high", 64, 67, 81.4, 4.78),
+    p(Vendor::Claude, "claude-fable-5-2", "medium", 58, 61, 37.7, 2.0),
     p(Vendor::Claude, "claude-opus-5-5", "high", 54, 57, 44.2, 1.82),
     p(Vendor::Claude, "claude-opus-5-5", "medium", 51, 53, 27.9, 1.34),
     p(Vendor::Claude, "claude-sonnet-5-5", "high", 47, 44, 17.5, 0.88),

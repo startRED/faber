@@ -15,7 +15,7 @@ const AUTO_MODELS = new Set(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-
 export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {
   const options: Option[] = [{ label: t('model.autoChoose'), choice: { vendor: 'auto' } }];
   if (vendors.includes('claude')) {
-    for (const [label, model] of [['Opus', 'opus'], ['Sonnet', 'sonnet'], ['Haiku', 'haiku']] as const) {
+    for (const [label, model] of [['Fable', 'fable'], ['Opus', 'opus'], ['Sonnet', 'sonnet'], ['Haiku', 'haiku']] as const) {
       options.push({ label: `Claude ${label}`, choice: { vendor: 'claude', model }, current: true });
     }
   }

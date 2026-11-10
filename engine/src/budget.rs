@@ -73,7 +73,7 @@ pub fn vendor_wide(name: &str) -> bool {
 
 /// The model family a family window belongs to, or the family of a Claude model id.
 pub fn family_of(name: &str) -> Option<&'static str> {
-    ["opus", "sonnet", "haiku"].into_iter().find(|f| name.contains(f))
+    ["fable", "opus", "sonnet", "haiku"].into_iter().find(|f| name.contains(f))
 }
 
 /// How a week of use is spread over the hours of the week: weekday x hour in the PC's local time, Monday 00:00 first,

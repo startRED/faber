@@ -862,7 +862,7 @@ mod tests {
             } else {
                 engine.note_account_events(
                     vendor,
-                    ["seven_day_opus", "seven_day_sonnet"]
+                    ["seven_day_fable", "seven_day_opus", "seven_day_sonnet"]
                         .map(|window| EngineEvent::Quota {
                             window: window.into(),
                             used: if used { 1.0 } else { 0.0 },

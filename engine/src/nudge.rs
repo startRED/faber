@@ -318,13 +318,15 @@ mod tests {
     fn a_model_at_its_top_effort_moves_to_the_next_model_at_medium() {
         assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "high"), to("claude-opus-5-5", "medium"));
         assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "medium"), to("claude-sonnet-5-5", "medium"));
+        assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "high"), to("claude-fable-5-2", "medium"));
+        assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "medium"), to("claude-fable-5-2", "high"));
         assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6.1-terra", "medium"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "high"), to("gpt-6.1-sol", "medium"));
     }
 
     #[test]
     fn the_strongest_pick_of_a_vendor_and_a_pick_the_table_does_not_know_have_no_rung() {
-        assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "high"), None);
+        assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "high"), None);
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "high"), None);
         assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "high"), None);
         assert_eq!(rung(Vendor::Claude, "sonnet", "medium"), None);
@@ -463,7 +465,7 @@ mod tests {
         m.status = Some(Status::Stopped);
         assert_eq!(of(&m, Area::Project, &PROFILES), None);
         let mut m = turn(vec![bash("cargo test", false)]);
-        m.model = Some("claude-opus-5-5".into());
+        m.model = Some("claude-fable-5-2".into());
         m.effort = Some("high".into());
         assert_eq!(of(&m, Area::Project, &PROFILES), None);
     }
