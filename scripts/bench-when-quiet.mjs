@@ -263,7 +263,8 @@ function gameRunning() {
 async function main() {
   const { codexOnly, claudeOnly, notBefore } = watcherOptions(process.argv.slice(2));
   const subscriptionOnly = codexOnly || claudeOnly;
-  const release = '4bc453277a64e9b7ca26835c1df7ecc128d52e5f';
+  // A re-run after product fixes names its own candidate; the default stays the first measured one.
+  const release = process.env.FABER_BENCH_RELEASE || '4bc453277a64e9b7ca26835c1df7ecc128d52e5f';
   const evidence = claudeOnly ? CLAUDE_EVIDENCE : codexOnly ? CODEX_EVIDENCE : path.join(root, 'reports/reforma/helpers/g390b-evidence');
   const deadline = claudeOnly ? CLAUDE_DEADLINE : undefined;
   const limit = claudeOnly ? 'deadline' : '14-hour limit';
