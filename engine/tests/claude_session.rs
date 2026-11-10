@@ -1240,9 +1240,15 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
         })
     };
     let windows = |args: &[String]| args.windows(2).filter(|a| a[0] == "--autocompact").map(|a| a[1].clone()).collect::<Vec<_>>();
-    for (model, window) in
-        [("haiku", "150k"), ("claude-haiku-5-5", "150k"), ("Haiku[1m]", "150k"), ("sonnet", "300k"), ("claude-opus-5-5", "400k")]
-    {
+    for (model, window) in [
+        ("haiku", "150k"),
+        ("claude-haiku-5-5", "150k"),
+        ("Haiku[1m]", "150k"),
+        ("sonnet", "300k"),
+        ("claude-opus-5-5", "400k"),
+        ("fable", "400k"),
+        ("claude-fable-5-2", "400k"),
+    ] {
         for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
             assert_eq!(windows(&with(model, permissions, None, NEWER)), [window], "{model} {permissions:?}: one window, never two");
         }
@@ -1252,7 +1258,7 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
         );
         assert!(windows(&with(model, Permissions::FullAccess, Some("Route."), NEWER)).is_empty(), "a side question keeps the CLI default");
     }
-    assert!(windows(&with("fable", Permissions::Isolated, None, NEWER)).is_empty(), "an unknown model keeps the CLI default");
+    assert!(windows(&with("mythos", Permissions::Isolated, None, NEWER)).is_empty(), "an unknown model keeps the CLI default");
 }
 
 #[test]

@@ -16,7 +16,7 @@ fn picked(kind: &'static str, level: &'static str, confidence: f64, from: &[Prof
 #[test]
 fn the_router_never_sees_a_model_or_company_name() {
     let seen = format!("{INSTRUCTIONS}\n{}", question("Fix the failing test in my Rust project", 0)).to_lowercase();
-    for name in ["claude", "anthropic", "opus", "sonnet", "haiku", "gpt", "openai", "codex", "chatgpt", "sol", "luna"] {
+    for name in ["claude", "anthropic", "fable", "opus", "sonnet", "haiku", "gpt", "openai", "codex", "chatgpt", "sol", "luna"] {
         assert!(!seen.split(|c: char| !c.is_alphanumeric()).any(|w| w == name), "the router saw {name:?}");
     }
 }

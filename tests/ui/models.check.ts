@@ -30,7 +30,7 @@ check('models: current models include Auto profiles and the account default, lea
     { id: 'gpt-6-luna', label: 'GPT-6 Luna', isDefault: false },
     { id: 'account-model', label: 'Account model', isDefault: true },
   ]);
-  deepEqual(options.filter((option) => option.current).map((option) => option.choice.model), ['opus', 'sonnet', 'haiku', 'gpt-6.1-sol', 'gpt-6-luna', 'account-model']);
+  deepEqual(options.filter((option) => option.current).map((option) => option.choice.model), ['fable', 'opus', 'sonnet', 'haiku', 'gpt-6.1-sol', 'gpt-6-luna', 'account-model']);
   equal(options.find((option) => option.choice.model === 'gpt-5')?.current, false);
 });
 
