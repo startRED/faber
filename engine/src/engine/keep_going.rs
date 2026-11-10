@@ -19,7 +19,8 @@ Continue with the next item of your plan, or take the next task from the project
 and check it the way the project says. When the task you take next has nothing to do with what this conversation did so far, start it on a fresh context with your conversation tool's clear, when you have it. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
 Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
-question tool when you have one, and say exactly what you need. When the whole request is done and verified, end your closing message with the <|faber-wrap-up|> JSON block, outcome done, and say what you checked.";
+question tool when you have one, and say exactly what you need. When the whole request is done and verified, call your wrap_up tool \
+with outcome done, saying what you checked; only if you have no wrap_up tool, say so in one short line and end your reply with this line alone: [keep going: stop]";
 
 /// The line the agent ended its reply with when nothing was left, before the closing box's `done` (task 017). Still read for a
 /// release, so a run under way stops, and always taken off the answer.

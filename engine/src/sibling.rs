@@ -23,25 +23,25 @@ pub const MAX_OPEN: usize = 5;
 /// The most of a conversation's latest answer a read returns.
 const MAX_READ: usize = 4000;
 
-const DESCRIPTION: &str = "Project conversations: start, read, list, ask, stop, resume, wait, archive, context, compact or clear. Start only independent substantial work; teams require the person's request. Stop or resume only your children; resume rather than restart, and read and verify before archiving. Wait when independent work ends, then end your turn; never poll. Compact after a phase or 60%, never mid-step; clear after two failed attempts or for unrelated work. Both end this turn; next carries the handoff word for word.";
+const DESCRIPTION: &str = "Start parallel work only for independent pieces, a team only when the person asked for one. Stop a child that went the wrong way; resume it rather than restart. Archive children once their work is read and verified. Handoff: `start`, then `wait` on its id and end your turn; call wait when you have no independent work left, never poll. `stop` and `resume` take an `id` (resume: optional `message`); `wait` takes `on` (child ids) and/or a `note`.\nActs on this project's conversations and on this one. `action`:\n- `start` (`title`, `brief`): a parallel conversation whose agent cannot see this one, so the brief must give the goal, the files involved and what done looks like. Returns its `id`; its answer reaches you when it stops. Only for independent work that takes a while, never small steps or pieces that change the same files. `step`: the plan step it does (its copy starts from your latest work; a step that waits on or shares files with a running one is refused). `ai`: `same` (default), `auto` (by task and quota), `claude`, `codex`; spread work over the AIs that have room (`quota` first), and have the other AI review code. `keep_going`: it works through an ordered task list in its brief; you get one report at the end.\n- `read` `id`: working, waiting for the person or done, and its latest answer.\n- `list`: the unarchived conversations, which are working, each folder. When a file you work on changed and neither you nor your helpers changed it, list and ask the one working there.\n- `ask` `id` `message`: your question to another agent; read its reply later with `read`. Say who you are and what you need, briefly. One cut off when Faber closed goes on when asked \"Continue where you stopped. Check the project's state first.\"\n- `archive` `id`: a finished conversation (not working, waiting, queued or pinned), whoever started it; the person can bring it back. `list` first, and only what the person asked for.\n- `archive`: this conversation, as your very last step once all is done, verified and nothing waits on the person.\n- `context`: your context's tokens, limit and share.\n- `compact`: summarizes everything so far (details gone) once you end this turn, so end it right after. Good after a large phase or past about 60%; never mid-step. `next`: all you need to continue (goal, done, left, files, decisions); Faber sends it back word for word and you go on alone. Without it the conversation waits for the person.\n- `clear` with `next`: fresh context, no summary; Faber does it the moment you end this turn, and your next turn starts a new session holding only the person's requests, word for word, and `next` (your handoff: done, left, files, decisions, check commands, what failed; long notes go in a named file). Use it instead of `compact` when the next task is unrelated or after two failed attempts at the same problem.";
 
 fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "stop", "resume", "wait", "archive", "context", "compact", "clear"], "description": "read: status and latest answer; list: unarchived conversations and folders, if a file changed unexpectedly, ask the conversation working there; ask: identify yourself and read the reply later; wait: on ids or note; archive id: list first, only when asked; any owner, finished, not working, waiting, queued or pinned; recoverable by the person; archive without id: self only when done, verified and nothing awaits the person. context: token usage. compact: summarize, losing details; without next wait for the person. clear: discard summary, keep the person's requests word for word and next." },
+            "action": { "type": "string", "enum": ["start", "read", "list", "ask", "stop", "resume", "wait", "archive", "context", "compact", "clear"] },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
-            "brief": { "type": "string", "description": "start: self-contained goal, files and done criteria; no overlapping work. Returns id and reports when finished. keep_going gives ordered tasks and one final report." },
-            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: same by default or auto by task and quota; check quota, spread across available AIs, use the other AI for code review." },
+            "brief": { "type": "string", "description": "start: everything the new conversation needs to do the work on its own." },
+            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: which AI runs it; same when left out." },
             "model": { "type": "string", "description": "start: model of the chosen AI; not with auto." },
             "effort": { "type": "string", "enum": ["low", "medium", "high"] },
-            "on": { "type": "array", "items": { "type": "string" }, "description": "wait: child conversation ids." },
-            "note": { "type": "string", "description": "wait: optional reason." },
+            "on": { "type": "array", "items": { "type": "string" } },
+            "note": { "type": "string" },
             "keep_going": { "type": "boolean", "description": "start: true when the brief is an ordered list of tasks it goes through by itself." },
-            "step": { "type": "string", "description": "start: plan step id; its copy starts from your latest work; steps waiting on or sharing files with running work are refused." },
+            "step": { "type": "string", "description": "start: the id of the plan step this conversation does; its copy starts from your latest work." },
             "id": { "type": "string", "description": "read, ask, stop, resume, archive: the other conversation's id." },
-            "message": { "type": "string", "description": "ask: your question; after Faber closed, continue a cut-off conversation with: Continue where you stopped. Check the project's state first. resume: an optional instruction." },
-            "next": { "type": "string", "description": "compact, clear: goal, done, left, files, decisions, checks and failures; sent word for word. Put long notes in a named file." }
+            "message": { "type": "string", "description": "ask: your question; resume: an optional instruction for the conversation." },
+            "next": { "type": "string", "description": "compact, clear: everything you need to continue afterwards; sent to you word for word." }
         },
         "additionalProperties": false
     })
@@ -490,16 +490,6 @@ mod tests {
         let long = read("Docs", State::Concluded, &"x".repeat(5000));
         assert!(long.contains("concluded its task") && long.contains("(cut short)"), "{long}");
         assert!(!read("Docs", State::Failed, "short").contains("cut short"));
-    }
-
-    #[test]
-    fn ask_explains_how_to_continue_after_faber_closed() {
-        assert!(
-            codex_tool()["inputSchema"]["properties"]["message"]["description"]
-                .as_str()
-                .unwrap()
-                .contains("Continue where you stopped. Check the project's state first.")
-        );
     }
 
     #[test]

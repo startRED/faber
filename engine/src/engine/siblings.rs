@@ -381,7 +381,7 @@ impl Core {
         }
         if open >= sibling::MAX_OPEN {
             return Err("five conversations started by agents are already open in this project, and some wait for the person to answer \
-                them; tell the person once with the faber-wrap-up block, then wait for an answer or for one to finish");
+                them; tell the person once with wrap_up, then wait for an answer or for one to finish");
         }
         Ok(())
     }
@@ -918,7 +918,7 @@ mod tests {
             assert_eq!(core.sibling_room("p"), Ok(()), "three waiting for the person leave room to work");
             started(core, 2, false);
             let full = core.sibling_room("p").unwrap_err();
-            assert!(full.starts_with("five conversations") && full.contains("faber-wrap-up"), "{full}");
+            assert!(full.starts_with("five conversations") && full.contains("wrap_up"), "{full}");
             assert_eq!(core.sibling_room("other"), Ok(()), "the limits are per project");
             started(core, 1, false);
             assert!(core.sibling_room("p").unwrap_err().starts_with("three conversations"), "three working is the first limit");

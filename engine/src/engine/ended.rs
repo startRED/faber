@@ -155,8 +155,7 @@ fn fresh_plan(c: &Conversation) -> Option<&Plan> {
 /// reply cannot erase the work before it.
 fn needs_conclusion(c: &Conversation) -> bool {
     c.area == Area::Project
-        && (c.messages.last().is_some_and(|m| m.conclusion_error.is_some())
-            || fresh_plan(c).is_some()
+        && (fresh_plan(c).is_some()
             || c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some()).any(|m| {
                 m.role == Role::Assistant
                     && (m.checks.is_some()
@@ -180,8 +179,9 @@ pub(super) fn conclusion_line(c: &Conversation) -> Option<String> {
 }
 
 /// What Faber says, once, to an agent whose turn ended with work done and no conclusion.
-const CONCLUDE: &str = "Your last turn ended without concluding the task. Check what really got done, then end your closing message with the <|faber-wrap-up|> JSON block and the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
-move is the person's. Say what is not done or not verified. Write your closing message to the person before that block.";
+const CONCLUDE: &str = "Your last turn ended without concluding the task. Check what really got done, then call wrap_up with \
+the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
+move is the person's. Say what is not done or not verified. Then write your closing message to the person.";
 
 fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> String {
     let files: Vec<_> =
@@ -286,16 +286,11 @@ impl Core {
         let base = if conclude {
             CONCLUDE
         } else {
-            "Before closing, tidy the project notes, then end your closing message with the <|faber-wrap-up|> block restating the task's outcome and verification."
+            "Before closing, tidy the project notes, then call wrap_up restating the task's outcome and verification."
         };
-        let mut text = memory.as_ref().map_or_else(|| base.into(), |memory| closing_input(base, memory));
+        let text = memory.as_ref().map_or_else(|| base.into(), |memory| closing_input(base, memory));
         let fold = text != base;
-        if let Some(error) = c.messages.last().and_then(|m| m.conclusion_error.as_deref()) {
-            text.push_str("\nThe previous conclusion was rejected: ");
-            text.extend(error.chars().take(1000));
-            text.push_str(". Correct it in the closing block.");
-        }
-        if !conclude && !fold && c.messages.last().is_none_or(|m| m.conclusion_error.is_none()) {
+        if !conclude && !fold {
             return;
         }
         let reply = self.convs.get_mut(conv).unwrap().messages.last_mut().unwrap();
@@ -325,51 +320,6 @@ impl Core {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[tokio::test]
-    async fn rejected_conclusion_sends_its_reason_in_the_one_reminder() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
-        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
-        let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
-        let id = super::super::answer::tests::seed(
-            &engine,
-            Session::from_fn(move |command| {
-                if let crate::events::SessionCommand::Send(turn) = command {
-                    let _ = send.send(turn.text);
-                }
-            }),
-            &[("reply", &[])],
-        );
-        engine.with(|core| {
-            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
-            core.ledger.of_mut(Vendor::Claude).billing = Billing::Subscription;
-            let c = core.convs.get_mut(&id).unwrap();
-            c.area = Area::Project;
-            c.project_id = Some(project.id);
-            c.sessions.insert(Vendor::Claude, "synthetic-session".into());
-            c.choice = Some(Choice { vendor: "claude".into(), model: None, effort: None });
-            let reply = c.messages.last_mut().unwrap();
-            reply.text = "Tried.".into();
-            reply.status = Some(Status::Done);
-            reply.conclusion_error = Some("error.chat.saveFailed".into());
-            let cwd = core.cwd_of(&core.convs[&id]).unwrap();
-            let live = core.live.get_mut(&id).unwrap();
-            live.turn = None;
-            live.cwd = cwd;
-            live.cli = core.opts.clis[&Vendor::Claude].clone();
-            live.model = Some(crate::router::default_model(Vendor::Claude, None, &[]));
-            live.tuning = core.store.settings().tuning();
-            core.conclusion_memory_ready(&id, None, &[]);
-        });
-        let input = tokio::time::timeout(Duration::from_secs(10), receive.recv()).await.unwrap().unwrap();
-        assert!(input.contains("error.chat.saveFailed"), "{input}");
-        assert!(input.contains("Correct it in the closing block"));
-        engine.with(|core| assert!(!core.can_request_conclusion(&id)));
-        engine.shutdown();
-    }
 
     #[tokio::test]
     async fn t495_fold_kept_loss_is_a_notice_in_the_next_input() {

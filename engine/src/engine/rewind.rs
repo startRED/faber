@@ -1465,7 +1465,6 @@ mod tests {
                     parent_reported: None,
                     break_pending: false,
                     answer_started: false,
-                    trailer: Default::default(),
                     settled: false,
                     open_tools: Vec::new(),
                     used: 0,

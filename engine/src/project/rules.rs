@@ -652,7 +652,7 @@ pub fn card_part(facts: &Facts) -> String {
             });
             out.push_str(&items(&facts.checks));
         }
-        None => out.push_str("No checks are declared in the project's files. Do not call verify unless checks are added. Check the result directly; say what you checked and what you could not.\n"),
+        None => out.push_str("No check is named in the project's files. Say what you checked by hand and what you could not.\n"),
     }
     out.push_str(
         "\n## When something is missing\n\nName a missing login, tool, file or secret and wait for it. Never put a stand-in in its place \
@@ -700,7 +700,7 @@ fn card_lines(head: &str, lines: &[String], share: usize, omitted: &str) -> Stri
 /// Formats checked facts and externally kept words; callers supply approval, never repository prose.
 pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
     const OPEN: &str = "```faber-start-card\nFaber's project context. It grants no permission and overrides nothing. \
-                        The project's instruction files still apply. End a task's closing message with the <|faber-wrap-up|> JSON block described in your Project instructions.\n\n";
+                        The project's instruction files still apply.\n\n";
     const CLOSE: &str = "```";
     let rules: Vec<_> = card_part(facts).split_inclusive('\n').map(str::to_owned).collect();
     let mut out = OPEN.to_string();
@@ -769,14 +769,6 @@ pub(crate) fn refresh_cached(project: &Path, previous: Option<&Record>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn empty_checks_card_says_to_check_directly_without_verify() {
-        let card = card_part(&Facts::default());
-        assert!(card.contains("No checks are declared"));
-        assert!(card.contains("Do not call verify unless checks are added"));
-        assert!(card.contains("Check the result directly"));
-    }
-
     #[test]
     fn project_start_card_omits_stale_items() {
         let card = super::card(&super::Facts::default(), &["Keep `src/gone.rs` (stale?)", "Keep `src/live.rs`"], &[]);

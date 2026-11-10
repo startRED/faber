@@ -33,7 +33,7 @@ mod tests {
             assert!(text.contains("12 turns over 1.0 hours"));
             assert!(text.contains("US$0.00"));
             assert!(text.contains("Still waiting"));
-            assert!(text.contains("faber-wrap-up block with outcome blocked"));
+            assert!(text.contains("wrap_up with done=false"));
             assert!(core.store.get(&id).unwrap().stuck.is_some());
             assert!(matches!(core.dry_gate(&id), Gate::Go));
             add_dry(core.convs.get_mut(&id).unwrap(), 2, 4_600_000);
@@ -216,7 +216,7 @@ impl Core {
             .map(|l| l.chars().take(200).collect())
             .unwrap_or_default();
         let text = format!(
-            "The last {} turns over {:.1} hours delivered nothing: no file changed, no check passed, no commit, no pull request, no answer to the person, and no closing box with done. They cost about US${:.2} at API price. Your last line: \"{}\". Choose exactly one: (a) change approach and say in one sentence what is different; (b) ask the person with the question tool; or (c) end with the faber-wrap-up block with outcome blocked and say what is not done. Waiting on CI, a queue, a build or another conversation is not a result and must not be repeated as a loop.",
+            "The last {} turns over {:.1} hours delivered nothing: no file changed, no check passed, no commit, no pull request, no answer to the person, and no closing box with done. They cost about US${:.2} at API price. Your last line: \"{}\". Choose exactly one: (a) change approach and say in one sentence what is different; (b) ask the person with the question tool; or (c) call wrap_up with done=false and say what is not done. Waiting on CI, a queue, a build or another conversation is not a result and must not be repeated as a loop.",
             dry.turns,
             wall as f64 / 3_600_000.0,
             dry.usd,

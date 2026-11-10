@@ -61,7 +61,7 @@ impl Level {
     }
 }
 
-const DESCRIPTION: &str = "Call only when the project card lists checks or checks were added since it was made. Runs this project's own checks (its \"Proof commands\": lint, type checks, tests, builds) and returns each failure with its file, line and the tool's suggested fix. You can call it with `fast` (the default: only the checks your changes can affect, skipping one that already passed on the same content) or `full` (every check). The whole output stays in the log it names.";
+const DESCRIPTION: &str = "Runs this project's own checks (its \"Proof commands\": lint, type checks, tests, builds) and returns each failure with its file, line and the tool's suggested fix. You can call it with `fast` (the default: only the checks your changes can affect, skipping one that already passed on the same content) or `full` (every check). The whole output stays in the log it names.";
 
 fn schema() -> Value {
     json!({
