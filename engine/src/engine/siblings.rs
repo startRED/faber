@@ -48,18 +48,6 @@ pub(super) fn state_of(busy: bool, c: &Conversation) -> State {
     }
 }
 
-/// Whether a conversation an agent started stopped working for its starter, so its report is owed. A turn that ended
-/// needing an answer counts: the starter answers for the person or tells them, and holding the report back left the starter
-/// waiting forever. Only a turn still running, its own wait on the conversations it started, or a permission prompt mid-turn
-/// (the person answers it, and the turn goes on) holds the report.
-pub(super) fn stopped_for_starter(busy: bool, c: &Conversation) -> bool {
-    match state_of(busy, c) {
-        State::Working => false,
-        State::Waiting => c.waiting_on.is_none() && !ended::asking(c),
-        _ => true,
-    }
-}
-
 /// Where a plan step's conversation stands (task 040), in a subagent row's words.
 pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
     match state_of(busy, c) {
@@ -104,7 +92,7 @@ impl Core {
             for id in waiting.ids {
                 let Some(mut child) = store.get(&id) else { continue };
                 child.messages.iter_mut().for_each(settle);
-                if child.keep_going.is_none() && stopped_for_starter(false, &child) {
+                if child.keep_going.is_none() && !matches!(state_of(false, &child), State::Working | State::Waiting) {
                     pending.entry(parent.clone()).or_default().insert(id);
                 }
             }
@@ -501,7 +489,7 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return };
         let Some(parent) = c.started_by.clone() else { return };
         let state = state_of(busy, c);
-        if c.keep_going.is_some() || c.compacting || !stopped_for_starter(busy, c) {
+        if c.keep_going.is_some() || c.compacting || state == State::Working || state == State::Waiting {
             return;
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
@@ -511,10 +499,8 @@ impl Core {
             format!("No confirmed conclusion. Latest output: {text}")
         });
         let text = sibling::finished(&c.title, conv, state, &last);
-        // Stopped working: the plan step waits for its work to be joined. One waiting for an answer is not done yet.
-        if state != State::Waiting {
-            self.edit_worker(conv, |w| w.joining = true);
-        }
+        // Stopped working: the plan step waits for its work to be joined.
+        self.edit_worker(conv, |w| w.joining = true);
         let mut recipients = vec![parent.clone()];
         let mut cursor = parent;
         let mut seen = HashSet::new();
@@ -796,7 +782,7 @@ impl Core {
             let reply = child.messages.iter().rev().find(|m| m.role == Role::Assistant);
             let report_id = format!("report-{id}-{}", reply.map_or("empty", |m| m.id.as_str()));
             let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
-            let ended = stopped_for_starter(busy, child);
+            let ended = !matches!(state_of(busy, child), State::Working | State::Waiting);
             let delivered = self
                 .convs
                 .get(by)

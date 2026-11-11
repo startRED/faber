@@ -79,8 +79,7 @@ impl Core {
 /// How the conversation's run ended, or None when it has not ended for the person: they put it away, or Keep going or a
 /// waiting message goes on with it.
 pub(super) fn end_kind(c: &Conversation) -> Option<EndKind> {
-    // Waiting on the conversations it started is work going on in parallel: their reports wake it.
-    if c.archived_at.is_some() || c.keep_going.is_some() || !c.queued.is_empty() || waits_on_helpers(c) {
+    if c.archived_at.is_some() || c.keep_going.is_some() || !c.queued.is_empty() {
         return None;
     }
     result_kind(c)
@@ -122,10 +121,8 @@ pub(super) fn result_kind(c: &Conversation) -> Option<EndKind> {
 /// running list, another agent's read and the command line share.
 pub(super) fn run_state(c: &Conversation, busy: bool) -> State {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-    let asking = asking(c);
-    // A conversation waiting on the ones it started works through them: never "ended without a conclusion" meanwhile.
-    let working =
-        busy || c.compacting || !c.queued.is_empty() || waits_on_helpers(c) || last.is_some_and(|m| m.status == Some(Status::Streaming));
+    let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
+    let working = busy || c.compacting || !c.queued.is_empty() || last.is_some_and(|m| m.status == Some(Status::Streaming));
     match last {
         _ if asking => State::Waiting,
         // Its copy is still being made: the brief follows it.
@@ -144,16 +141,6 @@ pub(super) fn run_state(c: &Conversation, busy: bool) -> State {
             Some(EndKind::Unconcluded) | None => State::Unconcluded,
         },
     }
-}
-
-/// Whether it waits on conversations it started: their reports wake it. A wait with only a note names nothing that will.
-fn waits_on_helpers(c: &Conversation) -> bool {
-    c.waiting_on.as_ref().is_some_and(|w| !w.ids.is_empty())
-}
-
-/// Whether the latest reply holds a permission prompt: its turn is not over, and only the person answers it.
-pub(super) fn asking(c: &Conversation) -> bool {
-    c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))
 }
 
 /// The plan, when the agent wrote it for the request now under way: a checklist left over from an earlier request says
@@ -251,7 +238,6 @@ impl Core {
             !c.stopped
                 && c.archived_at.is_none()
                 && c.keep_going.is_none()
-                && !waits_on_helpers(c)
                 && c.queued.is_empty()
                 && !c.compacting
                 && matches!(result_kind(c), Some(EndKind::Done | EndKind::Unconcluded))
@@ -640,45 +626,6 @@ mod tests {
             assert!(reports[0].text.contains("stopped with an error in its latest turn"), "{}", reports[0].text);
         });
         engine.shutdown();
-    }
-
-    /// A lead waiting on a helper that ends needing an answer is woken by it, never left waiting forever.
-    #[tokio::test]
-    async fn a_helper_that_ends_needing_an_answer_wakes_the_lead_waiting_on_it() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
-        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
-        engine.with(|core| {
-            core.live.remove(&child);
-            core.convs.get_mut(&child).unwrap().started_by = Some(parent.clone());
-            core.convs.get_mut(&parent).unwrap().waiting_on =
-                Some(crate::model::WaitingOn { ids: vec![child.clone()], note: String::new(), since: 0 });
-            let reply = core.convs.get_mut(&child).unwrap().messages.last_mut().unwrap();
-            reply.status = Some(Status::Done);
-            reply.wrap_up = Some(concluded("needs_you"));
-            assert_eq!(result_kind(&core.convs[&child]), Some(EndKind::NeedsYou));
-            core.turn_ended(&child);
-            let reports: Vec<_> =
-                core.convs[&parent].queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).collect();
-            assert_eq!(reports.len(), 1, "the helper's end reaches the lead");
-            assert!(reports[0].text.contains("answer it with `ask`"), "{}", reports[0].text);
-            assert!(core.convs[&parent].waiting_on.is_none(), "the lead stops waiting once the helper reported");
-        });
-        engine.shutdown();
-    }
-
-    #[test]
-    fn a_lead_waiting_on_its_helpers_is_working_not_ended_without_a_conclusion() {
-        let mut c = conv(vec![person(), worked()]);
-        c.waiting_on = Some(crate::model::WaitingOn { ids: vec!["helper".into()], note: String::new(), since: 0 });
-        assert_eq!(run_state(&c, false), State::Working);
-        assert_eq!(end_kind(&c), None, "no ended card while its helpers work");
-        c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "Waiting for review".into(), since: 0 });
-        assert_eq!(run_state(&c, false), State::Unconcluded, "a note names nothing that will wake it");
-        c.waiting_on = None;
-        assert_eq!(run_state(&c, false), State::Unconcluded);
-        assert_eq!(end_kind(&c), Some(EndKind::Unconcluded));
     }
 
     fn conv(messages: Vec<Message>) -> Conversation {
