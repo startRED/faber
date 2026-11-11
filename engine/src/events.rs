@@ -123,9 +123,6 @@ pub enum EngineEvent {
     },
     /// The CLI accepted a turn on the session. The session may have no saved history until the turn shows output.
     TurnStarted,
-    /// The CLI began a turn nobody sent: Claude Code answers by itself when a background command ends. The engine opens a
-    /// reply for it or has it interrupted (`Core::own_turn`).
-    OwnTurn,
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
     Break {

@@ -632,7 +632,7 @@ async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward
     assert_eq!((kg.waiting.unwrap().why.as_str(), kg.work, kg.idle), ("rest", 0, 1), "it did not count");
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert_eq!(turns(&pipe).len(), 1, "it rests before the next turn");
-    // A quick look with a tool is work: it counts, and the next goes at once.
+    // The same turn with a tool is work: it counts, and the next goes at once.
     engine.set_keep_going_pace(0.0);
     engine.keep_going(&id, false).unwrap();
     engine.keep_going(&id, true).unwrap();
@@ -643,60 +643,7 @@ async fn a_turn_that_only_waited_rests_before_the_next_and_does_not_count_toward
     answers_at(&mut pipe, "Tests pass.", true, 0.1).await;
     until_turns(&pipe, 3).await;
     let kg = engine.open(&id).unwrap().keep_going.unwrap();
-    assert_eq!((kg.work, kg.idle), (1, 1), "one quick look that changed no file is still work");
-    // The same look again right after ("still running") is a wait. Any tool call used to count as work, so an agent that
-    // watched a build was sent its next turn at once: 880 such turns in four days of the owner's projects (2026-11-11).
-    engine.set_keep_going_pace(0.02);
-    pipe.say(json!({ "type": "assistant", "message": { "role": "assistant",
-        "content": [{ "type": "tool_use", "id": "toolu_c", "name": "Bash", "input": { "command": "gh run view" } }] } }))
-        .await;
-    answers_at(&mut pipe, "Still running.", true, 0.1).await;
-    let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())).await;
-    let kg = c.keep_going.unwrap();
-    assert_eq!((kg.waiting.unwrap().why.as_str(), kg.work, kg.idle), ("rest", 1, 2), "the second look in a row did not count");
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(turns(&pipe).len(), 3, "it rests instead of asking again at once");
-    engine.shutdown();
-}
-
-// The recording of `tests/fixtures/claude/background-command-own-turn.jsonl`, said line by line: the agent leaves a
-// command running in the background and ends its turn. Faber used to send the next turn at once, the agent looked at the
-// command, ended again, and so on until it finished. Now it waits for the command; when it ends, what the agent says by
-// itself joins the conversation and the next turn follows that.
-#[tokio::test]
-async fn a_turn_that_left_its_own_command_running_waits_for_it_and_goes_on_when_it_ends() {
-    let (dir, project) = (support::DataFolder::new(), support::work_folder());
-    let (engine, _rx, mut pipe, id) = started(&dir, project.path()).await;
-    // A quarter of an hour is 18 s here, and the two minutes left to the CLI's own turn 2.4 s.
-    engine.set_keep_going_pace(0.02);
-    engine.keep_going(&id, true).unwrap();
-    let lines: Vec<Value> = support::fixture("claude", "background-command-own-turn")
-        .into_iter()
-        .filter(|e| !e.input && e.msg["faber_hold"].is_null() && e.msg["subtype"] != "init")
-        .map(|e| e.msg)
-        .collect();
-    let first_end = lines.iter().position(|m| m["type"] == "result").unwrap();
-    for line in &lines[..=first_end] {
-        pipe.say(line.clone()).await;
-    }
-    let c = until(&engine, &id, |c| c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())).await;
-    let kg = c.keep_going.unwrap();
-    assert_eq!((kg.waiting.unwrap().why.as_str(), kg.work), ("command", 0), "it waits for its command, and that is not work");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(turns(&pipe).len(), 1, "no turn goes out only to look at a command that still runs");
-
-    // The command ends; the CLI tells its agent, and the agent speaks in a turn nobody sent.
-    for line in &lines[first_end + 1..] {
-        pipe.say(line.clone()).await;
-    }
-    until_turns(&pipe, 2).await;
-    let c = engine.open(&id).unwrap();
-    let own =
-        c.messages.iter().position(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.commandDone")).expect("Faber's line for the turn");
-    assert!(c.messages[own + 1].text.contains("Its output was `finished`"), "{}", c.messages[own + 1].text);
-    assert!(turns(&pipe)[1].contains("keep going on your own"), "the next turn is Faber's, after the news: {}", turns(&pipe)[1]);
-    tokio::time::sleep(Duration::from_millis(2800)).await;
-    assert_eq!(turns(&pipe).len(), 2, "one turn after the command, not one from the timer too");
+    assert_eq!((kg.work, kg.idle), (1, 0));
     engine.shutdown();
 }
 

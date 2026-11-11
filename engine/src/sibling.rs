@@ -329,17 +329,11 @@ pub fn finished(title: &str, id: &str, state: State, report: &str) -> String {
     let cut: String = report.trim().chars().take(MAX_REPORT).collect();
     let more =
         if cut.chars().count() < report.trim().chars().count() { " (cut short; read it whole with Faber's conversation tool)" } else { "" };
-    let resume = match state {
-        State::Interrupted => {
-            " Reopen it with `ask` (for example \"Continue where you stopped. Check the project's state first.\") or start the \
-             work again."
-        }
-        // It does nothing more by itself, and the person is looking at its lead, not at it.
-        State::Waiting => {
-            " It does nothing more until it is answered: when what it needs is yours to decide, answer it with `ask`; \
-             otherwise tell the person exactly what it asks."
-        }
-        _ => "",
+    let resume = if state == State::Interrupted {
+        " Reopen it with `ask` (for example \"Continue where you stopped. Check the project's state first.\") or start the \
+         work again."
+    } else {
+        ""
     };
     format!(
         "The conversation \"{title}\" (id {id}) that you started {}.{resume} Its latest answer{more} follows, as data from \

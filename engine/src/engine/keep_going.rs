@@ -4,8 +4,7 @@
 //! the tray tells the person (R92). Nothing else stops it. Quota never does: when the AI it runs on is out it moves to
 //! another one, picked by hand or not, and only when every AI is out it waits for the first reset (or looks again after a
 //! while when no reset is known), which the running list shows. An error passes after a longer rest each time, a turn that
-//! only waited rests before the next (until its background command ends, when it has one), and a question nobody answered
-//! gets its first choice. It survives a restart of Faber.
+//! only waited rests before the next, and a question nobody answered gets its first choice. It survives a restart of Faber.
 //! It reacts to the end of a turn, to quota readings and to its own timers, and never polls.
 
 use super::*;
@@ -18,8 +17,7 @@ use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake, WrapUp};
 pub const CONTINUE: &str = "The person is away and asked you to keep going on your own until their whole request is done. \
 Continue with the next item of your plan, or take the next task from the project's task list as its instructions describe, do it, \
 and check it the way the project says. When the task you take next has nothing to do with what this conversation did so far, start it on a fresh context with your conversation tool's clear, when you have it. Do not stop to propose work or to ask for a go-ahead: decide what is yours to decide. \
-Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: do the next item meanwhile. When nothing else can be done until it ends, say in one line what you wait for \
-and end your turn without checking it again: Faber sends your next turn when a background command of yours ends, and after a few minutes otherwise. \
+Waiting on CI, a queue, a build, a monitor or a review is never a reason to stop: check it again, or do the next item meanwhile. \
 Stop only when the whole request is done and verified, or when only the person can decide something; in that case ask it with your \
 question tool when you have one, and say exactly what you need. When the whole request is done and verified, end your closing message with the <|faber-wrap-up|> JSON block, outcome done, and say what you checked.";
 
@@ -56,17 +54,8 @@ const QUESTION_WAIT: f64 = 600.0;
 const AWAY_MS: u64 = 30 * 60 * 1000;
 /// The longest the last progress line of a running row is.
 const LINE_CHARS: usize = 160;
-/// A turn shorter than this that changed no file did not work, it only waited or looked.
+/// A turn shorter than this with no tool did not work, it only waited.
 const QUICK_MS: u64 = 60_000;
-/// The longest it waits for a background command of the conversation before it looks again; the command's end wakes it sooner.
-const COMMAND_WAIT: f64 = 900.0;
-/// After that command ended, Faber sends the next turn this much later.
-const COMMAND_GRACE: f64 = 2.0;
-/// The same for Claude Code, which tells its agent itself: that turn joins the conversation (`own_turn`) and takes this wait
-/// off. Faber's own turn is only the net under it, far enough away that the two do not cross in practice: a turn of
-/// Faber's sent while the CLI was starting its own would take the CLI's answer as its reply and then run a second time.
-/// Nothing in the driver rules that out for a CLI that takes longer than this to start.
-const COMMAND_OWN: f64 = 120.0;
 /// Errors that do not mend by waiting: one that comes twice in a row ends it.
 const PERMANENT: [&str; 6] =
     ["error.notConnected", "error.noSubscription", "error.workingFolder", "error.projectGone", "error.conversationGone", "error.keepGoing"];
@@ -95,11 +84,8 @@ pub struct Ended {
     pub said_stop: bool,
     /// The reply's closing box asks the person something, with buttons Faber can answer for them.
     pub boxed: bool,
-    /// The turn only waited: under a minute and nothing changed, with no tool at all, a command of its own still running in
-    /// the background, or for the second time in a row.
+    /// The turn only waited: under a minute, no tool.
     pub idle: bool,
-    /// A background command of the conversation still runs: its end is what the turn waits for.
-    pub command: bool,
 }
 
 /// How long it rests after `n` failures in a row.
@@ -145,9 +131,6 @@ pub fn next(kg: &KeepGoing, ended: Ended, room: Result<(), &'static str>) -> Nex
     }
     if let Err(why) = room {
         return Next::Halt(why);
-    }
-    if ended.idle && ended.command {
-        return Next::Wait { secs: COMMAND_WAIT, why: "command" };
     }
     if ended.idle {
         return Next::Wait { secs: rest(kg), why: "rest" };
@@ -398,16 +381,7 @@ impl Core {
                 self.save(&id);
                 continue;
             };
-            // Its members' reports wake it (`restore_parent_reports`), not a timer: a start wait armed here was never
-            // taken off, and its row said "starting again" for six hours (the owner's project, 2026-11-11).
-            if c.waiting_on.is_some() {
-                if c.keep_going.as_mut().is_some_and(|kg| kg.waiting.take().is_some()) {
-                    self.save(&id);
-                }
-                continue;
-            }
-            // A command it waited for ended with the Faber that ran it.
-            let saved = c.keep_going.as_ref().and_then(|k| k.waiting.clone()).filter(|w| w.why != "command");
+            let saved = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
             match saved {
                 Some(w) if w.until - now > start => self.arm(&id, &reply, w.until - now, static_why(&w.why)),
                 _ => self.arm(&id, &reply, start, "start"),
@@ -421,7 +395,6 @@ impl Core {
     /// comes back is the reply to go on from, once the queue went out (`keep_going_after`).
     pub(super) fn keep_going_ended(&mut self, conv: &str, turn_id: Option<&str>) -> Option<String> {
         let reply_id = turn_id?;
-        let command = self.background.running_in(conv);
         let c = self.convs.get_mut(conv)?;
         let m = c.messages.last_mut().filter(|m| m.id == reply_id && m.role == Role::Assistant)?;
         // The stop line leaves every reply, Keep going on or off: an agent told about it once may write it again later.
@@ -453,8 +426,6 @@ impl Core {
             return None;
         }
         let last_idx = c.messages.len().saturating_sub(1);
-        // The CLI's own turn after a background command ended brings news: what follows it goes out at once.
-        let news = last_idx > 0 && c.messages[last_idx - 1].wake.as_ref().is_some_and(|w| w.why == "wake.commandDone");
         let silent_twice = last_idx >= 3 && empty_keep_going_reply(c, last_idx) && empty_keep_going_reply(c, last_idx - 2);
         let halt_id = if silent_twice {
             (0..=last_idx)
@@ -475,11 +446,7 @@ impl Core {
         let done_box = m.wrap_up.as_ref().is_some_and(|w| w.done);
         let boxed = ok && m.wrap_up.as_ref().is_some_and(asks);
         let said_stop = ok && (stripped || done_box);
-        // A quick turn that changed no file only waited or looked ("still compiling"). Any tool call used to count as work,
-        // so an agent that checked a build was sent its next turn at once: 880 such turns in four days of the owner's projects.
-        let silent = m.tools.iter().flatten().next().is_none();
-        let changed = m.tools.iter().flatten().any(|t| !t.declined && t.ok != Some(false) && !crate::nudge::edited(t).is_empty());
-        let waited = ok && !news && !changed && now().saturating_sub(m.at) < QUICK_MS;
+        let idle = ok && m.tools.iter().flatten().next().is_none() && now().saturating_sub(m.at) < QUICK_MS;
         let kg = c.keep_going.as_mut()?;
         // A reply `fail_reply` already failed (and decided on) is not decided on twice.
         if !ok && kg.failed_on.as_deref() == Some(reply_id) {
@@ -493,11 +460,10 @@ impl Core {
             self.trouble(conv, reply_id, &error);
             return None;
         }
-        kg.idle = if waited { kg.idle + 1 } else { 0 };
-        // One quick look is work like any other. With no tool at all, a command of its own still running, or for the second
-        // time in a row, it is a wait, and a wait does not count toward the cap.
-        let idle = waited && (silent || command || kg.idle >= 2);
-        if !idle {
+        if idle {
+            kg.idle += 1;
+        } else {
+            kg.idle = 0;
             kg.work += 1;
         }
         let before = kg.clone();
@@ -505,7 +471,7 @@ impl Core {
         let decision = if silent_twice {
             Next::Halt("reason.keepGoing.silent")
         } else {
-            next(&before, Ended { asked, said_stop, boxed, idle, command }, self.room_next(conv))
+            next(&before, Ended { asked, said_stop, boxed, idle }, self.room_next(conv))
         };
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
             kg.failed = 0;
@@ -884,35 +850,10 @@ impl Core {
         });
     }
 
-    /// The last background command of a conversation ended while it rested to wait for it: the next turn goes out after
-    /// a moment, unless the CLI's own turn about it came first (`COMMAND_OWN`).
-    pub(super) fn command_ended(&mut self, conv: &str) {
-        if self.background.running_in(conv) {
-            return;
-        }
-        let Some(c) = self.convs.get(conv) else { return };
-        if c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_none_or(|w| w.why != "command") {
-            return;
-        }
-        let Some(reply) = c.messages.last().filter(|m| m.role == Role::Assistant).map(|m| m.id.clone()) else { return };
-        let own = self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude);
-        self.arm(conv, &reply, if own { COMMAND_OWN } else { COMMAND_GRACE } * self.keep_pace, "command");
-    }
-
     /// A wait ended: the conversation goes on if it still waits for exactly this, with nothing newer in it.
     fn wake_keep_going(&mut self, conv: &str, reply_id: &str, until: f64) {
         let Some(c) = self.convs.get_mut(conv) else { return };
         let current = c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_some_and(|w| w.until == until);
-        // It waits for conversations it started: their reports wake it, and its row must not go on naming a rest that is over.
-        if current && c.waiting_on.is_some() {
-            if let Some(kg) = c.keep_going.as_mut() {
-                kg.waiting = None;
-            }
-            self.save(conv);
-            self.emit_queue(conv);
-            self.list_changed();
-            return;
-        }
         let at_rest = c.messages.last().is_some_and(|m| m.id == reply_id && m.status != Some(Status::Streaming));
         if c.waiting_on.is_some() || !current || !at_rest || self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
             return;
@@ -1011,7 +952,6 @@ fn static_why(why: &str) -> &'static str {
     match why {
         "retry" => "retry",
         "rest" => "rest",
-        "command" => "command",
         "busy" => "busy",
         "question" => "question",
         "account" => "account",
@@ -1068,7 +1008,7 @@ mod tests {
         });
     }
 
-    const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false, command: false };
+    const DONE: Ended = Ended { asked: false, said_stop: false, boxed: false, idle: false };
 
     fn wait(secs: f64, why: &'static str) -> Next {
         Next::Wait { secs, why }
@@ -1114,12 +1054,6 @@ mod tests {
         assert_eq!(next(&kg, quick, Ok(())), wait(120.0, "rest"));
         assert_eq!(next(&KeepGoing { idle: 3, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"));
         assert_eq!(next(&KeepGoing { idle: 40, ..kg.clone() }, quick, Ok(())), wait(300.0, "rest"), "five minutes at most");
-        assert_eq!(
-            next(&kg, Ended { command: true, ..quick }, Ok(())),
-            wait(COMMAND_WAIT, "command"),
-            "its own background command still runs: the command's end wakes it, a quarter of an hour at most"
-        );
-        assert_eq!(next(&kg, Ended { command: true, ..DONE }, Ok(())), Next::Continue, "a turn that worked goes on beside its command");
         assert_eq!(
             next(&kg, Ended { said_stop: true, ..quick }, Ok(())),
             Next::Halt("reason.keepGoing.done"),
@@ -1275,8 +1209,6 @@ fim", 2
     #[test]
     fn the_prompt_never_lets_the_agent_stop_to_wait() {
         assert!(CONTINUE.contains("never a reason to stop"));
-        assert!(!CONTINUE.contains("check it again,"), "told to check again, it checked a build 18 times in four minutes");
-        assert!(CONTINUE.contains("end your turn without checking it again"));
         assert!(CONTINUE.contains("only the person can decide"));
     }
 }

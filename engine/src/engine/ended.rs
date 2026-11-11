@@ -179,9 +179,8 @@ pub(super) fn conclusion_line(c: &Conversation) -> Option<String> {
     }
 }
 
-/// What Faber says, once, to an agent whose turn ended with work done and no conclusion. It names its sender: an agent that
-/// reads it as the person's words answers "as you asked" for something the person never said.
-const CONCLUDE: &str = "Faber sends this, not the person: your last turn ended without concluding the task. Check what really got done, then end your closing message with the <|faber-wrap-up|> JSON block and the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
+/// What Faber says, once, to an agent whose turn ended with work done and no conclusion.
+const CONCLUDE: &str = "Your last turn ended without concluding the task. Check what really got done, then end your closing message with the <|faber-wrap-up|> JSON block and the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
 move is the person's. Say what is not done or not verified. Write your closing message to the person before that block.";
 
 fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> String {
@@ -239,8 +238,6 @@ impl Core {
             !c.stopped
                 && c.archived_at.is_none()
                 && c.keep_going.is_none()
-                // It ended its turn to wait for conversations it started: their reports wake it, and the request is not over.
-                && c.waiting_on.is_none()
                 && c.queued.is_empty()
                 && !c.compacting
                 && matches!(result_kind(c), Some(EndKind::Done | EndKind::Unconcluded))
@@ -289,7 +286,7 @@ impl Core {
         let base = if conclude {
             CONCLUDE
         } else {
-            "Faber sends this, not the person: before closing, tidy the project notes, then end your closing message with the <|faber-wrap-up|> block restating the task's outcome and verification."
+            "Before closing, tidy the project notes, then end your closing message with the <|faber-wrap-up|> block restating the task's outcome and verification."
         };
         let mut text = memory.as_ref().map_or_else(|| base.into(), |memory| closing_input(base, memory));
         let fold = text != base;
@@ -372,38 +369,6 @@ mod tests {
         assert!(input.contains("Correct it in the closing block"));
         engine.with(|core| assert!(!core.can_request_conclusion(&id)));
         engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn a_lead_waiting_for_its_conversations_is_not_asked_to_conclude() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
-        engine.with(|core| {
-            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
-            core.ledger.of_mut(Vendor::Claude).billing = Billing::Subscription;
-            let c = core.convs.get_mut(&id).unwrap();
-            c.area = Area::Project;
-            c.choice = Some(Choice { vendor: "claude".into(), model: None, effort: None });
-            let reply = c.messages.last_mut().unwrap();
-            reply.text = "Two conversations started; I wait for their reports.".into();
-            reply.status = Some(Status::Done);
-            core.live.get_mut(&id).unwrap().turn = None;
-            assert!(core.can_request_conclusion(&id), "a turn that ended with no conclusion is asked for one");
-            let wait = crate::model::WaitingOn { ids: vec!["child".into()], note: "Both lanes report".into(), since: 1 };
-            core.convs.get_mut(&id).unwrap().waiting_on = Some(wait.clone());
-            assert!(!core.can_request_conclusion(&id), "its members' reports wake it; a conclusion now would end the wait");
-            core.conclusion_memory_ready(&id, None, &[]);
-            let c = &core.convs[&id];
-            assert_eq!(c.waiting_on, Some(wait), "the wait is kept");
-            assert!(c.messages.iter().all(|m| m.wake.is_none()) && c.queued.is_empty(), "nothing was sent");
-        });
-        engine.shutdown();
-    }
-
-    #[test]
-    fn faber_names_itself_in_what_it_sends_to_close() {
-        assert!(CONCLUDE.starts_with("Faber sends this, not the person"));
     }
 
     #[tokio::test]

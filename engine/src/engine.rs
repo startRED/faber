@@ -2956,7 +2956,6 @@ impl Core {
     fn handle(&mut self, conv: &str, sid: u64, event: EngineEvent) {
         let current = self.live.get(conv).is_some_and(|entry| entry.sid == sid);
         if let EngineEvent::Background(update) = event {
-            let ended = matches!(update, crate::background::Update::End { .. });
             let owner = self
                 .live
                 .get(conv)
@@ -2969,9 +2968,6 @@ impl Core {
             {
                 self.emit_background();
                 self.refresh_running();
-                if ended {
-                    self.command_ended(conv);
-                }
             }
             return;
         }
@@ -3002,9 +2998,6 @@ impl Core {
                 l.capabilities = found;
             }
             return;
-        }
-        if matches!(event, EngineEvent::OwnTurn) {
-            return self.own_turn(conv);
         }
         let entry = self.live.get(conv).expect("session checked above");
         let (vendor, resumed) = (entry.vendor, entry.resumed);
@@ -3511,8 +3504,6 @@ impl Core {
             EngineEvent::Parked { tool_use_id, tool, input } => self.park(conv, tool_use_id, tool, input),
             EngineEvent::Injected { tag: Some(ref tag) } | EngineEvent::SteerFailed { ref tag } if tag.starts_with("team:") => {}
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
-            // Handled before the turn is read (`own_turn`).
-            EngineEvent::OwnTurn => {}
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => return self.apply_signals(vendor, s),
