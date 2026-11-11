@@ -302,13 +302,9 @@ pub fn select(
     } else {
         difficulty
     };
-    let rung = if job == "advise" {
-        if economy { "hard" } else { "expert" }
-    } else if level == "hard" && scope == "open" {
-        "expert"
-    } else {
-        level
-    };
+    // Economy already lowered the level, so an open scope raises nothing there.
+    let scope = if economy { "tight" } else { scope };
+    let rung = if job == "advise" { if economy { "hard" } else { "expert" } } else { crate::route::scoped(kind, level, scope) };
     let bar = if job == "read" { (24, 15) } else { crate::route::bar(kind, rung, true) };
     let clearing: Vec<Profile> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
     let mut eligible: Vec<Profile> = clearing
@@ -807,7 +803,7 @@ mod mixing_tests {
                             let old = before(task, l, &candidates, false);
                             let first = select(task, Some(l), *vendor, &candidates, &[*vendor], &neutral, false);
                             let mixed = select(task, Some(l), *vendor, &candidates, BOTH, &neutral, false);
-                            if job != "advise" && (scope == "tight" || difficulty != "hard" || job != "build") {
+                            if job != "advise" && (scope == "tight" || difficulty == "easy" || job != "build") {
                                 assert_eq!(old, mixed, "{task:?}/{connected}");
                             }
                             println!(
@@ -849,6 +845,16 @@ mod mixing_tests {
         let open = select(piece("build", "hard", "open"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
         assert_eq!((tight.iq, tight.agent), (46, 39));
         assert!(open.iq >= 50 && open.agent >= 42);
+        // A well-defined medium piece runs on the smaller model; an open one gets the everyday model's bar, except in economy.
+        let medium =
+            |scope, economy| select(piece("build", "medium", scope), Some(l), l.vendor, &PROFILES, BOTH, &neutral, economy).unwrap();
+        assert_eq!((medium("tight", false).model, medium("tight", false).effort), ("gpt-6.1-terra", "medium"));
+        assert_eq!((medium("open", false).model, medium("open", false).effort), ("gpt-6.1-sol", "medium"));
+        assert_eq!(medium("open", true), medium("tight", true));
+        assert_eq!(
+            select(piece("build", "easy", "open"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false),
+            select(piece("build", "easy", "tight"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false)
+        );
         let capped = PROFILES.into_iter().find(|p| p.model == "gpt-6.1-terra" && p.effort == "medium").unwrap();
         let above =
             select(piece("build", "hard", "open"), Some(capped), capped.vendor, &PROFILES, &[capped.vendor], &neutral, false).unwrap();
