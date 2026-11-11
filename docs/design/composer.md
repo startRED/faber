@@ -27,11 +27,9 @@ Auto's task guide names supplied-text chores, everyday documents/slides/spreadsh
 or costly-error work. Fable starts at medium; Luna high is available. A sufficient dominating row can replace the
 cheapest within a 15% factored price premium and its time cap. Easy/medium chat favors rows within 300 s;
 a premium row may be slower within that pool. At neutral factors, medium Chat uses Sonnet medium, Terra medium
-when available, otherwise Sol low. Medium work with an open scope starts on the everyday model (Opus or Sol at medium),
-not the smaller one; inside a conversation a smaller model does it at high at most and the answer offers the stronger
-model once, with the existing row. Only spare quota or learning lifts frontier
+when available, otherwise Sol low. Only spare quota or learning lifts frontier
 to summit (60/50, Fable high). Below high, a stronger answer raises effort first; from high it compares one more
-effort with the next stronger model's lowest sufficient effort, cheaper then faster. The [task guide and sources](../product/auto-task-guide.md)
+effort with the next stronger model's lowest sufficient effort, cheaper then faster. The [task guide and sources](../product/models.md#task-guide-and-maker-starting-points-2026-11-11)
 record both makers' recommendations, read 2026-11-11: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/),
 [cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
 [OpenAI models](https://developers.openai.com/codex/models) and [reasoning](https://developers.openai.com/api/docs/guides/reasoning).

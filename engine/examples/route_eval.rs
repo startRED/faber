@@ -1,9 +1,9 @@
 //! Manual check of Auto's router against hand-labelled requests. Never part of `cargo t`: it talks to the real CLIs with
 //! the user's own sign-in and spends a little real quota (cheap models, one-word answers).
 //!
-//!     cargo run -p faber-engine --example route_eval -- [runs] [effort]
+//!     cargo run -p faber-engine --example route_eval -- [runs]
 //!
-//! Each router (the two `ROUTER` models, at medium and at low effort, or only at the effort named) reads every request in a fresh session, the way
+//! Each router (the two `ROUTER` models, at medium and at low effort) reads every request in a fresh session, the way
 //! Auto asks it, and the table prints how often its verdict matches the label, how often it was valid JSON, and how long
 //! it took. A label is one person's reading, so a disagreement is a question to look at, not a proven mistake.
 
@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 const TURN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// (request, kind, difficulty, check, scope), written the way people type to Faber.
-const LABELLED: [(&str, &str, &str, &str, &str); 48] = [
+const LABELLED: [(&str, &str, &str, &str, &str); 42] = [
     ("oi, tudo bem?", "chat", "easy", "glance", "tight"),
     ("What's the capital of Australia?", "chat", "easy", "blind", "tight"),
     ("Escreve um email educado pro meu chefe pedindo folga na sexta", "writing", "easy", "glance", "tight"),
@@ -89,25 +89,6 @@ const LABELLED: [(&str, &str, &str, &str, &str); 48] = [
     ("Summarize this 300-page report in ten bullet points", "writing", "medium", "glance", "tight"),
     ("Ordena essa planilha enorme por data e remove linhas repetidas", "other", "medium", "machine", "tight"),
     ("Write a long email to all 200 customers using this exact template", "writing", "medium", "glance", "tight"),
-    // Well-defined against open, in the makers' own examples: a result one sentence can state is tight.
-    (
-        "Clicking Pay twice charges the card twice. Steps: add an item, open checkout, double-click Pay. Fix it",
-        "code",
-        "medium",
-        "machine",
-        "tight",
-    ),
-    ("Atualiza a biblioteca de datas pra versão 4 no pacote de cobrança e conserta os testes dele", "code", "medium", "machine", "tight"),
-    ("Add monthly subscriptions to my shop: it touches the data model, the API and the screens", "code", "hard", "machine", "tight"),
-    ("Move the whole shop to the new architecture; checkout must stay up and no order may be lost", "code", "hard", "machine", "open"),
-    (
-        "Compare the ways to store user sessions for my app, read what each project recommends and tell me which fits",
-        "research",
-        "medium",
-        "blind",
-        "open",
-    ),
-    ("Olha a pasta de relatórios, decide como organizar tudo e reorganiza", "other", "medium", "glance", "open"),
 ];
 
 fn spawner(cli: &Cli) -> Spawner {
@@ -217,7 +198,6 @@ struct Score {
 #[tokio::main]
 async fn main() {
     let runs: u32 = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(1);
-    let only = std::env::args().nth(2);
     let dir = std::env::temp_dir().join("faber-route-eval");
     std::fs::create_dir_all(&dir).expect("a folder to work in");
     let codex = find_cli("codex").map(|cli| {
@@ -237,7 +217,7 @@ async fn main() {
     println!("| router | effort | valid JSON | kind | difficulty | check | scope | median s | slowest s |");
     println!("|---|---|---|---|---|---|---|---|---|");
     for (vendor, model, _) in ROUTER {
-        for effort in ["medium", "low"].into_iter().filter(|e| only.as_deref().is_none_or(|o| o == *e)) {
+        for effort in ["medium", "low"] {
             let mut score = Score::default();
             for _ in 0..runs {
                 for (request, kind, difficulty, check, scope) in LABELLED {
@@ -259,9 +239,6 @@ async fn main() {
                     score.scope += u32::from(verdict.scope == scope);
                     if verdict.check != check {
                         score.misses.push(format!("check {} (label {check}): {request}", verdict.check));
-                    }
-                    if verdict.scope != scope {
-                        score.misses.push(format!("scope {} (label {scope}): {request}", verdict.scope));
                     }
                 }
             }

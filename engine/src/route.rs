@@ -73,7 +73,7 @@ difficulty: judge what the work is, not how long the message is. When two levels
 easy: a greeting or short fact; sorting, tagging, extracting or summarising text already given; finding a file or reading a log; a one-line rewrite or rename; simple arithmetic.
 medium: an everyday document, email, slide or spreadsheet; a translation; well-scoped code (a named bug, one function or file, a change from a clear spec, a small script); a routine investigation, review or explanation.
 hard: engineering across several files, or a bug with no known cause; a feature that touches several parts; reviewing a large change; reading many screenshots or operating a computer; a financial model or a document built from many sources; a proof; anything where a subtle mistake is costly (concurrency, security, legal, medical, money).
-scope: tight (the finished result can be stated in one sentence: a named bug or one with clear steps to reproduce, one file or function, a spec, one deliverable, a feature whose parts are already decided even when it touches several files); open (explore and decide, choices nobody has written down, many services, sources or milestones, migration, major refactor, architecture, deep research, long unattended run). A clear spec does not make a migration or a major refactor tight.
+scope: tight (named bug, file or function, spec, one deliverable); open (explore and decide, many files, services or sources, migration, major refactor, architecture, deep research, long unattended run).
 check: machine (a test, exit code, schema or number the work can recount proves it), glance (the person sees at once \
 whether it is right), blind (the person cannot easily tell a wrong answer from a right one: facts, advice, analysis, \
 subtle code).
@@ -246,22 +246,11 @@ fn matters(kind: &str, level: &str) -> bool {
     matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard" | "expert" | "frontier" | "summit")
 }
 
-/// The level a task's scope gives it. The makers keep the smaller, faster models for well-defined work and start the
-/// rest on the everyday model, so open medium work gets the hard bar and open hard work the expert one. Easy work stays
-/// easy, and chat keeps its level: a reply a person waits on stays fast.
-pub(crate) fn scoped(kind: &str, difficulty: &'static str, scope: &str) -> &'static str {
-    match (difficulty, scope) {
-        ("hard", "open") => "expert",
-        ("medium", "open") if kind != "chat" => "hard",
-        _ => difficulty,
-    }
-}
-
 /// An unsure verdict gets the next level's bar, and so does a `blind` one where quality matters: self-checking pays most
 /// where the person cannot verify the answer quickly, as with math's early hard bar (`bar`). The two are one step, never
 /// two, and a `machine` check lowers nothing: this is raise-only.
 fn level_of(kind: &str, difficulty: &'static str, check: &str, scope: &str, confidence: f64) -> &'static str {
-    let level = scoped(kind, difficulty, scope);
+    let level = if difficulty == "hard" && scope == "open" { "expert" } else { difficulty };
     let step = confidence < 0.5 || (check == "blind" && matters(kind, level));
     let at = LADDER.iter().position(|l| *l == level).unwrap_or(2);
     LADDER[if step { (at + 1).min(LADDER.len() - 1) } else { at }]
@@ -396,25 +385,9 @@ pub fn choose_scoped(
 }
 
 /// Choose an effort within the current model, keeping uncertain or blind reductions at the previous effort.
-///
-/// Open medium work would have started on the everyday model (`scoped`). A smaller model already held does it at high at
-/// most: past high one more effort costs as much as a bigger model, so the unmet bar offers that model instead
-/// (`Routed::clears_bar`, `nudge`). Work that reached the top effort before this rule still does.
 pub fn choose_effort(verdict: &Asked, project: bool, current: &Profile) -> Option<Routed> {
     let profiles: Vec<_> = PROFILES.iter().filter(|p| p.vendor == current.vendor && p.model == current.model).copied().collect();
-    let pick =
-        |scope, rows: &[Profile]| choose_scoped(verdict.kind, verdict.difficulty, verdict.check, scope, verdict.confidence, project, rows);
-    let mut chosen = pick(verdict.scope, &profiles)?;
-    if chosen.profile.effort == "xhigh"
-        && scoped(verdict.kind, verdict.difficulty, verdict.scope) == "hard"
-        && verdict.difficulty == "medium"
-        && pick("tight", &profiles).is_some_and(|tight| tight.profile.effort != "xhigh")
-    {
-        let below: Vec<_> = profiles.iter().filter(|p| p.effort != "xhigh").copied().collect();
-        if let Some(capped) = pick(verdict.scope, &below) {
-            (chosen.profile, chosen.price) = (capped.profile, capped.price);
-        }
-    }
+    let mut chosen = choose_scoped(verdict.kind, verdict.difficulty, verdict.check, verdict.scope, verdict.confidence, project, &profiles)?;
     if chosen.profile.cost < current.cost && (verdict.confidence < 0.7 || verdict.check == "blind") {
         chosen.profile = *current;
         chosen.price = current.cost as f64;
