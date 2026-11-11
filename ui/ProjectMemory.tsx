@@ -37,13 +37,16 @@ function MemoryList(props: { projectId: string }) {
   useDraft(() => editing() !== undefined || busy());
   const [error, setError] = createSignal('');
   // The list is held here, not in a resource: a change shows on it at once and a re-read replaces it quietly, so it never
-  // goes back to "Loading". Only the first read says so.
+  // goes back to "Loading". Only the first read says so; every read still holds the buttons, so an editor never opens on
+  // a revision the read in flight is about to replace.
   const [files, setFiles] = createSignal<MemoryList>();
   const [loading, setLoading] = createSignal(true);
+  const [reading, setReading] = createSignal(0);
   const refetch = async () => {
+    setReading((n) => n + 1);
     try { setFiles(await api.projectMemory(props.projectId)); }
     catch (err) { setError(message(err)); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setReading((n) => n - 1); }
   };
   void refetch();
   const [shown, setShown] = createSignal(50);
@@ -93,9 +96,9 @@ function MemoryList(props: { projectId: string }) {
     void save(file, entry, null);
   };
   return (
-    <div class="memory-body" aria-busy={busy() || loading()} ref={body}>
+    <div class="memory-body" aria-busy={busy() || reading() > 0} ref={body}>
       <p class="sr-only" role="status">{notice()}</p>
-      <div class="memory-head"><p class="hint">{t('memory.scope')}</p><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => void refresh()}>{t('memory.refresh')}</button></div>
+      <div class="memory-head"><p class="hint">{t('memory.scope')}</p><button type="button" class="btn ghost" disabled={busy() || reading() > 0} onClick={() => void refresh()}>{t('memory.refresh')}</button></div>
       <p class="hint">{t('memory.nextLaunch')}</p>
       <Show when={loading()}><p role="status">{t('memory.loading')}</p></Show>
       <Show when={error()}><p class="note err" role="alert">{error()}</p></Show>
@@ -111,9 +114,9 @@ function MemoryList(props: { projectId: string }) {
                 <p class="memory-text">{(entry().body || entry().text).replace(/ \(stale\?\)$/u, '')}</p>
                 <Show when={entry().stale}><p class="hint memory-stale">{t('memory.stale')}</p></Show>
                 <Show when={file.path !== ".faber/rules.md"}><div class="memory-actions">
-                  <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
-                  <button type="button" class="btn ghost" data-edit disabled={busy() || loading()} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
-                  <button type="button" class="btn ghost danger" disabled={busy() || loading()}
+                  <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || reading() > 0} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
+                  <button type="button" class="btn ghost" data-edit disabled={busy() || reading() > 0} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
+                  <button type="button" class="btn ghost danger" disabled={busy() || reading() > 0}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
                       if (event.repeat) event.preventDefault();
@@ -122,14 +125,14 @@ function MemoryList(props: { projectId: string }) {
                     onKeyUp={(event) => { if (event.key === 'Enter' || event.key === ' ') keyDown = needsRelease = false; }}
                     onFocusOut={() => { keyDown = needsRelease = false; if (confirm() === key(file, entry())) setConfirm(undefined); }}
                     onClick={() => remove(file, entry())}>{t(confirm() === key(file, entry()) ? 'memory.confirmDelete' : 'memory.delete')}</button>
-                  <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
+                  <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || reading() > 0} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
                 </div></Show>
               </>}>
-                <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !loading()) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
-                  <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || loading()} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />
+                <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !reading()) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
+                  <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || reading() > 0} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />
                   <div class="memory-actions">
-                    <button type="submit" class="btn ghost" disabled={busy() || loading() || !draft().trim()}>{t('memory.save')}</button>
-                    <button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => setEditing(undefined)}>{t('memory.cancel')}</button>
+                    <button type="submit" class="btn ghost" disabled={busy() || reading() > 0 || !draft().trim()}>{t('memory.save')}</button>
+                    <button type="button" class="btn ghost" disabled={busy() || reading() > 0} onClick={() => setEditing(undefined)}>{t('memory.cancel')}</button>
                   </div>
                 </form>
               </Show>}
