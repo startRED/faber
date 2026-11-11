@@ -87,7 +87,7 @@ fn round(ctx: &mut Ctx, leader: &str) -> Result {
     };
     super::select_model(page, model)?;
     ask(page, prompt)?;
-    let row = css("article .agents .agent").has_text("Check config");
+    let row = css("article .team .team-member").has_text("Check config");
     page.wait_visible(&row)?;
     let box_ = css("#running .side-write textarea");
     // Streamed steps move both the row and Send between coordinate lookup and mouse dispatch; keyboard actions keep their target.
@@ -100,7 +100,11 @@ fn round(ctx: &mut Ctx, leader: &str) -> Result {
     page.wait_visible(&css("#running .side-told .you").has_text(TOLD))?;
     ensure(page.count(&css("#running .side-told"))? == 1, || "the helper must receive the person's message exactly once".into())?;
     page.wait_visible(&css("#running .side-body .tools"))?;
-    page.wait_visible(&css("article .agents .agent[data-state=done]").has_text("Check config"))?;
+    // The card says finished while the reply still streams; once the reply ends the team folds to its receipt line.
+    page.wait_for(
+        "the helper to finish inside the team block",
+        "[...document.querySelectorAll('article .team .team-member[data-state=done]')].some(e=>e.textContent.includes('Check config')) || (!!document.querySelector('article .team .team-fold') && !document.querySelector('article .team .team-fold .team-failure'))",
+    )?;
     page.wait_visible(&css("#running .agent-report").has_text("retries"))?;
     page.wait_visible(&css("article.ai .md").has_text(reply))?;
     page.wait_visible(&css("article.ai .actions .cost"))?;

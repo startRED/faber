@@ -9,10 +9,11 @@ import { isAgentCall, isProgressCall } from './worklog.ts';
 export type Item = { kind: 'tool'; tool: ToolUse; key: string } | { kind: 'thought'; text: string; key: string };
 
 /** A stretch of words (`from`..`to` in the reply's text, UTF-16 units), the steps and thinking that came together between
- * two stretches, or a subagent or helper the agent started, which always stands as its own row. */
+ * two stretches, a CLI subagent row, or a run containing Faber helpers. */
 export type Part =
   | { kind: 'text'; from: number; to: number; key: string }
   | { kind: 'steps'; items: Item[]; key: string }
+  | { kind: 'team'; tools: ToolUse[]; key: string }
   | { kind: 'agent'; tool: ToolUse; key: string };
 
 /** The pieces of a reply's thinking, each with where it falls: before the agent's step number `steps`, `at` units into the
@@ -72,7 +73,24 @@ export function timeline(m: Message, text: string): Part[] {
     else parts.push({ kind: 'steps', items: [event.item!], key: event.item!.key });
   }
   words(text.length);
-  return parts;
+  // Adjacent helper starts are one run. Prose and the lead's own work keep their place between runs.
+  const grouped: Part[] = [];
+  for (let i = 0; i < parts.length;) {
+    const part = parts[i]!;
+    if (part.kind !== 'agent' || part.tool.name === 'Review') { grouped.push(part); i++; continue; }
+    const run: ToolUse[] = [];
+    while (i < parts.length) {
+      const next = parts[i]!;
+      if (next.kind !== 'agent' || next.tool.name === 'Review') break;
+      const started = next.tool.started;
+      if (run.length && started !== undefined && run.every((tool) => tool.ended !== undefined && tool.ended <= started)) break;
+      run.push(next.tool);
+      i++;
+    }
+    if (run.some((tool) => tool.name === 'Helper')) grouped.push({ kind: 'team', tools: run, key: `team:${run[0]!.id}` });
+    else grouped.push(...run.map((tool): Part => ({ kind: 'agent', tool, key: tool.id })));
+  }
+  return grouped;
 }
 
 /** Whether two parts draw the same thing. */
@@ -80,6 +98,7 @@ function samePart(part: Part, other: Part): boolean {
   if (part.kind !== other.kind || part.key !== other.key) return false;
   if (part.kind === 'text') return other.kind === 'text' && part.to === other.to;
   if (part.kind === 'agent') return other.kind === 'agent' && part.tool === other.tool;
+  if (part.kind === 'team') return other.kind === 'team' && part.tools.length === other.tools.length && part.tools.every((tool, i) => tool === other.tools[i]);
   return (
     other.kind === 'steps' &&
     part.items.length === other.items.length &&

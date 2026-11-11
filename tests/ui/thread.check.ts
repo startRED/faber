@@ -222,12 +222,12 @@ check('thread: a dead helper leaves the live count and keeps an uncertain cost w
         conversationId: 'helper-exit', options: [], onBranch: () => {} }), root);
       try {
         equal(helpersAtWork([message()]), 1);
-        equal(root.querySelector<HTMLElement>('.agents .agent')?.dataset.state, 'running');
+        equal(root.querySelector<HTMLElement>('.team-member')?.dataset.state, 'running');
         setMessage({ ...message(), incomplete: true, tools: [{ ...call, ok: false, ended: 2,
           output: `${partial}\nThe helper process ended before reporting its result.` }] });
         equal(helpersAtWork([message()]), 0, 'the caller can continue without a ghost helper');
-        equal(root.querySelector<HTMLElement>('.agents .agent')?.dataset.state, 'failed');
-        ok(!root.querySelector('.agents .agent .live'), 'an exited helper has no live mark');
+        equal(root.querySelector<HTMLElement>('.team-member')?.dataset.state, 'failed');
+        ok(!root.querySelector('.team-member .st-working'), 'an exited helper has no live mark');
         equal(message().status, 'streaming', 'the caller remains free to continue its own reply');
         setMessage({ ...message(), status: 'done', text: 'The caller continued after the helper failed.' });
         ok(root.querySelector('.cost')?.textContent?.startsWith('≈'), 'known caller spend remains visibly uncertain');

@@ -67,7 +67,7 @@ fn helper_controls(ctx: &mut Ctx, width: u32) -> Result {
     page.wait_for("the synthetic helper subscription and models", "window.__TAURI_INTERNALS__.invoke('state').then(s=>s.models.some(m=>m.id==='gpt-6.1-sol') && s.usage?.some(u=>u.vendor==='codex' && !u.billingUnknown && !u.billedPerUse))")?;
     super::select_model(page, "Claude Haiku")?;
     ask(page, "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.")?;
-    let helper = css("article .agents .agent").has_text("Check config");
+    let helper = css("article .team .team-member").has_text("Check config");
     page.wait_visible(&helper)?;
     let crumb = page.inner_text(&css(".crumb b"))?;
     let draft = "Keep this conversation's draft.";
