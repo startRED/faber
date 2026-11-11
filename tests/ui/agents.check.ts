@@ -359,10 +359,7 @@ check('helper row shows the selected model and effort', () => {
   const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools: [HELPER], acts };
   const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
   try {
-    root.querySelector<HTMLButtonElement>('.team-fold')!.click();
-    ok(root.querySelector('.team-model')!.textContent!.includes('Haiku 5.5 · Medium'));
-    equal(root.querySelector('.team-deliveries .team-job'), null, 'deliveries keep the model, with no repeated job label');
-    equal(root.querySelector('.team-state')!.textContent, 'stopped', 'an old unfinished call keeps its stopped state');
+    ok(root.querySelector('.agent-meta')!.textContent!.includes('Reading · Haiku 5.5 · medium effort'));
   } finally {
     dispose();
     root.remove();
@@ -377,14 +374,9 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
   const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools };
   const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
   try {
-    root.querySelector<HTMLButtonElement>('.team-fold')!.click();
-    const row = root.querySelector<HTMLButtonElement>('.team-member')!;
+    const row = root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(row.querySelector('b')!.textContent, 'Review the parser');
-    equal(row.querySelector('.team-model'), null, 'an unknown model stays unknown');
-    equal(row.querySelector('.team-state')!.textContent, '', 'finished deliveries show only their check');
-    equal(row.querySelector('.team-state [role=img]')!.getAttribute('aria-label'), 'finished', 'a helper that ran no check is finished, not done');
-    ok(row.getAttribute('aria-label')!.includes('1 step'));
-    equal(row.querySelector('.team-outcome')!.textContent, 'Two mistakes in parser.rs.');
+    equal(row.querySelector('.agent-meta')!.textContent, 'Codex · finished · 1 step', 'a helper that ran no check is finished, not done');
   } finally {
     dispose();
     root.remove();
@@ -879,11 +871,10 @@ check('review rounds: two scored rows, nested reviewers and the final line', () 
   ], review: { rounds: [{ ...round, call: 'r1' }, { ...round, call: 'r2', lines: [5, 4, 5, 4, 4], total: 22 }], stop: 'review.stop.target' } };
   const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'review', options: [], onBranch: () => {} }), root);
   try {
-    root.querySelector<HTMLButtonElement>('.team-fold')!.click();
-    const rows = [...root.querySelectorAll('.agents .agent b, .team-member b')].map((el) => el.textContent);
+    const rows = [...root.querySelectorAll('.agents .agent b')].map((el) => el.textContent);
     deepEqual(rows, ['Round 1: 17 of 25', 'Check changes', 'Round 2: 22 of 25']);
     ok(root.textContent!.includes('Review: 22 of 25 · good enough'));
-    equal(root.querySelector('.team-member')?.getAttribute('data-call'), 'h1');
+    equal(root.querySelector('[data-parent="r1"]')?.getAttribute('data-parent'), 'r1');
   } finally { dispose(); root.remove(); }
   const detail = document.createElement('div'); document.body.append(detail);
   const steps = agentSteps(message.tools, '', undefined, message.review!.rounds);
@@ -917,8 +908,8 @@ check('team messages: helper row waits for the lead and the running view keeps e
     get step() { return agentSteps([tool()])[0]!; }, streaming: true, onBack: () => {}, onClose: () => {},
   }), detail);
   try {
-    equal(root.querySelector('.team-title')!.textContent, 'Review the parser');
-    ok(root.querySelector('.team-state')!.textContent!.includes('waiting for lead'));
+    equal(root.querySelector('.agent b')!.textContent, 'Parser');
+    ok(root.querySelector('.agent-meta')!.textContent!.includes('asked the lead; waiting'));
     equal(agentState(agentSteps([tool()])[0]!, true), 'waitingLead', 'distinct from waiting on the person');
     const status = workStatus({ agent: agentSteps([tool()])[0]!, streaming: true });
     equal(status.state, 'waitingLead');
@@ -927,7 +918,7 @@ check('team messages: helper row waits for the lead and the running view keeps e
     const lines = [...root.querySelectorAll('.side-body .side-meta')].map((line) => line.textContent);
     deepEqual(lines.filter((line) => line?.includes('→')), ['Parser → Lead: May I rename foo?', 'Caller → Parser: I use bar now.']);
     setTeam({ ...team(), state: 'running', messages: [...messages.map((m) => m.id === 'q' ? { ...m, state: 'answered' as const } : m), { id: 'a', from: 'lead', to: 'h1', fromName: 'lead', toName: 'Parser', kind: 'answer', text: 'Use bar.', at: 12, question: 'q' }] });
-    ok(!root.querySelector('.team-state')!.textContent!.includes('asked the lead; waiting'));
+    ok(!root.querySelector('.agent-meta')!.textContent!.includes('asked the lead; waiting'));
     ok(root.querySelector('.side-body')!.textContent!.includes('Lead → Parser: Use bar.'));
   } finally {
     dispose(); close(); root.remove(); showAgent();
