@@ -1359,7 +1359,7 @@ check('settings keyboard traversal: App restores the recreated opener after keyb
             opener.click(); // Clicks need not focus their button on every platform.
           }
           await tick();
-          ok(opener.closest('.shell')?.classList.contains('under'), 'entry leaves the shell mounted beneath');
+          equal(opener.isConnected, false, 'entry removes the old shell');
           equal(document.activeElement, view.host.querySelector('.s-nav button'), 'Back receives entry focus');
           if (source.startsWith('quota-')) ok(view.host.querySelector('.s-nav button[aria-current="true"]')?.textContent?.includes(en['set.subscriptions']));
           key(',', true); // Repeating the shortcut must not replace the original opener with Back.

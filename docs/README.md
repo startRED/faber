@@ -43,7 +43,6 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/work-log.md](design/work-log.md) | The work log above an answer: its steps, folds and Technical details line |
 | [design/reading.md](design/reading.md) | Reading width, selections, durable scroll position and the latest-message control |
 | [design/visual-answers.md](design/visual-answers.md) | Native inline pieces, saved choices, generated HTML/SVG cards and their web-access rules |
-| [design/layers.md](design/layers.md) | How the shell moves: the sidebar, the running column, Settings and Catalog as layers; peek |
 | [design/layout.md](design/layout.md) | Window widths, titlebar, the homes, the running column |
 | [design/chat-groups.md](design/chat-groups.md) | Chat groups, shared instructions and knowledge files |
 | [design/sidebar.md](design/sidebar.md) | Sidebar area lists, pinning, export, archive and footer |

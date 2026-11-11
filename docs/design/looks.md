@@ -124,7 +124,7 @@ Windows contrast themes use system colours and visible edges for cards, the comp
   conversation and turn across the engine's lists, so the card's own exit runs once.
 - Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
-- The running column slides and fades over `transform` and `opacity`; the stage takes its new width in one step ([layers](layers.md)).
+- The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.
   The stage is never cloned. During travel, stage shadows and rounded clipping are omitted to avoid expensive raster
   effects; they return at rest. Offscreen messages and markdown blocks use native content visibility with intrinsic
   size estimates. Panel content staggers by 18 ms, capped at 48 ms. Surviving list rows

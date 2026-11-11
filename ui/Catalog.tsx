@@ -10,7 +10,6 @@ import { CatalogInventory } from './CatalogInventory.tsx';
 import { McpServers } from './McpServers.tsx';
 import { keysOf, pressed } from './keys.ts';
 import { Peek } from './Mark.tsx';
-import { animateList } from './motion.ts';
 
 const PAGE = 48;
 // Preserve the legacy catalog's jobs while presenting a few broad groups.
@@ -318,12 +317,11 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const count = (action: Batch) => chosen().filter((row) => fits(row, action)).length;
   return (
     <section class="catalog" ref={(el) => (surface = el)} data-catalog data-picking={chosen().length ? '' : undefined} aria-label={t('area.catalog')}>
-      {/* The list and a tool's page cross-fade: the one that leaves is an inert copy (animateList). */}
-      <div class="catalog-content" ref={animateList}>
+      <div class="catalog-content">
         <Show when={props.vendors.length === 0}><p class="hint">{t('catalog.noAi')}</p></Show>
         <Show when={error()}><div class="catalog-notice" role="alert"><span>{error()}</span><Show when={retry()}><button class="btn" disabled={busy()} onClick={() => retry()?.()}>{t('catalog.retry')}</button></Show></div></Show>
         <Show when={removed()}><div class="catalog-notice" role="status"><span>{t('catalog.removed', { name: catalogName(removed()!.id) })}</span><button class="btn" ref={(el) => (undo = el)} disabled={busy()} onClick={() => void change(removed()!.id, 'restore')}>{t('catalog.undo')}</button></div></Show>
-        <Show when={item()} fallback={<div class="catalog-list">
+        <Show when={item()} fallback={<>
           <header class="catalog-top">
             <h1>{t('area.catalog')}</h1>
             <label class="field catalog-search"><Icon name="search" /><input ref={(el) => (search = el)} type="search" aria-label={t('catalog.search')} placeholder={t('catalog.search')} value={query()} onInput={(e) => { setQuery(e.currentTarget.value); setPage(0); }} /><kbd>{keysOf('find')}</kbd></label>
@@ -363,7 +361,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
               <div class="catalog-batch-actions"><span>{t('catalog.confirmRemoveMany', { n: count('remove') })}</span><button class="btn" ref={(el) => (cancelBatch = el)} onClick={() => setConfirmingBatch(false)}>{t('catalog.cancel')}</button><button class="btn danger" data-batch="confirm-remove" onClick={() => void runBatch('remove')}>{t('catalog.remove')}</button></div>
             </Show>
           </div></Show>
-        </div>}>
+        </>}>
           {(row) => <article class="catalog-detail" aria-busy={busy()} data-tone={tone(row())}>
             <div class="catalog-return"><button class="btn" onClick={back}><Icon name="left" small />{t('catalog.back')}</button></div>
             <header class="catalog-hero">

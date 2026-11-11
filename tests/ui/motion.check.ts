@@ -106,7 +106,7 @@ check('motion: list exits honor the 80ms exit token and are shorter than their e
   }
 });
 
-check('motion: closing a column lets the main settle in one step while the column copy leaves in the 80ms exit token', async () => {
+check('motion: closing a column keeps the surviving main width and uses the 80ms exit token', async () => {
   const root = document.createElement('div');
   root.className = 'shell';
   root.dataset.motion = 'full';
@@ -119,6 +119,7 @@ check('motion: closing a column lets the main settle in one step while the colum
     const main = root.querySelector<HTMLElement>('.main')!;
     const column = root.querySelector<HTMLElement>('.runcol')!;
     const before = main.getBoundingClientRect();
+    const resting = { shadow: getComputedStyle(main).boxShadow, radius: getComputedStyle(main).borderRadius };
     ok(before.width > 0 && column.getBoundingClientRect().width > 0, 'both real grid columns have measurable width');
     equal(main.getAnimations().length, 0, 'the survivor starts at rest');
     root.style.gridTemplateColumns = '0 minmax(0,1fr) 0';
@@ -127,18 +128,28 @@ check('motion: closing a column lets the main settle in one step while the colum
     const target = main.getBoundingClientRect();
     ok(target.width > before.width, 'removing the right column gives the same main more room');
     await Promise.resolve();
-    // The stage settles in one step beside a layer that slides: no width or travel animation, so no layout work per frame.
-    equal(main.getAnimations().length, 0, 'the surviving main is never animated');
-    ok(Math.abs(main.getBoundingClientRect().width - target.width) < 0.5, 'layout owns the final width at once');
-    equal(main.style.width, '', 'no inline animation width');
+    const animation = main.getAnimations()[0];
+    ok(animation, 'the real list observer animates the surviving main');
+    animation.pause();
+    equal(root.querySelector('.main'), main, 'the same main owns the animation');
     equal(document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.main'), null, 'the main is never cloned');
-    const exits = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.runcol')?.getAnimations() ?? [];
-    ok(exits.length, 'the column that leaves slides out as an inert copy');
-    const duration = Number(exits[0]!.effect!.getComputedTiming().duration);
-    equal(duration, 80, 'the leaving column honors the exit token');
+    const duration = Number(animation.effect!.getComputedTiming().duration);
+    equal(duration, 80, 'closing-column survivors honor the exit token');
     ok(duration < 220, 'closure remains shorter than the entrance token');
-    for (const active of exits) active.finish();
-    await finished(exits);
+    const keys = (animation.effect as KeyframeEffect).getKeyframes();
+    ok(Math.abs(parseFloat(String(keys[0]!.width)) - before.width) < 0.5, 'width starts at the measured old size');
+    ok(Math.abs(parseFloat(String(keys.at(-1)!.width)) - target.width) < 0.5, 'width ends at the measured target');
+    const from = new DOMMatrix(String(keys[0]!.transform));
+    ok(Math.abs(from.m41 - (before.x - target.x)) < 0.5, 'translation matches the actual layout delta, including zero');
+    ok(new DOMMatrix(String(keys.at(-1)!.transform)).isIdentity, 'travel ends without translation or glyph scaling');
+    const exits = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.runcol')?.getAnimations() ?? [];
+    for (const active of [animation, ...exits]) active.finish();
+    await finished([animation, ...exits]);
+    equal(main.getAnimations().length, 0, 'the animation releases the surviving main');
+    ok(Math.abs(main.getBoundingClientRect().width - target.width) < 0.5, 'layout owns the final width');
+    equal(main.style.width, '', 'no inline animation width remains');
+    equal(getComputedStyle(main).boxShadow, resting.shadow, 'the resting shadow returns');
+    equal(getComputedStyle(main).borderRadius, resting.radius, 'the resting corners return');
     equal(document.querySelector('.motion-exit'), null, 'the removed column copy is cleaned up');
   } finally {
     dispose();

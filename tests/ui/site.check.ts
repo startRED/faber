@@ -1259,7 +1259,7 @@ check('page in the browser: the pane opens again on the page it last showed, aft
               animation instanceof CSSTransition
               && ['width', 'grid-template-columns'].includes(animation.transitionProperty)
               && animation.playState === 'running');
-            equal(transitions.length, 0, 'returning to a saved page takes its actual width in one step: the page measures its final box, and no track animates');
+            ok(transitions.length, 'returning to a saved page glides its actual width after the earlier switch settled');
           } finally { api.siteOpen = openSite; }
           button.click();
           await settle(250);
