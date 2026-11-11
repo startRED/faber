@@ -17,7 +17,9 @@ It wraps at 720 px and does not move.
 Coming back to it (R224): its row in the running column has, under the title, one quiet line in the data face with
 the turns of work done and how long it has run, and under that the last line the agent wrote on one line with an
 ellipsis (its full text is the tooltip); the verb beside the AI's name says the wait it is in ("resting after an
-error", "waiting for an update to finish"), and "Waiting for quota until …" for a quota wait. After half an hour on its
+error", "waiting for an update to finish", "waiting for its command to finish" while a background command of its own
+runs and it has nothing else to do), and "Waiting for quota until …" for a quota wait. A lead waiting for the
+conversations it started shows that wait, never a rest that is over. After half an hour on its
 own, the newest reply starts, right under the model's name, with one quiet line and the loop icon, in the same style
 as the stop line: "While you were away (3 h): 14 turns of work, 1 switch to the other AI, 2 questions answered for you."
 (a part that did not happen is left out). The questions Faber answered (the agent's own and its closing box's) are one

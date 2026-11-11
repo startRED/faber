@@ -4107,6 +4107,32 @@ async fn a_message_written_while_a_tool_runs_stays_editable_until_the_step_ends(
     assert_eq!(f.wire.lines_with(PONG), 1, "the message went to the CLI once");
 }
 
+// Live capture (claude 2.1.312, Haiku 5.5, 2026-11-11): the agent left a command running in the background (`sleep 8`),
+// answered "started" and ended its turn. When the command ended the CLI told its agent so, and the agent spoke again in a
+// turn nobody had sent. Faber dropped those words, so a conversation that ended with "I will tell you when the build ends"
+// stayed there for ever. The turn now joins the conversation under a line of Faber's.
+// The capture was made without Faber, so the two times Faber asks the CLI for the command's output were added to it, with
+// answers in the shape `background-steer` recorded.
+#[tokio::test]
+async fn what_claude_says_when_its_background_command_ends_reaches_the_conversation() {
+    const ASK: &str = "Use the Bash tool with run_in_background true to run exactly: sleep 8 && echo finished. Then answer only \"started\" and end your turn. Do not wait for it.";
+    let dir = support::DataFolder::new();
+    let f = fake(fixture("claude", "background-command-own-turn"));
+    let (engine, _rx) = engine(&dir, Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, ASK, choice("claude", Some("haiku")))).unwrap();
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(f.wire.lines_with("\"interrupt\""), 0, "the turn the CLI began is left to work");
+    assert_eq!(f.wire.lines_with("\"type\":\"user\""), 1, "Faber sent nothing for it: the turn already ran");
+    assert_eq!(c.messages[1].text.trim(), "started");
+    assert_eq!(c.messages[2].role, Role::User);
+    assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.commandDone"), "the screen says who spoke");
+    assert_eq!(c.messages[3].text.trim(), "The background command finished with exit code 0. Its output was `finished`.");
+    assert_eq!(c.messages[3].status, Some(Status::Done));
+}
+
 // Live capture (claude, Haiku 5.5, the flags Faber uses): the agent left a subagent working in the background (a 30 s
 // command) and ended its turn; a line written while the subagent still worked became a turn of its own, and the subagent
 // went on to its own result. On 2026-10-17 a message written then was only queued, so the owner pressed Stop to get it
