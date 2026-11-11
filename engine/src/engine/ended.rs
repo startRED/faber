@@ -3,8 +3,7 @@
 //! as a done card and the sidebar as a dot, both from the conversation list (`Summary::ended`), so they agree and survive a
 //! restart. A run the person was there for (their own Stop, an archive) leaves no mark, and a new run takes the old one away.
 use super::*;
-use crate::model::{Outcome, WrapUp};
-use crate::sibling::State;
+pub(super) use crate::conversation_state::{fresh_plan, needs_conclusion, result_kind, run_state};
 
 impl Engine {
     /// The person has the conversation open on a visible window: its done card and its dot go.
@@ -83,87 +82,6 @@ pub(super) fn end_kind(c: &Conversation) -> Option<EndKind> {
         return None;
     }
     result_kind(c)
-}
-
-/// The truth about how the last turn ended, whether or not the conversation was archived or queued. A turn whose process
-/// exited without an error is not a conclusion: the end is `Done` only when the agent concluded it (a plain answer in a chat
-/// is its own conclusion), and `Unconcluded` otherwise. None while the reply still streams, or when no reply is last.
-pub(super) fn result_kind(c: &Conversation) -> Option<EndKind> {
-    let reply = c.messages.last().filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming))?;
-    let outcome = reply.wrap_up.as_ref().and_then(WrapUp::outcome);
-    Some(if reply.error.is_some() || reply.status == Some(Status::Error) {
-        EndKind::Failed
-    } else if reply.closed {
-        EndKind::Interrupted
-    } else if reply.halt.as_deref().is_some_and(|why| !matches!(why, "reason.keepGoing.done" | "reason.keepGoing.silent"))
-        || keep_going::unanswered_question(reply)
-        || reply.checks.as_ref().is_some_and(|k| k.state == crate::model::ChecksState::NeedsYou)
-        || reply.wrap_up.as_ref().is_some_and(keep_going::asks)
-        || (matches!(outcome, Some(Outcome::Blocked | Outcome::NeedsYou)) && reply.wrap_up.as_ref().is_some_and(|w| w.answered.is_none()))
-    {
-        EndKind::NeedsYou
-    } else if reply.status == Some(Status::Stopped)
-        || reply.halt.as_deref() == Some("reason.keepGoing.silent")
-        || fresh_plan(c).is_some_and(|p| p.steps.iter().any(|s| s.state != StepState::Done))
-        || (needs_conclusion(c) && outcome != Some(Outcome::Done))
-        || outcome.is_some_and(|o| o != Outcome::Done)
-        || (reply.wrap_up.is_some() && outcome.is_none())
-        // A project turn that ended with no words and no conclusion has nothing a person can read as its answer.
-        || (c.area == Area::Project && reply.text.trim().is_empty() && outcome.is_none())
-    {
-        EndKind::Unconcluded
-    } else {
-        EndKind::Done
-    })
-}
-
-/// Where the conversation stands now, from what is stored and whether a turn runs (`busy`). The one answer the sidebar, the
-/// running list, another agent's read and the command line share.
-pub(super) fn run_state(c: &Conversation, busy: bool) -> State {
-    let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-    let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
-    let working = busy || c.compacting || !c.queued.is_empty() || last.is_some_and(|m| m.status == Some(Status::Streaming));
-    match last {
-        _ if asking => State::Waiting,
-        // Its copy is still being made: the brief follows it.
-        _ if c.messages.is_empty() => State::Working,
-        _ if working && c.stuck.is_some() => State::Stuck,
-        _ if working => State::Working,
-        None => State::Unconcluded,
-        Some(_) if c.messages.last().is_some_and(|m| m.role == Role::User) => State::Unconcluded,
-        Some(m) if m.status == Some(Status::Stopped) && m.closed => State::Interrupted,
-        Some(m) if m.status == Some(Status::Stopped) => State::Stopped,
-        Some(_) => match result_kind(c) {
-            Some(EndKind::Done) => State::Concluded,
-            Some(EndKind::NeedsYou) => State::Waiting,
-            Some(EndKind::Failed) => State::Failed,
-            Some(EndKind::Interrupted) => State::Interrupted,
-            Some(EndKind::Unconcluded) | None => State::Unconcluded,
-        },
-    }
-}
-
-/// The plan, when the agent wrote it for the request now under way: a checklist left over from an earlier request says
-/// nothing about this one. A request starts at the person's last message; Faber's own wakes belong to the same request.
-fn fresh_plan(c: &Conversation) -> Option<&Plan> {
-    let start = c.messages.iter().rev().find(|m| m.role == Role::User && m.wake.is_none()).map_or(0, |m| m.at);
-    c.plan.as_ref().filter(|p| p.at >= start)
-}
-
-/// Whether the request did work that wants a conclusion: a file was edited, checks ran or a plan was kept. An answer built from
-/// reading, searching or a command that changed nothing is its own conclusion. Wakes belong to the same request: a closing
-/// reply cannot erase the work before it.
-fn needs_conclusion(c: &Conversation) -> bool {
-    c.area == Area::Project
-        && (c.messages.last().is_some_and(|m| m.conclusion_error.is_some())
-            || fresh_plan(c).is_some()
-            || c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some()).any(|m| {
-                m.role == Role::Assistant
-                    && (m.checks.is_some()
-                        || m.tools
-                            .as_ref()
-                            .is_some_and(|t| t.iter().any(|t| !t.declined && t.ok != Some(false) && !crate::nudge::edited(t).is_empty())))
-            }))
 }
 
 /// The line a card or a row shows for the end: the closing call's result and what is left, with the plan steps not marked done.
@@ -324,6 +242,8 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Outcome;
+    use crate::sibling::State;
     use serde_json::json;
 
     #[tokio::test]

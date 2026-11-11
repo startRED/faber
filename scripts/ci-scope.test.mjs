@@ -11,7 +11,7 @@ import { isWords, scope, suitesFor } from './ci-scope.mjs';
 
 test('each path picks the suites of the table testkit tests too (testkit/src/plan.rs)', () => {
   const cases = [
-    ['engine/src/store.rs', ['rust', 'screen']],
+    ['engine-core/src/store.rs', ['rust', 'screen']],
     ['src-tauri/src/main.rs', ['rust', 'ui', 'screen']],
     ['Cargo.lock', ['rust', 'ui', 'screen']],
     ['.cargo/config.toml', ['rust', 'ui', 'screen']],

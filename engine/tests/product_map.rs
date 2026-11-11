@@ -198,7 +198,7 @@ fn the_project_map_read_from_faber_s_code_finds_what_the_product_map_is_checked_
     let set = |names: Vec<String>| names.into_iter().collect::<BTreeSet<String>>();
     let (files, keys) = screen_files_and_keys();
     assert_eq!(of(Kind::Command, &|f| f == "src-tauri/src/main.rs" || f == "host/src/table.rs"), set(commands()));
-    assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/")), set(settings_keys()));
+    assert_eq!(of(Kind::Setting, &|f| f.starts_with("engine/") || f.starts_with("engine-core/")), set(settings_keys()));
     assert_eq!(of(Kind::Screen, &|f| f.starts_with("ui/") && !f[3..].contains('/')), set(files));
     // Shared storage keys are listed once, which may be in Electron code before the UI.
     let stored = of(Kind::Stored, &|_| true);

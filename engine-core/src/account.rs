@@ -1,0 +1,764 @@
+//! Signing in to each CLI with its own official flow, and asking the CLI whether it is signed in.
+//! Faber never reads the CLIs' credential files; it only runs their status command and keeps the verdict.
+//!
+//! Claude Code: `claude auth login`, `claude auth status` prints JSON with `loggedIn` and exits 0 when signed in, 1
+//! when not (https://code.claude.com/docs/en/cli-reference).
+//! Codex: `codex login`, `codex login status` prints the active mode and exits 0 when signed in
+//! (https://developers.openai.com/codex/cli/reference/#codex-login).
+
+use crate::cli::Cli;
+use crate::model::Vendor;
+use crate::proc::Spawner;
+use crate::signals::{Signals, claude_plan};
+use serde::Serialize;
+use std::path::Path;
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountStatus {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
+/// The CLI's own interactive sign-in, meant for a terminal the user sees.
+pub fn login_args(vendor: Vendor) -> &'static [&'static str] {
+    match vendor {
+        Vendor::Claude => &["auth", "login"],
+        Vendor::Codex => &["login"],
+        // Not yet: no CLI is discovered for it, so nothing signs in.
+        Vendor::Gemini => &[],
+    }
+}
+
+pub fn status_args(vendor: Vendor) -> &'static [&'static str] {
+    match vendor {
+        Vendor::Claude => &["auth", "status"],
+        Vendor::Codex => &["login", "status"],
+        Vendor::Gemini => &[],
+    }
+}
+
+// Bound transient output, including diagnostics, before discarding it after the verdict.
+const OUTPUT_LIMIT: u64 = 64 * 1024;
+
+/// What a status command printed and how it ended.
+struct Ran {
+    out: String,
+    err: String,
+    code: Option<i32>,
+    /// A replayed recording has no process and so no exit status: its text is all there is.
+    replayed: bool,
+}
+
+/// Runs the status command without a shell, with its output bounded. None when the CLI fails to start, does not answer within
+/// `timeout` (it is killed when the run ends) or prints more than the bound.
+async fn run(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
+    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout).await
+}
+
+/// Runs a status command or a reading as a background process: both are short and periodic, and neither may compete with a
+/// game or the person’s own work (idle priority on Windows; see `proc::spawn_background`).
+async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
+    let args: Vec<String> = cli.prefix.iter().cloned().chain(args).collect();
+    let p = crate::proc::spawn_background(spawn, &cli.command, &args, cwd).ok()?;
+    drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
+    let mut child = p.child;
+    let run = async {
+        let (Some(out), Some(err)) = tokio::join!(read_all(Some(p.stdout)), read_all(p.stderr)) else { return None };
+        let code = match &mut child {
+            Some(c) => c.wait().await.ok().and_then(|s| s.code()),
+            None => None,
+        };
+        Some(Ran { out, err, code, replayed: child.is_none() })
+    };
+    tokio::time::timeout(timeout, run).await.ok().flatten()
+}
+
+/// Runs the status command. Its output is read into memory only to reach a verdict, then dropped; a CLI that fails to start or
+/// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
+pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+    let Some(Ran { out, err, code, .. }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
+    if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
+}
+
+/// Which newer flags the installed Claude Code lists in `--help` (one short hidden run, output bounded). None when it did not
+/// answer or printed nothing: the caller then keeps passing none of them.
+pub async fn claude_flags(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<crate::claude::ClaudeFlags> {
+    claude_launch_support(cli, spawn, cwd, timeout).await.map(|(flags, _)| flags)
+}
+
+pub async fn claude_launch_support(
+    cli: &Cli,
+    spawn: &Spawner,
+    cwd: &Path,
+    timeout: Duration,
+) -> Option<(crate::claude::ClaudeFlags, bool)> {
+    let ran = run_args(cli, vec!["--help".into()], spawn, cwd, timeout).await?;
+    flags_from_run(ran.code, ran.replayed, &ran.out).map(|flags| (flags, crate::claude::supports_fork(&ran.out)))
+}
+
+/// The flags a finished `--help` run declares. A help that failed (non-zero exit) is no declaration; a replayed recording has
+/// no exit status and is judged by its text alone.
+fn flags_from_run(code: Option<i32>, replayed: bool, out: &str) -> Option<crate::claude::ClaudeFlags> {
+    let finished = code == Some(0) || (replayed && code.is_none());
+    (finished && !out.trim().is_empty()).then(|| crate::claude::ClaudeFlags::from_help(out))
+}
+
+#[cfg(test)]
+mod flags_tests {
+    use super::*;
+    use crate::claude::ClaudeFlags;
+
+    const HELP: &str = "Usage: claude\n  --autocompact <auto|tokens>   Window\n  --permission-prompts <target>   Who answers\n";
+    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: false, plugin_dir: false };
+
+    #[test]
+    fn only_a_help_that_finished_successfully_declares_flags() {
+        assert_eq!(flags_from_run(Some(0), false, HELP), Some(BOTH));
+        assert_eq!(flags_from_run(Some(1), false, HELP), None, "a failed run is no declaration");
+        assert_eq!(flags_from_run(None, false, HELP), None, "a real process with no status was cut off");
+        assert_eq!(flags_from_run(None, true, HELP), Some(BOTH), "a recording is judged by its text");
+        assert_eq!(flags_from_run(Some(0), false, "  \n"), None);
+    }
+}
+
+/// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
+/// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
+pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {
+    let ran = run(Vendor::Claude, cli, spawn, cwd, timeout).await?;
+    serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
+    Some(claude_plan(&ran.out))
+}
+
+fn utc_seconds(text: &str) -> Option<f64> {
+    let text = text.strip_suffix('Z').or_else(|| text.strip_suffix("+00:00"))?;
+    let (date, clock) = text.split_once('T')?;
+    let date: Vec<u32> = date.split('-').map(str::parse).collect::<Result<_, _>>().ok()?;
+    let clock: Vec<u32> = clock.split('.').next()?.split(':').map(str::parse).collect::<Result<_, _>>().ok()?;
+    if date.len() != 3 || clock.len() != 3 {
+        return None;
+    }
+    let (year, month, day) = (date[0], date[1], date[2]);
+    let leap = |y: u32| y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
+    let months = [31, if leap(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1970..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > months[(month - 1) as usize]
+        || clock[0] > 23
+        || clock[1] > 59
+        || clock[2] > 59
+    {
+        return None;
+    }
+    let days: u64 = (1970..year).map(|y| if leap(y) { 366 } else { 365 }).sum::<u64>()
+        + months[..(month - 1) as usize].iter().map(|d| u64::from(*d)).sum::<u64>()
+        + u64::from(day - 1);
+    Some((days * 86400 + u64::from(clock[0] * 3600 + clock[1] * 60 + clock[2])) as f64)
+}
+
+fn usage_events(report: &serde_json::Value) -> Option<Vec<crate::events::EngineEvent>> {
+    use crate::events::EngineEvent;
+    if report["rate_limits_available"] != true
+        || report["session"]["total_cost_usd"].as_f64() != Some(0.0)
+        || report["session"]["model_usage"].as_object().is_none_or(|models| !models.is_empty())
+    {
+        return None;
+    }
+    let rates = &report["rate_limits"];
+    // SDK 0.3.312 omits model_scoped on cached answers; receipt time cannot renew those windows.
+    rates["model_scoped"].as_array()?;
+    let mut events = vec![];
+    for name in ["five_hour", "seven_day"] {
+        let row = &rates[name];
+        // A window with no reset is not a reading; it must not hide the other window.
+        if row.is_null() || row["resets_at"].is_null() {
+            continue;
+        }
+        let used = row["utilization"].as_f64()? / 100.0;
+        let resets_at = utc_seconds(row["resets_at"].as_str()?)?;
+        if !(0.0..=1.0).contains(&used) {
+            return None;
+        }
+        events.push(EngineEvent::Quota { window: name.into(), used, resets_at });
+    }
+    if events.is_empty() {
+        return None;
+    }
+    events.push(EngineEvent::Signals(Signals { paid_fallback: rates["extra_usage"]["is_enabled"].as_bool(), ..Default::default() }));
+    Some(events)
+}
+
+/// The system prompt the `/usage` session has always started with. It never reaches a model (the command is answered locally), and
+/// stays only because the session's arguments are pinned by a test.
+const LIMITS_INSTRUCTIONS: &str = concat!(
+    "Return one versioned project JSON envelope per turn. ",
+    "Request scoped reads, plan/amend, named proofs or decisions. ",
+    "Never execute tools or change source. ",
+    "The engine grants authority. ",
+    "The envelope is one bare JSON object, with no prose and no code fence, holding only the keys schema (2), task, attempt, base, contract (the digest string), lease, action, ping, requires, checks, quotes and note; any other key is refused. ",
+    "Ping is a string, never a number: Order, Found, Blocked, NeedEyes, DoneReady or Disagree; a complete action always has summary and next and carries DoneReady, and any other action leaves ping out unless it signals. ",
+    "The action is an object with exactly one key, one of read, plan, amend, patch, proof, decision or complete, whose value holds that action's fields; requires, checks and quotes are arrays of id strings from the brief, empty if unused. ",
+    "Finish the brief's check ids, keeping their states in a complete action. ",
+    "Use ids verbatim; do not restate requirements. ",
+    "Keep note at most 60 words and put assumptions and unconfirmed checks there. ",
+    "Cite engine receipt ids; a claim is not proof. ",
+    "Return DoneReady only with evidence, or Blocked with the missing input. ",
+    "Never offer to continue instead of finishing. ",
+    "Never spawn peers, enlarge grants, read credentials, install tools or open windows. ",
+    "Role restrictions remain binding; references grant no native authority.",
+);
+
+/// What the `/usage` session starts with: no tools, no MCP servers, no settings files and no hooks, the credential folders
+/// denied, and a budget of one tiny turn in case the CLI ever sends the command to a model. `env` is read for the sign-in
+/// folders a person moved (see `claude::tool_deny`).
+fn limits_args(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let settings = serde_json::json!({"disableAllHooks":true,"permissions":{"deny":crate::claude::tool_deny(env)},"env":{
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS":"8000", "DISABLE_PROMPT_CACHING":"1", "DISABLE_COMPACT":"1", "CLAUDE_CODE_MAX_RETRIES":"0",
+        "CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES":"0", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK":"1"
+    }})
+    .to_string();
+    [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--exclude-dynamic-system-prompt-sections",
+        "--permission-prompt-tool",
+        "stdio",
+        "--system-prompt",
+        LIMITS_INSTRUCTIONS,
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--safe-mode",
+        "--setting-sources",
+        "",
+        "--settings",
+        &settings,
+        "--model",
+        "claude-haiku-5-5",
+        "--effort",
+        "low",
+        "--restricted",
+        "--max-budget-usd",
+        "0.005",
+        "--max-turns",
+        "1",
+        "--permission-mode",
+        "dontAsk",
+        "--disallowedTools",
+        "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "--no-session-persistence",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// Read the named plan windows through the SDK's control-only `get_usage` contract (0.3.312).
+/// No user message is sent; `skip_behaviors` also avoids scanning local transcripts.
+pub async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Vec<crate::events::EngineEvent> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let args = limits_args(&|name| std::env::var(name).ok());
+    let args: Vec<_> = cli.prefix.iter().cloned().chain(args).collect();
+    let Ok(mut p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return vec![] };
+    let _tail = crate::proc::stderr_tail(p.stderr.take());
+    let mut lines = BufReader::new(p.stdout.take(OUTPUT_LIMIT)).lines();
+    let ask = async {
+        for (id, request) in [
+            ("limits-init", serde_json::json!({"subtype":"initialize"})),
+            ("limits-usage", serde_json::json!({"subtype":"get_usage","skip_behaviors":true})),
+        ] {
+            crate::proc::write_line(&mut *p.stdin, &serde_json::json!({"type":"control_request","request_id":id,"request":request}))
+                .await
+                .ok()?;
+            loop {
+                let line = lines.next_line().await.ok()??;
+                let msg: serde_json::Value = serde_json::from_str(&line).ok()?;
+                match msg["type"].as_str()? {
+                    "control_response" if msg["response"]["request_id"] == id => {
+                        let answer = &msg["response"];
+                        if answer["subtype"] != "success" || !answer["response"].is_object() {
+                            return None;
+                        }
+                        if id == "limits-usage" {
+                            return usage_events(&answer["response"]);
+                        }
+                        break;
+                    }
+                    "assistant" | "stream_event" | "result" | "control_request" => return None,
+                    _ => {}
+                }
+            }
+        }
+        None
+    };
+    let result = tokio::time::timeout(timeout, ask).await.ok().flatten().unwrap_or_default();
+    crate::proc::stop(&mut *p.stdin, &mut p.child, &mut p.contained).await;
+    result
+}
+
+/// What `claude -p /usage` gave.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UsageRead {
+    /// The vendor-wide windows: name, used (0 to 1), reset in Unix seconds.
+    Windows(Vec<(&'static str, f64, f64)>),
+    /// The CLI did not take `/usage` as a local command and asked a model: it is never used for readings again.
+    Spent,
+    /// A clean local answer that prints no window at all: newer Claude Code versions list what contributes to the limits but no
+    /// percentages, so only a real request tells them (`claude_probe`).
+    NoWindows,
+    Failed,
+}
+
+/// Reads Claude Code's quota windows through its own `/usage` command, which answers locally: no prompt is sent, no model
+/// runs, and the result says so (`num_turns` 0 and no tokens). Faber's usual isolation applies (no hooks, settings files or
+/// MCP servers), and no session is saved. A CLI whose result shows model work is reported as `Spent`.
+pub async fn claude_usage(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration, now: f64, offset: i64) -> UsageRead {
+    let args = [
+        "-p",
+        "/usage",
+        "--output-format",
+        "json",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--no-session-persistence",
+    ];
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return UsageRead::Failed };
+    usage_from(&ran.out, if ran.replayed { Some(0) } else { ran.code }, now, offset)
+}
+
+/// What the output of `claude -p /usage` means. A reading needs a clean exit, no error flag and every metering field present
+/// and well typed (`num_turns`, the token counts and the cost); a missing or mistyped field is no reading at all, never
+/// zero. Any model work (a turn, tokens, cost) makes it `Spent`.
+fn usage_from(out: &str, code: Option<i32>, now: f64, offset: i64) -> UsageRead {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(out) else { return UsageRead::Failed };
+    // Positive evidence of model work comes first, so a damaged answer that still shows spending switches `/usage` off for good.
+    let counts =
+        ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].map(|k| v["usage"][k].as_u64());
+    let (turns, cost) = (v["num_turns"].as_u64(), v["total_cost_usd"].as_f64());
+    if turns.is_some_and(|t| t > 0) || counts.iter().flatten().any(|c| *c > 0) || cost.is_some_and(|c| c != 0.0) {
+        return UsageRead::Spent;
+    }
+    // Then every field must be there and well typed, and zero: a missing one is no reading, never zero.
+    if turns.is_none() || cost.is_none() || counts.iter().any(Option::is_none) {
+        return UsageRead::Failed;
+    }
+    if code != Some(0) || v["is_error"] != false {
+        return UsageRead::Failed;
+    }
+    let text = v["result"].as_str().unwrap_or_default();
+    let windows = crate::signals::claude_usage_windows(text, now, offset);
+    // Only a login the CLI says is on its subscription may be probed: a request on any other billing is paid.
+    if !windows.is_empty() {
+        UsageRead::Windows(windows)
+    } else if text.lines().any(|line| line.trim() == "You are currently using your subscription to power your Claude Code usage") {
+        UsageRead::NoWindows
+    } else {
+        UsageRead::Failed
+    }
+}
+
+/// A probe that cost more than this (US$, list price) did more than it was asked to, and is no reading.
+const PROBE_COST_LIMIT: f64 = 0.01;
+
+/// The smallest real request Claude Code can answer: no tools, no skills, a one-line system prompt and the cheapest model. Its
+/// `rate_limit_event` carries both vendor-wide windows exactly, which is all `/usage` used to print. It costs about 500 cached
+/// tokens (US$0.0001 at list price), and runs only when `/usage` says nothing, at most once per reading of the schedule in
+/// `cadence.rs`. A budget well under a cent stops it should it ever do more.
+pub async fn claude_probe(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> (Vec<(&'static str, f64, f64)>, Signals) {
+    let args = [
+        "-p",
+        "ok",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--model",
+        "claude-haiku-5-5",
+        "--effort",
+        "low",
+        "--max-turns",
+        "1",
+        "--max-budget-usd",
+        "0.005",
+        "--system-prompt",
+        "Reply ok.",
+        "--disable-slash-commands",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--no-session-persistence",
+        "--tools",
+        "",
+    ];
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return Default::default() };
+    probe_windows(&ran.out, if ran.replayed { Some(0) } else { ran.code })
+}
+
+/// The windows in a finished probe: its stream must end in a successful result that cost next to nothing, and carry a
+/// `rate_limit_event` whose two windows are fractions with a reset time. Anything else is no reading. What the event says
+/// about extra usage counts either way, as it does for any turn: it is what lets the next probe run, or stops it.
+fn probe_windows(out: &str, code: Option<i32>) -> (Vec<(&'static str, f64, f64)>, Signals) {
+    let (mut windows, mut signals) = (vec![], Signals::default());
+    let mut finished = false;
+    for line in out.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        match msg["type"].as_str() {
+            Some("rate_limit_event") => {
+                // A later event that leaves a field out keeps what an earlier one said, as the ledger does.
+                let s = crate::signals::claude_signals(&msg);
+                signals.reach = s.reach.or(signals.reach);
+                signals.overage_active = s.overage_active.or(signals.overage_active);
+                signals.paid_fallback = s.paid_fallback.or(signals.paid_fallback);
+                for name in ["five_hour", "seven_day"] {
+                    let w = &msg["rate_limit_info"]["unifiedWindows"][name];
+                    if let (Some(used), Some(resets)) = (w["utilization"].as_f64(), w["resetsAt"].as_f64())
+                        && (0.0..=1.0).contains(&used)
+                    {
+                        windows.retain(|(n, _, _)| *n != name);
+                        windows.push((name, used, resets));
+                    }
+                }
+            }
+            Some("result") => {
+                finished = msg["is_error"] == false && msg["total_cost_usd"].as_f64().is_some_and(|c| (0.0..PROBE_COST_LIMIT).contains(&c))
+            }
+            _ => {}
+        }
+    }
+    if code == Some(0) && finished { (windows, signals) } else { (vec![], signals) }
+}
+
+async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {
+    let mut buf = Vec::new();
+    if let Some(s) = stream {
+        s.take(OUTPUT_LIMIT + 1).read_to_end(&mut buf).await.ok()?;
+    }
+    if buf.len() as u64 > OUTPUT_LIMIT {
+        return None;
+    }
+    String::from_utf8(buf).ok()
+}
+
+fn verdict(vendor: Vendor, output: &str, code: Option<i32>) -> AccountStatus {
+    let said = match vendor {
+        Vendor::Gemini => return AccountStatus::Unknown,
+        Vendor::Claude => serde_json::from_str::<serde_json::Value>(output).ok().and_then(|v| v["loggedIn"].as_bool()),
+        // ponytail: Codex documents only its exit code; the wording is matched for replays, which have none.
+        Vendor::Codex => output.lines().map(str::trim).find_map(|l| {
+            let l = l.to_ascii_lowercase();
+            if l.starts_with("not logged in") {
+                Some(false)
+            } else if l.starts_with("logged in") {
+                Some(true)
+            } else {
+                None
+            }
+        }),
+    };
+    match (said, code) {
+        (Some(true), _) | (None, Some(0)) => AccountStatus::SignedIn,
+        (Some(false), _) => AccountStatus::SignedOut,
+        (None, Some(1)) if vendor == Vendor::Claude => AccountStatus::SignedOut,
+        _ => AccountStatus::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The arguments of the `/usage` session are what they were when the project roles built them: this list was captured from
+    /// that code before it was retired, with the added protections for taste and lesson files.
+    #[test]
+    fn the_usage_session_starts_with_the_arguments_it_always_had() {
+        let args = limits_args(&|_| None);
+        const SETTINGS: &str = "{\"disableAllHooks\":true,\"env\":{\"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK\":\"1\",\"CLAUDE_CODE_MAX_OUTPUT_TOKENS\":\"8000\",\"CLAUDE_CODE_MAX_RETRIES\":\"0\",\"CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES\":\"0\",\"DISABLE_COMPACT\":\"1\",\"DISABLE_PROMPT_CACHING\":\"1\"},\"permissions\":{\"deny\":[\"Edit(//**/.git/**)\",\"Read(~/.claude/**)\",\"Edit(~/.claude/**)\",\"Read(~/.codex/**)\",\"Edit(~/.codex/**)\",\"Read(~/.gemini/**)\",\"Edit(~/.gemini/**)\",\"Read(~/.ssh/**)\",\"Edit(~/.ssh/**)\",\"Read(~/.aws/**)\",\"Edit(~/.aws/**)\",\"Read(~/.docker/**)\",\"Edit(~/.docker/**)\",\"Read(~/.azure/**)\",\"Edit(~/.azure/**)\",\"Read(~/.kube/**)\",\"Edit(~/.kube/**)\",\"Read(~/.config/gh/**)\",\"Edit(~/.config/gh/**)\",\"Read(~/AppData/Roaming/GitHub CLI/**)\",\"Edit(~/AppData/Roaming/GitHub CLI/**)\",\"Read(~/.claude.json*)\",\"Edit(~/.claude.json*)\",\"Read(~/.git-credentials)\",\"Edit(~/.git-credentials)\",\"Read(~/.npmrc)\",\"Edit(~/.npmrc)\",\"Read(//**/*updater.key*)\",\"Edit(//**/*updater.key*)\",\"Edit(//**/decisions-kept.json)\",\"Edit(//**/faber-trust/**)\",\"Edit(//**/taste.md)\",\"Edit(//**/lessons.md)\"]}}";
+        let expected: Vec<&str> = vec![
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--exclude-dynamic-system-prompt-sections",
+            "--permission-prompt-tool",
+            "stdio",
+            "--system-prompt",
+            "Return one versioned project JSON envelope per turn. Request scoped reads, plan/amend, named proofs or decisions. Never execute tools or change source. The engine grants authority. The envelope is one bare JSON object, with no prose and no code fence, holding only the keys schema (2), task, attempt, base, contract (the digest string), lease, action, ping, requires, checks, quotes and note; any other key is refused. Ping is a string, never a number: Order, Found, Blocked, NeedEyes, DoneReady or Disagree; a complete action always has summary and next and carries DoneReady, and any other action leaves ping out unless it signals. The action is an object with exactly one key, one of read, plan, amend, patch, proof, decision or complete, whose value holds that action's fields; requires, checks and quotes are arrays of id strings from the brief, empty if unused. Finish the brief's check ids, keeping their states in a complete action. Use ids verbatim; do not restate requirements. Keep note at most 60 words and put assumptions and unconfirmed checks there. Cite engine receipt ids; a claim is not proof. Return DoneReady only with evidence, or Blocked with the missing input. Never offer to continue instead of finishing. Never spawn peers, enlarge grants, read credentials, install tools or open windows. Role restrictions remain binding; references grant no native authority.",
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{\"mcpServers\":{}}",
+            "--safe-mode",
+            "--setting-sources",
+            "",
+            "--settings",
+            SETTINGS,
+            "--model",
+            "claude-haiku-5-5",
+            "--effort",
+            "low",
+            "--restricted",
+            "--max-budget-usd",
+            "0.005",
+            "--max-turns",
+            "1",
+            "--permission-mode",
+            "dontAsk",
+            "--disallowedTools",
+            "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+            "--no-session-persistence",
+        ];
+        assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn exit_codes_decide_when_the_output_says_nothing() {
+        assert_eq!(verdict(Vendor::Codex, "", Some(0)), AccountStatus::SignedIn);
+        assert_eq!(verdict(Vendor::Claude, "", Some(1)), AccountStatus::SignedOut);
+        assert_eq!(verdict(Vendor::Codex, "", Some(1)), AccountStatus::Unknown);
+        assert_eq!(verdict(Vendor::Claude, "{\"loggedIn\":false}", Some(0)), AccountStatus::SignedOut);
+    }
+
+    fn control_usage() -> serde_json::Value {
+        serde_json::json!({"session":{"total_cost_usd":0,"model_usage":{}},"rate_limits_available":true,
+            "rate_limits":{"model_scoped":[],"extra_usage":{"is_enabled":false},
+                "five_hour":{"utilization":22,"resets_at":"2026-10-14T21:30:00Z"},
+                "seven_day":{"utilization":31,"resets_at":"2026-10-20T08:00:00Z"}}})
+    }
+
+    #[test]
+    fn control_usage_requires_available_windows_and_zero_session_work() {
+        let report = control_usage();
+        let events = usage_events(&report).unwrap();
+        assert!(events.iter().any(|e| matches!(e, crate::events::EngineEvent::Quota {window,used,resets_at}
+            if window == "seven_day" && *used == 0.31 && *resets_at == 1792483200.0)));
+        assert!(events.iter().any(|e| matches!(e,crate::events::EngineEvent::Signals(s) if s.paid_fallback==Some(false))));
+        for (pointer, bad) in [
+            ("/rate_limits_available", serde_json::json!(false)),
+            ("/rate_limits", serde_json::Value::Null),
+            ("/rate_limits/model_scoped", serde_json::Value::Null),
+            ("/session/total_cost_usd", serde_json::json!(0.01)),
+            ("/session/total_cost_usd", serde_json::Value::Null),
+            ("/session/model_usage", serde_json::json!({"m":{"outputTokens":1}})),
+            ("/session/model_usage", serde_json::Value::Null),
+            ("/rate_limits/seven_day/utilization", serde_json::json!(101)),
+            ("/rate_limits/seven_day/utilization", serde_json::json!("31")),
+            ("/rate_limits/seven_day/resets_at", serde_json::json!("invalid")),
+        ] {
+            let mut invalid = report.clone();
+            *invalid.pointer_mut(pointer).unwrap() = bad;
+            assert!(usage_events(&invalid).is_none(), "{pointer}");
+        }
+    }
+
+    #[test]
+    fn a_cached_control_answer_cannot_renew_windows_or_extra_usage_evidence() {
+        let mut report = control_usage();
+        report["rate_limits"].as_object_mut().unwrap().remove("model_scoped");
+        assert!(usage_events(&report).is_none());
+    }
+
+    #[test]
+    fn a_missing_or_unstarted_window_does_not_hide_the_other_window() {
+        for name in ["five_hour", "seven_day"] {
+            let mut report = control_usage();
+            report["rate_limits"][name]["resets_at"] = serde_json::Value::Null;
+            let events = usage_events(&report).unwrap();
+            assert_eq!(events.iter().filter(|e| matches!(e, crate::events::EngineEvent::Quota { .. })).count(), 1);
+            report["rate_limits"][name] = serde_json::Value::Null;
+            assert_eq!(usage_events(&report).unwrap(), events);
+        }
+    }
+
+    #[test]
+    fn quota_reset_timestamps_are_checked_calendar_values() {
+        assert_eq!(utc_seconds("1970-01-01T00:00:00Z"), Some(0.0));
+        assert_eq!(utc_seconds("2026-10-20T08:00:00.296594+00:00"), Some(1792483200.0));
+        for text in [
+            "2026-02-29T00:00:00Z",
+            "2026-13-01T00:00:00Z",
+            "2026-01-00T00:00:00Z",
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T00:60:00Z",
+            "2026-01-01T00:00:60Z",
+            "2026-01-01T00:00:00+03:00",
+            "x",
+        ] {
+            assert_eq!(utc_seconds(text), None, "{text}");
+        }
+    }
+
+    fn stream(event: serde_json::Value, result: serde_json::Value) -> String {
+        format!("{{\"type\":\"system\"}}\n{event}\nnot json\n{result}\n")
+    }
+
+    fn event() -> serde_json::Value {
+        serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"overageStatus":"rejected","isUsingOverage":false,"unifiedWindows":{
+            "five_hour":{"utilization":0,"resetsAt":1793233200},
+            "seven_day":{"utilization":0.15,"resetsAt":1793692800}}}})
+    }
+
+    fn result() -> serde_json::Value {
+        serde_json::json!({"type":"result","is_error":false,"total_cost_usd":0.0001})
+    }
+
+    #[test]
+    fn a_probe_gives_the_two_windows_from_its_rate_limit_event() {
+        let (got, said) = probe_windows(&stream(event(), result()), Some(0));
+        assert_eq!(got, vec![("five_hour", 0.0, 1793233200.0), ("seven_day", 0.15, 1793692800.0)]);
+        assert_eq!((said.paid_fallback, said.overage_active), (Some(false), Some(false)), "extra usage is off, so the next probe may run");
+        let mut costly = result();
+        costly["total_cost_usd"] = 0.5.into();
+        assert_eq!(probe_windows(&stream(event(), costly), Some(0)).1, said, "what it says about extra usage counts either way");
+    }
+
+    #[test]
+    fn a_probe_that_failed_or_cost_too_much_is_no_reading() {
+        let mut errored = result();
+        errored["is_error"] = true.into();
+        let mut costly = result();
+        costly["total_cost_usd"] = 0.5.into();
+        let mut no_cost = result();
+        no_cost.as_object_mut().unwrap().remove("total_cost_usd");
+        for bad in [errored, costly, no_cost] {
+            assert!(probe_windows(&stream(event(), bad), Some(0)).0.is_empty());
+        }
+        assert!(probe_windows(&stream(event(), result()), Some(1)).0.is_empty(), "a non-zero exit");
+        assert!(probe_windows(&stream(event(), result()), None).0.is_empty(), "killed, no exit code");
+        assert!(probe_windows(&format!("{}\n", result()), Some(0)).0.is_empty(), "no rate-limit event");
+    }
+
+    #[test]
+    fn a_later_event_that_says_less_keeps_what_an_earlier_one_said_about_extra_usage() {
+        let mut on = event();
+        on["rate_limit_info"]["overageStatus"] = "allowed".into();
+        let quiet = serde_json::json!({"type":"rate_limit_event","rate_limit_info":{}});
+        let out = format!(
+            "{on}
+{quiet}
+{}
+",
+            result()
+        );
+        assert_eq!(probe_windows(&out, Some(0)).1.paid_fallback, Some(true));
+    }
+
+    #[test]
+    fn a_probe_window_that_cannot_be_real_is_skipped() {
+        let mut e = event();
+        e["rate_limit_info"]["unifiedWindows"]["five_hour"]["utilization"] = 7.into();
+        e["rate_limit_info"]["unifiedWindows"]["seven_day"].as_object_mut().unwrap().remove("resetsAt");
+        assert!(probe_windows(&stream(e, result()), Some(0)).0.is_empty());
+    }
+
+    #[test]
+    fn a_usage_command_with_no_percentages_asks_for_the_probe() {
+        let mut v = clean();
+        let why = "What's contributing to your limits usage?\nLast 24h · 655 requests";
+        v["result"] = format!("You are currently using your subscription to power your Claude Code usage\n\n{why}").into();
+        assert_eq!(read(&v, Some(0)), UsageRead::NoWindows);
+        v["result"] = why.into();
+        assert_eq!(read(&v, Some(0)), UsageRead::Failed, "a login not said to be on its subscription is never probed");
+    }
+
+    const TEXT: &str = "Current session: 10% used · resets Oct 14, 11:29pm (X/Y)
+Current week (all models): 36% used · resets Oct 20, 4:59am (X/Y)";
+    const NOW: f64 = 1_791_620_000.0;
+
+    fn clean() -> serde_json::Value {
+        serde_json::json!({ "is_error": false, "num_turns": 0, "total_cost_usd": 0,
+            "usage": { "input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0 }, "result": TEXT })
+    }
+
+    fn read(v: &serde_json::Value, code: Option<i32>) -> UsageRead {
+        usage_from(&v.to_string(), code, NOW, 0)
+    }
+
+    #[test]
+    fn a_clean_local_answer_is_a_reading() {
+        assert!(matches!(read(&clean(), Some(0)), UsageRead::Windows(w) if w.len() == 2));
+    }
+
+    #[test]
+    fn a_failed_answer_is_never_a_reading() {
+        let mut errored = clean();
+        errored["is_error"] = true.into();
+        assert_eq!(read(&errored, Some(0)), UsageRead::Failed);
+        assert_eq!(read(&clean(), Some(1)), UsageRead::Failed, "a non-zero exit");
+        assert_eq!(read(&clean(), None), UsageRead::Failed, "killed, no exit code");
+        let mut no_flag = clean();
+        no_flag.as_object_mut().unwrap().remove("is_error");
+        assert_eq!(read(&no_flag, Some(0)), UsageRead::Failed, "an answer that does not say it succeeded");
+        assert_eq!(usage_from("not json", Some(0), NOW, 0), UsageRead::Failed);
+    }
+
+    #[test]
+    fn a_missing_or_mistyped_metering_field_is_no_reading_never_zero() {
+        for field in ["num_turns", "total_cost_usd"] {
+            let mut v = clean();
+            v.as_object_mut().unwrap().remove(field);
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} missing");
+        }
+        for field in ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"] {
+            let mut v = clean();
+            v["usage"].as_object_mut().unwrap().remove(field);
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} missing");
+            v["usage"][field] = "0".into();
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} a string");
+        }
+        let mut v = clean();
+        v.as_object_mut().unwrap().remove("usage");
+        assert_eq!(read(&v, Some(0)), UsageRead::Failed);
+        let mut v = clean();
+        v["total_cost_usd"] = "0".into();
+        assert_eq!(read(&v, Some(0)), UsageRead::Failed);
+    }
+
+    #[test]
+    fn spending_is_seen_before_missing_fields_so_a_damaged_answer_still_switches_usage_off() {
+        let mut turns = clean();
+        turns["num_turns"] = 1.into();
+        turns.as_object_mut().unwrap().remove("usage");
+        assert_eq!(read(&turns, Some(0)), UsageRead::Spent);
+        let mut tokens = clean();
+        tokens["usage"] = serde_json::json!({ "output_tokens": 9 });
+        tokens.as_object_mut().unwrap().remove("num_turns");
+        assert_eq!(read(&tokens, Some(1)), UsageRead::Spent);
+        let mut cost = clean();
+        cost["total_cost_usd"] = 0.02.into();
+        cost.as_object_mut().unwrap().remove("num_turns");
+        assert_eq!(read(&cost, None), UsageRead::Spent);
+    }
+
+    #[test]
+    fn any_model_work_is_spent_even_when_the_exit_is_bad() {
+        for (key, value) in [("num_turns", serde_json::json!(1)), ("total_cost_usd", serde_json::json!(0.01))] {
+            let mut v = clean();
+            v[key] = value;
+            assert_eq!(read(&v, Some(0)), UsageRead::Spent, "{key}");
+            assert_eq!(read(&v, Some(1)), UsageRead::Spent, "{key}, exit 1");
+        }
+        let mut v = clean();
+        v["usage"]["output_tokens"] = 5.into();
+        assert_eq!(read(&v, Some(0)), UsageRead::Spent);
+    }
+}

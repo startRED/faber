@@ -65,7 +65,7 @@ the old 16,000-character limit cuts after a whole message or at a paragraph or s
 right after the last words kept says "It wrote more than fits here. What it wrote after this point is not kept." Then,
 once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
 in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
-its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
+its brief never named. These are counted by the engine from its steps (`engine-core/src/facts.rs`), never taken from the
 main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
 "Talk to the main AI about this helper" readies a message to the main agent: the conversation's box stays empty, and one
 quiet line above its field in the second ink says "To the main AI, about <name>" with a small close button that drops it
@@ -107,7 +107,7 @@ turn amber, its state reads "seems stuck", and one line under the row says in pl
 empty box with the helper named above it (Codex takes the message into the running turn; Claude Code after it, or at once
 with "Send now"). The line arrives with
 the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
-words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the
+words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine-core/src/stuck.rs`): the
 same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or
 no step for 10 minutes (30 while a command runs, since builds say nothing until they end). The time a question waits for
 the person never counts, and only for the subagent that asked it: a sibling that hangs meanwhile still turns amber

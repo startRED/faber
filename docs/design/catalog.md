@@ -147,7 +147,7 @@ and 14 for any remaining job, checked in engine tests. Only metadata and localiz
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
 
 Checks: `tests/ui/catalog.check.ts`, `tests/ui/plugins.check.ts`, `engine/tests/plugins.rs`,
-`engine/src/tools/plugins.rs`, `engine/src/tools/plugin_delivery.rs`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (every shipped name in every locale),
+`engine-core/src/tools/plugins.rs`, `engine-core/src/tools/plugin_delivery.rs`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (each shipped name, each locale),
 `engine/src/engine/kits.rs` (native resume and oversize discovery), `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
 Cards checked in code review: C007 (localized UTF-8), C009 (shared context menu policy), C011 (management placement).
 Catalog is not a C005 work home; no composer is added to satisfy that card. Visual screenshots remain to be verified.

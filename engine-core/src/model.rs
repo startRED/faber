@@ -1,0 +1,2118 @@
+//! What Faber keeps on disk and shows on screen. Field names match the JSON files, so a conversation saved by any
+//! version of Faber opens in any other.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Vendor {
+    Claude,
+    Codex,
+    /// Gemini through Antigravity's `agy` CLI (task 055). Known, but nothing discovers, starts or routes it yet.
+    Gemini,
+}
+
+impl Vendor {
+    pub const ALL: [Vendor; 3] = [Vendor::Claude, Vendor::Codex, Vendor::Gemini];
+    /// The vendors Faber discovers, lists and starts today; Gemini joins once its CLI is discovered (the tasks after 055).
+    pub const RUNNABLE: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Vendor::Claude => "claude",
+            Vendor::Codex => "codex",
+            Vendor::Gemini => "gemini",
+        }
+    }
+}
+
+/// A session the person started with a CLI in a terminal, as that CLI lists it, which a project conversation can go on with
+/// (parity F5). `updated_at` is in milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliSession {
+    pub vendor: Vendor,
+    pub id: String,
+    pub title: String,
+    /// The model the session last used, when the CLI says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub updated_at: u64,
+}
+
+/// A command or skill advertised by the running CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub name: String,
+    pub skill: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCommand {
+    pub vendor: Vendor,
+    #[serde(flatten)]
+    pub command: Command,
+}
+
+/// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Area {
+    Chat,
+    Project,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Streaming,
+    Done,
+    Stopped,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Image {
+    pub media_type: String,
+    pub base64: String,
+}
+
+fn glance() -> String {
+    "glance".into()
+}
+
+fn other() -> String {
+    "other".into()
+}
+
+/// Parked items saved before `kind` existed hold it empty; the screen has no text for that, so it reads as `other`.
+fn kind_or_other<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let kind = String::deserialize(d)?;
+    Ok(if kind.is_empty() { other() } else { kind })
+}
+
+/// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub pick: crate::router::Pick,
+    pub text: String,
+    pub by_hand: bool,
+    pub retried: bool,
+    /// The router's `check` for the request; files from before it was kept read as `glance`.
+    #[serde(default = "glance")]
+    pub check: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default = "recovery_confidence")]
+    pub confidence: f64,
+}
+
+fn recovery_confidence() -> f64 {
+    0.95
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transcript {
+    pub pages: u64,
+    pub failed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolDetail {
+    pub pages: u64,
+    pub bytes: usize,
+    pub hash: String,
+}
+
+/// A piece of a reply's thinking: it starts at `from` in the thinking (UTF-16 units) and came when the reply's text was
+/// `at` units long and the agent had started `steps` calls of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThinkingMark {
+    pub from: usize,
+    pub at: usize,
+    pub steps: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolUse {
+    pub id: String,
+    pub name: String,
+    pub input: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// No running CLI owns this unfinished agent call after restore or copy; no result or end time was observed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub declined: bool,
+    /// The subagent that ran this tool: the id of the agent tool call that started it. None for the agent's own tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// On a subagent's call while the reply runs: waiting for the person, or seeming stuck (`stuck.rs`). Never read back
+    /// from disk, so a sign can outlive neither its reply nor Faber.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub sign: Option<crate::stuck::Sign>,
+    /// On a subagent's call once it ended: what it changed and checked (`facts.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facts: Option<crate::facts::Facts>,
+    /// A command that runs the project's tests, lint or build (`nudge.rs`), marked when the call starts so the screen counts
+    /// the checks a reply ran without a second list of what a check is (R161 step 9).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check: bool,
+    /// When the engine saw the call start, in Unix milliseconds, so the screen can say how long a long step has run without
+    /// a clock of its own (R161 step 9). Absent on calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<u64>,
+    /// When the engine saw the call end, in Unix milliseconds, so a subagent's row can say how long it took. Absent while it
+    /// runs and on calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<u64>,
+    /// On a helper's call: what the person wrote to the helper while it worked (R161 step 5), oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub told: Vec<Told>,
+    /// Bounded team exchanges, preserved by screen updates, saves and branching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<HelperTeam>,
+    /// On a subagent's call: what the subagent itself wrote between its steps, oldest first (R161 step 3). Each entry sits after
+    /// the first `at` steps it ran under this call, so the side chat draws it in order with them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Words>,
+    /// Set once a word was left out because `WORDS_LIMIT` was reached, so the side chat can say later words are not kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not", rename = "wordsCut")]
+    pub words_cut: bool,
+    /// Only on the copy the screen gets (`Message::for_screen` takes `words` out): how many characters of words the call holds,
+    /// so the side chat loads them while it is open and again when this changes.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "wordsChars")]
+    pub words_chars: Option<usize>,
+    /// Visible child-session pages, kept outside the conversation and read one at a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<Transcript>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<ToolDetail>,
+    /// Where the reply's words stood when the agent's own call started, in UTF-16 units of its text, so the thread draws
+    /// the words and the steps in the order they happened (W1, 2026-10-31). None for a subagent's call (it sits in its
+    /// subagent's row) and for calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<usize>,
+    /// On an edit step: the lines it added and removed and the first of them (`change.rs`), so the screen counts them
+    /// without the whole input. Absent on other steps and on conversations recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::change::Change>,
+}
+
+pub fn input_hash(input: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    crate::hex(&Sha256::digest(input.to_string().as_bytes()))
+}
+
+impl ToolUse {
+    /// Keeps what a subagent wrote after its first `at` steps. Words with no step between join one entry (the blank line that
+    /// joins them counts). Past `WORDS_LIMIT` the text is cut at a clean place, never mid-sentence, and nothing later is kept.
+    pub fn add_words(&mut self, at: usize, text: &str) {
+        let text = text.trim();
+        if text.is_empty() || self.words_cut {
+            return;
+        }
+        let join = if self.words.last().is_some_and(|w| w.at == at) { 2 } else { 0 };
+        let used: usize = self.words.iter().map(|w| w.text.chars().count()).sum();
+        let room = WORDS_LIMIT.saturating_sub(used + join);
+        let kept = if text.chars().count() <= room {
+            Some(text)
+        } else {
+            self.words_cut = true;
+            // A whole entry or nothing, except one that is over the limit on its own.
+            if used == 0 { clean_cut(text, room) } else { None }
+        };
+        let Some(kept) = kept else { return };
+        match self.words.last_mut() {
+            Some(last) if last.at == at => {
+                last.text.push_str("\n\n");
+                last.text.push_str(kept);
+            }
+            _ => self.words.push(Words { at, text: kept.to_string() }),
+        }
+    }
+}
+
+/// The start of `text` that fits `room` characters and ends at its last paragraph or sentence break; None when it has none.
+fn clean_cut(text: &str, room: usize) -> Option<&str> {
+    let end = text.char_indices().nth(room).map_or(text.len(), |(i, _)| i);
+    let head = &text[..end];
+    let sentence = head
+        .char_indices()
+        .rev()
+        .find(|&(i, c)| matches!(c, '.' | '!' | '?' | '。') && text[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace))
+        .map(|(i, c)| i + c.len_utf8());
+    let cut = head.rfind("\n\n").max(sentence)?;
+    Some(head[..cut].trim_end()).filter(|kept| !kept.is_empty())
+}
+
+/// The most a subagent's own words keep, in characters, over the whole call. A long run writes a line or two per step, so this
+/// holds a long task; past it the later words are dropped and the steps and the report still tell the rest.
+pub const WORDS_LIMIT: usize = 16_000;
+
+/// What a subagent wrote after its first `at` steps.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Words {
+    pub at: usize,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelperTeam {
+    pub name: String,
+    pub job: String,
+    pub title: String,
+    pub files: Vec<String>,
+    pub state: TeamState,
+    pub messages: Vec<TeamMessage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TeamState {
+    Running,
+    WaitingLead,
+    Ended,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMessage {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+    pub from_name: String,
+    pub to_name: String,
+    pub kind: TeamKind,
+    pub text: String,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<QuestionState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TeamKind {
+    Ask,
+    Answer,
+    Tell,
+    NoAnswer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuestionState {
+    Waiting,
+    Answered,
+    Lapsed,
+}
+
+/// A message the person wrote to a helper at work. `taken` is empty while it is on its way, true once the helper took it
+/// in, and false when the helper had finished first, so it never read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Told {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken: Option<bool>,
+}
+
+/// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it
+/// starts, and it finishes later.
+pub fn runs_in_background(tool: &ToolUse) -> bool {
+    tool.parent.is_none() && matches!(tool.name.as_str(), "Agent" | "Task") && tool.input["run_in_background"] == true
+}
+
+/// A request the CLI denied because nobody could answer it (full access runs with no prompts): it was not done, and it waits
+/// here until the person says what to do. `tool_use_id` names it, with the turn. Only safe metadata is kept, never the request
+/// itself: a command line or a header in it could carry a token (see `engine::parked::describe`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Parked {
+    pub tool_use_id: String,
+    pub tool: String,
+    #[serde(default = "other", deserialize_with = "kind_or_other")]
+    /// "command", "file", "page" or "other".
+    pub kind: String,
+    #[serde(default)]
+    /// A file path, or the host of a page; empty for a command and for any other tool. Cut short.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /// For a command, what it would have done, as one word of Faber's own ("delete", "history", "publish", "install",
+    /// "network"); empty when none fits. Read from the command's program names and never a word of the command itself.
+    pub does: String,
+    #[serde(default)]
+    /// When it was held back, in milliseconds.
+    pub at: u64,
+}
+
+/// A permission request waiting for the user.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permission {
+    pub request_id: String,
+    pub tool: String,
+    pub input: Value,
+    /// The grants epoch current when the card was made. An "Always allow" on it is remembered only if the epoch is still
+    /// that one when the answer settles. Never shown or saved.
+    #[serde(skip)]
+    pub epoch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileInfo {
+    pub path: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Message {
+    pub id: String,
+    pub role: Role,
+    pub text: String,
+    /// Bounded visual outputs captured when this turn's editing tools completed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visual_files: Vec<crate::visual::VisualFile>,
+    /// Screen-only invalidation signal; snapshots themselves never enter the message store in the screen.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub visual_file_count: Option<usize>,
+    /// UTF-16 offsets where a new CLI text block starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_breaks: Option<Vec<usize>>,
+    /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_end: Option<usize>,
+    /// Where each piece of the thinking began and where it falls among the words and the steps, oldest first (W1,
+    /// 2026-10-31): the thread draws each piece in its place. Empty on replies recorded before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_marks: Vec<ThinkingMark>,
+    /// Milliseconds since the Unix epoch.
+    pub at: u64,
+    /// On a reply that ended well: how long it took from its start (`at`), in milliseconds. Absent on older replies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<Image>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_retry: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolUse>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<crate::review::History>,
+    /// Catalog items chosen when this reply's CLI session started; unchanged while that session runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_kit: Option<crate::tools::kits::Report>,
+    /// Successful git commit calls, recognised by the engine's command parser; ids refer to this reply's tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commits: Vec<String>,
+    /// A screen projection of the latest reply's authoritative running/done state; never inferred by the screen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_you: bool,
+    /// Oldest first; a model can ask for several tools at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<Permission>>,
+    /// Chat only: files the answer created or changed in the conversation's workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<FileInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<Status>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
+    /// separately). Codex reports one cache-write kind and no separate one-hour counter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
+    /// When the prompt cache this turn wrote goes cold, in milliseconds. Claude only: Codex names no lifetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_warm_until: Option<u64>,
+    /// Requests the CLI denied in this turn for want of anyone to answer them (see `Parked`), oldest first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked: Option<Vec<Parked>>,
+    /// How many more were denied in the turn beyond the few kept (see `parked::MAX_PARKED`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_more: Option<u32>,
+    /// True once the person said they read the held-back requests: they stay on the reply and no longer need the person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_seen: Option<bool>,
+    /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incomplete: Option<bool>,
+    /// Why the quota changed the model Auto chose, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<PaceNote>,
+    /// The permission mode that really ran this turn, as an i18n key, only when it is not the one chosen (`mode.fallback.auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Coverage of the file baseline immediately before this user message; unavailable history never blocks a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind: Option<crate::rewind::PointInfo>,
+    /// The CLI's exact native boundary for a later branch or retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_point: Option<crate::rewind::NativePoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
+    /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudge: Option<crate::nudge::Nudge>,
+    /// Code changed in this reply and nothing checked it: the screen offers to ask the same model to check its work,
+    /// before any rung (`nudge::Offer::SelfCheck`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub self_check: bool,
+    /// A reply that went from red to green, marked for the offer to look for the same mistake elsewhere (see `look`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<crate::look::Look>,
+    /// The pull request this reply opened or pushed, followed until its checks pass or it closes (`crate::follow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow: Option<Follow>,
+    /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acts: Vec<crate::act::FaberAct>,
+    /// Faber was closed while this reply ran, so no CLI finished it (set when Faber closes, or when a conversation loads from
+    /// disk still streaming after a crash): the screen says so and offers to continue, never the person's own Stop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
+    /// The one closing reminder was attempted for this reply, including refused delivery.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conclusion_requested: bool,
+    /// A rejected conclusion, passed to the bounded conclusion reminder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conclusion_error: Option<String>,
+    /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_kept: Vec<crate::project::memory::KeptDecision>,
+    /// A fold lost a kept decision; the next admitted input consumes this plain notice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fold_lost: bool,
+    /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halt: Option<String>,
+    /// On a reply: questions Faber answered with their first choice because "keep going" was on and nobody answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_answers: Option<Vec<AutoAnswer>>,
+    /// On the newest reply of a conversation "keep going" has run in for a while: what it did while the person was away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away: Option<Away>,
+    /// On a project reply that changed files: Faber's own run of the fast checks once it ended (R146, "Faber decides done").
+    /// A run that was going on when Faber closed is not read back: nothing would end it.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
+    pub checks: Option<Checks>,
+    /// On a reply: when its words, thinking or tools last changed, in milliseconds. The screen's "updated 3 min ago" counts from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_at: Option<u64>,
+    /// On a reply: when the agent said all it will say (its last message ended with `end_turn` and no tool call was open, or
+    /// the turn ended), in milliseconds. A reply that still streams with this set is finished for the person while the CLI
+    /// closes its turn; more words or tools clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
+    /// On a reply: what the agent said it is doing now, in a few words (`crate::progress::status`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// On a reply: the closing box of the task it ended (`crate::progress::wrap_up`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap_up: Option<WrapUp>,
+    /// On the latest reply while its conversation works: a sign that the agent itself seems stuck (task 110). Never read back
+    /// from disk, so a sign can outlive neither its work nor Faber.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub stall: Option<Stall>,
+}
+
+/// What the person is told when the agent's own work seems stuck: a step that has said nothing for a long while, a
+/// compaction that takes too long, or the same step again and again. It never stops anything by itself (task 110).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stall {
+    pub kind: StallKind,
+    /// Whole minutes without news, for `quiet` and `compacting`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StallKind {
+    /// A step of the agent's own has run with no word from the CLI for longer than its kind of work allows.
+    Quiet,
+    /// The compaction of the context runs longer than it should.
+    Compacting,
+    /// The agent started the same step, with the same input, many times with no file changed between.
+    Repeat,
+    /// The same step failed three times with no file changed between.
+    Failing,
+}
+
+/// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checks {
+    pub state: ChecksState,
+    /// How many checks passed or were unchanged since they passed.
+    #[serde(default)]
+    pub passed: u32,
+    /// The checks that failed or did not finish, in the order the project declares them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<FailedCheck>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChecksState {
+    Running,
+    Passed,
+    /// Failed, and Faber asked the agent to fix it.
+    Failed,
+    /// Still failed after the automatic fixes: the person decides.
+    NeedsYou,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedCheck {
+    pub command: String,
+    /// Its first short failures (R155), for the screen; the agent reads them all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+}
+
+fn settled_checks<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Checks>, D::Error> {
+    Ok(Option::<Checks>::deserialize(d)?.filter(|c| c.state != ChecksState::Running))
+}
+
+/// A pull request a project conversation follows (R200): one line under the reply that opened or last pushed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Follow {
+    /// `owner/name`.
+    pub repo: String,
+    pub number: u64,
+    pub url: String,
+    pub state: FollowState,
+    /// The checks that failed on the commit last read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<String>,
+    /// The commit last read; a new one is the agent's fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// What Faber already woke the agent for (the commit and why), so the same failure never spends a second turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub woke: Option<String>,
+    /// The checks failed while the quota was tight: the person is told instead of the agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
+    /// The person took the conversation back after it was archived, or wrote to it while Faber read the end of the pull
+    /// request: Faber does not put it away for this pull request (`engine/src/engine/auto_archive.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
+    /// Why following ended early, as an i18n key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// When something last changed, in milliseconds.
+    pub since: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowState {
+    Pending,
+    Failing,
+    Conflict,
+    Passing,
+    Merged,
+    Closed,
+    /// Ended by the person, by a problem, or after long quiet.
+    Stopped,
+}
+
+impl FollowState {
+    /// Whether Faber still looks at the pull request.
+    pub fn open(self) -> bool {
+        matches!(self, FollowState::Pending | FollowState::Failing | FollowState::Conflict)
+    }
+
+    /// Whether a timer still reads it: an open one, and a green pull request until it is merged or closed, since a queue
+    /// run may still turn it red (`follow.rs`).
+    pub fn watched(self) -> bool {
+        self.open() || self == FollowState::Passing
+    }
+}
+
+/// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wake {
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`, `wake.cleared`).
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+}
+
+impl Wake {
+    pub fn of(why: &str) -> Wake {
+        Wake { why: why.into(), pr: None, checks: vec![] }
+    }
+}
+
+/// "Keep going" is on in a conversation (R199): Faber sends the next turn by itself whenever one ends, until a stop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepGoing {
+    /// Turns Faber sent by itself since it was turned on.
+    pub turns: u32,
+    /// Turns that did real work (not a quick answer with no tool); only these count toward the cap.
+    #[serde(default)]
+    pub work: u32,
+    /// Failures in a row (an error, or an AI Faber could not reach); a turn that ends well sets it to zero.
+    pub failed: u32,
+    /// Every AI it may use is out of quota: it goes on by itself at this time (Unix seconds), and the screen says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    /// Turns in a row that ended in under a minute with no tool: Faber lets a longer rest pass before the next.
+    #[serde(default)]
+    pub idle: u32,
+    /// The error of the last failure, so one that cannot mend by waiting stops it when it comes again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// When it was turned on, in milliseconds since the Unix epoch.
+    #[serde(default)]
+    pub since: u64,
+    /// Times Faber moved the work to another AI because the first had no quota left.
+    #[serde(default)]
+    pub switches: u32,
+    /// Questions Faber answered with the first choice because the person was away.
+    #[serde(default)]
+    pub answered: u32,
+    /// Moves to another AI inside the turn that runs (a plan limit hit again after a move); zero at the end of each turn.
+    #[serde(default, skip)]
+    pub moves: u8,
+    /// Faber waits to send the next turn, and why. Saved, so a restart waits out the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<KeepWait>,
+    /// The reply whose closing question waited its ten minutes: only then Faber answers it for the person (task 017).
+    #[serde(default, skip)]
+    pub asked_on: Option<String>,
+    /// The reply whose failure was already counted, so a reply reported twice counts once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_on: Option<String>,
+}
+
+/// Why "keep going" is waiting to send the next turn, and until when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepWait {
+    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update), `start` (Faber
+    /// just opened) or `question` (the closing box asks the person, task 017). A wait for quota is `wait_until` instead.
+    pub why: String,
+    /// Seconds since the Unix epoch.
+    pub until: f64,
+}
+
+/// What "keep going" did since it was turned on, told on the newest reply once the person has been away a while.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Away {
+    /// How long it has been on, in whole minutes.
+    pub minutes: u32,
+    /// Turns that did real work.
+    pub turns: u32,
+    /// Moves of the work to another AI.
+    pub switches: u32,
+    /// Questions Faber answered with the first choice.
+    pub answered: u32,
+}
+
+/// How far a conversation that goes on by itself has come, for its row in the running list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepProgress {
+    /// Turns that did real work.
+    pub turns: u32,
+    /// When it was turned on, in milliseconds since the Unix epoch; 0 when not known.
+    pub since: u64,
+    /// The last line the agent wrote, without its markup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<String>,
+}
+
+/// A project agent's plan for the request (`crate::progress`): a checklist that belongs to the conversation, so it carries
+/// through Keep going's turns and across restarts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    pub steps: Vec<PlanStep>,
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_because: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<PlanContract>,
+    /// When the agent last sent it, in milliseconds.
+    pub at: u64,
+    /// The conversation's estimate, copied here for the screen only (`Conversation::shown_plan`): the plan that is stored never
+    /// holds one, since the estimate belongs to the job and outlives any list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<Estimate>,
+}
+
+/// What the agent plans to change and how it will check the work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanContract {
+    #[serde(default, skip_serializing_if = "PlanSize::is_small")]
+    pub size: PlanSize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_because: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSize {
+    #[default]
+    Small,
+    Normal,
+    Risky,
+}
+
+impl PlanSize {
+    fn is_small(&self) -> bool {
+        *self == Self::Small
+    }
+}
+
+impl Plan {
+    pub fn covers(&self, size: PlanSize) -> bool {
+        size == PlanSize::Small
+            || self
+                .contract
+                .as_ref()
+                .is_some_and(|c| c.size >= size && (c.extends.is_some() || c.new_because.is_some()) && c.proof.is_some())
+    }
+}
+
+/// A big job's estimate in whole US$ cents at API price (the unit of `Message.cost_usd`), so `Plan` keeps `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Estimate {
+    pub cents: u32,
+    /// The conversation's running total (`Conversation::spent_usd`) in cents when the first estimate arrived; the job's spend
+    /// is counted from there.
+    pub base: u64,
+    /// The estimate was passed by half: support work now runs cheaper and extras wait.
+    #[serde(default)]
+    pub economy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanStep {
+    /// Short and stable, so other steps can wait on it (`crate::progress::plan` gives `s1`, `s2`… by position when the agent sends
+    /// none); empty only in a plan stored before ids existed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    pub text: String,
+    pub state: StepState,
+    /// The conversation this one started that does the step (task 040), checked when the plan is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    /// For the screen only, like `Plan::estimate`: where that conversation stands now (`Core::shown_plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<MemberState>,
+    /// What the agent ran or looked at that shows a done step is done; absent until it marks the step done (and on older plans).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    /// Paths or folders the step expects to change, relative to the project, written with `/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Ids of the steps that must be done before this one starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<String>,
+    /// The step only reads (search, collect, review): it goes to a helper and never gets a copy of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read: bool,
+    /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<StepWorker>,
+}
+
+/// Where a plan step's conversation stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberState {
+    Running,
+    Waiting,
+    Done,
+    Failed,
+    Stopped,
+}
+
+/// The conversation that works on a plan step, and where its copy started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepWorker {
+    pub conversation: String,
+    /// The branch of its copy; empty until the copy is made, and when the project works in its own folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub branch: String,
+    /// The leader's commit the copy started from.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub base: String,
+    /// The conversation stopped working: the step waits for its work to be joined and is not running any more.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub joining: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StepState {
+    Pending,
+    Active,
+    Done,
+}
+
+impl Plan {
+    /// How far it has come: steps done, and steps in all.
+    pub fn count(&self) -> PlanCount {
+        PlanCount { done: self.steps.iter().filter(|s| s.state == StepState::Done).count() as u32, total: self.steps.len() as u32 }
+    }
+}
+
+/// "3 of 7": a plan's steps done and in all, for the running column and the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanCount {
+    pub done: u32,
+    pub total: u32,
+}
+
+/// The closing box an agent puts at the end of a reply when a task ends (`crate::progress::wrap_up`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrapUp {
+    /// What is now true, then what is not done or not verified.
+    pub recap: String,
+    /// One question whose answer is the person's to give, with its replies (the recommendation first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<String>,
+    /// The person's whole request is finished and verified: Keep going stops on it. True only for the outcome `done`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub done: bool,
+    /// The reply Faber gave for the person while Keep going ran and nobody answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<String>,
+    /// How the agent concluded: `done`, `blocked` (it cannot go on without the person) or `needsYou` (a decision is theirs).
+    /// Absent on a box written before conclusions had outcomes; [`WrapUp::outcome`] reads those from `done` and `ask`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
+    /// The four parts of a conclusion in the agent's own words (what it did, the result, what is not done, what it checked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ConclusionSummary>,
+}
+
+/// How an agent ended its task, through the closing call (`crate::progress::wrap_up`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Outcome {
+    /// The whole request is finished and verified.
+    Done,
+    /// It cannot go on until something outside its reach changes.
+    Blocked,
+    /// A decision or an action is the person's.
+    NeedsYou,
+}
+
+/// What a conclusion says, in four short parts. `did` and `result` are always there; the others only when they say something.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConclusionSummary {
+    pub did: String,
+    pub result: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub not_done: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verified: String,
+}
+
+impl WrapUp {
+    /// The conclusion's outcome: the one the agent named, else what an older box meant (`done`, or a question for the person).
+    /// None for a box that concludes nothing: it says what is not done and asks nothing.
+    pub fn outcome(&self) -> Option<Outcome> {
+        self.outcome.or(if self.done {
+            Some(Outcome::Done)
+        } else if self.ask.is_some() && !self.actions.is_empty() {
+            Some(Outcome::NeedsYou)
+        } else {
+            None
+        })
+    }
+}
+
+/// A question the agent asked that Faber answered with the first choice while the person was away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoAnswer {
+    pub question: String,
+    pub answer: String,
+    /// The question's other choices, so the person can change the answer later (task 018's "Change").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<String>,
+}
+
+impl Message {
+    pub fn refresh_commits(&mut self) {
+        self.commits = self
+            .tools
+            .iter()
+            .flatten()
+            .filter(|tool| tool.ok == Some(true) && !tool.declined)
+            .filter(|tool| crate::nudge::command(tool).is_some_and(|c| crate::follow::committed(c, tool.output.as_deref().unwrap_or(""))))
+            .map(|tool| tool.id.clone())
+            .collect();
+    }
+
+    pub fn for_screen(mut self) -> Self {
+        // Sources are Arc-backed, so cloning the message never copies the snapshot bytes before removing them.
+        self.visual_file_count = (!self.visual_files.is_empty()).then_some(self.visual_files.len());
+        self.visual_files.clear();
+        // A subagent's words are loaded when its side chat opens (`Engine::child_words`), so they never ride in every update.
+        for call in self.tools.iter_mut().flatten().filter(|t| !t.words.is_empty()) {
+            call.words_chars = Some(call.words.iter().map(|w| w.text.chars().count()).sum());
+            call.words.clear();
+        }
+        self
+    }
+
+    /// What the reply said to the person: its text, then its closing box's recap and question, which the agent does not
+    /// repeat in words. Another AI taking over and a parent conversation read this, not the text alone.
+    pub fn said(&self) -> String {
+        let Some(w) = &self.wrap_up else { return self.text.clone() };
+        let ask = w
+            .ask
+            .as_ref()
+            .map(|q| {
+                format!(
+                    "
+{q} ({})",
+                    w.actions.join(" / ")
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "{}
+
+{}{ask}",
+            self.text, w.recap
+        )
+        .trim()
+        .to_string()
+    }
+
+    pub fn new(id: String, role: Role, text: String, at: u64) -> Self {
+        Message {
+            id,
+            role,
+            text,
+            visual_files: vec![],
+            visual_file_count: None,
+            text_breaks: None,
+            activity_end: None,
+            thinking_marks: vec![],
+            at,
+            took: None,
+            images: None,
+            attachments: None,
+            vendor: None,
+            model: None,
+            effort: None,
+            reason: None,
+            overload_retry: None,
+            thinking: None,
+            tools: None,
+            review: None,
+            commits: vec![],
+            needs_you: false,
+            permissions: None,
+            files: None,
+            status: None,
+            error: None,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cache_write_1h_tokens: None,
+            cache_warm_until: None,
+            parked: None,
+            parked_more: None,
+            parked_seen: None,
+            incomplete: None,
+            pace: None,
+            wait_until: None,
+            moved_from: None,
+            moved_from_model: None,
+            mode: None,
+            note: None,
+            rewind: None,
+            native_point: None,
+            recovery: None,
+            nudge: None,
+            self_check: false,
+            look: None,
+            follow: None,
+            wake: None,
+            acts: vec![],
+            closed: false,
+            conclusion_requested: false,
+            conclusion_error: None,
+            fold_kept: vec![],
+            fold_lost: false,
+            halt: None,
+            auto_answers: None,
+            away: None,
+            checks: None,
+            moved_at: None,
+            finished_at: None,
+            now: None,
+            wrap_up: None,
+            tool_kit: None,
+            stall: None,
+        }
+    }
+}
+
+/// The versions of one message of the open conversation (parity T7): the conversations that took another way at it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Versions {
+    /// The message in the open conversation.
+    pub message_id: String,
+    /// Which of `list` it is.
+    pub at: usize,
+    /// Every version, in the order they were written.
+    pub list: Vec<VersionAt>,
+}
+
+/// One version: the conversation that shows it and the message there.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionAt {
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchOf {
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
+/// A message written while a turn was running. It waits to be sent as the next turn, or, on a CLI that can take a message
+/// into a running turn, it is handed to that turn and leaves the queue once the CLI has taken it in. `text` is what the
+/// person wrote; the note about attached files is added when it goes to the CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTurn {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<Image>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
+    pub choice: crate::router::Choice,
+    pub at: u64,
+    /// Handed to the running turn and waiting for the CLI to take it in: it can no longer be taken back. Nothing is on
+    /// its way after a restart, so loading a conversation clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sending: bool,
+    /// Faber queued it by itself: the message it becomes carries this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
+}
+
+/// What an agent that called `wait` waits for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingOn {
+    /// The conversations it waits for, all started by it; the marker goes when one of them reports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
+    /// Its own words for what it waits for, at most 200 characters.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    /// When it started waiting, in milliseconds.
+    pub since: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    /// Tasks discovered at close; sent tasks stay on disk until a done conclusion or explicit dismissal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_ups: Vec<FollowUpTask>,
+    /// The commands advertised by each of this conversation's CLIs. Never saved.
+    #[serde(skip)]
+    pub commands: BTreeMap<Vendor, Vec<Command>>,
+    pub id: String,
+    pub title: String,
+    /// Marks a conversation as temporary; old records are ordinary conversations.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub temporary: bool,
+    /// Files owned by this temporary conversation, recorded before their contents are written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temporary_attachments: Vec<String>,
+    /// The choice for the next message, retained independently in each conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<crate::router::Choice>,
+    /// Codex's saved thread is still in Plan; its first work turn must explicitly leave that prompt.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub codex_plan: bool,
+    pub area: Area,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Chat's canonical folder, retained as the source of its file cards after a move. Project sessions use `copy` or the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_folder: Option<String>,
+    /// No project turn has started yet: the common session entrance applies the project's current copy rule.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub project_start_pending: bool,
+    /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<crate::project::copy::WorkCopy>,
+    /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
+    #[serde(default)]
+    pub sessions: BTreeMap<Vendor, String>,
+    /// The catalog ids of each native session, including empty kits that have no visible report.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_kits: BTreeMap<Vendor, (String, Vec<String>, Option<String>)>,
+    /// The exact project card sent to each native session; another native id cannot inherit it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_start_cards: BTreeMap<Vendor, (String, String)>,
+    /// Digest of the exact catalog resource prefix accepted by each native kit; old records resend once.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_resource_digests: BTreeMap<Vendor, String>,
+    /// Digest of the line that told each native session of Faber's own guide (R18); kept apart so a kit that changes never resends it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_guide_digests: BTreeMap<Vendor, String>,
+    /// A session id whose first turn was accepted but has not shown any output yet. It is not resumable like `sessions` (the CLI may
+    /// not have saved it), but a restart after a crash resumes it instead of starting a session that knows nothing of the turn.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tentative: BTreeMap<Vendor, String>,
+    /// Older sessions restart once with visible history to receive the host command tool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_gate: bool,
+    /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,
+    /// Tools the user chose to always allow in this conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_always: Option<Vec<String>>,
+    /// The grants epoch (`Settings::grants_epoch`) that was current when each tool in `allow_always` was allowed. A grant
+    /// stands only while the settings hold that same epoch.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub allow_always_epochs: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_of: Option<BranchOf>,
+    /// The conversation whose agent started this one with Faber's conversation tool (`crate::sibling`). Such a conversation
+    /// cannot start conversations of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
+    /// Its latest completion still needs a place in its parent's bounded inbox.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending_parent_report: bool,
+    /// The agent declared it waits for the conversations it started (or for a stated reason) instead of being done: its turn
+    /// ending is then not an ending (`crate::sibling` `wait`). Cleared when a conversation it waits for reports, or at its next turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
+    /// The project whose standing goal this conversation fixes, or whose goal fix started it: such a conversation is held to the
+    /// project's day of money (`engine/goals.rs`) for as long as it lives, whatever becomes of the goal's own pointer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_fix: Option<String>,
+    /// What this conversation has cost in US$ at API price, counted where each cost is written: its turns, the helpers and
+    /// quick side questions (`/btw`) of its agent, and those of the conversations that agent started. A running total that no
+    /// rewind takes back, so the job's spend (rule 7) is never a scan of the conversations.
+    #[serde(default, skip_serializing_if = "is_zero_usd")]
+    pub spent_usd: f64,
+    /// The whole job's estimate (rule 7), kept here and not in the plan: it ends only when the closing box says the work is
+    /// done, whatever happens to the list of steps or to a rewind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<Estimate>,
+    /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
+    /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
+    /// Stable persona version used when this conversation began; legacy sessions keep None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_version: Option<u32>,
+    pub created_at: u64,
+    pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued: Vec<QueuedTurn>,
+    /// "Keep going" is on (`engine/src/engine/keep_going.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_going: Option<KeepGoing>,
+    /// The agent already offered the larger version of a request in this conversation (`offer_bigger`): once is the most.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bigger_offered: bool,
+    /// When it was archived, by the person or by its own agent (`engine/src/engine/archive.rs`): it leaves the sidebar
+    /// until the person brings it back or writes to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<u64>,
+    /// When the person pinned it to the top of its sidebar list. Archiving removes the pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
+    /// Its last run ended and the person has not opened it since (`engine/src/engine/ended.rs`): the running column's done card
+    /// and the sidebar's dot read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
+    /// How full the context of the conversation's own agent is, as its CLI last said (`engine/src/engine/compact.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextFill>,
+    /// The agent started its context fresh (`clear`, `engine/src/engine/compact.rs`): the id of the last message its old one
+    /// held. No CLI is ever given what came before it again, also when another AI joins later (`context_messages`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh_after: Option<String>,
+    /// The agent's plan for the request (`crate::progress::plan`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Plan>,
+    /// The watchdog found this conversation delivering nothing for a long run of turns (`crate::results::Stuck`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<crate::results::Stuck>,
+    pub messages: Vec<Message>,
+    /// Only on a copy for the screen that holds the newest messages (`Engine::open_for_screen_window`): how many came before
+    /// them, read with `Engine::messages_before`. Never saved with a value: a stored conversation keeps every message.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub earlier: usize,
+    /// Changes to typed inline pieces, bound to the original reply block's source digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub piece_values: Vec<crate::pieces::SavedValue>,
+    /// Its tabs in Faber's browser (`crate::browser::tabs`): where each one is and which one is in front, so the pane opens
+    /// them again after it closed, another conversation or a restart. Never exported, and a branch starts with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<crate::browser::tabs::Tabs>,
+    /// Saved-message continuation after rewind; consumed by the next reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_notice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewind_native: Option<crate::rewind::NativeRewind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_fork: Option<crate::rewind::NativeFork>,
+    /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
+    /// before the point where Faber's CLI flags make it compact. Never saved.
+    #[serde(skip)]
+    pub reported: (Option<u64>, Option<u64>),
+    /// The context is being compacted: the conversation is at work meanwhile. Never saved.
+    #[serde(skip)]
+    pub compacting: bool,
+    /// The person pressed Stop: the closing turn cannot drain the queue or leave a done card (`engine/src/engine/ended.rs`).
+    /// A new turn clears it; running-list updates never do. Never saved.
+    #[serde(skip)]
+    pub stopped: bool,
+    /// A message the person explicitly sends while a stopped turn is still closing. Starts through Send now once idle.
+    #[serde(skip)]
+    pub send_after_stop: Option<String>,
+}
+
+/// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextFill {
+    pub used: u64,
+    pub window: u64,
+}
+
+/// One part of what fills a conversation's own agent's context, as its CLI counts it: `key` is a `ctx.part.*` key (the
+/// system part, tools, files, the conversation, other).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextPart {
+    pub key: String,
+    pub tokens: u64,
+}
+
+/// The longest name Faber keeps, in characters.
+pub const NAME_LIMIT: usize = 40;
+
+/// The name as Faber keeps it: control characters dropped, the ends trimmed, at most [`NAME_LIMIT`] characters. None when
+/// nothing is left, which is how a cleared name is stored.
+pub fn clean_name(raw: &str) -> Option<String> {
+    let kept: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = kept.trim().chars().take(NAME_LIMIT).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    /// Each conversation works in a separate copy of its own (R201): on by default, switched in Settings > Projects. It
+    /// acts only in a git repository with a commit; elsewhere conversations work in the folder.
+    #[serde(rename = "separateCopies", default = "separate_by_default")]
+    pub separate_copies: bool,
+    /// Catalog servers turned off for this project's next CLI launch; never written to a CLI's configuration.
+    #[serde(rename = "disabledMcpServers", default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub disabled_mcp_servers: std::collections::BTreeSet<String>,
+    /// Fields written by a newer Faber, kept as they were so this version never drops them.
+    #[serde(flatten)]
+    pub extra: crate::project::Extra,
+}
+
+fn separate_by_default() -> bool {
+    true
+}
+
+impl Project {
+    pub fn new(id: String, name: String, path: String) -> Self {
+        Project {
+            id,
+            name,
+            path,
+            separate_copies: separate_by_default(),
+            disabled_mcp_servers: Default::default(),
+            extra: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    #[serde(skip)]
+    pub temporary: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_ups: Vec<FollowUpTask>,
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub title: String,
+    pub area: Area,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub updated_at: u64,
+    /// "Keep going" is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
+    /// The conversation whose agent started this one: the sidebar shows it under that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
+    /// Details for a conversation started by an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_choice: Option<crate::router::Choice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_line: Option<String>,
+    /// Its last run ended and nobody has opened it since, while that is recent (`Ended::current`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Ended>,
+    /// Where the conversation stands now, whether or not anyone has opened it (`ended::run_state`): the sidebar and the
+    /// running list read it, so they agree. Absent in a list from before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<crate::sibling::State>,
+    /// How far the agent's plan has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanCount>,
+    /// What the conversation delivered and cost, derived from its messages (`crate::results`); none before its first reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<crate::results::Results>,
+    /// The watchdog found it delivering nothing for a long run of turns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowUpTask {
+    pub title: String,
+    pub file: String,
+    pub revision: String,
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub ready: bool,
+}
+
+/// How a run ended that nobody saw end (task 016): a done card in the running column and a dot on the sidebar row until the
+/// person opens the conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ended {
+    /// When, in milliseconds.
+    pub at: u64,
+    pub kind: EndKind,
+    /// How long the run worked, from its first turn to its end, in milliseconds.
+    pub work_ms: u64,
+    /// The last line the agent wrote, as the running row showed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndKind {
+    Done,
+    /// The turn ended and the agent never concluded: a tool turn with no closing call, unfinished plan steps, or a closing call
+    /// that says the work is not done.
+    Unconcluded,
+    /// Faber closed or crashed mid-turn.
+    Interrupted,
+    /// It stopped on something only the person can settle: a question, Keep going's cap, an AI billed per use.
+    NeedsYou,
+    Failed,
+}
+
+impl Ended {
+    /// A card nobody opens goes by itself: a failure after a day, the rest after a week (as the other apps' cards do).
+    pub fn current(&self, now: u64) -> bool {
+        let days = if self.kind == EndKind::Failed { 1 } else { 7 };
+        now.saturating_sub(self.at) < days * 86_400_000
+    }
+}
+
+/// Where a running conversation stands: answering, or waiting for the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RunState {
+    Working,
+    NeedsYou,
+}
+
+/// One conversation that is answering now or waits for the user: a row of the running list.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningItem {
+    pub conversation_id: String,
+    /// The id of the turn's reply message. With the request id it names a question, because request ids repeat.
+    pub turn_id: String,
+    /// Empty while the conversation has none.
+    pub title: String,
+    pub area: Area,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// None while Auto is still choosing the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<Vendor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub state: RunState,
+    /// The `at` of the turn's reply message.
+    pub since: u64,
+    /// The questions the user has not answered yet.
+    pub permissions: Vec<Permission>,
+    /// Requests the CLI denied in the latest reply that wait for the person (empty when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<Parked>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub parked_more: u32,
+    /// The subagent calls of the reply that seem stuck: each needs the person like a question does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stuck: Vec<String>,
+    /// The agent itself seems stuck (`Message::stall`): it needs the person like a stuck subagent does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stall: Option<Stall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    /// A followed pull request whose checks failed while the quota was tight: its number, and the commit, so each is told once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<(u64, String)>,
+    /// "Keep going" is on: the conversation runs on its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
+    /// "Keep going" waits to send the next turn: the row stays between turns, and says until when.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_wait: Option<KeepWait>,
+    /// The agent declared it waits for the conversations it started, or for a reason of its own (`Conversation::waiting_on`):
+    /// its turn ended, yet the work is not over, so the row stays and says what it waits for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
+    /// "Keep going" is on: how far it has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_progress: Option<KeepProgress>,
+    /// The agent said all it will say and only the CLI's turn is still closing (its Stop hooks, say), with nothing else running
+    /// for the conversation: the screen reads it as done and leaves it out of what it shows as running. Updates, the tray and
+    /// the awake lock still count it, since a process is still at work.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub settled: bool,
+    /// How far the agent's plan has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanCount>,
+    /// What the agent said it is doing now, on the reply under way (`Message::now`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+}
+
+/// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
+/// snapshot and an event can be told apart by age.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Running {
+    pub revision: u64,
+    pub items: Vec<RunningItem>,
+}
+
+/// The latest reading of one quota window of one vendor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaReading {
+    pub vendor: Vendor,
+    pub window: String,
+    pub used: f64,
+    /// Seconds since the Unix epoch, as the CLI reports it; 0 when it did not say.
+    pub resets_at: f64,
+}
+
+/// Why something other than the table alone changed the pick of Auto, shown under the model name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaceNote {
+    /// `step` (one rung up, bought with quota that would expire), `fast` (moved away from a vendor that is being used faster than
+    /// its daily line), `low` (moved away from a vendor that is really near its limit) or `learned` (one rung up because the person
+    /// often redoes this kind of task, `auto_learned`).
+    pub kind: String,
+    pub vendor: Vendor,
+}
+
+/// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    /// Sites the browser must not open, in canonical host form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_hosts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<serde_json::Map<String, Value>>,
+    /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_hooks: Option<bool>,
+    /// Missing in older settings means commands run without asking in Chat and Projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
+    /// Missing means live (R140).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<WebSearch>,
+    /// Codex only; missing means the model's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<ReasoningSummary>,
+    /// Shared reply style; missing leaves the AI's own way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_style: Option<ReplyStyle>,
+    /// The person's own words, kept when another style is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_style_text: Option<String>,
+    /// Attention notifications and their chime are both on unless explicitly disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_sound: Option<bool>,
+    /// The language of the screen ("en", "pt-BR"...); none follows the system.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// What the user did with the first-run guide; none means it has not run yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<Setup>,
+    /// The answer to "Do you already use AI?"; none means no answer, which counts as a beginner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experience: Option<Experience>,
+    /// False once the first run asked for the tutorial, true once it ended or was skipped; none before the first run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tutorial_done: Option<bool>,
+    /// How the user wants to be called, asked (optionally) at the first run. A patch with an empty text clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
+    /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_awake: Option<bool>,
+    /// Resume work cut short by Faber closing (on by default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_interrupted: Option<bool>,
+    /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
+    /// A random token that every stricter mode replaces, in the same save that changes the mode. A remembered "Always allow"
+    /// stands only if it was made under the current token, wherever it is still stored, so a conversation file that failed to
+    /// update cannot bring it back, and no clock is involved. A grant with no token stands only while the settings have never
+    /// held one. Only the engine sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grants_epoch: Option<String>,
+    /// A plan card may approve only under the revision it was shown with. Only the engine changes this token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions_revision: Option<String>,
+    /// The mode before the person chose Plan, consumed by the next plan card. Any later mode pick clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_plan: Option<Permissions>,
+    /// Receive previews: update checks read the preview channel (the newest build) instead of the weekly stable one (off by
+    /// default). Turning it off never installs an older version: a running preview takes only the next stable line, never
+    /// the stable of its own `X.Y.Z`, which may be built from an older preview (`src-tauri/src/update.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previews: Option<bool>,
+    /// Full trust for Faber's own setup (guardrail 3; off by default): the project agent installs from the catalog without a
+    /// card. It never covers sending, publishing, paying or deleting. Only the Settings screen writes it: no card button and no
+    /// tool of the agent does (in Full access the agent could still edit the file itself, so this is no wall against it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faber_trust: Option<bool>,
+}
+
+/// A fresh grants epoch: 244 random bits as hex.
+pub fn new_epoch() -> String {
+    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+}
+
+/// Each switch's default lives here and nowhere else: the engine and the shell read these, and the screen is sent
+/// [`Settings::shown`].
+impl Settings {
+    pub fn user_hooks(&self) -> bool {
+        self.user_hooks.unwrap_or(false)
+    }
+
+    pub fn permissions(&self) -> Permissions {
+        self.permissions.unwrap_or_default()
+    }
+
+    pub fn notifications(&self) -> bool {
+        self.notifications.unwrap_or(true)
+    }
+
+    pub fn notification_sound(&self) -> bool {
+        self.notification_sound.unwrap_or(true)
+    }
+
+    pub fn keep_awake(&self) -> bool {
+        self.keep_awake.unwrap_or(true)
+    }
+
+    pub fn resume_interrupted(&self) -> bool {
+        self.resume_interrupted.unwrap_or(true)
+    }
+
+    pub fn autostart(&self) -> bool {
+        self.autostart.unwrap_or(false)
+    }
+
+    pub fn faber_trust(&self) -> bool {
+        self.faber_trust.unwrap_or(false)
+    }
+
+    /// What the screen is sent: every switch with its value, so the screen keeps no default of its own. The file keeps
+    /// only what the person changed, since saving is a patch.
+    pub fn shown(self) -> Self {
+        Settings {
+            user_hooks: Some(self.user_hooks()),
+            permissions: Some(self.permissions()),
+            notifications: Some(self.notifications()),
+            notification_sound: Some(self.notification_sound()),
+            keep_awake: Some(self.keep_awake()),
+            resume_interrupted: Some(self.resume_interrupted()),
+            autostart: Some(self.autostart()),
+            ..self
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Experience {
+    Beginner,
+    Experienced,
+}
+
+/// How a CLI session may act. `Ask`, `AcceptEdits`, `Plan`, `Auto` and `FullAccess` are the choices on screen (R121, R140);
+/// `Isolated` exists only inside Faber.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Permissions {
+    /// Commands and file changes wait for a card the person answers.
+    #[serde(rename = "ask")]
+    Ask,
+    /// File edits run, commands ask (R140).
+    #[serde(rename = "acceptEdits")]
+    AcceptEdits,
+    /// Read and plan, no changes (R140).
+    #[serde(rename = "plan")]
+    Plan,
+    /// The CLI's own reviewer approves the safe actions and the rest asks (R140).
+    #[serde(rename = "auto")]
+    Auto,
+    /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
+    /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
+    #[default]
+    #[serde(rename = "dontAsk")]
+    FullAccess,
+    /// Faber's own isolated mode (R97, R107, R109): commands run in a native sandbox with no network, only the working
+    /// folder writable, integrations off and sensitive folders refused. For the model list, the router, internal checks and
+    /// the self-development roles. Never stored, never chosen by the person.
+    #[serde(skip)]
+    Isolated,
+}
+
+impl Permissions {
+    /// The modes that keep the person in the loop (everything the person can choose except full access): the CLI starts in
+    /// its restricted setup, and the person's hooks stay off unless the switch is on.
+    pub fn guarded(self) -> bool {
+        matches!(self, Permissions::Ask | Permissions::AcceptEdits | Permissions::Plan | Permissions::Auto)
+    }
+
+    /// How far a mode lets the CLI act alone, from loosest to strictest. Moving to a higher number stops the turns in flight.
+    pub fn strictness(self) -> u8 {
+        match self {
+            Permissions::FullAccess => 0,
+            Permissions::Auto => 1,
+            Permissions::AcceptEdits => 2,
+            Permissions::Ask => 3,
+            Permissions::Plan | Permissions::Isolated => 4,
+        }
+    }
+
+    /// The mode Claude Code really runs. A CLI that does not list `auto` in its `--permission-mode` choices gets the nearest
+    /// safer one, accept edits.
+    pub fn for_claude(self, flags: crate::claude::ClaudeFlags) -> Permissions {
+        match self {
+            Permissions::Auto if !flags.auto_mode => Permissions::AcceptEdits,
+            other => other,
+        }
+    }
+
+    /// The locale key of the line that says a mode runs as another one. Only `for_claude` changes a mode, and only Auto.
+    pub fn fallback_note(self, runs: Permissions) -> Option<String> {
+        (self != runs).then(|| "mode.fallback.auto".to_string())
+    }
+}
+
+/// Web search for Chat and the person's own project sessions (R140). Live is the default: the most capable agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebSearch {
+    /// What a launch gets when nobody chose: only the person's saved settings turn the web on (`Settings::tuning`).
+    #[default]
+    Off,
+    /// Codex only; Claude Code has no cache, so it keeps searching and does not fetch pages.
+    Cached,
+    Live,
+}
+
+impl WebSearch {
+    /// How little of the web it lets in: a higher number is stricter, and turning it up stops the turns under way.
+    pub fn strictness(self) -> u8 {
+        match self {
+            WebSearch::Live => 0,
+            WebSearch::Cached => 1,
+            WebSearch::Off => 2,
+        }
+    }
+}
+
+/// Codex's reasoning summary. `Default` leaves the model's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningSummary {
+    #[default]
+    Default,
+    Auto,
+    Concise,
+    Detailed,
+    #[serde(rename = "none")]
+    Hidden,
+}
+
+/// How the person wants replies in Chat and Projects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplyStyle {
+    #[default]
+    Default,
+    Short,
+    Explained,
+    Own,
+}
+
+pub fn clean_reply_style_text(text: &str) -> String {
+    text.trim_matches(|c: char| c.is_whitespace() || c.is_control())
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .take(400)
+        .collect()
+}
+
+/// What a launch takes from the settings besides the mode. Never reaches a project role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Tuning {
+    pub web: WebSearch,
+    pub summary: ReasoningSummary,
+    pub reply_style: ReplyStyle,
+    pub reply_style_text: String,
+    /// The language chosen for Faber's screen ("en", "pt-BR"...), none when it follows the system: the replies' language when
+    /// the person's latest message has none of its own (task 130).
+    pub language: Option<String>,
+}
+
+impl Settings {
+    pub fn tuning(&self) -> Tuning {
+        Tuning {
+            // Live is the default for the person's chat settings (R140); `Tuning::default()` is Off.
+            web: self.web_search.unwrap_or(WebSearch::Live),
+            summary: self.reasoning_summary.unwrap_or_default(),
+            reply_style: self.reply_style.unwrap_or_default(),
+            reply_style_text: self.reply_style_text.as_deref().map(clean_reply_style_text).unwrap_or_default(),
+            language: self.language.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Setup {
+    Done,
+    Skipped,
+}
+
+fn is_zero<T: Default + PartialEq>(n: &T) -> bool {
+    *n == T::default()
+}
+
+fn is_zero_usd(n: &f64) -> bool {
+    *n == 0.0
+}
+
+impl Conversation {
+    pub fn for_screen(mut self) -> Self {
+        self.messages = self.messages.into_iter().map(Message::for_screen).collect();
+        self.session_start_cards.clear();
+        self.plan = self.shown_plan();
+        self
+    }
+
+    /// The plan as the screen draws it, with the job's estimate in it (rule 7).
+    pub fn shown_plan(&self) -> Option<Plan> {
+        self.plan.clone().map(|plan| Plan { estimate: self.estimate, ..plan })
+    }
+
+    /// What the conversation has cost so far, in whole US$ cents.
+    pub fn spent_cents(&self) -> u64 {
+        (self.spent_usd * 100.0).round() as u64
+    }
+
+    /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.
+    pub fn resumable(&self, vendor: Vendor) -> Option<&String> {
+        if self.temporary {
+            return None;
+        }
+        self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))
+    }
+
+    /// The messages the agent's current context holds: all of them, or those after its last `clear`. A message it names that
+    /// is gone (an edit cut the conversation there) gives them all back, so an AI joining late never misses one.
+    pub fn context_messages(&self) -> &[Message] {
+        let start = self.fresh_after.as_ref().and_then(|id| self.messages.iter().position(|m| &m.id == id)).map_or(0, |at| at + 1);
+        &self.messages[start..]
+    }
+
+    /// Forgets every session of the vendor.
+    pub fn forget_session(&mut self, vendor: Vendor) {
+        self.sessions.remove(&vendor);
+        self.tentative.remove(&vendor);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_flag_defaults_to_false_and_round_trips() {
+        let json = serde_json::json!({
+            "id": "chat", "title": "", "area": "chat", "createdAt": 1, "updatedAt": 1, "messages": []
+        });
+        let mut conversation: Conversation = serde_json::from_value(json).unwrap();
+        assert!(!conversation.temporary);
+        conversation.sessions.insert(Vendor::Claude, "native-session".into());
+        assert!(conversation.resumable(Vendor::Claude).is_some());
+        conversation.temporary = true;
+        assert!(conversation.resumable(Vendor::Claude).is_none());
+        let saved = serde_json::to_value(&conversation).unwrap();
+        assert_eq!(saved["temporary"], true);
+        assert!(serde_json::from_value::<Conversation>(saved).unwrap().temporary);
+    }
+
+    fn call() -> ToolUse {
+        serde_json::from_value(serde_json::json!({ "id": "a", "name": "Agent", "input": {} })).unwrap()
+    }
+
+    fn chars(call: &ToolUse) -> usize {
+        call.words.iter().map(|w| w.text.chars().count()).sum()
+    }
+
+    #[test]
+    fn a_subagents_words_keep_whole_entries_up_to_the_limit_and_then_say_they_stopped() {
+        let sentences = |n: usize| "One sentence here. ".repeat(n).trim().to_string();
+        let mut a = call();
+        a.add_words(0, &sentences(450));
+        a.add_words(0, "joined");
+        assert_eq!(a.words.len(), 1, "words with no step between join one entry");
+        assert!(a.words[0].text.ends_with("\n\njoined"));
+        assert!(!a.words_cut);
+        // The next entry does not fit: it is left out whole, never cut in the middle, and the call says words were left out.
+        a.add_words(1, &sentences(450));
+        assert_eq!((a.words.len(), a.words_cut), (1, true));
+        // A cut call keeps nothing later, even a short word that would fit.
+        a.add_words(2, "short");
+        assert_eq!(a.words.len(), 1);
+        assert!(chars(&a) <= WORDS_LIMIT);
+    }
+
+    #[test]
+    fn the_blank_line_that_joins_words_counts_against_the_limit() {
+        let mut a = call();
+        a.add_words(0, &"x".repeat(WORDS_LIMIT - 2));
+        a.add_words(0, "y");
+        assert_eq!((chars(&a), a.words_cut), (WORDS_LIMIT - 2, true), "y plus its two joining characters would be one over");
+        let mut b = call();
+        b.add_words(0, &"x".repeat(WORDS_LIMIT - 4));
+        b.add_words(0, "y");
+        assert_eq!((chars(&b), b.words_cut), (WORDS_LIMIT - 1, false), "one that fits with its joining characters is kept");
+        b.add_words(0, "zz");
+        assert_eq!((chars(&b), b.words_cut), (WORDS_LIMIT - 1, true), "and the next one, two over, is not");
+    }
+
+    #[test]
+    fn one_entry_over_the_limit_on_its_own_is_cut_at_its_last_paragraph_or_sentence() {
+        let mut paragraphs = call();
+        let text = format!("{}\n\n{}", "First paragraph. Still the first.", "word ".repeat(4000));
+        paragraphs.add_words(0, &text);
+        assert_eq!(paragraphs.words[0].text, "First paragraph. Still the first.", "the last paragraph break that fits");
+        assert!(paragraphs.words_cut);
+        let mut sentences = call();
+        sentences.add_words(0, &"Une phrase ici. ".repeat(2000));
+        let kept = &sentences.words[0].text;
+        assert!(
+            kept.ends_with("ici.") && kept.chars().count() <= WORDS_LIMIT && kept.chars().count() > WORDS_LIMIT - 20,
+            "{}",
+            kept.chars().count()
+        );
+        assert!(sentences.words_cut);
+        let mut solid = call();
+        solid.add_words(0, &"x".repeat(WORDS_LIMIT + 1));
+        assert!(solid.words.is_empty() && solid.words_cut, "no break to cut at: nothing is kept, and the call says so");
+    }
+
+    #[test]
+    fn the_screens_copy_of_a_message_holds_how_much_a_subagent_wrote_and_not_what() {
+        let mut a = call();
+        a.add_words(0, "héllo wörld");
+        let mut message = Message::new("m".into(), Role::Assistant, String::new(), 0);
+        message.tools = Some(vec![a, call()]);
+        let tools = message.for_screen().tools.unwrap();
+        assert_eq!((tools[0].words.len(), tools[0].words_chars), (0, Some(11)));
+        assert_eq!(tools[1].words_chars, None, "a call with no words says nothing");
+        let json = serde_json::to_value(&tools[0]).unwrap();
+        assert_eq!((&json["wordsChars"], json.get("words")), (&serde_json::json!(11), None));
+    }
+
+    #[test]
+    fn a_cleared_context_holds_only_the_messages_after_it_and_a_gone_mark_gives_them_all() {
+        let mut c: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "c", "title": "", "area": "project", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        c.messages = ["a", "b", "c"].map(|id| Message::new(id.into(), Role::User, id.into(), 0)).to_vec();
+        assert_eq!(c.context_messages().len(), 3);
+        c.fresh_after = Some("b".into());
+        assert_eq!(c.context_messages().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["c"]);
+        c.fresh_after = Some("gone".into());
+        assert_eq!(c.context_messages().len(), 3);
+    }
+
+    #[test]
+    fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
+        assert_eq!(
+            serde_json::to_value(Settings::default().shown()).unwrap(),
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false })
+        );
+        let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
+        assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));
+        let shown = mine.shown();
+        assert_eq!((shown.keep_awake, shown.notifications, shown.language.as_deref()), (Some(false), Some(true), Some("de")));
+    }
+
+    #[test]
+    fn a_name_is_trimmed_without_control_characters_and_cut_at_forty_characters() {
+        assert_eq!(clean_name("  Erick  ").as_deref(), Some("Erick"));
+        assert_eq!(clean_name("Er\u{0}ick\n\t\u{7f}").as_deref(), Some("Erick"));
+        assert_eq!(clean_name("José da Silva").as_deref(), Some("José da Silva"));
+        assert_eq!(clean_name(""), None);
+        assert_eq!(clean_name(" \t\n\u{7} "), None);
+        let long = "ã".repeat(50);
+        assert_eq!(clean_name(&long).unwrap().chars().count(), NAME_LIMIT);
+        assert_eq!(clean_name(&format!("{} x", "a".repeat(39))).as_deref(), Some(&*"a".repeat(39)), "no space left dangling at the cut");
+    }
+
+    #[test]
+    fn a_parked_item_saved_with_an_empty_or_missing_kind_loads_as_other() {
+        for json in [r#"{"toolUseId":"t","tool":"Read"}"#, r#"{"toolUseId":"t","tool":"Read","kind":""}"#] {
+            assert_eq!(serde_json::from_str::<Parked>(json).unwrap().kind, "other", "{json}");
+        }
+        assert_eq!(serde_json::from_str::<Parked>(r#"{"toolUseId":"t","tool":"Bash","kind":"command"}"#).unwrap().kind, "command");
+    }
+}

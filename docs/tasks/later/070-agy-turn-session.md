@@ -1,7 +1,7 @@
 # An Antigravity conversation runs a turn, stops, and resumes
 
 Area: Projects
-Files: engine/src/agy.rs, engine/src/engine.rs, engine/src/proc.rs, engine/src/events.rs, testkit/src/fake.rs, engine/tests/agy_session.rs, docs/product-map.md
+Files: engine/src/agy.rs, engine/src/engine.rs, engine-core/src/proc.rs, engine-core/src/events.rs, testkit/src/fake.rs, engine/tests/agy_session.rs, docs/product-map.md
 Depends: antigravity-driver, agy-sign-in-and-setup, agy-reply-parser
 Size: re-estimate after the authenticated ACP recording; no driver implementation is authorized by this brief alone.
 
@@ -27,7 +27,7 @@ before execution with harmless canaries, including relevant tool, shell, MCP and
 denials alone do not prove the whole boundary. Keep unsupported modes disabled.
 
 Then implement the authenticated transport behind the existing `events::Session` boundary and its question, permission,
-tool, usage and reply events. Reuse child ownership and shutdown in `engine/src/proc.rs` and `winproc/`: no shell, no
+tool, usage and reply events. Reuse child ownership and shutdown in `engine-core/src/proc.rs` and `winproc/`: no shell, no
 visible console, and Stop leaves no process tree. Define Stop and resume from recordings, keeping the interrupted
 prompt in Faber even if the provider drops it. Never silently replace Ask with Accept edits, skip questions in Full
 access, or enable direct print as a fallback. Preserve the environment scrub and credential protection.

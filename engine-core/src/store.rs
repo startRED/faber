@@ -1,0 +1,2106 @@
+//! Plain JSON files in the app's data folder: readable by people and by any future tool.
+//! Writes go to a temp file first, so a crash never leaves a half-written conversation.
+//!
+//! Every write that can carry authority or spending (projects with their grants, the quota ledger, mission records)
+//! returns a [`Fault`] the screen can translate. Their checked readers tell a missing file from a damaged one: only the
+//! former is empty, and a damaged safety file is never read as no data.
+
+use crate::ledger::Ledger;
+use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
+use crate::project::memory::{AdoptedKind, KeptDecision, LearningKind, LearningRecords};
+use crate::recents::Recents;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::SystemTime;
+
+/// Keep typed deserialization, including duplicate-field rejection, while reading the removed setting.
+#[derive(Default, Deserialize)]
+struct SettingsFile {
+    #[serde(flatten)]
+    settings: Settings,
+    verbosity: Option<LegacyVerbosity>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum LegacyVerbosity {
+    Default,
+    Low,
+    Medium,
+    High,
+}
+
+/// Why a file could not be saved or read, as a key the screen translates. A directory-sync failure may follow replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// The disk or the user's quota is full.
+    DiskFull,
+    /// Any other failure to write or replace the file.
+    Write,
+    /// The file exists but could not be read.
+    Read,
+    /// The file was read but is not what it should be.
+    Corrupt,
+}
+
+impl Fault {
+    pub fn key(self) -> &'static str {
+        match self {
+            Fault::DiskFull => "error.store.full",
+            Fault::Write => "error.store.write",
+            Fault::Read => "error.store.read",
+            Fault::Corrupt => "error.store.corrupt",
+        }
+    }
+
+    /// The fault of a failed write or folder creation.
+    pub fn of_write(e: &io::Error) -> Fault {
+        match e.kind() {
+            io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Fault::DiskFull,
+            _ => Fault::Write,
+        }
+    }
+}
+
+/// The file operations durable publication needs. Tests swap in one that fails like a full disk.
+pub trait Disk: Send + Sync {
+    /// Creates or truncates `path`, writes all of `bytes` and flushes them to the disk.
+    fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+    /// Moves `from` over `to`, replacing it.
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Flushes directory entries after renames, before another file can depend on them.
+    fn flush(&self, path: &Path) -> io::Result<()> {
+        #[cfg(unix)]
+        fs::File::open(path)?.sync_all()?;
+        // Windows cannot open directories for sync; Disk::write syncs each file before its rename.
+        #[cfg(not(unix))]
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// The computer's own disk.
+pub struct RealDisk;
+
+impl Disk for RealDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut file = fs::File::create(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+}
+
+/// Writes and syncs `bytes` beside `path`, renames the result over it and syncs its parent directory on Unix.
+/// On failure the temp file is removed; a directory-sync failure may leave the new file published without durability.
+pub fn replace(disk: &dyn Disk, path: &Path, bytes: &[u8]) -> Result<(), Fault> {
+    replace_with(disk, path, bytes, true)
+}
+
+/// [`replace`], where `patient` false does not wait for a busy rename: the caller already knows this file keeps failing.
+pub fn replace_with(disk: &dyn Disk, path: &Path, bytes: &[u8], patient: bool) -> Result<(), Fault> {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    let tmp = path.with_file_name(name);
+    // Windows lets an antivirus or indexer hold a file it has just seen for a few ms: a busy rename tries again before it
+    // counts as a failed save.
+    let rename = || if patient { crate::tools::retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    disk.write(&tmp, bytes).and_then(|()| rename()).and_then(|()| disk.flush(parent)).map_err(|e| {
+        drop(fs::remove_file(&tmp));
+        Fault::of_write(&e)
+    })
+}
+
+/// Reads a JSON file: `None` when it does not exist, a [`Fault`] when it cannot be read or does not parse.
+pub fn read_checked<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Fault> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => return Err(Fault::Corrupt),
+        Err(_) => return Err(Fault::Read),
+    };
+    serde_json::from_str(&text).map(Some).map_err(|_| Fault::Corrupt)
+}
+
+fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    read_checked(path).ok().flatten()
+}
+
+// Drivers have no Store handle; weak roots protect every live Store without retaining one after it closes.
+static DATA_ROOTS: Mutex<Vec<Weak<PathBuf>>> = Mutex::new(Vec::new());
+
+pub struct Store {
+    _data_root: Arc<PathBuf>,
+    pub transcripts: crate::transcript::TranscriptStore,
+    conversations: PathBuf,
+    /// The side chat of each conversation (R250), a file of its own beside it, so the conversation and its search never read it.
+    side_chats: PathBuf,
+    creative_reviews: PathBuf,
+    search: crate::search::Search,
+    projects: PathBuf,
+    chat_groups: PathBuf,
+    settings: PathBuf,
+    recents: PathBuf,
+    decisions_kept: PathBuf,
+    learning_kept: PathBuf,
+    rules_sources: PathBuf,
+    adoptions: PathBuf,
+    budget: PathBuf,
+    auto_learned: PathBuf,
+    cache_health: PathBuf,
+    disk: Arc<dyn Disk>,
+    budget_owner: Mutex<Option<fs::File>>,
+    owner_required: bool,
+    /// The grants epoch started when the settings could not be read. It lives here, in memory, and is the epoch in force
+    /// until a save writes it: a read that works again later never brings the epoch on disk back.
+    recovery_epoch: std::sync::Mutex<Option<String>>,
+    /// The sidebar row of each conversation file, kept by the file's length and time, so a list reads only the files that
+    /// changed. Reading one decodes the whole conversation to take a few fields: 202 MB and 420 ms for 32 real ones
+    /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
+    /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
+    summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
+    /// The rows above kept on disk (`conversation-list.json`), so a start lists the conversations from one small file and
+    /// reads only the conversation files that changed since: with 257 MB of conversations the first list took 1.1 s, and
+    /// 7.6 s from a cold disk (2026-11-04).
+    kept_list: KeptList,
+    /// Failed reads, and whether the person dismissed this exact file for this app run.
+    unreadable: Mutex<HashMap<PathBuf, (Stamp, bool)>>,
+    /// How many times a conversation record was written, so a test can tell one write from a hundred.
+    writes: std::sync::atomic::AtomicU64,
+    group_move: Mutex<()>,
+    // Entries, including deletion tombstones, stay for the session: their number is bounded by IDs touched in it.
+    snapshot_writes: Mutex<HashMap<String, Arc<SnapshotWrites>>>,
+}
+
+// Constructed together from one conversation; publication needs only bytes and small index metadata.
+pub struct Snapshot {
+    pub bytes: Vec<u8>,
+    row: Summary,
+}
+
+#[derive(Default)]
+struct SnapshotWrites {
+    next: std::sync::atomic::AtomicU64,
+    written: Mutex<Option<u64>>,
+}
+
+/// A file's length and last change: the same pair means the file was not written since.
+type Stamp = (u64, Option<SystemTime>);
+
+/// How often a busy list writes `conversation-list.json` again at most; closing writes it too.
+const KEEP_LIST_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `Store::summaries` on disk: read at the first list, written when rows changed.
+struct KeptList {
+    file: PathBuf,
+    /// The rows changed since they were last written.
+    dirty: std::sync::atomic::AtomicBool,
+    /// Read yet, and when last written; held while writing, so two writes never share the temporary file.
+    state: Mutex<(bool, Option<std::time::Instant>)>,
+}
+
+/// The file as written. A row counts only for the program that wrote it (`build`): another may make rows differently.
+#[derive(Serialize, Deserialize)]
+struct ListFile {
+    build: String,
+    rows: Vec<ListRow>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ListRow {
+    file: String,
+    len: u64,
+    /// The file's last change, in seconds and nanoseconds since 1970.
+    modified: Option<(u64, u32)>,
+    temporary: bool,
+    row: Summary,
+}
+
+/// This program, by its own file's length and time: rows written by any other build are read again from the files.
+fn build_id() -> &'static str {
+    static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUILD.get_or_init(|| {
+        std::env::current_exe()
+            .and_then(fs::metadata)
+            .map(|m| {
+                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).unwrap_or_default();
+                format!("{}-{}-{}", env!("CARGO_PKG_VERSION"), m.len(), at.as_nanos())
+            })
+            .unwrap_or_default()
+    })
+}
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()))
+}
+
+/// The sidebar row of a conversation. Its done card is kept whole; whether it still shows is decided when listed.
+pub fn summary(c: &Conversation) -> Summary {
+    Summary {
+        temporary: c.temporary,
+        follow_ups: c.follow_ups.clone(),
+        reason: None,
+        keep_going: c.keep_going.is_some(),
+        archived: c.archived_at.is_some(),
+        pinned_at: c.pinned_at,
+        started_by: c.started_by.clone(),
+        waiting_on: c.waiting_on.clone(),
+        child_state: c.started_by.as_ref().map(|_| crate::conversation_state::child_state(c)),
+        child_choice: c.started_by.as_ref().and(c.choice.clone()),
+        child_line: c.started_by.as_ref().and_then(|_| crate::conversation_state::child_line(c)),
+        ended: c.ended.clone(),
+        state: (!c.messages.is_empty()).then(|| crate::conversation_state::run_state(c, false)),
+        plan: c.plan.as_ref().map(crate::model::Plan::count),
+        results: Some(crate::results::tally(c)).filter(|r| r.cost.turns > 0),
+        stuck: c.stuck.is_some(),
+        id: c.id.clone(),
+        title: c.title.clone(),
+        area: c.area,
+        project_id: c.project_id.clone(),
+        updated_at: c.updated_at,
+    }
+}
+
+/// The conversation replacement commits the move; until then group membership must roll back after a crash.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GroupMove {
+    conversation_id: String,
+    groups: Vec<ChatGroup>,
+}
+
+/// Approving a location never approves its words or permits an adapter to write them.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdoptedFile {
+    version: u8,
+    root: PathBuf,
+    target: String,
+}
+
+type Adoptions = BTreeMap<String, BTreeMap<AdoptedKind, AdoptedFile>>;
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        self.search.stop();
+    }
+}
+
+/// What a start found in the conversation files (`Store::start_scan`), by id.
+#[derive(Default)]
+pub struct StartScan {
+    /// Saved with Keep going on.
+    pub keep_going: Vec<String>,
+    /// Started by another conversation's agent.
+    pub started_by: Vec<String>,
+    /// Waiting on conversations it started.
+    pub waiting_on: Vec<String>,
+}
+
+/// The id of a conversation record marked temporary, or None for an ordinary or unreadable one.
+fn temporary_flag(text: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Flag {
+        id: String,
+        #[serde(default)]
+        temporary: bool,
+    }
+    serde_json::from_str::<Flag>(text).ok().filter(|flag| flag.temporary).map(|flag| flag.id)
+}
+
+impl Store {
+    pub fn data_roots() -> Vec<PathBuf> {
+        let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+        roots.retain(|root| root.strong_count() > 0);
+        roots.iter().filter_map(Weak::upgrade).map(|root| (*root).clone()).collect()
+    }
+
+    pub fn new(data_dir: &Path) -> Self {
+        Store::with_disk(data_dir, Arc::new(RealDisk))
+    }
+
+    /// A store that writes through `disk`, so tests can make writes fail.
+    pub fn with_disk(data_dir: &Path, disk: Arc<dyn Disk>) -> Self {
+        let conversations = data_dir.join("conversations");
+        let _ = fs::create_dir_all(&conversations);
+        let data_root =
+            Arc::new(data_dir.canonicalize().unwrap_or_else(|_| std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.to_path_buf())));
+        {
+            let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+            roots.retain(|root| root.strong_count() > 0);
+            roots.push(Arc::downgrade(&data_root));
+        }
+        Store {
+            _data_root: data_root,
+            transcripts: crate::transcript::TranscriptStore::with_disk(data_dir.join("child-transcripts"), disk.clone()),
+            search: crate::search::Search::new(conversations.clone()),
+            conversations,
+            side_chats: data_dir.join("side-chats"),
+            creative_reviews: data_dir.join("creative-reviews"),
+            projects: data_dir.join("projects.json"),
+            chat_groups: data_dir.join("chat-groups.json"),
+            settings: data_dir.join("settings.json"),
+            recents: data_dir.join("recents.json"),
+            decisions_kept: data_dir.join("decisions-kept.json"),
+            learning_kept: data_dir.join("faber-trust/learning-kept.json"),
+            rules_sources: data_dir.join("rules-sources.json"),
+            adoptions: data_dir.join("faber-trust/adoptions.json"),
+            budget: data_dir.join("budget.json"),
+            auto_learned: data_dir.join("auto-learned.json"),
+            disk,
+            budget_owner: Mutex::new(None),
+            owner_required: false,
+            recovery_epoch: std::sync::Mutex::new(None),
+            cache_health: data_dir.join("cache-health.jsonl"),
+            summaries: Mutex::default(),
+            kept_list: KeptList {
+                file: data_dir.join("conversation-list.json"),
+                dirty: std::sync::atomic::AtomicBool::new(false),
+                state: Mutex::new((false, None)),
+            },
+            unreadable: Mutex::default(),
+            writes: std::sync::atomic::AtomicU64::new(0),
+            group_move: Mutex::default(),
+            snapshot_writes: Mutex::default(),
+        }
+    }
+
+    /// How many conversation records this store wrote.
+    pub fn conversation_writes(&self) -> u64 {
+        self.writes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Own the spending ledger for this engine's lifetime, including builds with a custom data folder.
+    pub fn claim_budget(&mut self) -> Result<(), Fault> {
+        self.owner_required = true;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.budget.with_extension("lock"))
+            .map_err(|e| Fault::of_write(&e))?;
+        file.try_lock().map_err(|_| Fault::Write)?;
+        *self.budget_owner.get_mut().unwrap_or_else(|e| e.into_inner()) = Some(file);
+        Ok(())
+    }
+
+    pub fn release_budget(&self) {
+        *self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
+        self.write_with(path, value, true)
+    }
+
+    fn write_with<T: Serialize>(&self, path: &Path, value: &T, patient: bool) -> Result<(), Fault> {
+        let bytes = serde_json::to_string_pretty(value).expect("plain data always serializes");
+        replace_with(&*self.disk, path, bytes.as_bytes(), patient)
+    }
+
+    /// A conversation file is written compact: a big one holds tens of thousands of tool records, and an indent and a line
+    /// break on each of their fields made every rewrite slower. Reading takes both.
+    fn write_compact<T: Serialize>(&self, path: &Path, value: &T, patient: bool) -> Result<(), Fault> {
+        let bytes = serde_json::to_vec(value).expect("plain data always serializes");
+        replace_with(&*self.disk, path, &bytes, patient)
+    }
+
+    fn file(&self, id: &str) -> PathBuf {
+        self.conversations.join(format!("{id}.json"))
+    }
+
+    /// The id is generated here; caller text can never select a filesystem path.
+    pub fn save_creative_review(&self, value: &serde_json::Value) -> Result<String, Fault> {
+        let id = uuid::Uuid::new_v4().to_string();
+        fs::create_dir_all(&self.creative_reviews).map_err(|e| Fault::of_write(&e))?;
+        self.write(&self.creative_reviews.join(format!("{id}.json")), value)?;
+        Ok(id)
+    }
+
+    /// Whether conversation `id`'s file is still the one Faber last listed or wrote: nothing else changed or removed it since.
+    pub fn unchanged(&self, id: &str) -> bool {
+        let path = self.file(id);
+        let known = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&path).map(|(kept, _)| *kept);
+        known.is_some() && stamp(&path) == known
+    }
+
+    /// Reads `conversation-list.json` into the rows, once: a row already known in memory is newer and stays.
+    fn read_kept_list(&self) {
+        let mut state = self.kept_list.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if std::mem::replace(&mut state.0, true) {
+            return;
+        }
+        let Some(kept) = read::<ListFile>(&self.kept_list.file).filter(|kept| !build_id().is_empty() && kept.build == build_id()) else {
+            return;
+        };
+        let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for ListRow { file, len, modified, temporary, mut row } in kept.rows {
+            // Only a plain name inside the conversations folder.
+            if file.contains(['/', '\\']) || !file.ends_with(".json") {
+                continue;
+            }
+            // A time no file can have (a damaged list) leaves that file to be read.
+            let modified = match modified {
+                None => None,
+                Some((secs, nanos)) if nanos < 1_000_000_000 => {
+                    match std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs, nanos)) {
+                        Some(at) => Some(at),
+                        None => continue,
+                    }
+                }
+                Some(_) => continue,
+            };
+            row.temporary = temporary;
+            cache.entry(self.conversations.join(file)).or_insert(((len, modified), row));
+        }
+    }
+
+    /// Writes the rows to `conversation-list.json` when they changed, at most every `KEEP_LIST_EVERY` unless `now`.
+    pub fn keep_list(&self, now: bool) {
+        let mut state = self.kept_list.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.0 || build_id().is_empty() || (!now && state.1.is_some_and(|at| at.elapsed() < KEEP_LIST_EVERY)) {
+            return;
+        }
+        if !self.kept_list.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let rows = {
+            let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            cache
+                .iter()
+                .filter_map(|(path, ((len, modified), row))| {
+                    let modified =
+                        modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| (d.as_secs(), d.subsec_nanos()));
+                    let file = path.file_name()?.to_str()?.to_string();
+                    Some(ListRow { file, len: *len, modified, temporary: row.temporary, row: row.clone() })
+                })
+                .collect()
+        };
+        state.1 = Some(std::time::Instant::now());
+        let Ok(bytes) = serde_json::to_vec(&ListFile { build: build_id().to_string(), rows }) else { return };
+        // Only a help for the next start: a write that fails leaves that start to read the files.
+        let temporary = self.kept_list.file.with_extension("json.tmp");
+        if fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, &self.kept_list.file)).is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+    }
+
+    pub fn list(&self) -> Vec<Summary> {
+        self.read_kept_list();
+        let list = self.listed();
+        self.keep_list(false);
+        list
+    }
+
+    fn listed(&self) -> Vec<Summary> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        let paths: Vec<PathBuf> = fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut unreadable = self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let known = cache.len();
+        cache.retain(|path, _| paths.contains(path));
+        if cache.len() != known {
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
+        }
+        unreadable.retain(|path, _| paths.contains(path));
+        let mut list: Vec<Summary> = paths
+            .into_iter()
+            .filter_map(|path| {
+                let now_stamp = stamp(&path)?;
+                match cache.get(&path) {
+                    Some((kept, row)) if *kept == now_stamp => {
+                        unreadable.remove(&path);
+                        Some(row.clone())
+                    }
+                    // A file that cannot be read now (locked by a scanner, half copied) is tried again at the next list.
+                    _ => {
+                        let row = read::<Conversation>(&path).as_ref().map(summary);
+                        if let Some(row) = &row {
+                            unreadable.remove(&path);
+                            cache.insert(path, (now_stamp, row.clone()));
+                            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
+                            return Some(row.clone());
+                        }
+                        let previous = unreadable.insert(path.clone(), (now_stamp, false));
+                        let (failed_stamp, dismissed) = previous?;
+                        if dismissed && failed_stamp == now_stamp {
+                            unreadable.insert(path, (now_stamp, true));
+                            return None;
+                        }
+                        let id = path.file_stem()?.to_str()?;
+                        let copy = self.damaged_file(id)?;
+                        // Create exclusively: later failures never overwrite the first preserved bytes.
+                        if let Ok(mut source) = fs::File::open(&path)
+                            && let Ok(mut target) = fs::OpenOptions::new().write(true).create_new(true).open(&copy)
+                            && io::copy(&mut source, &mut target).and_then(|_| target.sync_all()).is_err()
+                        {
+                            drop(target);
+                            drop(fs::remove_file(&copy));
+                        }
+                        Some(Summary {
+                            temporary: false,
+                            follow_ups: vec![],
+                            id: id.into(),
+                            reason: Some("reason.conversation_damaged".into()),
+                            title: id.into(),
+                            area: crate::model::Area::Chat,
+                            project_id: None,
+                            updated_at: now_stamp
+                                .1
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map_or(0, |d| d.as_millis() as u64),
+                            keep_going: false,
+                            archived: false,
+                            pinned_at: None,
+                            started_by: None,
+                            waiting_on: None,
+                            child_state: None,
+                            child_choice: None,
+                            child_line: None,
+                            ended: None,
+                            state: None,
+                            plan: None,
+                            results: None,
+                            stuck: false,
+                        })
+                    }
+                }
+            })
+            .filter(|row| !row.temporary)
+            .map(|mut row| {
+                row.ended = row.ended.filter(|e| e.current(now));
+                row
+            })
+            .collect();
+        list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
+        list
+    }
+
+    fn damaged_file(&self, id: &str) -> Option<PathBuf> {
+        (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| self.file(id).with_extension("json.damaged"))
+    }
+
+    /// Only the preserved copy can be selected; callers never supply a path.
+    pub fn damaged_conversation(&self, id: &str) -> Result<PathBuf, Fault> {
+        let path = self.damaged_file(id).ok_or(Fault::Read)?;
+        if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink()) {
+            return Err(Fault::Read);
+        }
+        Ok(path)
+    }
+
+    /// The original stays untouched. Dismissal lasts until this file changes or Faber restarts.
+    pub fn remove_damaged_conversation(&self, id: &str) -> Result<(), Fault> {
+        let copy = self.damaged_file(id).ok_or(Fault::Write)?;
+        match crate::tools::retry_busy(|| fs::remove_file(&copy)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Fault::of_write(&e)),
+        }
+        let path = self.file(id);
+        if let Some(stamp) = stamp(&path) {
+            self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (stamp, true));
+        }
+        Ok(())
+    }
+
+    /// Which conversation branched from which (child, parent). Only the files that mention a branch are parsed, and only for
+    /// that.
+    pub fn branch_links(&self) -> Vec<(String, String)> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Link {
+            id: String,
+            branch_of: Option<BranchOf>,
+        }
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter_map(|e| fs::read_to_string(e.path()).ok().filter(|text| text.contains("\"branchOf\"")))
+            .filter_map(|text| serde_json::from_str::<Link>(&text).ok())
+            .filter_map(|l| Some((l.id, l.branch_of?.conversation_id)))
+            .collect()
+    }
+
+    /// The ids of conversations saved with "keep going" on. A file that does not mention it is not parsed, so looking at every
+    /// conversation once at start stays a read of the files and nothing more.
+    pub fn keep_going_ids(&self) -> Vec<String> {
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter(|e| fs::read_to_string(e.path()).is_ok_and(|text| text.contains("\"keepGoing\"")))
+            .filter_map(|e| e.path().file_stem().map(|id| id.to_string_lossy().into_owned()))
+            .collect()
+    }
+
+    /// What a start looks for in every conversation file, read once, by searching the text of each.
+    pub fn start_scan(&self) -> StartScan {
+        let mut scan = StartScan::default();
+        for entry in fs::read_dir(&self.conversations).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|x| x != "json") {
+                continue;
+            }
+            let (Some(id), Ok(text)) = (path.file_stem().map(|id| id.to_string_lossy().into_owned()), fs::read_to_string(&path)) else {
+                continue;
+            };
+            if text.contains("\"keepGoing\"") {
+                scan.keep_going.push(id.clone());
+            }
+            if text.contains("\"startedBy\"") {
+                scan.started_by.push(id.clone());
+            }
+            if text.contains("\"waitingOn\"") {
+                scan.waiting_on.push(id);
+            }
+        }
+        scan
+    }
+
+    /// The ids of conversations whose file mentions `text`, read without parsing.
+    pub fn mentioning(&self, text: &str) -> Vec<String> {
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter(|e| fs::read_to_string(e.path()).is_ok_and(|t| t.contains(text)))
+            .filter_map(|e| e.path().file_stem().map(|id| id.to_string_lossy().into_owned()))
+            .collect()
+    }
+
+    pub fn get(&self, id: &str) -> Option<Conversation> {
+        // Ids are UUIDs; anything else could point outside the folder.
+        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return None;
+        }
+        let path = self.file(id);
+        let before = stamp(&path);
+        let mut c: Conversation = read(&path)?;
+        self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
+        // Pages and helper steps reach disk before the record counts them: see `TranscriptStore::recover`.
+        self.transcripts.recover(id, &mut c.messages);
+        // Known as read, unless it changed while it was being read: `unchanged` then says so.
+        if let Some(read_stamp) = before.filter(|b| stamp(&path).as_ref() == Some(b)) {
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, summary(&c)));
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
+        }
+        Some(c)
+    }
+
+    pub fn save(&self, conversation: &Conversation) {
+        let _ = self.save_checked(conversation);
+    }
+
+    /// Replaces the record durably before publishing it to search or acknowledging a rewind cursor.
+    pub fn save_checked(&self, conversation: &Conversation) -> Result<(), Fault> {
+        self.save_checked_with(conversation, true)
+    }
+
+    /// Serialize a conversation for a later call to `save_snapshot`.
+    pub fn snapshot(conversation: &Conversation) -> Vec<u8> {
+        serde_json::to_vec(conversation).expect("plain data always serializes")
+    }
+
+    pub fn prepare_snapshot(conversation: &Conversation) -> Snapshot {
+        Snapshot { bytes: Self::snapshot(conversation), row: summary(conversation) }
+    }
+
+    pub fn save_prepared(&self, id: &str, snapshot: &Snapshot, generation: u64, patient: bool) -> Result<(), Fault> {
+        if snapshot.row.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(Fault::Corrupt);
+        }
+        self.save_record(&snapshot.row, generation, &snapshot.bytes, patient)
+    }
+
+    fn snapshot_lock(&self, id: &str) -> Arc<SnapshotWrites> {
+        self.snapshot_writes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(id.to_owned()).or_default().clone()
+    }
+
+    /// Reserve a generation before taking a snapshot, using the same sequence as synchronous saves.
+    pub fn next_generation(&self, id: &str) -> u64 {
+        self.snapshot_lock(id)
+            .next
+            .try_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |n| n.checked_add(1))
+            .expect("conversation generation exhausted")
+            + 1
+    }
+
+    /// Writes a snapshot only if no equal or newer generation has been written for this conversation.
+    /// All callers must share one increasing generation sequence per conversation.
+    pub fn save_snapshot(&self, id: &str, generation: u64, bytes: Vec<u8>) -> Result<(), Fault> {
+        let conversation: Conversation = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+        if conversation.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(Fault::Corrupt);
+        }
+        self.save_snapshot_with(&conversation, generation, &bytes, true)
+    }
+
+    /// [`Store::save_checked`], where `patient` false does not wait for a busy rename (see [`replace_with`]).
+    pub fn save_checked_with(&self, conversation: &Conversation, patient: bool) -> Result<(), Fault> {
+        let generation = self.next_generation(&conversation.id);
+        let bytes = Self::snapshot(conversation);
+        self.save_snapshot_with(conversation, generation, &bytes, patient)
+    }
+
+    fn save_snapshot_with(&self, conversation: &Conversation, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
+        self.save_record(&summary(conversation), generation, bytes, patient)
+    }
+
+    fn save_record(&self, row: &Summary, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lock = self.snapshot_lock(&row.id);
+        lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if written.is_some_and(|last| last >= generation) {
+            return Ok(());
+        }
+        if let Some((pending, area)) = self.read_group_move()?
+            && pending.conversation_id == row.id
+            && area != row.area
+        {
+            self.recover_group_move_locked(&row.id)?;
+        }
+        let path = self.file(&row.id);
+        replace_with(&*self.disk, &path, bytes, patient)?;
+        *written = Some(generation);
+        self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.written_summary(path, row.clone());
+        self.search.saved_metadata(&row.id, row.area, row.project_id.clone(), row.updated_at, row.temporary);
+        Ok(())
+    }
+
+    /// The file just written is the conversation in hand, so the next list need not read it back, and `unchanged` knows it.
+    fn written(&self, path: PathBuf, conversation: &Conversation) {
+        self.written_summary(path, summary(conversation));
+    }
+
+    fn written_summary(&self, path: PathBuf, row: Summary) {
+        self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
+        if let Some(now_stamp) = stamp(&path) {
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, row));
+            self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// Enumerate records directly: temporary conversations are deliberately absent from list().
+    /// A file whose row the list keeps for its current length and time is not read again: its row says whether it is
+    /// temporary. Every other file is read, and parsed only when it mentions `temporary`.
+    pub fn temporary_ids(&self) -> Vec<String> {
+        self.read_kept_list();
+        fs::read_dir(&self.conversations)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|path| path.extension().is_some_and(|x| x == "json"))
+            .filter_map(|path| {
+                let known = {
+                    let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    cache.get(&path).filter(|(kept, _)| stamp(&path).as_ref() == Some(kept)).map(|(_, row)| row.temporary)
+                };
+                if known == Some(false) {
+                    return None;
+                }
+                let text = fs::read_to_string(&path).ok()?;
+                let id = text.contains("\"temporary\"").then(|| temporary_flag(&text)).flatten()?;
+                path.file_stem().is_some_and(|s| s == id.as_str()).then_some(id)
+            })
+            .collect()
+    }
+
+    pub fn remove(&self, id: &str) {
+        let _ = self.remove_checked(id);
+    }
+
+    /// Deletes the record, or says why it stayed. Only a record that is not there is already removed: one that cannot be
+    /// read (locked, damaged) is still a file that stays until it is deleted.
+    pub fn remove_checked(&self, id: &str) -> Result<(), Fault> {
+        self.remove_record(id, false)
+    }
+
+    pub fn remove_temporary_checked(&self, id: &str) -> Result<(), Fault> {
+        self.remove_record(id, true)
+    }
+
+    fn remove_record(&self, id: &str, temporary_only: bool) -> Result<(), Fault> {
+        // Ids are UUIDs; anything else could point outside the folder.
+        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Ok(());
+        }
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lock = self.snapshot_lock(id);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.read_group_move()?.is_some_and(|(pending, _)| pending.conversation_id == id) {
+            self.recover_group_move_locked(id)?;
+        }
+        if temporary_only {
+            if read_checked::<Conversation>(&self.file(id))?.is_some_and(|c| c.id != id || !c.temporary) {
+                return Err(Fault::Corrupt);
+            }
+            self.save_side_chat::<()>(id, &[])?;
+        }
+        match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
+            Ok(()) => self.search.removed(id),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Fault::of_write(&e)),
+        }
+        *written = Some(u64::MAX);
+        if !temporary_only {
+            // An ordinary side chat goes with its record; best effort, the conversation is gone already.
+            let _ = self.save_side_chat::<()>(id, &[]);
+        }
+        Ok(())
+    }
+
+    fn side_file(&self, id: &str) -> Option<PathBuf> {
+        // Ids are UUIDs; anything else could point outside the folder.
+        id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-').then(|| self.side_chats.join(format!("{id}.json")))
+    }
+
+    /// The side chat kept with conversation `id`: its newest turns, or none when it has no file or a damaged one.
+    pub fn side_chat<T: DeserializeOwned>(&self, id: &str) -> Vec<T> {
+        self.side_file(id).and_then(|path| read(&path)).unwrap_or_default()
+    }
+
+    /// Keeps the side chat of conversation `id`; an empty one removes its file.
+    pub fn save_side_chat<T: Serialize>(&self, id: &str, turns: &[T]) -> Result<(), Fault> {
+        let Some(path) = self.side_file(id) else { return Ok(()) };
+        if turns.is_empty() {
+            return match crate::tools::retry_busy(|| fs::remove_file(&path)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(Fault::of_write(&e)),
+                _ => Ok(()),
+            };
+        }
+        fs::create_dir_all(&self.side_chats).map_err(|e| Fault::of_write(&e))?;
+        self.write(&path, &turns)
+    }
+
+    pub fn search(&self) -> crate::search::Search {
+        self.search.clone()
+    }
+
+    /// The project list for the sidebar: a damaged file shows no projects.
+    pub fn projects(&self) -> Vec<Project> {
+        read(&self.projects).unwrap_or_default()
+    }
+
+    /// The project list with the grants it carries. A missing file is no project; a damaged one is an error, so a lost
+    /// grant is never mistaken for a list that never had one.
+    pub fn projects_checked(&self) -> Result<Vec<Project>, Fault> {
+        read_checked(&self.projects).map(Option::unwrap_or_default)
+    }
+
+    pub fn save_projects(&self, projects: &[Project]) -> Result<(), Fault> {
+        let mut raw = serde_json::to_value(projects).map_err(|_| Fault::Corrupt)?;
+        if let Some(items) = raw.as_array_mut() {
+            for item in items {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.remove("state");
+                }
+            }
+        }
+        self.write(&self.projects, &raw)?;
+        // A project that left the list takes its local method count with it (`method_log`).
+        if let Some(dir) = self.projects.parent() {
+            crate::method_log::forget(dir, &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>());
+        }
+        Ok(())
+    }
+
+    pub fn chat_groups(&self) -> Result<Vec<ChatGroup>, Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.chat_groups_locked()
+    }
+
+    fn chat_groups_locked(&self) -> Result<Vec<ChatGroup>, Fault> {
+        let pending = self.read_group_move()?;
+        let groups: Vec<ChatGroup> = match &pending {
+            Some((pending, crate::model::Area::Chat)) => pending.groups.clone(),
+            _ => read_checked(&self.chat_groups)?.unwrap_or_default(),
+        };
+        if pending.is_some() {
+            // A blocked rollback still reads the old membership; mutations must finish recovery first.
+            let _ = self.recover_group_move_transaction();
+        }
+        if groups.iter().any(|g| {
+            uuid::Uuid::parse_str(&g.id).is_err()
+                || g.files.len() > 10
+                || g.instructions.chars().count() > 8000
+                || g.files.iter().try_fold(0usize, |size, f| size.checked_add(f.size)).is_none_or(|size| size > 5_000_000)
+                || g.files.iter().any(|f| uuid::Uuid::parse_str(&f.id).is_err())
+        }) {
+            return Err(Fault::Corrupt);
+        }
+        // A crash between staging a deletion and saving metadata keeps the old record: restore its bytes before use.
+        for group in &groups {
+            let dir = self.chat_groups_dir().join(&group.id);
+            restore_removal(&dir)?;
+            for file in &group.files {
+                restore_removal(&dir.join(&file.id))?;
+            }
+        }
+        Ok(groups)
+    }
+
+    pub fn chat_groups_dir(&self) -> PathBuf {
+        self.chat_groups.with_extension("")
+    }
+
+    pub fn save_chat_groups(&self, groups: &[ChatGroup]) -> Result<(), Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction()?;
+        self.write(&self.chat_groups, &groups)
+    }
+
+    /// Remove membership and replace the area under one commit point, without touching the group's knowledge files.
+    pub fn move_chat_to_project(
+        &self,
+        conversation: &Conversation,
+        generation: u64,
+        prepare: impl FnOnce(&Conversation) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction().map_err(|e| e.key())?;
+        let groups = self.chat_groups_locked().map_err(|e| e.key())?;
+        let lock = self.snapshot_lock(&conversation.id);
+        lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
+        let mut written = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *written == Some(u64::MAX) || !self.file(&conversation.id).try_exists().map_err(|_| Fault::Read.key())? {
+            return Err(Fault::Corrupt.key().into());
+        }
+        if written.is_some_and(|last| last >= generation) {
+            return Ok(false);
+        }
+        prepare(conversation)?;
+        if !groups.iter().any(|group| group.conversation_ids.contains(&conversation.id)) {
+            self.write_compact(&self.file(&conversation.id), &conversation, true).map_err(|e| e.key())?;
+            *written = Some(generation);
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.written(self.file(&conversation.id), conversation);
+            self.search.saved(conversation);
+            return Ok(true);
+        }
+        let journal = self.chat_groups.with_file_name("chat-group-move.json");
+        self.write(&journal, &GroupMove { conversation_id: conversation.id.clone(), groups: groups.clone() }).map_err(|e| e.key())?;
+        let mut after = groups;
+        for group in &mut after {
+            group.conversation_ids.retain(|id| id != &conversation.id);
+        }
+        if let Err(error) = self.write(&self.chat_groups, &after) {
+            // Atomic replacement failed: both original files are untouched.
+            let _ = fs::remove_file(journal);
+            return Err(error.key().into());
+        }
+        if let Err(error) = self.write_compact(&self.file(&conversation.id), &conversation, true) {
+            // Keep the journal if rollback also fails, so the next reader retries before using membership.
+            let _ = self.recover_group_move_locked(&conversation.id);
+            return Err(error.key().into());
+        }
+        *written = Some(generation);
+        self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.written(self.file(&conversation.id), conversation);
+        // Area is now committed; recovery can only finish cleanup, never put this conversation back in its group.
+        let _ = fs::remove_file(journal);
+        self.search.saved(conversation);
+        Ok(true)
+    }
+
+    fn read_group_move(&self) -> Result<Option<(GroupMove, crate::model::Area)>, Fault> {
+        let journal = self.chat_groups.with_file_name("chat-group-move.json");
+        let Some(pending) = read_checked::<GroupMove>(&journal)? else {
+            return Ok(None);
+        };
+        if uuid::Uuid::parse_str(&pending.conversation_id).is_err() {
+            return Err(Fault::Corrupt);
+        }
+        let conversation = read_checked::<Conversation>(&self.file(&pending.conversation_id))?.ok_or(Fault::Corrupt)?;
+        Ok(Some((pending, conversation.area)))
+    }
+
+    pub fn recover_group_move(&self) -> Result<(), Fault> {
+        let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.recover_group_move_transaction()
+    }
+
+    fn recover_group_move_transaction(&self) -> Result<(), Fault> {
+        loop {
+            let Some(pending) = read_checked::<GroupMove>(&self.chat_groups.with_file_name("chat-group-move.json"))? else {
+                return Ok(());
+            };
+            if uuid::Uuid::parse_str(&pending.conversation_id).is_err() {
+                return Err(Fault::Corrupt);
+            }
+            let lock = self.snapshot_lock(&pending.conversation_id);
+            let _write = lock.written.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.recover_group_move_locked(&pending.conversation_id)? {
+                return Ok(());
+            }
+        }
+    }
+
+    fn recover_group_move_locked(&self, id: &str) -> Result<bool, Fault> {
+        let Some((pending, area)) = self.read_group_move()? else { return Ok(true) };
+        if pending.conversation_id != id {
+            return Ok(false);
+        }
+        if area == crate::model::Area::Chat {
+            self.write(&self.chat_groups, &pending.groups)?;
+        }
+        fs::remove_file(self.chat_groups.with_file_name("chat-group-move.json")).map_err(|e| Fault::of_write(&e))?;
+        Ok(true)
+    }
+
+    /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer
+    /// build wrote) is never read as that: it asks before every change.
+    pub fn settings(&self) -> Settings {
+        let mut recovery = self.recovery_epoch.lock().unwrap_or_else(|e| e.into_inner());
+        let read = read_checked::<SettingsFile>(&self.settings).map(|found| {
+            let SettingsFile { mut settings, verbosity } = found.unwrap_or_default();
+            let migrated = verbosity.is_some();
+            if let Some(old) = verbosity {
+                use crate::model::ReplyStyle;
+                settings.reply_style.get_or_insert(match old {
+                    LegacyVerbosity::Low => ReplyStyle::Short,
+                    LegacyVerbosity::High => ReplyStyle::Explained,
+                    LegacyVerbosity::Default | LegacyVerbosity::Medium => ReplyStyle::Default,
+                });
+            }
+            settings.reply_style_text = settings.reply_style_text.as_deref().map(crate::model::clean_reply_style_text);
+            if let Some(epoch) = recovery.clone() {
+                settings.grants_epoch = Some(epoch.clone());
+                settings.permissions_revision = Some(epoch);
+            }
+            if migrated {
+                // A read-only disk may defer the rewrite until the person's next successful save.
+                let _ = self.write(&self.settings, &settings);
+            }
+            settings
+        });
+        match read {
+            Ok(settings) => settings,
+            // No earlier grant counts either: a new epoch, kept in memory and written by the next save.
+            Err(_) => Settings {
+                permissions: Some(crate::model::Permissions::Ask),
+                grants_epoch: Some(recovery.get_or_insert_with(crate::model::new_epoch).clone()),
+                permissions_revision: recovery.clone(),
+                ..Settings::default()
+            },
+        }
+    }
+
+    /// Forgets the "Always allow" of every conversation on disk except the `loaded` ones, which the engine clears itself.
+    pub fn clear_grants(&self, loaded: &dyn Fn(&str) -> bool) {
+        let files = fs::read_dir(&self.conversations).into_iter().flatten().flatten();
+        for entry in files.filter(|e| e.path().extension().is_some_and(|x| x == "json")) {
+            if let Some(mut c) = read::<Conversation>(&entry.path())
+                && c.allow_always.is_some()
+                && !loaded(&c.id)
+            {
+                c.allow_always = None;
+                c.allow_always_epochs.clear();
+                // Silent on purpose: the epoch replaced in `save_settings` already voids these grants, so a file that stays
+                // stale costs nothing and the person's mode change is not undone by it.
+                self.save(&c);
+            }
+        }
+    }
+
+    pub fn save_settings(&self, settings: &Settings) -> Result<(), Fault> {
+        let mut recovery = self.recovery_epoch.lock().unwrap_or_else(|e| e.into_inner());
+        self.write(&self.settings, settings)?;
+        // The epoch in force is on disk now.
+        *recovery = None;
+        Ok(())
+    }
+
+    fn quarantine(&self) -> PathBuf {
+        self.budget.with_file_name("budget.json.quarantine")
+    }
+
+    /// Reads `budget.json`; a damaged file is copied aside once, as evidence, before the error is returned.
+    fn read_ledger(&self) -> Result<Ledger, Fault> {
+        let checked = read_checked::<Ledger>(&self.budget).and_then(|found| {
+            let ledger = found.unwrap_or_default();
+            if crate::project::budget::Budget::load(&ledger).is_err()
+                || crate::model::Vendor::ALL.iter().any(|v| ledger.of(*v).own_spend.values().any(|cost| !cost.is_finite() || *cost < 0.0))
+            {
+                return Err(Fault::Corrupt);
+            }
+            Ok(ledger)
+        });
+        match checked {
+            Ok(mut ledger) => {
+                ledger.sanitize();
+                Ok(ledger)
+            }
+            Err(Fault::Corrupt) => {
+                if !self.quarantine().exists() {
+                    drop(fs::copy(&self.budget, self.quarantine()));
+                }
+                Err(Fault::Corrupt)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn recents(&self) -> Recents {
+        read::<Recents>(&self.recents).unwrap_or_default().bounded()
+    }
+
+    pub fn save_recents(&self, recents: &Recents) -> Result<(), Fault> {
+        self.write(&self.recents, recents)
+    }
+
+    /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
+    pub fn refresh_rules(&self, project: &str, folder: &Path) -> Result<crate::project::rules::Facts, &'static str> {
+        let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
+        let (record, facts) = crate::project::rules::refresh_cached(folder, all.get(project))?;
+        if all.get(project) != Some(&record) {
+            all.insert(project.into(), record);
+            self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
+        }
+        Ok(facts)
+    }
+
+    fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
+        let all: Adoptions = read_checked(&self.adoptions)?.unwrap_or_default();
+        if all.iter().any(|(id, kinds)| {
+            !crate::project::valid_id(id) || kinds.values().any(|record| record.version != 1 || !record.root.is_absolute())
+        }) {
+            return Err(Fault::Corrupt);
+        }
+        Ok(all)
+    }
+
+    /// Person-only approval, called under the engine lock; never exposed as an agent tool. No project file is written.
+    pub fn approve_adopted_file(&self, project: &str, root: &Path, kind: AdoptedKind, target: &str) -> Result<(), &'static str> {
+        if kind == AdoptedKind::Tasks || !crate::project::valid_id(project) || !root.is_absolute() {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_source(root, target)?;
+        self.save_adoption(project, root, kind, target)
+    }
+
+    /// Person-only location approval; repository content grants no authority over the folder's words.
+    pub fn approve_adopted_tasks(&self, project: &str, root: &Path, target: &str) -> Result<(), &'static str> {
+        if !crate::project::valid_id(project) || !root.is_absolute() {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_tasks(root, target)?;
+        self.save_adoption(project, root, AdoptedKind::Tasks, target)
+    }
+
+    fn save_adoption(&self, project: &str, root: &Path, kind: AdoptedKind, target: &str) -> Result<(), &'static str> {
+        let mut all = self.adoptions_checked().map_err(Fault::key)?;
+        all.entry(project.into()).or_default().insert(kind, AdoptedFile { version: 1, root: root.into(), target: target.into() });
+        fs::create_dir_all(self.adoptions.parent().expect("fixed record parent")).map_err(|e| Fault::of_write(&e).key())?;
+        self.write(&self.adoptions, &all).map_err(Fault::key)
+    }
+
+    /// Reopen the approved location on every read; neither repository text nor another project can redirect it.
+    pub fn read_adopted_file(&self, project: &str, root: &Path, kind: AdoptedKind) -> Result<Option<String>, &'static str> {
+        if kind == AdoptedKind::Tasks {
+            return Err("error.memory.refused");
+        }
+        let all = self.adoptions_checked().map_err(Fault::key)?;
+        let Some(record) = all.get(project).and_then(|kinds| kinds.get(&kind)) else { return Ok(None) };
+        if record.root != root {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_source(root, &record.target).map(Some)
+    }
+
+    /// Revalidate the approved task folder and every opened file on each read.
+    pub fn read_adopted_tasks(&self, project: &str, root: &Path) -> Result<Option<crate::project::memory::AdoptedTasks>, &'static str> {
+        let all = self.adoptions_checked().map_err(Fault::key)?;
+        let Some(record) = all.get(project).and_then(|kinds| kinds.get(&AdoptedKind::Tasks)) else { return Ok(None) };
+        if record.root != root {
+            return Err("error.memory.refused");
+        }
+        crate::project::memory::read_adopted_tasks(root, &record.target).map(Some)
+    }
+
+    /// The decisions the person kept (R16), as item identities and content hashes, or legacy body-only hashes. They live here and
+    /// not in the project, so no agent can write a review. A missing or damaged file keeps nothing: decisions read "not
+    /// reviewed" again.
+    pub fn kept_decisions(&self, project: &str) -> Vec<KeptDecision> {
+        self.kept_decisions_reader(project)()
+    }
+
+    /// Damaged provenance approves nothing. Read on the worker, with no retained cache or watcher.
+    pub fn approved_learning_reader(&self, project: &str) -> impl FnOnce() -> LearningRecords + Send + 'static + use<> {
+        let (path, project) = (self.learning_kept.clone(), project.to_string());
+        move || read::<BTreeMap<String, LearningRecords>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// Called under the engine lock; a failed write never reports an approval as saved.
+    pub fn keep_learning(&self, project: &str, kind: LearningKind, hash: String) -> Result<(), Fault> {
+        let mut all: BTreeMap<String, LearningRecords> = read_checked(&self.learning_kept)?.unwrap_or_default();
+        let hashes = all.entry(project.into()).or_default().entry(kind).or_default();
+        if !hashes.contains(&hash) {
+            hashes.push(hash);
+        }
+        fs::create_dir_all(self.learning_kept.parent().expect("record has a parent")).map_err(|e| Fault::of_write(&e))?;
+        self.write(&self.learning_kept, &all)
+    }
+
+    /// Revoke before editing the project; an unreadable record must never let an old approval survive a deletion.
+    pub fn revoke_learning(&self, project: &str, kind: LearningKind, hash: &str) -> Result<(), Fault> {
+        let mut all: BTreeMap<String, LearningRecords> = read_checked(&self.learning_kept)?.unwrap_or_default();
+        let Some(hashes) = all.get_mut(project).and_then(|records| records.get_mut(&kind)) else { return Ok(()) };
+        let before = hashes.len();
+        hashes.retain(|kept| kept != hash);
+        if hashes.len() == before {
+            return Ok(());
+        }
+        self.write(&self.learning_kept, &all)
+    }
+
+    /// `kept_decisions` for a worker: the file is read when the closure is called, away from the engine lock.
+    pub fn kept_decisions_reader(&self, project: &str) -> impl FnOnce() -> Vec<KeptDecision> + Send + 'static {
+        let (path, project) = (self.decisions_kept.clone(), project.to_string());
+        move || read::<BTreeMap<String, Vec<KeptDecision>>>(&path).unwrap_or_default().remove(&project).unwrap_or_default()
+    }
+
+    /// `kept_decisions` for taking a review back, where a file that cannot be read is an error, as for Keep: one unreadable now,
+    /// or damaged for this version (a newer one may read it), may still hold the review.
+    pub fn kept_decisions_now(&self, project: &str) -> Result<Vec<KeptDecision>, Fault> {
+        Ok(read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?
+            .unwrap_or_default()
+            .remove(project)
+            .unwrap_or_default())
+    }
+
+    /// Called under the engine lock: a stale listing must never overwrite a newer Keep.
+    pub fn migrate_kept_decisions(&self, project: &str, expected: &[KeptDecision], upgraded: &[KeptDecision]) -> Result<bool, Fault> {
+        let mut all: BTreeMap<String, Vec<KeptDecision>> = read_checked(&self.decisions_kept)?.unwrap_or_default();
+        let Some(current) = all.get_mut(project).filter(|current| current.as_slice() == expected) else { return Ok(false) };
+        *current = upgraded.to_vec();
+        self.write(&self.decisions_kept, &all)?;
+        Ok(true)
+    }
+
+    /// Adds one kept decision without discarding older approvals. Projects that are gone (not in `live`) are dropped.
+    pub fn keep_decision(&self, project: &str, record: KeptDecision, live: &[String]) -> Result<(), Fault> {
+        let mut all = read_checked::<BTreeMap<String, Vec<KeptDecision>>>(&self.decisions_kept)?.unwrap_or_default();
+        all.retain(|id, _| live.contains(id));
+        let kept = all.entry(project.into()).or_default();
+        kept.retain(|older| !older.matches(&record));
+        kept.push(record);
+        self.write(&self.decisions_kept, &all)
+    }
+
+    /// What Faber remembers about each vendor's quota, for Chat and Auto. A missing, damaged or unreadable file is an empty
+    /// ledger: it only holds what was learned, and learning starts again.
+    pub fn ledger(&self) -> Ledger {
+        self.read_ledger().unwrap_or_default()
+    }
+
+    /// The same ledger for decisions that admit spending. A damaged file is an error, and stays one while its quarantined
+    /// copy exists, even after Chat has saved a fresh ledger over it: damaged safety data never becomes an empty budget.
+    pub fn ledger_checked(&self) -> Result<Ledger, Fault> {
+        let ledger = self.read_ledger()?;
+        if self.quarantine().exists() {
+            return Err(Fault::Corrupt);
+        }
+        Ok(ledger)
+    }
+
+    /// What Auto learned from the person's redone and kept answers. A missing, damaged or unreadable file is nothing learned: it
+    /// only holds a nudge, and learning starts again.
+    pub fn auto_learned(&self) -> crate::auto_learned::Learned {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        read::<crate::auto_learned::Learned>(&self.auto_learned).unwrap_or_default().sanitized(now)
+    }
+
+    pub fn save_auto_learned(&self, learned: &crate::auto_learned::Learned) -> Result<(), Fault> {
+        self.write(&self.auto_learned, learned)
+    }
+
+    /// Compact on purpose: it is rewritten often and a person never has to read it.
+    pub fn save_ledger(&self, ledger: &Ledger) -> Result<(), Fault> {
+        if self.owner_required && self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+            return Err(Fault::Write);
+        }
+        replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())
+    }
+}
+
+fn restore_removal(path: &Path) -> Result<(), Fault> {
+    let staged = path.with_extension("removing");
+    if !path.exists() && staged.exists() {
+        fs::rename(staged, path).map_err(|e| Fault::of_write(&e))?;
+    }
+    Ok(())
+}
+
+// ponytail: size cap, rotate if it ever matters.
+const CACHE_HEALTH_MAX: u64 = 1_000_000;
+
+/// Adds one line to a local log that nothing reads back for sending: it stops growing at `max` bytes and a failed write is
+/// ignored, so it can never break a turn.
+pub fn append_bounded(path: &Path, max: u64, line: &serde_json::Value) {
+    use std::io::Write;
+    if fs::metadata(path).is_ok_and(|m| m.len() >= max) {
+        return;
+    }
+    let _ = fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
+}
+
+impl Store {
+    /// Adds one line to the local cache-health log. Nothing reads it back and nothing sends it anywhere.
+    pub fn log_cache_health(&self, line: &serde_json::Value) {
+        append_bounded(&self.cache_health, CACHE_HEALTH_MAX, line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_chat_delete_guard_preserves_ordinary_and_mismatched_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut chat: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "ordinary", "title": "keep", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&chat).unwrap();
+        let before = fs::read(store.file("ordinary")).unwrap();
+        assert_eq!(store.remove_temporary_checked("ordinary"), Err(Fault::Corrupt));
+        assert_eq!(fs::read(store.file("ordinary")).unwrap(), before);
+        chat.id = "temporary".into();
+        chat.temporary = true;
+        store.save_checked(&chat).unwrap();
+        fs::copy(store.file("temporary"), store.file("mismatch")).unwrap();
+        assert_eq!(store.remove_temporary_checked("mismatch"), Err(Fault::Corrupt));
+        assert!(store.file("mismatch").exists());
+        store.remove_temporary_checked("temporary").unwrap();
+        assert!(!store.file("temporary").exists());
+        assert_eq!(fs::read(store.file("ordinary")).unwrap(), before);
+    }
+
+    #[test]
+    fn temporary_conversations_are_not_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let mut chat: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "private", "title": "private", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        chat.temporary = true;
+        store.save_checked(&chat).unwrap();
+        chat.id = "ordinary".into();
+        chat.temporary = false;
+        store.save_checked(&chat).unwrap();
+        let ordinary_file = dir.path().join("conversations/ordinary.json");
+        let ordinary_bytes = fs::read(&ordinary_file).unwrap();
+        assert_eq!(store.list().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["ordinary"]);
+        let reopened = Store::new(dir.path());
+        assert_eq!(reopened.list().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["ordinary"]);
+        assert_eq!(reopened.get("ordinary").unwrap(), chat);
+        assert_eq!(fs::read(ordinary_file).unwrap(), ordinary_bytes, "listing and reopening never rewrite ordinary conversations");
+        assert!(reopened.get("private").unwrap().temporary, "this slice filters without deleting any conversation");
+    }
+
+    #[test]
+    fn a_reopened_store_lists_from_the_kept_list_and_reads_only_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = |id: &str, title: &str, temporary: bool| -> Conversation {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "title": title, "area": "chat", "createdAt": 0, "updatedAt": 1, "messages": [], "temporary": temporary
+            }))
+            .unwrap()
+        };
+        let store = Store::new(dir.path());
+        for conversation in [chat("kept", "Kept", false), chat("changed", "Before", false), chat("private", "Private", true)] {
+            store.save_checked(&conversation).unwrap();
+        }
+        let titles = |store: &Store| store.list().into_iter().map(|row| (row.id, row.title)).collect::<BTreeMap<_, _>>();
+        assert_eq!(titles(&store).len(), 2);
+        store.keep_list(true);
+        drop(store);
+        // The same length and time as before, with nothing readable in it: only a row kept on disk can still name it.
+        let kept = dir.path().join("conversations/kept.json");
+        let (len, modified) = (fs::metadata(&kept).unwrap().len(), fs::metadata(&kept).unwrap().modified().unwrap());
+        fs::write(&kept, vec![b' '; len as usize]).unwrap();
+        fs::OpenOptions::new().write(true).open(&kept).unwrap().set_modified(modified).unwrap();
+        // A file changed since is read again.
+        Store::new(dir.path()).save_checked(&chat("changed", "After", false)).unwrap();
+        let reopened = Store::new(dir.path());
+        assert_eq!(
+            titles(&reopened),
+            BTreeMap::from([("changed".to_string(), "After".to_string()), ("kept".to_string(), "Kept".to_string())]),
+            "the temporary conversation stays out of the list after a restart too"
+        );
+        // A list file written by another build is not trusted: every file is read.
+        let file = dir.path().join("conversation-list.json");
+        let mut written: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        written["build"] = "another".into();
+        fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
+        let rows = Store::new(dir.path()).list();
+        assert!(rows.iter().all(|row| row.title != "Kept"), "the unreadable file is never listed from the old rows");
+        // A time no file can have is not trusted either, and never stops the list.
+        written["build"] = build_id().into();
+        for row in written["rows"].as_array_mut().unwrap() {
+            row["modified"] = serde_json::json!([u64::MAX, 999_999_999]);
+        }
+        fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
+        assert!(Store::new(dir.path()).list().iter().all(|row| row.title != "Kept"));
+    }
+
+    #[test]
+    fn store_snapshot_and_recovery_hold_the_move_lock_during_writes() {
+        struct CheckingDisk(Mutex<Option<std::sync::Weak<Store>>>, std::sync::atomic::AtomicUsize);
+        impl Disk for CheckingDisk {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                let store = self.0.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
+                assert!(store.group_move.try_lock().is_err());
+                self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                RealDisk.rename(from, to)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let disk = Arc::new(CheckingDisk(Mutex::new(None), Default::default()));
+        let store = Arc::new(Store::with_disk(dir.path(), disk.clone()));
+        *disk.0.lock().unwrap() = Some(Arc::downgrade(&store));
+        let id = uuid::Uuid::new_v4().to_string();
+        let conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": id, "title": "chat", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&conversation).unwrap();
+        fs::write(dir.path().join("chat-group-move.json"), serde_json::json!({"conversationId": id, "groups": []}).to_string()).unwrap();
+        store.chat_groups().unwrap();
+        assert_eq!(disk.1.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn move_rejects_a_newer_snapshot_and_accepts_a_fresh_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut conversation: Conversation = serde_json::from_value(serde_json::json!({
+            "id": id, "title": "old", "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        store.save_checked(&conversation).unwrap();
+        let stale_generation = store.next_generation(&id);
+        conversation.title = "new".into();
+        store.save_checked(&conversation).unwrap();
+        let mut moved = conversation.clone();
+        moved.title = "old".into();
+        moved.area = crate::model::Area::Project;
+        assert!(!store.move_chat_to_project(&moved, stale_generation, |_| Ok(())).unwrap());
+        assert_eq!(store.get(&id).unwrap().title, "new");
+        let generation = store.next_generation(&id);
+        moved.title = conversation.title;
+        let writes = store.conversation_writes();
+        assert!(store.move_chat_to_project(&moved, generation, |_| Ok(())).unwrap());
+        assert_eq!(store.conversation_writes(), writes + 1);
+        assert_eq!(store.get(&id).unwrap().title, "new");
+        moved.title = "later".into();
+        store.save_checked(&moved).unwrap();
+        assert_eq!(store.get(&id).unwrap().title, "later");
+    }
+
+    #[test]
+    fn move_serializes_different_conversations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::new(dir.path()));
+        let conversation = |id: &str| -> Conversation {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "title": id, "area": "chat", "createdAt": 0, "updatedAt": 0, "messages": []
+            }))
+            .unwrap()
+        };
+        let first_id = uuid::Uuid::new_v4().to_string();
+        let second_id = uuid::Uuid::new_v4().to_string();
+        let first = conversation(&first_id);
+        let second = conversation(&second_id);
+        store.save_checked(&first).unwrap();
+        store.save_checked(&second).unwrap();
+        let group = ChatGroup {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "group".into(),
+            instructions: String::new(),
+            files: vec![],
+            conversation_ids: vec![first.id.clone(), second.id.clone()],
+        };
+        store.save_chat_groups(&[group]).unwrap();
+        let mut first_move = first;
+        first_move.area = crate::model::Area::Project;
+        let mut second_move = second;
+        second_move.area = crate::model::Area::Project;
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let moving = store.clone();
+        let first_thread = std::thread::spawn(move || {
+            moving.move_chat_to_project(&first_move, 2, |_| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        entered_rx.recv().unwrap();
+        assert!(store.group_move.try_lock().is_err());
+        let moving = store.clone();
+        let second_thread = std::thread::spawn(move || moving.move_chat_to_project(&second_move, 2, |_| Ok(())));
+        release_tx.send(()).unwrap();
+        first_thread.join().unwrap().unwrap();
+        second_thread.join().unwrap().unwrap();
+        assert!(store.chat_groups().unwrap()[0].conversation_ids.is_empty());
+        assert_eq!(store.get(&first_id).unwrap().area, crate::model::Area::Project);
+        assert_eq!(store.get(&second_id).unwrap().area, crate::model::Area::Project);
+    }
+
+    #[test]
+    fn rules_registry_preserves_other_projects_approvals_and_refuses_unsafe_output() {
+        let data = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(&store.decisions_kept, b"approval bytes must stay untouched").unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        store.refresh_rules("second", second.path()).unwrap();
+        let before: serde_json::Value = read(&store.rules_sources).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), before);
+        fs::write(first.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert_eq!(current["second"], before["second"]);
+        let registered = fs::read(&store.rules_sources).unwrap();
+        fs::write(first.path().join(".faber/rules.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        let generated = fs::read(first.path().join(".faber/rules.md")).unwrap();
+        fs::write(other.path().join("rules.md"), &generated).unwrap();
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        fs::hard_link(other.path().join("rules.md"), first.path().join(".faber/rules.md")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        fs::remove_file(first.path().join(".faber/rules.md")).unwrap();
+        store.refresh_rules("first", first.path()).unwrap();
+        fs::rename(first.path().join(".faber"), first.path().join("original")).unwrap();
+        #[cfg(windows)]
+        junction::create(other.path(), first.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(other.path(), first.path().join(".faber")).unwrap();
+        assert!(store.refresh_rules("first", first.path()).is_err());
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+        assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"approval bytes must stay untouched");
+    }
+    #[test]
+    fn rules_registry_failed_save_keeps_previous_record_and_approvals() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        store.refresh_rules("project", project.path()).unwrap();
+        let before = fs::read(&store.rules_sources).unwrap();
+        fs::write(&store.decisions_kept, b"existing decisions").unwrap();
+        fs::write(project.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(failing.refresh_rules("project", project.path()), Err("error.store.full"));
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), before);
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"existing decisions");
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), before);
+    }
+
+    #[test]
+    fn rules_registry_tracks_sources_repairs_planted_output_and_recovers_derived_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        let manifest = project.path().join("package.json");
+        let rules = project.path().join(".faber/rules.md");
+        fs::write(&manifest, r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let generated = fs::read(&rules).unwrap();
+        let registered = fs::read(&store.rules_sources).unwrap();
+        let rules_time = fs::metadata(&rules).unwrap().modified().unwrap();
+        let record_time = fs::metadata(&store.rules_sources).unwrap().modified().unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::metadata(&rules).unwrap().modified().unwrap(), rules_time);
+        assert_eq!(fs::metadata(&store.rules_sources).unwrap().modified().unwrap(), record_time);
+
+        // Unchanged sources do not make a planted output trustworthy.
+        fs::write(&rules, "PLANTED_SYSTEM_AUTHORITY").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(fs::read(&rules).unwrap(), generated);
+        assert_eq!(fs::read(&store.rules_sources).unwrap(), registered);
+
+        fs::write(&manifest, r#"{"scripts":{"lint":"eslint"}}"#).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+        assert_ne!(fs::read(&store.rules_sources).unwrap(), registered);
+        fs::write(project.path().join("tsconfig.json"), "{}").unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert!(fs::read_to_string(&rules).unwrap().contains("TypeScript"));
+        fs::remove_file(&manifest).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        let current: serde_json::Value = read(&store.rules_sources).unwrap();
+        assert!(current["project"]["sources"].get("package.json").is_none());
+        assert!(!fs::read_to_string(&rules).unwrap().contains("npm run lint"));
+
+        let mut obsolete = current.clone();
+        obsolete["project"]["version"] = 0.into();
+        fs::write(&store.rules_sources, serde_json::to_vec(&obsolete).unwrap()).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+
+        for damaged in ["{", "{}", r#"{"project":{"version":0,"sources":{},"hash":"old"}}"#] {
+            fs::write(&store.rules_sources, damaged).unwrap();
+            fs::write(&rules, "PLANTED_AGAIN").unwrap();
+            store.refresh_rules("project", project.path()).unwrap();
+            assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+            assert!(!fs::read_to_string(&rules).unwrap().contains("PLANTED"));
+        }
+        fs::remove_file(&store.rules_sources).unwrap();
+        store.refresh_rules("project", project.path()).unwrap();
+        assert_eq!(read::<serde_json::Value>(&store.rules_sources).unwrap(), current);
+    }
+
+    #[test]
+    fn adopted_task_approvals_survive_reopen_without_trusting_repository_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/b.md"), "second").unwrap();
+        fs::write(project.path().join("tasks/a.md"), "first [by person]").unwrap();
+        fs::write(project.path().join("decisions.md"), "existing decisions").unwrap();
+        fs::write(project.path().join("taste.md"), "existing taste").unwrap();
+        fs::write(project.path().join("adoptions.json"), r#"{"project":{"tasks":{"target":"tasks"}}}"#).unwrap();
+        assert!(store.read_adopted_tasks("project", project.path()).unwrap().is_none());
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        store.approve_adopted_file("other", project.path(), AdoptedKind::Taste, "taste.md").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let reopened = Store::new(data.path());
+        let tasks = reopened.read_adopted_tasks("project", project.path()).unwrap().unwrap();
+        assert_eq!(tasks.files, [("a.md".into(), "first [by person]".into()), ("b.md".into(), "second".into())]);
+        assert!(!tasks.incomplete);
+        assert!(reopened.read_adopted_tasks("other", other.path()).unwrap().is_none());
+        assert!(reopened.read_adopted_tasks("project", other.path()).is_err());
+        assert_eq!(
+            reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some("existing decisions")
+        );
+        assert_eq!(reopened.read_adopted_file("other", project.path(), AdoptedKind::Taste).unwrap().as_deref(), Some("existing taste"));
+        assert_eq!(fs::read_to_string(project.path().join("tasks/a.md")).unwrap(), "first [by person]");
+        assert!(!project.path().join(".faber").exists());
+        assert!(!data.path().join("decisions-kept.json").exists());
+    }
+
+    #[test]
+    fn adopted_task_approvals_refuse_file_kind_confusion_and_preserve_damaged_records() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/a.md"), "original").unwrap();
+        fs::write(project.path().join("ordinary.md"), "not a folder").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Tasks, "ordinary.md").is_err());
+        assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Tasks).is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "ordinary.md").is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "../tasks").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        for damaged in [
+            b"{broken".as_slice(),
+            br#"{"project":{"unknown":{}}}"#,
+            br#"{"project":{"tasks":{"version":99,"root":"/","target":"tasks"}}}"#,
+        ] {
+            fs::write(&store.adoptions, damaged).unwrap();
+            assert!(store.read_adopted_tasks("project", project.path()).is_err());
+            assert!(store.approve_adopted_tasks("project", project.path(), "tasks").is_err());
+            assert_eq!(fs::read(&store.adoptions).unwrap(), damaged);
+        }
+    }
+
+    #[test]
+    fn adopted_task_approvals_recheck_replaced_folders_without_overwriting_the_record() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("tasks")).unwrap();
+        fs::write(project.path().join("tasks/a.md"), "inside").unwrap();
+        fs::write(outside.path().join("a.md"), "outside").unwrap();
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        fs::rename(project.path().join("tasks"), project.path().join("original-tasks")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("tasks")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("tasks")).unwrap();
+        assert!(store.read_adopted_tasks("project", project.path()).is_err());
+        assert!(store.approve_adopted_tasks("project", project.path(), "tasks").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(fs::read_to_string(outside.path().join("a.md")).unwrap(), "outside");
+        #[cfg(windows)]
+        junction::delete(project.path().join("tasks")).unwrap();
+        #[cfg(unix)]
+        fs::remove_file(project.path().join("tasks")).unwrap();
+        assert_eq!(fs::read_to_string(project.path().join("original-tasks/a.md")).unwrap(), "inside");
+    }
+
+    #[test]
+    fn adopted_task_approvals_failed_save_preserves_the_previous_folder() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        for folder in ["tasks", "replacement"] {
+            fs::create_dir(project.path().join(folder)).unwrap();
+            fs::write(project.path().join(folder).join("a.md"), folder).unwrap();
+        }
+        let store = Store::new(data.path());
+        store.approve_adopted_tasks("project", project.path(), "tasks").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(failing.approve_adopted_tasks("project", project.path(), "replacement"), Err("error.store.full"));
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(store.read_adopted_tasks("project", project.path()).unwrap().unwrap().files, [("a.md".into(), "tasks".into())]);
+        assert!(!store.adoptions.with_file_name("adoptions.json.tmp").exists());
+    }
+
+    #[test]
+    fn adopted_private_files_cannot_replace_an_approved_source() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "approved decisions").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        let saved = fs::read(&store.adoptions).unwrap();
+        for name in [".npmrc", "auth.json", "credentials.json", ".env", "private.pem", "private.key", "private.p12", "private.pfx"] {
+            fs::write(project.path().join(name), "synthetic private record, never a real credential").unwrap();
+            assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, name).is_err(), "{name}");
+            assert_eq!(fs::read(&store.adoptions).unwrap(), saved);
+        }
+    }
+
+    #[test]
+    fn adopted_files_need_external_approval_and_recheck_the_selected_project() {
+        use crate::project::memory::AdoptedKind;
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "original decisions").unwrap();
+        fs::write(other.path().join("decisions.md"), "other project").unwrap();
+        fs::write(project.path().join("adoptions.json"), r#"{"project":{"decisions":{"target":"decisions.md"}}}"#).unwrap();
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap(), None);
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        let reopened = Store::new(data.path());
+        assert_eq!(
+            reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some("original decisions")
+        );
+        assert!(reopened.read_adopted_file("project", other.path(), AdoptedKind::Decisions).is_err());
+        assert_eq!(reopened.read_adopted_file("other", other.path(), AdoptedKind::Decisions).unwrap(), None);
+        let saved = fs::read(data.path().join("faber-trust/adoptions.json")).unwrap();
+        fs::remove_file(project.path().join("decisions.md")).unwrap();
+        assert!(reopened.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+        assert!(reopened.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "../outside.md").is_err());
+        assert_eq!(fs::read(data.path().join("faber-trust/adoptions.json")).unwrap(), saved);
+        assert_eq!(fs::read_to_string(other.path().join("decisions.md")).unwrap(), "other project");
+    }
+
+    #[test]
+    fn adopted_files_preserve_other_approvals_and_refuse_damaged_records() {
+        use crate::project::memory::AdoptedKind;
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::write(project.path().join("decisions.md"), "decisions").unwrap();
+        fs::write(project.path().join("taste.md"), "taste").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        store.approve_adopted_file("other", project.path(), AdoptedKind::Taste, "taste.md").unwrap();
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(), Some("decisions"));
+        assert_eq!(store.read_adopted_file("other", project.path(), AdoptedKind::Taste).unwrap().as_deref(), Some("taste"));
+        let path = data.path().join("faber-trust/adoptions.json");
+        for damaged in [b"{broken".as_slice(), br#"{"project":{"decisions":{"version":99,"root":"/","target":"decisions.md"}}}"#] {
+            fs::write(&path, damaged).unwrap();
+            assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+            assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").is_err());
+            assert_eq!(fs::read(&path).unwrap(), damaged);
+        }
+    }
+
+    #[test]
+    fn adopted_files_recheck_approved_targets_after_a_directory_is_replaced() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        fs::create_dir(project.path().join("docs")).unwrap();
+        fs::write(project.path().join("docs/decisions.md"), "inside").unwrap();
+        fs::write(outside.path().join("decisions.md"), "outside").unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "docs/decisions.md").unwrap();
+        let approval = fs::read(&store.adoptions).unwrap();
+        fs::rename(project.path().join("docs"), project.path().join("original-docs")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), project.path().join("docs")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).unwrap();
+        assert!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).is_err());
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "docs/decisions.md").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), approval);
+        assert_eq!(fs::read_to_string(outside.path().join("decisions.md")).unwrap(), "outside");
+        #[cfg(windows)]
+        junction::delete(project.path().join("docs")).unwrap();
+        #[cfg(unix)]
+        fs::remove_file(project.path().join("docs")).unwrap();
+    }
+
+    #[test]
+    fn adopted_files_failed_replacement_keeps_the_previous_approval() {
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::write(project.path().join("original.md"), "original").unwrap();
+        fs::write(project.path().join("replacement.md"), "replacement").unwrap();
+        let store = Store::new(data.path());
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "original.md").unwrap();
+        let before = fs::read(&store.adoptions).unwrap();
+        let failing = Store::with_disk(data.path(), Arc::new(NoReplace));
+        assert_eq!(
+            failing.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "replacement.md"),
+            Err("error.store.full")
+        );
+        assert_eq!(fs::read(&store.adoptions).unwrap(), before);
+        assert_eq!(store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(), Some("original"));
+        assert!(!store.adoptions.with_file_name("adoptions.json.tmp").exists());
+    }
+
+    #[test]
+    fn adopted_files_support_the_reference_decision_log_without_removing_the_size_bound() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let store = Store::new(data.path());
+        // The approved benchmark uses Faber's decision log, now larger than Memory's 256 KiB file cap.
+        let reference = "x".repeat(270_492);
+        fs::write(project.path().join("decisions.md"), &reference).unwrap();
+        store.approve_adopted_file("project", project.path(), AdoptedKind::Decisions, "decisions.md").unwrap();
+        assert_eq!(
+            store.read_adopted_file("project", project.path(), AdoptedKind::Decisions).unwrap().as_deref(),
+            Some(reference.as_str())
+        );
+        let saved = fs::read(&store.adoptions).unwrap();
+        fs::write(project.path().join("oversize.md"), vec![b'x'; 512 * 1024 + 1]).unwrap();
+        assert!(store.approve_adopted_file("project", project.path(), AdoptedKind::Taste, "oversize.md").is_err());
+        assert_eq!(fs::read(&store.adoptions).unwrap(), saved);
+    }
+
+    #[test]
+    fn creative_receipts_use_generated_paths_and_report_failed_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let value = serde_json::json!({"first":"../outside", "reason":"Full reason"});
+        let one = store.save_creative_review(&value).unwrap();
+        let two = store.save_creative_review(&value).unwrap();
+        assert_ne!(one, two);
+        assert!(uuid::Uuid::parse_str(&one).is_ok());
+        assert_eq!(read::<serde_json::Value>(&dir.path().join("creative-reviews").join(format!("{one}.json"))), Some(value));
+        let blocked = tempfile::tempdir().unwrap();
+        fs::write(blocked.path().join("creative-reviews"), "a file, not a folder").unwrap();
+        assert_eq!(Store::new(blocked.path()).save_creative_review(&serde_json::json!({})), Err(Fault::Write));
+    }
+
+    #[test]
+    fn kept_item_records_upgrade_without_losing_concurrent_or_other_project_approvals() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir(project.path().join(".faber")).unwrap();
+        fs::write(project.path().join(".faber/decisions.md"), "- Keep exports. [by AI]\n").unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        let encoded = serde_json::to_value(&item).unwrap();
+        let old = encoded["hash"].as_str().unwrap()[..32].to_string();
+        let initial = serde_json::json!({"project": [old, "unmatched legacy"], "other": ["other approval"]});
+        store.write(&store.decisions_kept, &initial).unwrap();
+        let expected = store.kept_decisions("project");
+        let list = memory::list(project.path()).unwrap();
+        let upgraded = memory::upgrade_kept(&list, &expected);
+        assert_eq!(upgraded, vec![item.clone(), KeptDecision::Legacy("unmatched legacy".into())]);
+        assert!(store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), upgraded);
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &upgraded).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        let second = KeptDecision::of("- Keep exports.\n  Also keep older formats.");
+        store.keep_decision("project", second.clone(), &["project".into(), "other".into()]).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &upgraded, &expected).unwrap());
+        let after = store.kept_decisions("project");
+        assert!(after.contains(&item) && after.contains(&second), "same heading cannot delete a distinct approval");
+        assert_eq!(store.kept_decisions("other"), vec![KeptDecision::Legacy("other approval".into())]);
+    }
+
+    #[test]
+    fn kept_file_reference_records_preserve_mixed_approvals_and_metadata_cas() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let old = KeptDecision::of("- Keep exports.");
+        let mut value = serde_json::to_value(&old).unwrap();
+        value["files"] = serde_json::json!(["src/lib.rs"]);
+        let enriched: KeptDecision = serde_json::from_value(value.clone()).unwrap();
+        let live = vec!["project".into(), "other".into()];
+        store.keep_decision("other", KeptDecision::Legacy("other approval".into()), &live).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("unmatched legacy".into()), &live).unwrap();
+        store.keep_decision("project", old, &live).unwrap();
+        let expected = store.kept_decisions("project");
+        store.keep_decision("project", enriched.clone(), &live).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        assert!(!store.migrate_kept_decisions("project", &expected, &expected).unwrap());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+        assert_eq!(Store::new(dir.path()).kept_decisions("project"), [KeptDecision::Legacy("unmatched legacy".into()), enriched]);
+        assert_eq!(store.kept_decisions("other"), [KeptDecision::Legacy("other approval".into())]);
+        value["files"] = serde_json::json!("not an array");
+        let corrupt = serde_json::to_vec(&serde_json::json!({"project": [value]})).unwrap();
+        fs::write(&store.decisions_kept, &corrupt).unwrap();
+        assert!(store.keep_decision("project", KeptDecision::of("- Another."), &live).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn kept_item_records_refuse_unknown_records_and_preserve_failed_migrations() {
+        use crate::project::memory::KeptDecision;
+        struct NoReplace;
+        impl Disk for NoReplace {
+            fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+                RealDisk.write(path, bytes)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::ErrorKind::StorageFull.into())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let item = KeptDecision::of("- Keep exports.");
+        for corrupt in [r#"{"project":[{"id":"id","hash":"hash","authority":true}]}"#, r#"{"project":[null]}"#] {
+            fs::write(&store.decisions_kept, corrupt).unwrap();
+            assert!(store.kept_decisions("project").is_empty());
+            assert_eq!(store.keep_decision("project", item.clone(), &["project".into()]), Err(Fault::Corrupt));
+            assert_eq!(store.migrate_kept_decisions("project", &[], &[]), Err(Fault::Corrupt));
+            assert_eq!(fs::read_to_string(&store.decisions_kept).unwrap(), corrupt);
+        }
+        let old = KeptDecision::Legacy("old".into());
+        store.write(&store.decisions_kept, &BTreeMap::from([("project", vec![old.clone()])])).unwrap();
+        let before = fs::read(&store.decisions_kept).unwrap();
+        let failed = Store::with_disk(dir.path(), Arc::new(NoReplace));
+        assert!(failed.migrate_kept_decisions("project", &[old], &[item]).is_err());
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), before);
+    }
+
+    #[test]
+    fn keeping_a_decision_refuses_corrupt_approvals_without_overwriting_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let corrupt = b"{\"project\":[\"existing approval\"],";
+        fs::write(&store.decisions_kept, corrupt).unwrap();
+        assert_eq!(store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]), Err(Fault::Corrupt));
+        assert_eq!(fs::read(&store.decisions_kept).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn keeping_a_decision_preserves_more_than_500_existing_approvals() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let records: Vec<_> = (0..501).map(|i| format!("{i:032x}")).collect();
+        store.write(&store.decisions_kept, &BTreeMap::from([("project", &records)])).unwrap();
+        store.keep_decision("project", KeptDecision::Legacy("new approval".into()), &["project".into()]).unwrap();
+        let kept = Store::new(dir.path()).kept_decisions("project");
+        assert_eq!(kept.len(), 502, "a new approval must not discard older approvals");
+        assert_eq!(&kept[..501], records.into_iter().map(KeptDecision::Legacy).collect::<Vec<_>>());
+        assert_eq!(kept.last(), Some(&KeptDecision::Legacy("new approval".into())));
+    }
+
+    #[test]
+    fn a_failed_rename_returns_the_error_and_removes_the_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("settings.json");
+        fs::create_dir_all(target.join("inside")).unwrap();
+        assert_eq!(replace(&RealDisk, &target, b"{}"), Err(Fault::Write));
+        assert!(!dir.path().join("settings.json.tmp").exists());
+        assert!(target.join("inside").is_dir(), "the destination was left alone");
+    }
+}
+
+/// A folder of chats with its own instructions and knowledge files (`engine::groups` keeps them).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatGroup {
+    pub id: String,
+    pub name: String,
+    pub instructions: String,
+    pub files: Vec<GroupFile>,
+    pub conversation_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupFile {
+    pub id: String,
+    pub name: String,
+    pub size: usize,
+    pub mime: String,
+}

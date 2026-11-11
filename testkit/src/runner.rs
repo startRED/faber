@@ -1,13 +1,13 @@
 //! `faber-test`: reads what changed, checks the lane's claim, picks the suites and runs them. The screen gets the
 //! failures, the measurements and a summary; every line goes to the run's log (R154). Cargo's output is read by the same
-//! functions that read a mission's checks (`engine/src/project/proof/output.rs`, R155).
+//! functions that read a mission's checks (`engine-core/src/project/proof/output.rs`, R155).
 
 use crate::app::{Paths, emergency_cleanup};
 use crate::base;
 use crate::checks;
 use crate::cross;
 use crate::lanes;
-use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, parse_failed, select};
+use crate::plan::{Options, Suite, affected_packages, changed_paths, jobs, packages, parse_args, parse_failed, select};
 use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
@@ -15,6 +15,7 @@ use crate::sweep;
 use crate::testbuild::{build_for_run, build_side_by_side, cargo_command, prebuilt, streamed};
 use crate::timing;
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -58,6 +59,23 @@ pub fn cargo_test_exact_args(jobs: usize, names: &[String]) -> Vec<String> {
     args
 }
 
+/// The same command line for only these packages instead of the whole workspace.
+pub fn scoped_args(mut args: Vec<String>, packages: &BTreeSet<String>) -> Vec<String> {
+    if let Some(at) = args.iter().position(|a| a == "--workspace") {
+        args.splice(at..=at, packages.iter().flat_map(|p| ["-p".to_string(), p.clone()]));
+    }
+    args
+}
+
+/// The packages a run from the changed files needs (`plan::affected_packages`), read from Cargo's own list of the
+/// workspace; None runs the whole workspace.
+fn rust_scope(root: &Path, changed: &[String]) -> Option<BTreeSet<String>> {
+    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    command.current_dir(root).args(["metadata", "--no-deps", "--format-version", "1", "--offline"]);
+    let output = command.output().ok().filter(|o| o.status.success())?;
+    affected_packages(&packages(&String::from_utf8_lossy(&output.stdout)), changed)
+}
+
 /// A Clippy proof with its compiler messages as JSON and `jobs` cores; what follows `--` stays as it is.
 pub fn lint_args(proof: &[&str], jobs: usize) -> Vec<String> {
     let split = proof.iter().position(|a| *a == "--").unwrap_or(proof.len());
@@ -93,10 +111,21 @@ fn cargo(mut command: Command, root: &Path, args: &[String], what: &str) -> std:
     output
 }
 
-fn run_rust(root: &Path, jobs: usize, filter: Option<&str>, exact: &[String], log: &mut Log) -> Vec<Outcome> {
+fn run_rust(
+    root: &Path,
+    jobs: usize,
+    filter: Option<&str>,
+    exact: &[String],
+    scope: Option<&BTreeSet<String>>,
+    log: &mut Log,
+) -> Vec<Outcome> {
     let _rust = timing::span("rust", "cargo test --workspace");
     let started = Instant::now();
     let args = if exact.is_empty() { cargo_test_args(jobs, filter) } else { cargo_test_exact_args(jobs, exact) };
+    let args = match scope {
+        Some(packages) => scoped_args(args, packages),
+        None => args,
+    };
     let output = match cargo(cargo_command(), root, &args, "cargo test --workspace") {
         Ok(output) => output,
         Err(e) => return vec![Outcome::fail(Suite::Rust, "cargo test --workspace", None, &format!("cannot start cargo: {e}"))],
@@ -382,7 +411,9 @@ fn run_suites(args: &[String], log_out: &mut Option<Log>) -> i32 {
     if suites.contains(&Suite::Rust) {
         // A failed build or a dead test program names no test, so the whole suite runs again.
         let exact: &[String] = failed.as_ref().filter(|f| !f.rust_whole).map_or(&[], |f| f.rust.as_slice());
-        let found = run_rust(&paths.root, jobs, filter, exact, log);
+        // A run from the changed files tests only the packages they touch and those built on them.
+        let scope = (!opts.all && opts.suite.is_none() && failed.is_none()).then(|| rust_scope(&paths.root, &changed)).flatten();
+        let found = run_rust(&paths.root, jobs, filter, exact, scope.as_ref(), log);
         log.show(&found);
         outcomes.extend(found);
     }
@@ -488,6 +519,14 @@ mod tests {
         assert!(nothing_matched(&[], Some("zzz")));
         assert!(!nothing_matched(&one, Some("i18n")));
         assert!(!nothing_matched(&[], None), "without a filter an empty run is another kind of problem");
+    }
+
+    #[test]
+    fn a_scoped_run_names_its_packages_instead_of_the_workspace() {
+        let packages = ["faber-engine".to_string(), "faber-host".to_string()].into_iter().collect();
+        let args = scoped_args(cargo_test_args(2, None), &packages);
+        assert!(!args.contains(&"--workspace".to_string()));
+        assert_eq!(&args[..5], ["test", "-p", "faber-engine", "-p", "faber-host"]);
     }
 
     #[test]

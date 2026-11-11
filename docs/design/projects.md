@@ -2,11 +2,11 @@
 
 The published contract of the Projects area: screens, separate copies, stored records and how checks run.
 
-After edits, checks or a plan, both drivers read the conclusion from a hidden JSON block at the end of the agent’s closing message. The engine validates and records the same closing box as a legacy `wrap_up` call, without showing the block while it streams. Successful checks are reused while their inputs and environment are unchanged; done still requires evidence. If the card lists no checks, the agent checks the result directly instead of calling verify. The bounded missing-conclusion request remains as recovery (R509). Token savings need a live comparison (`engine/src/progress.rs`, `new_tools_omit_wrap_up_but_legacy_calls_are_recognized`).
+After edits, checks or a plan, both drivers read the conclusion from a hidden JSON block at the end of the agent’s closing message. The engine validates and records the same closing box as a legacy `wrap_up` call, without showing the block while it streams. Successful checks are reused while their inputs and environment are unchanged; done still requires evidence. If the card lists no checks, the agent checks the result directly instead of calling verify. The bounded missing-conclusion request remains as recovery (R509). Token savings need a live comparison (`engine-core/src/progress.rs`, `new_tools_omit_wrap_up_but_legacy_calls_are_recognized`).
 
 ## Projects
 
-The engine types live in `engine/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
+The engine types live in `engine-core/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
 
 ### Screens
 
@@ -111,7 +111,7 @@ final check, or a previously opened writer on Unix, remains the accepted normal 
 Copies and registered projects share the [portable Git workflow](../product/git-workflow.md): idle, rate-limited
 housekeeping and safe retirement at startup and turn boundaries, with no extra screen, timer or permanent process.
 
-A project conversation works in a separate copy of the repository (R201, `engine/src/project/copy.rs`): a git
+A project conversation works in a separate copy of the repository (R201, `engine-core/src/project/copy.rs`): a git
 worktree in `<data>/copies/<conversation id>` on the branch `faber/<a few words>-<4 characters of the id>`, made with the
 git runner of `project/git.rs` (fixed argv, no shell, hooks and filters off) from the head the person has checked out, before
 the first message reaches the CLI. The agent starts in the same place of the copy as the project folder is in the

@@ -243,6 +243,59 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
     }
 }
 
+/// One workspace package for the Rust suite's scope: its folder relative to the repository (`/` separators) and the
+/// workspace packages it depends on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    pub name: String,
+    pub dir: String,
+    pub deps: Vec<String>,
+}
+
+/// The workspace packages in the output of `cargo metadata --no-deps --format-version 1`, folders relative to its
+/// `workspace_root`.
+pub fn packages(metadata: &str) -> Vec<Package> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(metadata) else { return Vec::new() };
+    let Some(root) = value["workspace_root"].as_str().map(std::path::Path::new) else { return Vec::new() };
+    let list = value["packages"].as_array().cloned().unwrap_or_default();
+    let names: BTreeSet<String> = list.iter().filter_map(|p| p["name"].as_str().map(str::to_string)).collect();
+    list.iter()
+        .filter_map(|p| {
+            let manifest = std::path::Path::new(p["manifest_path"].as_str()?);
+            let dir = manifest.parent()?.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/");
+            let deps = p["dependencies"].as_array().into_iter().flatten().filter_map(|d| d["name"].as_str()).filter(|d| names.contains(*d));
+            Some(Package { name: p["name"].as_str()?.to_string(), dir, deps: deps.map(str::to_string).collect() })
+        })
+        .collect()
+}
+
+/// The packages whose test programs a change needs: the package of each changed Rust file and every package built on it,
+/// so an edit to the engine's top crate leaves the crates below it unbuilt and untested. None means the whole workspace:
+/// nothing changed, or a path is not a Rust file inside a package (a manifest, a fixture or a text a test reads).
+pub fn affected_packages(packages: &[Package], changed: &[String]) -> Option<BTreeSet<String>> {
+    let owner =
+        |path: &str| packages.iter().filter(|p| !p.dir.is_empty() && path.starts_with(&format!("{}/", p.dir))).max_by_key(|p| p.dir.len());
+    let mut affected = BTreeSet::new();
+    for path in changed {
+        let path = path.trim_start_matches("./");
+        affected.insert(owner(path).filter(|_| path.ends_with(".rs"))?.name.clone());
+    }
+    if affected.is_empty() {
+        return None;
+    }
+    loop {
+        let before = affected.len();
+        for p in packages {
+            if p.deps.iter().any(|d| affected.contains(d)) {
+                affected.insert(p.name.clone());
+            }
+        }
+        if affected.len() == before {
+            return Some(affected);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -259,6 +312,42 @@ mod tests {
 
     fn paths(list: &[&str]) -> Vec<String> {
         list.iter().map(|p| p.to_string()).collect()
+    }
+
+    fn package(name: &str, dir: &str, deps: &[&str]) -> Package {
+        Package { name: name.into(), dir: dir.into(), deps: deps.iter().map(|d| d.to_string()).collect() }
+    }
+
+    #[test]
+    fn a_rust_change_tests_its_package_and_every_package_built_on_it() {
+        let list = [
+            package("core", "engine-core", &[]),
+            package("engine", "engine", &["core"]),
+            package("host", "host", &["engine"]),
+            package("update", "update", &[]),
+        ];
+        let set = |names: &[&str]| Some(names.iter().map(|n| n.to_string()).collect::<BTreeSet<_>>());
+        assert_eq!(affected_packages(&list, &paths(&["engine/src/engine/answer.rs"])), set(&["engine", "host"]));
+        assert_eq!(affected_packages(&list, &paths(&["engine-core/src/model.rs"])), set(&["core", "engine", "host"]));
+        assert_eq!(affected_packages(&list, &paths(&["update/src/lib.rs", "host/src/a.rs"])), set(&["host", "update"]));
+        for whole in [&[][..], &["engine/Cargo.toml"], &["engine/src/guide.md"], &["tests/fixtures/x.rs"], &["host/a.rs", "README.md"]] {
+            assert_eq!(affected_packages(&list, &paths(whole)), None, "{whole:?}");
+        }
+    }
+
+    #[test]
+    fn packages_come_from_cargo_metadata_relative_to_the_repository() {
+        let root = std::path::Path::new(if cfg!(windows) { r"C:\repo" } else { "/repo" });
+        let manifest = |dir: &str| root.join(dir).join("Cargo.toml").to_string_lossy().into_owned();
+        let metadata = serde_json::json!({"workspace_root": root, "packages": [
+            {"name": "faber-engine", "manifest_path": manifest("engine"), "dependencies": [{"name": "faber-engine-core"}, {"name": "serde"}]},
+            {"name": "faber-engine-core", "manifest_path": manifest("engine-core"), "dependencies": [{"name": "tokio"}]}
+        ]});
+        assert_eq!(
+            packages(&metadata.to_string()),
+            [package("faber-engine", "engine", &["faber-engine-core"]), package("faber-engine-core", "engine-core", &[])]
+        );
+        assert!(packages("not json").is_empty());
     }
     fn names(set: &BTreeSet<Suite>) -> Vec<&'static str> {
         set.iter().map(|s| s.name()).collect()

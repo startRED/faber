@@ -9,7 +9,8 @@
 
 use super::*;
 use crate::budget::{Reach, Why};
-use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake, WrapUp};
+pub(super) use crate::conversation_state::{asks, progress_line, unanswered_question};
+use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake};
 
 /// What the agent is told at each turn Faber sends. It is for the model, so it is English like every prompt of the engine;
 /// the person sees `wake.keepGoing` in their language instead. It names no project's own tools: the project's
@@ -52,8 +53,6 @@ const START_WAIT: f64 = 20.0;
 const QUESTION_WAIT: f64 = 600.0;
 /// The person counts as away once it has run this long (milliseconds).
 const AWAY_MS: u64 = 30 * 60 * 1000;
-/// The longest the last progress line of a running row is.
-const LINE_CHARS: usize = 160;
 /// A turn shorter than this with no tool did not work, it only waited.
 const QUICK_MS: u64 = 60_000;
 /// Errors that do not mend by waiting: one that comes twice in a row ends it.
@@ -106,11 +105,6 @@ pub fn failure(kg: &KeepGoing, error: &str) -> Next {
         return Next::Halt("reason.keepGoing.failed");
     }
     Next::Wait { secs: backoff(n), why: "retry" }
-}
-
-/// A closing box still waiting for the person's answer.
-pub(super) fn asks(w: &WrapUp) -> bool {
-    !w.done && w.ask.is_some() && !w.actions.is_empty() && w.answered.is_none()
 }
 
 /// The decision after a turn that finished, without the engine: `room` is the door of the AI that answers next (`Err` holds
@@ -205,38 +199,6 @@ fn away_of(kg: &KeepGoing) -> Option<Away> {
         switches: kg.switches,
         answered: kg.answered,
     })
-}
-
-/// Where the agent's work stands, for the running row and the done card: the first sentence of its newest closing box, else
-/// what it said it is doing now (task 017), else the last line it wrote, without the marks of a list, a heading or a quote.
-pub(super) fn progress_line(messages: &[Message]) -> Option<String> {
-    let text = messages.iter().rev().filter(|m| m.role == Role::Assistant).take(3).find_map(|m| {
-        if let Some(box_) = &m.wrap_up {
-            return Some(crate::progress::first_sentence(&box_.recap));
-        }
-        // Only while the reply works: once it ended, "Fixing the login page" would read as still at it.
-        if m.status == Some(Status::Streaming)
-            && let Some(now) = &m.now
-        {
-            return Some(now.clone());
-        }
-        m.text
-            .lines()
-            .rev()
-            .map(|l| l.trim_start_matches(|ch: char| ch.is_whitespace() || "#>*-`".contains(ch)).trim_end())
-            .find(|l| !l.is_empty())
-            .map(str::to_string)
-    })?;
-    Some(match text.char_indices().nth(LINE_CHARS) {
-        Some((at, _)) => format!("{}…", text[..at].trim_end()),
-        None => text.to_string(),
-    })
-}
-
-/// A question the agent asked the person that nobody has answered: its card still waits, or its call never got a result.
-pub(super) fn unanswered_question(m: &Message) -> bool {
-    m.tools.iter().flatten().any(|t| t.parent.is_none() && t.name == "AskUserQuestion" && t.ok != Some(true))
-        || m.permissions.iter().flatten().any(|p| p.tool == "AskUserQuestion")
 }
 
 /// A reply to Keep going's own prompt that ended well with no words, no steps and no closing box.
@@ -982,6 +944,7 @@ fn drop_own_turns(c: &mut Conversation) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversation_state::LINE_CHARS;
 
     #[tokio::test]
     async fn selected_account_waits_only_for_its_own_outside_use() {

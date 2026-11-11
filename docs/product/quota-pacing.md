@@ -79,7 +79,7 @@ Both vendors' counters are read by commands that answer locally, so a reading co
 - During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's
   rate-limit updates); those go through the same recording.
 
-When it is read (`engine/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
+When it is read (`engine-core/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
 visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). Three things may ask for an earlier
 reading: a request that ended, the window gaining focus, and the PC waking up (a loop that was not heard from for 90 seconds
 slept). All three share ONE debounce per vendor: no reading sooner than 5 minutes after the last one for Claude Code (whose

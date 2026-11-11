@@ -1,7 +1,7 @@
 # Require a fresh read-only review before a sized task counts as done
 
 Area: Agent's plan and closing box
-Files: engine/src/helper.rs, engine/src/engine/helpers.rs, engine/src/progress.rs, engine/src/model.rs, engine/src/route.rs, engine/tests/project_review.rs
+Files: engine-core/src/helper.rs, engine/src/engine/helpers.rs, engine-core/src/progress.rs, engine-core/src/model.rs, engine-core/src/route.rs, engine/tests/project_review.rs
 Depends: size-raised-by-permissions, receipt-from-checked-hashes
 Size: about 400 changed lines
 

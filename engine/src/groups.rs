@@ -1,26 +1,7 @@
 //! Chat folders own plain instructions and bounded, local copies of their knowledge files.
 use super::*;
-use serde::{Deserialize, Serialize};
 
 const MAX_BYTES: usize = 5_000_000;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatGroup {
-    pub id: String,
-    pub name: String,
-    pub instructions: String,
-    pub files: Vec<GroupFile>,
-    pub conversation_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GroupFile {
-    pub id: String,
-    pub name: String,
-    pub size: usize,
-    pub mime: String,
-}
 
 fn name(raw: &str) -> Result<String, String> {
     let clean: String = raw.chars().filter(|c| !c.is_control()).collect();

@@ -1,7 +1,7 @@
 # Delete any stored item in Memory with one click, and its record with it
 
 Area: Project memory
-Files: engine/src/project/memory.rs, engine/src/store.rs, engine/src/engine.rs, ui/ProjectMemory.tsx, ui/locales/, docs/design/
+Files: engine-core/src/project/memory.rs, engine-core/src/store.rs, engine/src/engine.rs, ui/ProjectMemory.tsx, ui/locales/, docs/design/
 Depends: taste-lesson-records
 Size: about 250 changed lines
 

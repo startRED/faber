@@ -13,7 +13,7 @@ before changing what a person sees, sets or calls follow [docs/product-rules.md]
   in through each CLI's own flow, and the CLI binaries run unmodified.
 - Never bundle third-party tools, skills, models or MCP servers: the curated catalog downloads them from their source.
 - No vendor names (Claude, Anthropic, Codex, OpenAI, ChatGPT, Gemini, Google) in product, feature or package names.
-- Child processes never go through a shell (`engine/src/cli.rs` resolves npm's real executable); code that builds a shell
+- Child processes never go through a shell (`engine-core/src/cli.rs` resolves npm's real executable); code that builds a shell
   line (`host/src/terminal.rs`) checks every piece first. Unit tests never spawn processes, touch real git or call a real CLI.
 - Every text on screen lives in `ui/locales/`, each language written by hand, never machine-translated; English (`en.ts`)
   is the source and a native speaker reviews each new language. The engine returns keys (`error.*`, `reason.*`).
@@ -37,9 +37,10 @@ before changing what a person sees, sets or calls follow [docs/product-rules.md]
   base comes first ([red base](docs/dev/workflow.md#red-base)). A `feat`, `fix` or `perf` commit that touches what ships
   becomes a patch release once green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 
-Stack: `engine/` (Rust: drives the CLIs, JSON files, no windows); `host/` (the one command table every front end calls, R459)
-with `sidecar/`, `channel/`, `cli/`; `electron/` (the shell; `src-tauri/` ships until the release switch); `winproc/` (unsafe
-process calls); `ui/` (SolidJS + TypeScript); `tests/` (screen checks); `testkit/` (`cargo t`). [Memory and processes](docs/product/architecture.md#architecture).
+Stack: `engine/` (Rust: the `Engine`) on `engine-core/` (every layer below it: drives the CLIs, JSON files, no windows);
+`host/` (the one command table every front end calls, R459) with `sidecar/`, `channel/`, `cli/`; `electron/` (the shell;
+`src-tauri/` ships until the release switch); `winproc/` (unsafe process calls); `ui/` (SolidJS + TypeScript); `tests/`
+(screen checks); `testkit/` (`cargo t`). [Memory and processes](docs/product/architecture.md#architecture).
 
 ## Proof commands
 

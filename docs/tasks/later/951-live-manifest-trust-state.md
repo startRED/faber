@@ -1,7 +1,7 @@
 # Keep the last good live manifest and the accepted revision, still unconnected to installs
 
 Area: none
-Files: engine/src/manifest.rs, engine/src/lib.rs, engine/src/store.rs, engine/tests/manifest.rs, docs/history/superpowers/specs/2026-10-24-cli-tools-live-manifest.md
+Files: engine/src/manifest.rs, engine/src/lib.rs, engine-core/src/store.rs, engine/tests/manifest.rs, docs/history/superpowers/specs/2026-10-24-cli-tools-live-manifest.md
 Depends: live-manifest-schema
 Size: about 400 changed lines
 
@@ -10,7 +10,7 @@ must trust only public keys shipped with it, verify the signature before parsing
 replace the last good copy; a stale fetch cannot overwrite a newer one; a cached copy is reverified on load; the accepted
 revision is persisted separately so an older signed document cannot roll it back; missing or damaged trust state after
 initialization blocks new managed installs and never resets the revision to zero. Nothing of this exists in the engine:
-the only code is the Node script `scripts/live-manifest.mjs`, and `engine/src/install.rs` knows no manifest.
+the only code is the Node script `scripts/live-manifest.mjs`, and `engine-core/src/install.rs` knows no manifest.
 
 Build:
 

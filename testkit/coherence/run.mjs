@@ -28,7 +28,7 @@ const out = path.resolve(repo, flags.out ?? `target/coherence/${new Date().toISO
 const { traps, without } = JSON.parse(fs.readFileSync(path.join(here, 'traps.json'), 'utf8'));
 const chosen = flags.only ? traps.filter((t) => flags.only.split(',').includes(t.id)) : traps;
 
-// API-equivalent US$ per million tokens (uncached input, cached input, output), from `engine/src/usage.rs`.
+// API-equivalent US$ per million tokens (uncached input, cached input, output), from `engine-core/src/usage.rs`.
 const PRICES = { 'gpt-6.1-sol': [2.0, 0.1, 10.0], 'gpt-6-luna': [0.1, 0.01, 0.5] };
 
 const PLAN = {

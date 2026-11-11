@@ -1,7 +1,7 @@
 # The agent splits big work by size and Faber carries every piece to its end
 
 Area: Agent's plan and closing box, Conversation started by the agent
-Files: engine/src/persona.rs, engine/src/engine/siblings.rs, engine/src/engine/plan.rs, engine/src/results.rs, ui/Thread.tsx, docs/product-map.md
+Files: engine-core/src/persona.rs, engine/src/engine/siblings.rs, engine/src/engine/plan.rs, engine-core/src/results.rs, ui/Thread.tsx, docs/product-map.md
 Depends: the rework's honest ending (#547), visible acts (#545), the Faber CLI (#544, #548), results (#550), plan steps that open their conversation (#467)
 Size: several tasks of about 300 to 600 changed lines; this file is the brief that splits into them
 

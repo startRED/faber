@@ -7,8 +7,8 @@ Size: about 380 changed lines
 
 Why: a Gemini conversation needs its stream turned into what Faber shows: text as it arrives, steps (commands, file changes,
 reads, searches), usage, the end and errors. Both existing drivers do this as a pure step before any process work:
-`engine/src/claude.rs` reads Claude Code's stream lines and `engine/src/codex.rs` the app-server's messages into the events
-that `engine/src/events.rs` (`Session`) delivers to the engine, and each is tested by replaying recorded files
+`engine-core/src/claude.rs` reads Claude Code's stream lines and `engine-core/src/codex.rs` the app-server's messages into the events
+that `engine-core/src/events.rs` (`Session`) delivers to the engine, and each is tested by replaying recorded files
 (`tests/fixtures/claude/`, `tests/fixtures/codex/`). The Antigravity CLI's own format is recorded by task `agy-recorded-runs`
 (`tests/fixtures/agy/`, `docs/dev/antigravity-cli.md`): lines `{"event":"init"|"step_update"|"result", ...}`.
 

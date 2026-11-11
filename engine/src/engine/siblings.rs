@@ -4,6 +4,7 @@
 //! copy, made away from the engine's lock like the person's own first message, so it never runs in the project folder. A
 //! read answers with where that conversation stands and its latest answer.
 use super::*;
+pub(super) use crate::conversation_state::state_of;
 use crate::progress;
 use crate::sibling::{self, Ai, Request, State};
 
@@ -28,25 +29,6 @@ pub(super) const GOAL_CAP: &str = "the day's limit for fixes of the project's go
 
 /// The conversations a list names at most.
 const MAX_LISTED: usize = 12;
-
-/// Where a conversation stands; `busy` is whether its CLI runs a turn now.
-pub(super) fn state_of(busy: bool, c: &Conversation) -> State {
-    if !busy && c.waiting_on.is_some() {
-        return State::Waiting;
-    }
-    let state = ended::run_state(c, busy);
-    if matches!(state, State::Working | State::Stuck)
-        && !busy
-        && !c.compacting
-        && c.messages.last().is_some_and(|m| {
-            m.role == Role::Assistant && (m.status == Some(Status::Stopped) || (c.stopped && m.status != Some(Status::Streaming)))
-        })
-    {
-        if c.messages.last().is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped }
-    } else {
-        state
-    }
-}
 
 /// Where a plan step's conversation stands (task 040), in a subagent row's words.
 pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
@@ -954,11 +936,11 @@ mod tests {
         engine.with_saves(false, |core| {
             started(core, 1, false);
             let c = core.convs.values_mut().find(|c| c.started_by.is_some()).unwrap();
-            assert_eq!(crate::engine::child_state(c), "working");
+            assert_eq!(crate::conversation_state::child_state(c), "working");
             c.messages.last_mut().unwrap().status = Some(Status::Error);
-            assert_eq!(crate::engine::child_state(c), "failed");
+            assert_eq!(crate::conversation_state::child_state(c), "failed");
             c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "Waiting for review".into(), since: 0 });
-            assert_eq!(crate::engine::child_state(c), "waiting");
+            assert_eq!(crate::conversation_state::child_state(c), "waiting");
         });
         engine.shutdown();
     }

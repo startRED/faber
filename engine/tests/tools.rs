@@ -342,7 +342,7 @@ async fn every_catalog_command_handles_empty_app_data_without_a_preexisting_stor
 #[test]
 fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     use faber_engine::tools::{Tier, catalog};
-    let source = include_str!("../src/tools.json");
+    let source = include_str!("../../engine-core/src/tools.json");
     let file: serde_json::Value = serde_json::from_str(source).unwrap();
     let entries: Vec<_> = file["skills"].as_array().unwrap().iter().chain(file["servers"].as_array().unwrap()).collect();
     let items = catalog();

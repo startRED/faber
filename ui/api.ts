@@ -1,6 +1,6 @@
 import { invoke, listen } from './shell.ts';
 
-// The shapes the engine sends (engine/src/model.rs).
+// The shapes the engine sends (engine-core/src/model.rs).
 export interface HookPreview { file: string; event: string; command: string; length: number; unreadable: boolean }
 
 export type Vendor = 'claude' | 'codex' | 'gemini';
@@ -11,7 +11,7 @@ export type Vendor = 'claude' | 'codex' | 'gemini';
  */
 /** A conversation's tabs in Faber's browser: where each one is, which one is in front and which one the agent drives. */
 export interface SiteTab { id: string; url: string; title?: string }
-/** A conversation's tabs in Faber's browser (`engine/src/browser/tabs.rs`); `closed` waits for "Reopen closed tab". */
+/** A conversation's tabs in Faber's browser (`engine-core/src/browser/tabs.rs`); `closed` waits for "Reopen closed tab". */
 export interface SiteTabs {
   tabs: SiteTab[];
   front?: string;
@@ -27,7 +27,7 @@ export interface UpdateStatus {
   mb?: number;
 }
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
-/** The level a model starts at; the engine keeps the same default (`Effort` in engine/src/router.rs). */
+/** The level a model starts at; the engine keeps the same default (`Effort` in engine-core/src/router.rs). */
 export const DEFAULT_EFFORT: Effort = 'medium';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
@@ -226,7 +226,7 @@ export interface Message {
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
   /** Code changed in this reply and nothing checked it: the offer to ask the same model to check its work, before any rung. */
   selfCheck?: boolean;
-  /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine/src/look.rs`). */
+  /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine-core/src/look.rs`). */
   look?: { reason: string; places?: string[] };
   /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
   follow?: Follow;
@@ -504,7 +504,7 @@ export interface ProofView {
   setup?: string[];
 }
 
-/** One standing goal as the screen shows it (engine/src/project/goals.rs). */
+/** One standing goal as the screen shows it (engine-core/src/project/goals.rs). */
 export interface GoalRow {
   id: string;
   words: string;
@@ -625,7 +625,7 @@ export interface ModelInfo {
   description?: string;
   isDefault: boolean;
 }
-/** One conversation that is answering now or waits for the user: a row of the running list (engine/src/model.rs). */
+/** One conversation that is answering now or waits for the user: a row of the running list (engine-core/src/model.rs). */
 export interface RunningItem {
   conversationId: string;
   /** The id of the turn's reply message. With the request id it names a question: request ids alone repeat. */
@@ -1177,7 +1177,7 @@ export const api = {
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
-  /** A conversation's tabs in Faber's browser, kept in its file (`engine/src/browser/tabs.rs`); null when it never had a page. */
+  /** A conversation's tabs in Faber's browser, kept in its file (`engine-core/src/browser/tabs.rs`); null when it never had a page. */
   siteTabs: (id: string) => invoke<SiteTabs | null>('site_tabs', { id }),
   siteTab: (id: string, step: SiteTabStep, tab?: string) => invoke<{ tabs: SiteTabs; tab: string | null } | null>('site_tab', { id, step, tab: tab ?? null }),
   siteGo: (id: string, url: string) => invoke<boolean>('site_go', { id, url }),

@@ -1,7 +1,7 @@
 # Gemini answers in Chat too, and Auto can pick it there
 
 Area: Auto
-Files: engine/src/route.rs, engine/src/engine/auto.rs, engine/src/engine.rs, ui/Composer.tsx, ui/locales/, engine/tests/, tests/ui/, docs/product/models.md, docs/product-map.md
+Files: engine-core/src/route.rs, engine/src/engine/auto.rs, engine/src/engine.rs, ui/Composer.tsx, ui/locales/, engine/tests/, tests/ui/, docs/product/models.md, docs/product-map.md
 Depends: gemini-profiles-in-routing, gemini-marks-on-screen
 Size: about 300 changed lines
 

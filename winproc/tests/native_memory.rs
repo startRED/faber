@@ -1,5 +1,5 @@
 //! Native macOS and Linux integration proof; unit tests keep using fake process readings. The measured process is this
-//! test binary started again in a process group of its own, the way the engine starts a CLI (`engine/src/proc.rs`): the
+//! test binary started again in a process group of its own, the way the engine starts a CLI (`engine-core/src/proc.rs`): the
 //! test's own group may hold processes it cannot read (macOS refuses them).
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 

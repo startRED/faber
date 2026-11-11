@@ -1,7 +1,7 @@
 # A person can publish their project's progress board to their own GitHub
 
 Area: Settings screen
-Files: engine/src/project/, engine/src/engine/plan.rs, ui/ProjectSettings.tsx, ui/locales/, tests/ui/, docs/product-map.md, docs/design/
+Files: engine-core/src/project/, engine/src/engine/plan.rs, ui/ProjectSettings.tsx, ui/locales/, tests/ui/, docs/product-map.md, docs/design/
 Depends: project-progress-line, follow-ups-as-task-files
 Size: about 350 changed lines
 

@@ -1145,6 +1145,31 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "faber-engine-core",
+ "faber-winproc",
+ "flate2",
+ "junction",
+ "pulldown-cmark",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sysinfo",
+ "tar",
+ "tempfile",
+ "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "uuid",
+ "win32job",
+ "zip 9.0.5",
+]
+
+[[package]]
+name = "faber-engine-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
  "crc32fast",
  "faber-winproc",
  "flate2",

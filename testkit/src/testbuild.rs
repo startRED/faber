@@ -90,7 +90,7 @@ const VITE_INPUTS: [&str; 14] = [
     "tests/fixtures/conversation-changes.json",
     "tests/fixtures/background-live.json",
     "src-tauri/src/themes.json",
-    "engine/src/tools.json",
+    "engine-core/src/tools.json",
     "src-tauri/src/pane/act.js",
     "vite.config.ts",
     "scripts/woff2-only.mjs",

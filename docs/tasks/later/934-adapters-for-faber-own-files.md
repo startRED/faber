@@ -1,7 +1,7 @@
 # Let Faber add to its own decision table, taste cards and task folder
 
 Area: Project memory
-Files: engine/src/project/memory.rs, engine/src/store.rs, engine/src/engine.rs, engine/tests/project_security.rs
+Files: engine-core/src/project/memory.rs, engine-core/src/store.rs, engine/src/engine.rs, engine/tests/project_security.rs
 Depends: adoption-in-the-card
 Size: about 400 changed lines
 
@@ -14,7 +14,7 @@ second copy.
 
 Build:
 
-- A small adapter trait in `engine/src/project/memory.rs` with the three operations above, each writing through a
+- A small adapter trait in `engine-core/src/project/memory.rs` with the three operations above, each writing through a
   handle to the file or to the parent folder, checking before any byte that the final path of the opened handle lies
   inside the project (`real_path`, junctions and `..` resolved), refusing links.
 - The R-number row uses the `R-next` placeholder rule of Faber's `docs/next/<branch>.json` instead of taking a number

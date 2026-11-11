@@ -26,7 +26,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   request alone and says what kind of task it is, how hard, and whether its scope is tight or open. It never sees the candidates.
 - A fixed table then picks the model, tuned for quality first: each model's profile has general intelligence and
   agentic coding scores, seconds per task, and cost per task priced by the quota left on its subscription right now, so
-  a nearly spent subscription hands its work to the other one (done, `engine/src/route.rs`).
+  a nearly spent subscription hands its work to the other one (done, `engine-core/src/route.rs`).
 - Measured on 10/10/2026 with the real router on 22 requests, run twice: 81 of 88 picks right, half the routes under
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
@@ -58,7 +58,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   Easy/medium chat allows slower premium rows within its 300 s pool.
   Ties favor lower price, then shorter time. Quota factors can apply this rule across vendors.
   The existing stronger retry also carries xhigh through the choice contract; the manual picker still offers three buttons.
-- **Long reads are priced by the token** (`engine/src/route.rs`, `read_cost`). Per-task prices assume a typical read; a
+- **Long reads are priced by the token** (`engine-core/src/route.rs`, `read_cost`). Per-task prices assume a typical read; a
   message with a long document or many pictures, or a long conversation moved to another model, reads far more, so each
   model's cost adds what that read costs at its own price per token (its long-prompt tiers included), with the context
   the conversation's model already holds read from its cache. The bar does not move: a long read only changes which of the
@@ -86,13 +86,13 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
-  check (done, `engine/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
+  check (done, `engine-core/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
 - Code that changed with nothing checking it first offers the makers' first step: the same model checks its own work
   ("Check the work", R565; Faber's verify counts as a check). An answer whose last check failed, or one still unchecked
   right after that offer, offers one step up. Below high, raise the same model one effort first. From high onward, compare that row (if present) with the next stronger model
   of the same vendor at its lowest effort that improves at least one score without lowering either. Offer the cheaper,
   then faster on a tie; only account-allowed rows qualify, ordered by measured scores. Sonnet high → Opus medium;
-  Opus high → Fable medium; Opus xhigh → Fable high. It runs in a new branch (`engine/src/nudge.rs`).
+  Opus high → Fable medium; Opus xhigh → Fable high. It runs in a new branch (`engine-core/src/nudge.rs`).
 - **Each later Auto message has its own effort inside the conversation's model.** A finished verdict from typing picks the
   cheapest sufficient effort using the same bars as a first message, or the held model's strongest row. Open medium work
   on a smaller model already held (Sonnet, Terra) runs at high at most, never extra high for the scope alone: past high the
@@ -105,7 +105,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   their screen row appears only on an effort change or a stronger-model offer; the first answer keeps its row. Technical
   details retain kind, difficulty, scope and check. A bar beyond the held model offers the existing stronger retry in a new
   branch once per conversation, taken or ignored; later requests still use the held model's strongest row.
-- **The table learns from what the person retries and keeps** (done, `engine/src/auto_learned.rs`; the owner said yes, with a
+- **The table learns from what the person retries and keeps** (done, `engine-core/src/auto_learned.rs`; the owner said yes, with a
   notice). Only two things count, and only for a conversation's first answer, the one Auto itself picked (later answers keep
   its model): a retry of a finished Auto answer (the same request asked again) says the pick was not good enough, and
   counts twice when it takes the step up above; the next message of that conversation says the answer was kept. An edited request is a new request, a stopped answer may only have been slow, and a failed check is Faber's own
@@ -176,6 +176,6 @@ phase.
 
 A project agent can hand reading, building or review to a helper. Reading uses a low-cost model that clears the reading bar, with quota factors in its price; building uses the project work bar and quota factors, preferring a model no stronger than the lead; a well-defined medium piece runs on the smaller model and an open one gets the hard bar, as in Auto (not in economy). Review uses the other connected AI when possible. Economy lowers the build bar one level and retains the lower review bar. Helpers run on the connected AI when only one is available. The reply's token totals include the helpers' cached input and cache writes as well as their input and output.
 
-Rules 1 to 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched; rule 7: a project agent gives an estimate in its plan, Faber counts the conversation's spend per turn from it, and past half again the estimate it warns once and switches to economy mode until the job ends, `engine/src/engine/plan.rs`, `engine/src/progress.rs`. The spend is a running total on the conversation, added to where each cost is written (a turn, a helper, a quick side question, and the same of the conversations its agent started), so it is read in one step; a cost with no known price counts 0 and a rewind takes no spend back, so the warning can come late; only an estimate sent after a costly first stretch of a turn counts that whole turn. The estimate ends only when `wrap_up` reports done). Every session start passes its mode, model and effort (the CLI probes that start no
+Rules 1 to 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine-core/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched; rule 7: a project agent gives an estimate in its plan, Faber counts the conversation's spend per turn from it, and past half again the estimate it warns once and switches to economy mode until the job ends, `engine/src/engine/plan.rs`, `engine-core/src/progress.rs`. The spend is a running total on the conversation, added to where each cost is written (a turn, a helper, a quick side question, and the same of the conversations its agent started), so it is read in one step; a cost with no known price counts 0 and a rewind takes no spend back, so the warning can come late; only an estimate sent after a costly first stretch of a turn counts that whole turn. The estimate ends only when `wrap_up` reports done). Every session start passes its mode, model and effort (the CLI probes that start no
 session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up
 `capabilities`, and every result becomes a `reason.*` key.

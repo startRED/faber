@@ -1,12 +1,12 @@
 # Auto and the team can pick Gemini models for project work
 
 Area: Auto
-Files: engine/src/route.rs, engine/src/router.rs, engine/src/nudge.rs, engine/src/sibling.rs, engine/src/engine/siblings.rs, engine/src/engine/auto.rs, engine/tests/, docs/product/models.md, docs/product-map.md
+Files: engine-core/src/route.rs, engine-core/src/router.rs, engine-core/src/nudge.rs, engine-core/src/sibling.rs, engine/src/engine/siblings.rs, engine/src/engine/auto.rs, engine/tests/, docs/product/models.md, docs/product-map.md
 Depends: agy-turn-session, agy-quota-reading, team-start-options
 Size: about 300 changed lines
 
 Why: with a Gemini driver and quota in place, the last step is choosing it. Auto picks from a fixed table of profiles (`PROFILES`
-in `engine/src/route.rs`: 12 rows of model, effort, reasoning score, agent score and cost, measured against Artificial Analysis
+in `engine-core/src/route.rs`: 12 rows of model, effort, reasoning score, agent score and cost, measured against Artificial Analysis
 and re-verified 2026-10-11), `candidates()` keeps those the account can run, `choose_paced` weighs them by quota pace and a
 conversation then stays in its own subscription (`engine/src/engine/auto.rs`). The team `start` of task `team-start-options` takes
 `ai: "same" | "auto" | "claude" | "codex"`. `agy models` lists Gemini 4 Argon and Gemini 3.8 Flash at low, medium and high, plus

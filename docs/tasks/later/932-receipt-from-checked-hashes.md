@@ -1,14 +1,14 @@
 # Write the receipt of a task from recorded results tied to file hashes
 
 Area: Agent's plan and closing box
-Files: engine/src/verify/journal.rs, engine/src/verify.rs, engine/src/engine/plan.rs, engine/src/model.rs, engine/tests/verify.rs
+Files: engine-core/src/verify/journal.rs, engine-core/src/verify.rs, engine/src/engine/plan.rs, engine-core/src/model.rs, engine/tests/verify.rs
 Depends: contract-in-the-plan
 Size: about 350 changed lines
 
 Why: slice 4 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`. The engine writes a task's receipt from
 recorded results, each tied to the hashes of the files it saw; a later change voids the result. A receipt is what the
 closing box may call "done" (guardrail 4 of `docs/product/areas.md`). Today the results journal
-(`engine/src/verify/journal.rs`: project, command, input key, ok, time) orders runs and spots flaky checks, but nothing
+(`engine-core/src/verify/journal.rs`: project, command, input key, ok, time) orders runs and spots flaky checks, but nothing
 ties a result to the files a task changed, and the agent's own words decide "done".
 
 Build:

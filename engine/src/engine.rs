@@ -48,21 +48,16 @@ mod ended;
 mod evict;
 pub use aside::Aside;
 
-/// Where a stored conversation stands, as the list shows it (`ended::run_state`, with no turn running).
-pub(crate) fn run_state(c: &Conversation) -> crate::sibling::State {
-    ended::run_state(c, false)
-}
-
+pub use crate::facts;
 pub use browse::TabStep;
 pub use copies::GitRunner;
 pub use session::NewSession;
-pub mod facts;
 mod goals;
 #[path = "groups.rs"]
 mod groups;
 mod helpers;
 mod review;
-pub use groups::{ChatGroup, GroupFile};
+pub use crate::store::{ChatGroup, GroupFile};
 mod install_gate;
 mod keep_going;
 mod kits;
@@ -70,7 +65,7 @@ mod look;
 mod mcp_servers;
 mod memory_search;
 mod native_fork;
-pub use native_fork::{NativeFork, NativePoint};
+pub use crate::rewind::{NativeFork, NativePoint};
 mod move_chat;
 mod overload;
 mod parked;
@@ -97,8 +92,8 @@ mod unbounded;
 mod usage_view;
 mod verifying;
 mod versions;
+pub use crate::usage::{VendorUsage, WindowUsage};
 pub use pr_watch::{PrReader, gh_reader};
-pub use usage_view::{VendorUsage, WindowUsage};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -236,23 +231,6 @@ pub struct WarmRequest {
     #[serde(default)]
     pub project_id: Option<String>,
     pub choice: Choice,
-}
-
-/// The durable projection used by linked conversation rows.
-pub(crate) fn child_state(c: &Conversation) -> String {
-    use crate::sibling::State;
-    match siblings::state_of(false, c) {
-        State::Working | State::Stuck => "working",
-        State::Waiting => "waiting",
-        State::Concluded => "done",
-        State::Failed => "failed",
-        State::Stopped | State::Interrupted | State::Unconcluded => "stopped",
-    }
-    .into()
-}
-
-pub(crate) fn child_line(c: &Conversation) -> Option<String> {
-    keep_going::progress_line(&c.messages)
 }
 
 #[derive(Debug, Clone, Serialize)]

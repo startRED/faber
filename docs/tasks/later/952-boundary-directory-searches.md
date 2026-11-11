@@ -1,7 +1,7 @@
 # Classify directory searches without guessing their contents
 
 Area: Agent's plan and closing box
-Files: engine/src/permissions.rs, engine/src/engine/plan.rs, engine/tests/plan.rs, docs/dev/plan-boundary-qualification.md
+Files: engine-core/src/permissions.rs, engine/src/engine/plan.rs, engine/tests/plan.rs, docs/dev/plan-boundary-qualification.md
 Depends: none
 Size: about 400 changed lines
 

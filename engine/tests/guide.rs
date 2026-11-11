@@ -1,4 +1,4 @@
-//! Faber's own guide (`engine/src/guide.md`, R18) answers "how do I..." about Faber, so it may not drift from the screen. Every
+//! Faber's own guide (`engine-core/src/guide.md`, R18) answers "how do I..." about Faber, so it may not drift from the screen. Every
 //! screen word it names is checked against the five locales, every Settings row and shortcut of the product map is in it, and
 //! it holds nothing private. A new setting or Settings section fails here until the guide says it.
 
@@ -130,7 +130,9 @@ fn every_settings_row_and_section_of_the_product_map_is_in_the_guide() {
         // A key a person changes in Settings says so where it lives; the rest is internal or the first run's.
         if cells[3].contains("Settings >") && key != "tutorialDone" {
             let label = SETTINGS.iter().find(|(k, _)| *k == key).unwrap_or_else(|| {
-                panic!("the map's setting `{key}` lives in Settings: say it in engine/src/guide.md and add its label key to SETTINGS here")
+                panic!(
+                    "the map's setting `{key}` lives in Settings: say it in engine-core/src/guide.md and add its label key to SETTINGS here"
+                )
             });
             named(label.1);
             seen.push(key);

@@ -2,44 +2,6 @@
 use super::*;
 use crate::budget::{Snap, State, elapsed};
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WindowUsage {
-    pub name: String,
-    pub used: f64,
-    /// The share of the window gone, weighted by when the person usually works: what pacing decisions use.
-    pub elapsed: f64,
-    /// The share of the window's time gone, plain clock time (R88's daily line): the mark on the screen's bar, so it agrees
-    /// with "resets in" beside it.
-    pub expected: f64,
-    pub resets_at: f64,
-    /// When the vendor's counter was read, Unix seconds. `used` is that reading as it was, never adjusted.
-    pub read_at: f64,
-    /// The share Faber's own recent work adds that the reading does not hold yet; only where a measured conversion exists.
-    pub uncounted: Option<f64>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VendorUsage {
-    pub vendor: Vendor,
-    pub plan: Option<String>,
-    pub state: &'static str,
-    pub learning: bool,
-    pub relearning: bool,
-    pub outside_share: Option<f64>,
-    pub foreign_use: bool,
-    pub overage_on: bool,
-    pub billed_per_use: bool,
-    pub billing_unknown: bool,
-    pub ask_for_plan: bool,
-    pub paid_possible: bool,
-    pub own_spend_usd: f64,
-    pub spend_days: Vec<(i64, f64, u32)>,
-    pub unmetered: u32,
-    /// Faber's own recent work may not be in the readings yet (or is running now): they may still rise.
-    pub counting: bool,
-    pub windows: Vec<WindowUsage>,
-}
 impl Core {
     /// Whether a turn of this vendor is running now: the counter is about to rise by what it is spending.
     pub(super) fn turn_running(&self, vendor: Vendor) -> bool {

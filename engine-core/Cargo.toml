@@ -1,0 +1,62 @@
+[package]
+name = "faber-engine-core"
+description = "The layers of Faber's engine below the Engine: model, storage, CLI drivers, routing, tools, projects, checks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+faber-winproc = { path = "../winproc" }
+# The existing workspace dependency supplies a safe native disk-space reading at build admission.
+# The free memory a Cargo build of the verifier is admitted against.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
+base64 = "0.23"
+# Local export timestamps, including the offset at each message's date; already in the workspace's dependency graph.
+chrono = "0.4"
+# Parse and serialize each exported message independently, preserving Markdown while closing its scopes.
+pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark-to-cmark = "23"
+# Already in the workspace: HTML's attribute rules also decode numeric entities without a semicolon.
+html5ever = "0.40"
+flate2 = "1"
+crc32fast = "1"
+# TLS through ring, which the updater already compiles, instead of reqwest's aws-lc-rs and its C build (`src/tls.rs`).
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.11"
+tar = "0.4"
+toml = "1.1"
+toml_parser = "1.1"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+# Job objects (a CLI and everything it starts are ended together); the safe wrapper keeps this crate free of unsafe code.
+win32job = "2"
+
+[target.'cfg(unix)'.dependencies]
+# Safe directory-relative file operations; already used by the workspace's dependencies.
+rustix = { version = "1", features = ["fs", "process"] }
+
+[dev-dependencies]
+# Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+# The paused clock of the tests that wait out the router (2.5 s) and an answer's acknowledgement (5 s).
+tokio = { version = "1", features = ["test-util"] }
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable, and symlinks require privileges on the maintainer's PC.
+junction = "2"
+
+[features]
+# Test fixtures the engine's own tests share (`workspace::TestRoot`); never in a shipped build.
+test-support = []

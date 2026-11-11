@@ -41,7 +41,7 @@ or after 150 seconds, and every conversation is then stopped. It prints, per req
 the conversations started, the plan's steps and a verdict, then per vendor how many big requests started two or more
 conversations or planned three or more steps, and how many small ones started none (that one must stay 6 of 6), with
 tokens and dollars at API price. Run it before and after a change to the agent's instructions or tools
-(`engine/src/persona.rs`, `engine/src/sibling.rs`); `cargo test -p faber-engine --example leader_eval` checks its counting.
+(`engine-core/src/persona.rs`, `engine-core/src/sibling.rs`); `cargo test -p faber-engine --example leader_eval` checks its counting.
 
 ## What stays the owner's
 

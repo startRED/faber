@@ -129,7 +129,7 @@ check('worklog: an edit step counts the lines it added and removed', () => {
 
 check('worklog: an edit step reads what the engine kept, with no input left', () => {
   useLanguage('en');
-  // The engine keeps the counts and only the first 40 lines (engine/src/change.rs), so a step may carry no input at all.
+  // The engine keeps the counts and only the first 40 lines (engine-core/src/change.rs), so a step may carry no input at all.
   const kept = { added: 50, removed: 3, lines: Array.from({ length: 40 }, (_, i) => ({ added: i >= 3, text: `line ${i}` })) };
   equal(changeOf({ id: 'k', name: 'Edit', input: {}, change: kept }), kept, 'the engine reading wins');
   const root = document.createElement('div');

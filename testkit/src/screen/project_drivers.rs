@@ -55,7 +55,7 @@ fn warm_memory(ctx: &mut Ctx) -> Result {
         .filter(|r| r.args.iter().any(|a| a == "-p"))
         .find_map(|r| rows.iter().find(|p| p.pid == r.pid))
         .ok_or("no warm fake CLI")?;
-    // The CLI is created suspended inside its job (engine/src/proc.rs), so no second copy of the app stands between them.
+    // The CLI is created suspended inside its job (engine-core/src/proc.rs), so no second copy of the app stands between them.
     let parent = rows.iter().find(|p| p.pid == cli.parent).ok_or("no CLI parent")?;
     ensure(!rows.iter().any(|p| p.pid == parent.parent && p.name.eq_ignore_ascii_case(&parent.name)), || {
         format!("the CLI runs under a second copy of {}", parent.name)

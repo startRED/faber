@@ -1,7 +1,7 @@
 # Each worker gets a packet instead of a history and reports back in a short summary
 
 Area: Conversation started by the agent
-Files: engine/src/engine/siblings.rs, engine/src/engine/helpers.rs, engine/src/helper.rs, engine/src/persona.rs, engine/src/engine/kits.rs, engine/tests/, docs/product-map.md
+Files: engine/src/engine/siblings.rs, engine/src/engine/helpers.rs, engine-core/src/helper.rs, engine-core/src/persona.rs, engine/src/engine/kits.rs, engine/tests/, docs/product-map.md
 Depends: plan-steps-files-and-waits
 Size: about 350 changed lines
 

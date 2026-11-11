@@ -1,7 +1,7 @@
 # Load a project's own decisions and task files into the start card
 
 Area: Project memory
-Files: engine/src/store.rs, engine/src/project/memory.rs, engine/src/project/rules.rs, engine/src/engine.rs, ui/ProjectMemory.tsx, ui/locales/
+Files: engine-core/src/store.rs, engine-core/src/project/memory.rs, engine-core/src/project/rules.rs, engine/src/engine.rs, ui/ProjectMemory.tsx, ui/locales/
 Depends: start-card-in-sessions
 Size: about 400 changed lines
 

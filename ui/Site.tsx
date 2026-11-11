@@ -25,7 +25,7 @@ export interface SiteStep {
   looks?: SiteLook[];
 }
 
-/** The page at one screen size, in a check at several (`engine/src/browser.rs`, `looks_text`). */
+/** The page at one screen size, in a check at several (`engine-core/src/browser.rs`, `looks_text`). */
 export interface SiteLook {
   /** The picture's call id: the call's own with the size's place after it. */
   picture: string;
@@ -157,7 +157,7 @@ type Screen = 'pc' | 'mac' | 'tablet' | 'phone';
 /** The screen sizes the pane can draw its pages at (the agent's own list) and the one in use; none is the pane's own. */
 type Sizes = { now: string | null; sizes: { name: string; screen: Screen; width: number; height: number }[] };
 
-/** What on a page only the person does (`engine/src/browser.rs`, `Turn`), and the words the card says it with. */
+/** What on a page only the person does (`engine-core/src/browser.rs`, `Turn`), and the words the card says it with. */
 const TURNS = { 'a login': 'site.turn.login', 'a captcha': 'site.turn.captcha', 'a payment': 'site.turn.payment' } as const;
 export type SiteTurn = (typeof TURNS)[keyof typeof TURNS];
 
@@ -683,7 +683,7 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
     }
   };
 
-  // The conversation's tabs (`engine/src/browser/tabs.rs`), read again whenever the engine changes them.
+  // The conversation's tabs (`engine-core/src/browser/tabs.rs`), read again whenever the engine changes them.
   const conversation = () => props.site.conversationId;
   const [tabs, setTabs] = createSignal<SiteTabs | null>(null);
   const readTabs = () => void api.siteTabs(conversation()).then(setTabs, () => {});
