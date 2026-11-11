@@ -19,6 +19,7 @@ export const fr: Messages = {
   'team.job.advise': "Conseil",
   'team.working': { one: "{n} au travail", other: "{n} au travail" },
   'team.done': { one: "{n} a terminé", other: "{n} ont terminé" },
+  'team.waiting': { one: "{n} en attente", other: "{n} en attente" },
   'team.questions': { one: "{n} a posé une question", other: "{n} ont posé une question" },
   'team.noAnswer': "Personne n’a répondu ; l’aide a décidé seul.",
   'team.earlier': { one: "{n} échange précédent", other: "{n} échanges précédents" },

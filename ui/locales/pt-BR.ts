@@ -19,6 +19,7 @@ export const ptBR: Messages = {
   'team.job.advise': "Conselho",
   'team.working': { one: "{n} trabalhando", other: "{n} trabalhando" },
   'team.done': { one: "{n} terminou", other: "{n} terminaram" },
+  'team.waiting': { one: "{n} esperando", other: "{n} esperando" },
   'team.questions': { one: "{n} fez uma pergunta", other: "{n} fizeram uma pergunta" },
   'team.noAnswer': "Ninguém respondeu; o ajudante decidiu por conta própria.",
   'team.earlier': { one: "{n} conversa anterior", other: "{n} conversas anteriores" },

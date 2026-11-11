@@ -19,6 +19,7 @@ export const en = {
   'team.job.advise': "Advice",
   'team.working': { one: "{n} working", other: "{n} working" },
   'team.done': { one: "{n} done", other: "{n} done" },
+  'team.waiting': { one: "{n} waiting", other: "{n} waiting" },
   'team.questions': { one: "{n} asked a question", other: "{n} asked a question" },
   'team.noAnswer': "Nobody answered; the helper decided itself.",
   'team.earlier': { one: "{n} earlier exchange", other: "{n} earlier exchanges" },

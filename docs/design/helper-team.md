@@ -15,8 +15,12 @@ model, effort and state as other members. The helper view also names the advice 
 The conversations the same reply started (the conversation tool's `start`, or the command line's marker) show in its
 first team block, under the helpers: title, AI, model, state and current line, each opening its conversation. They stay
 in view when the helpers end and the block folds, because a conversation goes on after them, and the card under each
-start step leaves so the conversation shows once. A reply with no helper keeps the card under its step. No new state:
-the cards read the conversation list the screen already holds (`tests/ui/team.check.ts`, "conversations the reply started").
+start step leaves so the conversation shows once. A reply with no helper that started conversations gets the same block
+after the steps that hold its first start: the Team head with one segment per conversation and the count of those
+working, waiting and done, the lead's line ("Handed out 2 pieces") and the cards; before 2026-11-11 such a reply showed
+no team at all, which is what a lead told to delegate through conversations produces. It does not fold. No new state,
+clock or request: the block reads the conversation list the screen already holds (`tests/ui/team.check.ts`,
+"conversations the reply started" and "only started conversations").
 
 Completed-reply coverage in `engine/tests/engine.rs` exercises a Codex lead with each of read and build, checks the
 first helper uses Claude, and verifies both makers and the successful helper report remain after the reply ends.

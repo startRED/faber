@@ -726,3 +726,34 @@ check('team block: conversations the reply started sit in the block, stay under 
     equal(cards().length, 0, 'another conversation cannot claim this child');
   } finally { dispose(); root.remove(); }
 });
+
+check('team block: a reply that only started conversations draws its team, counts it and keeps one card each', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const start = (id: string, title: string): ToolUse => ({ id: `start-${id}`, name: 'Conversation', input: { action: 'start', title }, ok: true, output: `Started.\n{"childId":"${id}"}` });
+  const message: Message = { id: 'lead-reply', role: 'assistant', status: 'done', vendor: 'claude', model: 'claude-sonnet-5-5', at: 1000, text: 'Two parts are out.',
+    tools: [{ id: 'read', name: 'Read', input: { file_path: 'a.ts' }, ok: true, output: '' }, start('a', 'Part A'), start('b', 'Part B')] };
+  const child = (id: string, title: string, childState: Summary['childState']): Summary => ({ id, title, area: 'project', updatedAt: 0, startedBy: 'lead', childState });
+  const [children, setChildren] = createSignal<Summary[]>([child('a', 'Part A', 'working'), child('b', 'Part B', 'waiting')]);
+  let opened = '';
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'lead', options: [], onBranch: () => {}, get conversations() { return children(); }, onOpenChild: (c) => { opened = c.id; } }), root);
+  try {
+    const cards = () => [...root.querySelectorAll<HTMLButtonElement>('.child-conversation')];
+    ok(root.querySelector('.team'), 'no helper ran, and the reply still shows its team');
+    equal(root.querySelectorAll('.team').length, 1);
+    equal(root.querySelector('.team-head > span')!.textContent, t('team.label'));
+    equal(root.querySelector('.team-count')!.textContent, `${t('team.working', { n: 1 })} · ${t('team.waiting', { n: 1 })}`);
+    equal(root.querySelector('.team-lead-sentence')!.textContent, t('team.handed', { n: 2 }));
+    equal(root.querySelectorAll('.team-segments i').length, 2);
+    equal(cards().length, 2, 'one card each: in the block, not under the start steps too');
+    ok(cards().every((card) => card.closest('.team > .team-started')), 'the cards sit in the team block');
+    ok(root.querySelector('.steps, .step'), 'the steps of the reply stay');
+    setChildren([child('a', 'Part A', 'done'), child('b', 'Part B', 'done')]);
+    equal(root.querySelector('.team-count')!.textContent, t('team.done', { n: 2 }));
+    cards()[1]!.click();
+    equal(opened, 'b');
+    setChildren([{ ...child('a', 'Part A', 'done'), startedBy: 'another-lead' }]);
+    equal(root.querySelector('.team'), null, 'a conversation another lead started makes no team here');
+  } finally { dispose(); root.remove(); }
+});

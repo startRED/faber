@@ -19,6 +19,7 @@ export const es: Messages = {
   'team.job.advise': "Consejo",
   'team.working': { one: "{n} trabajando", other: "{n} trabajando" },
   'team.done': { one: "{n} terminó", other: "{n} terminaron" },
+  'team.waiting': { one: "{n} esperando", other: "{n} esperando" },
   'team.questions': { one: "{n} hizo una pregunta", other: "{n} hicieron una pregunta" },
   'team.noAnswer': "Nadie respondió; el ayudante decidió por su cuenta.",
   'team.earlier': { one: "{n} intercambio anterior", other: "{n} intercambios anteriores" },

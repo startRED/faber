@@ -1,5 +1,5 @@
 import { FaberActs } from './FaberAct.tsx';
-import { createEffect, createMemo, createResource, createSignal, For, Index, Match, on, onCleanup, Show, Switch, type Accessor } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, createUniqueId, For, Index, Match, on, onCleanup, Show, Switch, type Accessor } from 'solid-js';
 import {
   api,
   errorText,
@@ -252,15 +252,47 @@ function startedChild(tool: ToolUse): string | undefined {
   } catch { return undefined; }
 }
 
+/** Where a conversation this one started stands, in the words of its card. */
+function childStateOf(child: Summary, running?: RunningItem) {
+  return child.archived ? 'archived' : child.childState ?? (running?.state === 'needsYou' ? 'waiting' : running ? 'working' : 'done');
+}
+
 /** A conversation this one started: its title, who runs it and where it stands. A click opens it. */
 function ChildCard(props: { child: Summary; running?: RunningItem[]; onOpen: (c: Summary) => void }) {
   const child = () => props.child;
   const running = () => props.running?.find((r) => r.conversationId === child().id);
-  const state = () => child().archived ? 'archived' : child().childState ?? (running()?.state === 'needsYou' ? 'waiting' : running() ? 'working' : 'done');
+  const state = () => childStateOf(child(), running());
   return <button type="button" class="btn child-conversation" data-state={state()} onClick={() => props.onOpen(child())}>
     <b>{child().title}</b>
     <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), t(`child.${state()}`), child().waitingOn?.note, running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
   </button>;
+}
+
+/** The team of a reply that handed its work only to conversations. A lead told to delegate starts conversations, not
+ * helpers, and its reply used to show no team at all, only a card under each start step (the owner's project, 2026-11-11).
+ * The same block as a helper run: a head that counts where each member stands, the lead's line, the members' cards. It
+ * keeps no clock and polls nothing: the counts come from the list the sidebar already holds. */
+function Crew(props: { ids: string[]; conversations?: Summary[]; running?: RunningItem[]; lead?: Message['vendor']; leadModel?: string; onOpen: (c: Summary) => void }) {
+  const heading = createUniqueId();
+  const members = createMemo(() => props.ids.flatMap((id) => { const child = props.conversations?.find((c) => c.id === id); return child ? [child] : []; }));
+  const stateOf = (child: Summary) => childStateOf(child, props.running?.find((r) => r.conversationId === child.id));
+  const count = (...states: string[]) => members().filter((child) => states.includes(stateOf(child))).length;
+  const segment = (child: Summary) => ({ working: 'running', waiting: 'waiting', failed: 'failed', stopped: 'stopped', done: 'done', archived: 'done' })[stateOf(child)];
+  return <section class="team" role="group" aria-labelledby={heading} data-crew>
+    <div class="team-head" id={heading}>
+      <span>{t('team.label')}</span>
+      <span class="team-segments" aria-hidden="true"><For each={props.ids}>{(id) => <Show when={members().find((c) => c.id === id)}>{(child) => <i data-state={segment(child())} />}</Show>}</For></span>
+      <span class="team-count">{[count('working') && t('team.working', { n: count('working') }), count('waiting') && t('team.waiting', { n: count('waiting') }), count('done', 'archived') && t('team.done', { n: count('done', 'archived') })].filter(Boolean).join(' · ')}</span>
+    </div>
+    <div class="team-lead">
+      <Show when={props.lead === 'claude' || props.lead === 'codex' ? props.lead : undefined} fallback={<ToolGlyph kind="helper" small />}>{(vendor) => <ActorMark actor={vendor()} />}</Show>
+      <span>{t('agent.team.lead')}</span><span class="team-dot" aria-hidden="true">·</span><Show when={props.leadModel}><span class="team-model" title={prettyModel(props.leadModel!)}>{prettyModel(props.leadModel!)}</span><span class="team-dot" aria-hidden="true">·</span></Show>
+      <span class="team-lead-sentence">{t('team.handed', { n: members().length })}</span>
+    </div>
+    <div class="team-started" role="group" aria-label={t('team.conversations')}>
+      <For each={props.ids}>{(id) => <Show when={members().find((c) => c.id === id)}>{(child) => <ChildCard child={child()} running={props.running} onOpen={props.onOpen} />}</Show>}</For>
+    </div>
+  </section>;
 }
 
 /** One step the agent took, as a thin row: what it did ("Read", "Running" while it works), what it acted on, the lines it
@@ -511,10 +543,20 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const parts = createMemo(() => (before = keepParts(before, timeline(m(), text()))));
   // The conversations this reply started belong to its team: a lead that hands two parts to conversations and one to a
   // helper has a team of three, not of one (the owner's project, 2026-11-11). They show in the reply's first team block,
-  // which then replaces the card under each start step.
-  const startedIds = createMemo(() => parts().some((part) => part.kind === 'team') && props.onOpenChild
-    ? (m().tools ?? []).flatMap((tool) => { const id = startedChild(tool); return id && props.conversations?.some((c) => c.id === id && c.startedBy === props.conversationId) ? [id] : []; })
-    : [], [] as string[], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
+  // which then replaces the card under each start step. A reply with no helper gets a block of its own (`Crew`) after the
+  // steps that hold its first start.
+  const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
+  const starts = createMemo(() => tools().flatMap((tool) => { const id = startedChild(tool); return id ? [{ id, tool: tool.id }] : []; }), [], { equals: (a, b) => sameIds(a.map((s) => s.id + s.tool), b.map((s) => s.id + s.tool)) });
+  const hasTeam = createMemo(() => parts().some((part) => part.kind === 'team'));
+  const mine = (id: string) => !!props.conversations?.some((c) => c.id === id && c.startedBy === props.conversationId);
+  const crewAt = createMemo(() => {
+    if (hasTeam() || !props.onOpenChild) return -1;
+    const first = starts().find((start) => mine(start.id))?.tool;
+    return first ? parts().findIndex((part) => part.kind === 'steps' && part.items.some((item) => item.kind === 'tool' && item.tool.id === first)) : -1;
+  });
+  const startedIds = createMemo(() => (hasTeam() || crewAt() >= 0) && props.onOpenChild
+    ? [...new Set(starts().map((start) => start.id))].filter(mine)
+    : [], [] as string[], { equals: sameIds });
   const agentOf = (id: string) => agents().find((step) => step.call.id === id);
   const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
   const kitLine = () => {
@@ -716,6 +758,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               </Match>
               <Match when={part().kind === 'steps'}>
                 <Steps conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={startedIds().length ? undefined : props.onOpenChild} items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
+                <Show when={crewAt() === i}>
+                  <Crew ids={startedIds()} conversations={props.conversations} running={props.running} lead={m().vendor} leadModel={m().model} onOpen={props.onOpenChild!} />
+                </Show>
               </Match>
               <Match when={part().kind === 'team'}>
                 <Team members={team()} streaming={working()} lead={m().vendor} leadModel={m().model} conversationId={props.conversationId} messageId={m().id}>
