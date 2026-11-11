@@ -23,6 +23,16 @@ Picking another model resets effort to Medium; picking the same model preserves 
 Auto can choose low through xhigh from the measured rows of its held model; manual choices stay low, medium and high.
 The existing answer and helper rows name xhigh in every language; the stronger retry carries it through the choice
 contract and saves it like the other efforts. No control or picker layout changes.
+Auto's task guide names supplied-text chores, everyday documents/slides/spreadsheets and scoped code, and multi-part
+or costly-error work. Fable starts at medium; Luna high is available. A sufficient dominating row can replace the
+cheapest within a 15% factored price premium and its time cap. Easy/medium chat favors rows within 300 s;
+a premium row may be slower within that pool. At neutral factors, medium Chat uses Sonnet medium, Terra medium
+when available, otherwise Sol low. Only spare quota or learning lifts frontier
+to summit (60/50, Fable high). Below high, a stronger answer raises effort first; from high it compares one more
+effort with the next stronger model's lowest sufficient effort, cheaper then faster. The [task guide and sources](../product/models.md#task-guide-and-maker-starting-points-2026-11-11)
+record both makers' recommendations, read 2026-11-11: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+[cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
+[OpenAI models](https://developers.openai.com/codex/models) and [reasoning](https://developers.openai.com/api/docs/guides/reasoning).
 The menu uses named groups and pressed buttons, native light dismissal, Escape with focus return, and arrow/Home/End
 navigation alongside ordinary Tab and Enter/Space. Folded models stay outside keyboard navigation. Effort stays inside
 the menu; the closed chip states both values.

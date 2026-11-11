@@ -346,8 +346,8 @@ fn the_lift_is_one_rung_of_the_ladder_and_says_it_is_learned() {
     let base = usual("chat", "easy", &all);
     assert_eq!(base.profile.model, "claude-haiku-5-5");
     let up = lifted(base.clone(), &all, &neutral);
-    // Easy's intelligence floor is 24; medium's is 38: the cheapest model that clears it.
-    assert_eq!((up.profile.model, up.profile.effort), ("gpt-6.1-sol", "medium"));
+    // Easy chat's intelligence floor is 24; medium's is 31: the cheapest model that clears it.
+    assert_eq!((up.profile.model, up.profile.effort), ("gpt-6.1-sol", "low"));
     assert_eq!(up.pace.as_ref().map(|p| (p.kind.as_str(), p.vendor)), Some(("learned", Vendor::Codex)));
     let with_terra = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".into(), "gpt-6.1-terra".into()]);
     let hard = lifted(usual("code", "medium", &with_terra), &with_terra, &neutral);

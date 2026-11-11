@@ -13,7 +13,7 @@ use serde::Deserialize;
 /// One way to run a model. Artificial Analysis per-task runs, republished by slopalytics.com on 2026-11-10.
 /// Intelligence Index (`iq`) and the coding sub-index (`agent`) are rounded to whole numbers; `secs` is seconds per
 /// task and `cost` US$ per task, all from the same run and scale. No `max`: its extra quota and time are outside Auto's
-/// ladder. Fable xhigh has negligible gain; Luna high/xhigh lose to Terra low. Luna medium is an account's last resort.
+/// ladder. Fable starts at medium; Luna high is the maker's starting effort when only Luna is available.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
     pub vendor: Vendor,
@@ -33,7 +33,6 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 pub const PROFILES: [Profile; 24] = [
     p(Vendor::Claude, "claude-fable-5-2", "high", 62, 53, 1059.0, 9.078),
     p(Vendor::Claude, "claude-fable-5-2", "medium", 56, 47, 497.0, 3.803),
-    p(Vendor::Claude, "claude-fable-5-2", "low", 54, 45, 393.0, 3.097),
     p(Vendor::Claude, "claude-opus-5-5", "xhigh", 57, 50, 976.0, 6.047),
     p(Vendor::Claude, "claude-opus-5-5", "high", 52, 44, 573.0, 3.465),
     p(Vendor::Claude, "claude-opus-5-5", "medium", 48, 41, 427.0, 2.451),
@@ -54,6 +53,7 @@ pub const PROFILES: [Profile; 24] = [
     p(Vendor::Codex, "gpt-6.1-terra", "high", 42, 39, 241.0, 0.259),
     p(Vendor::Codex, "gpt-6.1-terra", "medium", 38, 34, 156.0, 0.169),
     p(Vendor::Codex, "gpt-6.1-terra", "low", 29, 21, 65.0, 0.071),
+    p(Vendor::Codex, "gpt-6-luna", "high", 21, 13, 336.0, 0.073),
     p(Vendor::Codex, "gpt-6-luna", "medium", 19, 9, 202.0, 0.042),
 ];
 
@@ -66,12 +66,13 @@ pub const SCOPES: [&str; 2] = ["tight", "open"];
 pub const CHECKS: [&str; 3] = ["machine", "glance", "blind"];
 
 pub const INSTRUCTIONS: &str = "You classify a user's request for a router. Never answer the request itself.
-kind: chat (casual talk, greetings, short facts), writing (texts, emails, translation, stories, plans), code (programs, \
+kind: chat (casual talk, greetings, short facts), writing (texts, emails, documents, slides, spreadsheets, translation, stories, plans), code (programs, \
 debugging, code review, changes to software), math (calculations, equations, proofs), research (analysis, comparisons, \
 explanations, advice), image (making or editing pictures), other.
-difficulty: easy (a quick answer any competent person gets right), medium (needs care, several steps or some \
-expertise), hard (expert work where a subtle mistake is costly: proofs, multi-file changes, concurrency, architecture, \
-legal, medical or financial analysis).
+difficulty: judge what the work is, not how long the message is. When two levels fit, choose the harder one.
+easy: a greeting or short fact; sorting, tagging, extracting or summarising text already given; finding a file or reading a log; a one-line rewrite or rename; simple arithmetic.
+medium: an everyday document, email, slide or spreadsheet; a translation; well-scoped code (a named bug, one function or file, a change from a clear spec, a small script); a routine investigation, review or explanation.
+hard: engineering across several files, or a bug with no known cause; a feature that touches several parts; reviewing a large change; reading many screenshots or operating a computer; a financial model or a document built from many sources; a proof; anything where a subtle mistake is costly (concurrency, security, legal, medical, money).
 scope: tight (named bug, file or function, spec, one deliverable); open (explore and decide, many files, services or sources, migration, major refactor, architecture, deep research, long unattended run).
 check: machine (a test, exit code, schema or number the work can recount proves it), glance (the person sees at once \
 whether it is right), blind (the person cannot easily tell a wrong answer from a right one: facts, advice, analysis, \
@@ -192,12 +193,14 @@ pub(crate) fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
         ("medium", "code") => (24, 32),
         // A wrong number reads as right: math gets the hard bar a level early.
         ("medium", "math") => (46, 0),
+        ("medium", "chat") => (31, 0),
         ("medium", _) => (38, 0),
         ("hard", "code") => (46, 39),
         ("frontier", "code") => (56, 46),
         ("frontier", _) => (56, 0),
         ("expert", "code") => (50, 42),
         ("expert", _) => (50, 0),
+        ("summit", _) => (60, 50),
         _ => (46, 0),
     };
     (
@@ -208,6 +211,7 @@ pub(crate) fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
                 "medium" => 32,
                 "hard" => 39,
                 "expert" => 42,
+                "summit" => 50,
                 _ => 46,
             })
         } else {
@@ -216,7 +220,7 @@ pub(crate) fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
     )
 }
 
-const LADDER: [&str; 5] = ["easy", "medium", "hard", "expert", "frontier"];
+const LADDER: [&str; 6] = ["easy", "medium", "hard", "expert", "frontier", "summit"];
 
 /// The bar of the nearest higher level whose bar is different; a task already at the top keeps its own.
 fn next_bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
@@ -225,14 +229,21 @@ fn next_bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
     LADDER[at + 1..].iter().map(|l| bar(kind, l, project)).find(|b| *b != own).unwrap_or(own)
 }
 
-/// Seconds per task a step up may take: 1,200 for hard-or-higher code and non-easy math, otherwise 600.
+/// Seconds per task a step up may take: deep quality work gets room for the strongest measured effort.
 fn cap_secs(kind: &str, level: &str) -> f32 {
-    if (kind == "code" && matches!(level, "hard" | "expert" | "frontier")) || (kind == "math" && level != "easy") { 1200.0 } else { 600.0 }
+    if (kind == "code" && matches!(level, "hard" | "expert" | "frontier" | "summit"))
+        || (kind == "math" && level != "easy")
+        || (matters(kind, level) && matches!(level, "expert" | "frontier" | "summit"))
+    {
+        1200.0
+    } else {
+        600.0
+    }
 }
 
 /// Spare quota only buys quality where quality matters.
 fn matters(kind: &str, level: &str) -> bool {
-    matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard" | "expert" | "frontier")
+    matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard" | "expert" | "frontier" | "summit")
 }
 
 /// An unsure verdict gets the next level's bar, and so does a `blind` one where quality matters: self-checking pays most
@@ -307,7 +318,10 @@ fn clears(p: &Profile, bar: (u8, u8)) -> bool {
     p.iq >= bar.0 && p.agent >= bar.1
 }
 
-/// The cheapest candidate that clears the bar under `factor`, with its price and whether it was priced as a step up.
+const QUALITY_PRICE_PREMIUM: f64 = 1.15;
+const CHAT_SECS: f32 = 300.0;
+
+/// The cheapest sufficient row, or a dominating row within 15% of its factored price and the task's time cap.
 fn cheapest(
     kind: &str,
     level: &str,
@@ -318,17 +332,28 @@ fn cheapest(
 ) -> Option<(Profile, f64, bool)> {
     let (own, next, cap) = (bar(kind, level, project), next_bar(kind, level, project), cap_secs(kind, level));
     let matters = matters(kind, level);
-    candidates
-        .iter()
-        .filter(|p| clears(p, own))
-        .map(|p| {
-            let f = factor(p);
-            let f_m = if matters { f.m } else { f.m.max(1.0) };
-            let step = steps && matters && next != own && clears(p, next) && p.secs <= cap && f.step_ok;
-            let price = (p.cost as f64 + f.read) * f.w * f_m * if step { f_m.min(1.0) } else { 1.0 };
-            (*p, price, step)
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.secs.total_cmp(&b.0.secs)))
+    let fast_chat =
+        kind == "chat" && matches!(level, "easy" | "medium") && candidates.iter().any(|p| clears(p, own) && p.secs <= CHAT_SECS);
+    let priced = candidates.iter().filter(|p| clears(p, own) && (!fast_chat || p.secs <= CHAT_SECS)).map(|p| {
+        let f = factor(p);
+        let f_m = if matters { f.m } else { f.m.max(1.0) };
+        let step = steps && matters && next != own && clears(p, next) && p.secs <= cap && f.step_ok;
+        let price = (p.cost as f64 + f.read) * f.w * f_m * if step { f_m.min(1.0) } else { 1.0 };
+        (*p, price, step)
+    });
+    let cheapest = priced.clone().min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.secs.total_cmp(&b.0.secs)))?;
+    Some(
+        priced
+            .filter(|(p, price, _)| {
+                p.iq >= cheapest.0.iq
+                    && p.agent >= cheapest.0.agent
+                    && (p.iq > cheapest.0.iq || p.agent > cheapest.0.agent)
+                    && p.secs <= cap
+                    && *price <= cheapest.1 * QUALITY_PRICE_PREMIUM
+            })
+            .min_by(|a, b| (b.0.iq, b.0.agent).cmp(&(a.0.iq, a.0.agent)).then(a.1.total_cmp(&b.1)).then(a.0.secs.total_cmp(&b.0.secs)))
+            .unwrap_or(cheapest),
+    )
 }
 
 fn strongest(candidates: &[Profile]) -> Option<Profile> {
@@ -461,4 +486,127 @@ pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) ->
         .collect();
     let Some((profile, price, _)) = cheapest(base.kind, up, &room, factor, false, base.project) else { return base };
     Routed { profile, price, pace: Some(PaceNote { kind: "learned".into(), vendor: profile.vendor }), ..base }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fifteen_percent_rule_changes_claude_expert_and_codex_medium_chat_in_the_210_pinned_picks() {
+        let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+        let mut changed = 0;
+        let mut unchanged = 0;
+        for vendors in [&[Vendor::Claude][..], &[Vendor::Codex][..], &[Vendor::Claude, Vendor::Codex][..]] {
+            let pool = candidates(vendors, &models);
+            for kind in KINDS {
+                for level in &LADDER[..5] {
+                    for project in [false, true] {
+                        let floor = bar(kind, level, project);
+                        let fast = kind == "chat"
+                            && matches!(*level, "easy" | "medium")
+                            && pool.iter().any(|p| clears(p, floor) && p.secs <= CHAT_SECS);
+                        let plain = pool
+                            .iter()
+                            .filter(|p| clears(p, floor) && (!fast || p.secs <= CHAT_SECS))
+                            .min_by(|a, b| a.cost.total_cmp(&b.cost).then(a.secs.total_cmp(&b.secs)))
+                            .copied()
+                            .or_else(|| strongest(&pool))
+                            .unwrap();
+                        let picked = choose_scoped(kind, level, "glance", "tight", 0.9, project, &pool).unwrap().profile;
+                        if picked != plain {
+                            changed += 1;
+                            if vendors == &[Vendor::Claude][..] {
+                                assert_eq!(*level, "expert");
+                                assert_eq!((plain.model, plain.effort), ("claude-opus-5-5", "high"));
+                                assert_eq!((picked.model, picked.effort), ("claude-fable-5-2", "medium"));
+                            } else {
+                                assert_eq!((kind, *level, project), ("chat", "medium", false));
+                                assert_eq!((plain.model, plain.effort), ("gpt-6.1-sol", "low"));
+                                assert_eq!((picked.model, picked.effort), ("gpt-6.1-terra", "medium"));
+                            }
+                        } else {
+                            unchanged += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!((changed, unchanged), (16, 194));
+    }
+
+    #[test]
+    fn the_quality_premium_uses_quota_weights_and_read_cost_across_vendors() {
+        let pool = candidates(&[Vendor::Codex, Vendor::Claude], &["gpt-6.1-terra".into(), "gpt-6.1-sol".into()]);
+        for sol in [Factor { m: 0.5, step_ok: false, ..Factor::NEUTRAL }, Factor { w: 0.5, step_ok: false, ..Factor::NEUTRAL }] {
+            let factor = |p: &Profile| if p.model == "gpt-6.1-sol" { sol } else { Factor::NEUTRAL };
+            let (picked, price, _) = cheapest("code", "medium", &pool, &factor, false, true).unwrap();
+            assert_eq!((picked.model, picked.effort), ("gpt-6.1-sol", "medium"));
+            assert!(price > 0.169 && price <= 0.169 * QUALITY_PRICE_PREMIUM);
+        }
+        // Opus medium is about 9% above Sol medium after quota, then the premium crosses vendors.
+        let factor = |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { 0.16 } else { 1.0 }, step_ok: false, ..Factor::NEUTRAL };
+        let (picked, price, _) = cheapest("code", "hard", &pool, &factor, false, false).unwrap();
+        assert_eq!((picked.model, picked.effort), ("claude-opus-5-5", "medium"));
+        assert!(price > 0.359 && price <= 0.359 * QUALITY_PRICE_PREMIUM);
+        let read = |p: &Profile| Factor { read: if p.model == "gpt-6.1-terra" { 0.17 } else { 0.0 }, ..Factor::NEUTRAL };
+        assert_eq!(cheapest("code", "medium", &pool, &read, false, true).unwrap().0.model, "gpt-6.1-sol");
+    }
+
+    #[test]
+    fn the_quality_premium_requires_both_scores_the_price_bound_and_the_time_cap_then_breaks_ties() {
+        let base = PROFILES.iter().find(|p| p.model == "gpt-6.1-sol" && p.effort == "medium").copied().unwrap();
+        let better = Profile { iq: 48, agent: 41, cost: base.cost * 1.1, ..base };
+        let pick = |other| cheapest("code", "hard", &[base, other], &|_| Factor::NEUTRAL, false, false).unwrap().0;
+        assert_eq!(pick(better), better);
+        for worse in [
+            Profile { agent: base.agent - 1, ..better },
+            Profile { iq: base.iq - 1, ..better },
+            Profile { cost: base.cost * 1.151, ..better },
+            Profile { secs: 1201.0, ..better },
+        ] {
+            assert_eq!(pick(worse), base);
+        }
+        let faster = Profile { secs: better.secs - 1.0, ..better };
+        let cheaper = Profile { cost: better.cost - 0.001, ..better };
+        let strongest = Profile { iq: 50, agent: 43, cost: base.cost * 1.14, ..base };
+        assert_eq!(cheapest("code", "hard", &[base, better, strongest], &|_| Factor::NEUTRAL, false, false).unwrap().0, strongest);
+        assert_eq!(cheapest("code", "hard", &[base, better, faster, cheaper], &|_| Factor::NEUTRAL, false, false).unwrap().0, cheaper);
+        assert_eq!(cheapest("code", "hard", &[base, better, faster], &|_| Factor::NEUTRAL, false, false).unwrap().0, faster);
+        assert_eq!(cheapest("code", "hard", &[base, faster, better], &|_| Factor::NEUTRAL, false, false).unwrap().0, faster);
+    }
+
+    #[test]
+    fn chat_prefers_rows_within_300_seconds_only_when_one_clears_its_own_bar() {
+        let claude = candidates(&[Vendor::Claude], &[]);
+        assert_eq!(choose("chat", "medium", "glance", 0.9, &claude).unwrap().profile.effort, "medium");
+        let slow: Vec<_> = claude.iter().filter(|p| p.secs > CHAT_SECS).copied().collect();
+        assert_eq!(choose("chat", "medium", "glance", 0.9, &slow).unwrap().profile.model, "claude-haiku-5-5");
+        for kind in KINDS.into_iter().filter(|k| *k != "chat") {
+            let row = choose(kind, "medium", "glance", 0.9, &claude).unwrap().profile;
+            assert_eq!((row.model, row.effort), if kind == "math" { ("claude-opus-5-5", "medium") } else { ("claude-sonnet-5-5", "high") });
+        }
+    }
+
+    #[test]
+    fn verdicts_stop_at_frontier_and_only_the_existing_step_paths_reach_summit() {
+        for kind in KINDS {
+            assert_eq!(next_bar(kind, "frontier", false), (60, 50));
+            assert_eq!(next_bar(kind, "summit", true), (60, 50));
+            for difficulty in LEVELS {
+                for scope in SCOPES {
+                    for check in CHECKS {
+                        for confidence in [0.2, 0.9] {
+                            assert_ne!(level_of(kind, difficulty, check, scope, confidence), "summit");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cap_secs("research", "hard"), 600.0);
+        for level in ["expert", "frontier"] {
+            assert_eq!(cap_secs("research", level), 1200.0);
+            assert_eq!(cap_secs("writing", level), 600.0);
+        }
+    }
 }

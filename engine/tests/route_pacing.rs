@@ -28,7 +28,7 @@ fn pick(kind: &'static str, level: &'static str, from: &[Profile], f: &dyn Fn(&P
 }
 
 const SONNET_HIGH: (&str, &str) = ("claude-sonnet-5-5", "high");
-const FABLE_LOW: (&str, &str) = ("claude-fable-5-2", "low");
+const FABLE_MEDIUM: (&str, &str) = ("claude-fable-5-2", "medium");
 const OPUS_MEDIUM: (&str, &str) = ("claude-opus-5-5", "medium");
 const SOL_MEDIUM: (&str, &str) = ("gpt-6.1-sol", "medium");
 const SOL_HIGH: (&str, &str) = ("gpt-6.1-sol", "high");
@@ -46,15 +46,15 @@ fn medium_code_steps_up_on_spare_claude_until_codex_is_cheaper() {
 #[test]
 fn hard_code_steps_to_the_expert_bar() {
     let all = all();
-    assert_eq!(pick("code", "hard", &all, &by_vendor(0.14, 1.0)), FABLE_LOW);
-    assert_eq!(pick("code", "hard", &all, &by_vendor(0.30, 1.0)), FABLE_LOW);
+    assert_eq!(pick("code", "hard", &all, &by_vendor(0.14, 1.0)), FABLE_MEDIUM);
+    assert_eq!(pick("code", "hard", &all, &by_vendor(0.30, 1.0)), FABLE_MEDIUM);
     assert_eq!(pick("code", "hard", &all, &by_vendor(0.44, 1.0)), SOL_MEDIUM);
     assert_eq!(pick("code", "hard", &all, &by_vendor(0.14, 0.14)), SOL_HIGH, "394 s is within the 1,200 s cap of hard code");
 }
 
 #[test]
 fn medium_math_steps_to_the_expert_bar() {
-    assert_eq!(pick("math", "medium", &all(), &by_vendor(0.18, 1.0)), FABLE_LOW);
+    assert_eq!(pick("math", "medium", &all(), &by_vendor(0.18, 1.0)), FABLE_MEDIUM);
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn a_step_over_the_time_cap_is_not_taken() {
     // Sol high (394 s) now fits the 600 s cap; Opus xhigh (976 s) still cannot be a research step.
     assert_eq!(pick("research", "hard", &codex, &by_vendor(1.0, 0.14)), SOL_HIGH);
     let claude = candidates(&[Vendor::Claude], &[]);
-    assert_eq!(pick("research", "hard", &claude, &by_vendor(0.14, 1.0)), FABLE_LOW);
+    assert_eq!(pick("research", "hard", &claude, &by_vendor(0.14, 1.0)), FABLE_MEDIUM);
     let capped = two(OPUS_MEDIUM, ("claude-opus-5-5", "xhigh"));
     assert_eq!(pick("research", "hard", &capped, &by_vendor(0.14, 1.0)), OPUS_MEDIUM);
     assert_eq!(pick("code", "hard", &capped, &by_vendor(0.14, 1.0)), ("claude-opus-5-5", "xhigh"), "976 s fits the code cap of 1,200 s");
@@ -124,6 +124,26 @@ fn learned_weights_change_the_pick_but_never_show_a_reason() {
     let with_terra = candidates(&BOTH, &["gpt-6.1-terra".into()]);
     assert_eq!(pick("chat", "easy", &with_terra, &by_vendor(1.0, 1.0)), ("gpt-6.1-terra", "low"));
     assert_eq!(paced("chat", "easy", &with_terra, &weighted), ("claude-haiku-5-5", "medium", None));
+}
+
+#[test]
+fn chat_buys_slower_quality_within_fifteen_percent_and_300_seconds() {
+    let terra = candidates(&[Vendor::Codex], &["gpt-6.1-terra".into()]);
+    for (level, weight, too_costly, baseline) in [("easy", 0.3, 0.32, "low"), ("medium", 0.7, 0.8, "medium")] {
+        let weighted = |w| move |p: &Profile| Factor { w: if p.effort == "high" { w } else { 1.0 }, ..Factor::NEUTRAL };
+        let base = terra.iter().find(|p| p.effort == baseline).unwrap();
+        for seconds in [241.0, 300.0, 301.0] {
+            let pool: Vec<_> = terra.iter().map(|p| if p.effort == "high" { Profile { secs: seconds, ..*p } } else { *p }).collect();
+            let row = choose_paced("chat", level, "glance", 0.9, &pool, &weighted(weight)).unwrap();
+            assert_eq!(row.profile.effort, if seconds <= 300.0 { "high" } else { baseline }, "{level}, {seconds} s");
+            if seconds <= 300.0 {
+                assert!(row.profile.iq > base.iq && row.profile.agent > base.agent);
+                assert!(row.profile.secs > base.secs);
+                assert!(row.price > base.cost as f64 && row.price <= base.cost as f64 * 1.15);
+            }
+            assert_eq!(pick("chat", level, &pool, &weighted(too_costly)), ("gpt-6.1-terra", baseline));
+        }
+    }
 }
 
 #[test]
@@ -156,18 +176,43 @@ fn with_neutral_factors_the_picks_are_exactly_the_unpaced_table() {
 }
 
 #[test]
-fn the_best_price_never_rises_when_a_vendor_gets_cheaper() {
+fn the_minimum_price_never_rises_and_extra_quality_stays_within_fifteen_percent() {
     let all = all();
     let steps = [25.0, 12.0, 6.0, 3.0, 1.5, 1.0, 0.8, 0.6, 0.45, 0.3, 0.2, 0.14, 0.1];
     for (kind, level) in
         [("code", "medium"), ("code", "hard"), ("math", "medium"), ("research", "hard"), ("writing", "medium"), ("chat", "easy")]
     {
         for codex in [0.1, 0.5, 1.0, 4.0] {
-            let mut last = f64::INFINITY;
+            let mut last_min = f64::INFINITY;
+            let mut last_pick: Option<(f64, Profile)> = None;
             for claude in steps {
-                let price = choose_paced(kind, level, "glance", 0.9, &all, &by_vendor(claude, codex)).unwrap().price;
-                assert!(price <= last + 1e-12, "{kind} {level}: price rose from {last} to {price} at m {claude} (codex {codex})");
-                last = price;
+                let factors = by_vendor(claude, codex);
+                let row = choose_paced(kind, level, "glance", 0.9, &all, &factors).unwrap();
+                let floor = match (kind, level) {
+                    ("code", "medium") => (24, 32),
+                    ("code", _) => (46, 39),
+                    ("math" | "research", _) => (46, 0),
+                    ("writing", _) => (38, 0),
+                    _ => (24, 0),
+                };
+                let min = all
+                    .iter()
+                    .filter(|p| p.iq >= floor.0 && p.agent >= floor.1)
+                    .map(|p| choose_paced(kind, level, "glance", 0.9, &[*p], &factors).unwrap().price)
+                    .min_by(f64::total_cmp)
+                    .unwrap();
+                assert!(min <= last_min + 1e-12, "{kind} {level}: minimum price rose at m {claude}, codex {codex}");
+                assert!(row.price <= min * 1.15 + 1e-12, "{kind} {level}: premium exceeds 15%");
+                if let Some((price, previous)) = last_pick.filter(|(price, _)| row.price > *price + 1e-12) {
+                    assert!(row.profile.iq >= previous.iq && row.profile.agent >= previous.agent);
+                    assert!(
+                        row.profile.iq > previous.iq || row.profile.agent > previous.agent,
+                        "extra cost {price} -> {} must buy quality",
+                        row.price
+                    );
+                }
+                last_min = min;
+                last_pick = Some((row.price, row.profile));
             }
         }
     }
@@ -182,7 +227,7 @@ fn the_router_line_is_read_without_the_table() {
 
 #[test]
 fn luna_at_medium_is_nineteen() {
-    let luna = PROFILES.iter().find(|p| p.model == "gpt-6-luna").unwrap();
+    let luna = PROFILES.iter().find(|p| p.model == "gpt-6-luna" && p.effort == "medium").unwrap();
     assert_eq!(luna.iq, 19);
 }
 

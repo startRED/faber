@@ -7,8 +7,21 @@ How Auto paces the shared quota, and what was measured about it.
 Auto prices the 2026-11-10 Artificial Analysis per-task runs republished by [Slopalytics](https://slopalytics.com/),
 using rounded intelligence and coding sub-index, seconds per task and US$ per task. The class floors and exclusions
 are in [models.md](models.md#auto-a-blind-router). Spare quota buys one rung within 600 seconds per task, or 1,200
-for hard-or-higher code and non-easy math. Multipliers, gates and learned adjustments keep their existing rules.
-Claude-only medium work uses Sonnet high, easy work has a quality floor, and Fable can answer at low effort.
+for hard-or-higher code, non-easy math and expert-or-higher work where quality matters (code, math, research).
+Frontier can step to summit (60/50), currently Fable high, only through spare quota or the existing learned rung;
+no verdict lands there directly and nothing steps above it. Multipliers, gates and learned adjustments keep their rules.
+The strongest sufficient row within 15% of the cheapest factored price wins if neither score falls and one improves,
+within the task's time cap. Easy/medium chat permits slower quality upgrades within its eligible 300 s pool.
+Ties favor lower price then shorter time. This includes token-read cost and learned weights.
+Fable low is removed; Luna high (21/13, 336 s, US$0.073) is added. Medium chat uses a 31 intelligence floor and
+excludes rows over 300 s when a sufficient row within 300 s exists. At neutral factors: Sonnet medium with Claude
+alone, Terra medium when available, otherwise Sol low. Terra medium improves both scores for about 5% more.
+Other medium work still uses Sonnet high with Claude alone. The concrete easy/medium/hard task guide, unchanged
+scope/check contract and stronger-answer order are in [models.md](models.md#task-guide-and-maker-starting-points-2026-11-11):
+below high raise effort first, then compare that row against the next stronger model's lowest sufficient effort by
+price and time. Sources read 2026-11-11: [Anthropic task guide](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+[Anthropic cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
+[OpenAI models](https://developers.openai.com/codex/models) and [reasoning](https://developers.openai.com/api/docs/guides/reasoning).
 
 Auto requires billing confirmed as a subscription before any user, router or summary request. The same quota gate
 checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell

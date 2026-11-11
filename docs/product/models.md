@@ -33,8 +33,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - On 10/11/2026 the updated router was checked twice on 42 hand-labelled requests. Haiku returned 84 valid lines at each effort: at medium, kind 90%, difficulty 74%, check 85% and scope 98% agreement; at low, 89%, 74%, 79% and 98%. Median time was 2.7 s for both. Luna returned one valid line at medium and none at low, so this run cannot establish its accuracy. These labels are one person’s judgement, not proven answers.
 - Profiles use Artificial Analysis per-task runs, republished by [Slopalytics](https://slopalytics.com/) on
   2026-11-10: rounded intelligence and coding sub-index, seconds per task and US$ per task, all on one scale.
-  No maximum effort: its extra quota and time are outside Auto's ladder. Fable xhigh and Luna high/xhigh are
-  excluded for poor marginal value or dominance. Luna medium is a last resort when the account has no Terra.
+  No maximum effort: its extra quota and time are outside Auto's ladder. Fable xhigh and Luna xhigh remain excluded.
+  Fable low is removed: its maker starts at medium/high and measured Opus high ahead for less per solved task.
+  Luna high is added (21/13, 336 s, US$0.073), the Luna-only fallback. Still 24 rows; the router stays at medium.
   The compiled table later moves to the live manifest and Faber's own scoreboard of kept and retried answers.
 
   | Level | General intelligence | Code / project coding |
@@ -44,11 +45,18 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   | Hard | 46 | 39 |
   | Expert | 50 | 42 |
   | Frontier | 56 | 46 |
+  | Summit | 60 | 50 |
 
   Medium code has the easy intelligence floor (24); medium math gets the hard intelligence floor (46).
-  Projects add the coding floor to every kind. Other general tasks have no coding floor.
-  Claude-only medium work now uses Sonnet high; easy work no longer takes the weakest row just for price.
-  A Fable conversation can answer at low effort, and Auto can use xhigh on the models with that row.
+  Medium chat has intelligence floor 31; easy and medium chat exclude rows over 300 s whenever a row within
+  300 s clears the whole bar. With neutral factors, Claude-only medium Chat uses Sonnet medium; with Terra
+  available it uses Terra medium, otherwise Sol low.
+  Projects still add the coding floor to every kind. Other general tasks have no coding floor.
+  Claude-only medium work outside chat uses Sonnet high; easy work keeps its quality floor. Fable starts at medium.
+  After finding the cheapest sufficient row, Auto prefers the strongest row that is at least as good on both scores,
+  improves one, fits the task's time cap, and costs at most 15% more under the same reading, weight and quota factors.
+  Easy/medium chat allows slower premium rows within its 300 s pool.
+  Ties favor lower price, then shorter time. Quota factors can apply this rule across vendors.
   The existing stronger retry also carries xhigh through the choice contract; the manual picker still offers three buttons.
 - **Long reads are priced by the token** (`engine/src/route.rs`, `read_cost`). Per-task prices assume a typical read; a
   message with a long document or many pictures, or a long conversation moved to another model, reads far more, so each
@@ -71,13 +79,16 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   Later messages never warm a spare router on keystrokes: a draft classification opens it only when it fires. Each later
   Auto message may ask the router up to twice, where previously it asked none. The router uses a thread on the shared
   Codex app-server when Luna is available and allowed, otherwise a separate Claude Haiku process for that request.
-- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. Quota and learned steps stop at frontier.
+- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. A verdict never reaches summit directly; spare quota or a learned rung can lift frontier to summit, currently cleared only by Fable high. Nothing steps above summit.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
   check (done, `engine/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
-- An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
-  model one effort higher, else the next model at medium. It runs as a new branch, so the source conversation keeps its model (done, `engine/src/nudge.rs`).
+- An answer whose last check failed, or whose code changed with nothing checking it, offers one step up. Below high,
+  raise the same model one effort first. From high onward, compare that row (if present) with the next stronger model
+  of the same vendor at its lowest effort that improves at least one score without lowering either. Offer the cheaper,
+  then faster on a tie; only account-allowed rows qualify, ordered by measured scores. Sonnet high → Opus medium;
+  Opus high → Fable medium; Opus xhigh → Fable high. It runs in a new branch (`engine/src/nudge.rs`).
 - **Each later Auto message has its own effort inside the conversation's model.** A finished verdict from typing picks the
   cheapest sufficient effort using the same bars as a first message, or the held model's strongest row. No finished verdict
   means the previous effort, with no wait. Raising is immediate; reducing requires confidence at least 0.7 and a non-blind
@@ -107,6 +118,24 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
+
+### Task guide and maker starting points (2026-11-11)
+
+Difficulty follows the work, not message length; ties use the harder level. The router sees no model or maker names.
+Writing includes documents, slides and spreadsheets.
+
+- Easy: greetings and short facts; sorting, tagging, extracting and summarising supplied text; finding files and reading
+  logs; one-line rewrites or renames; simple arithmetic.
+- Medium: everyday documents, emails, slides and spreadsheets; translations; scoped code (a named bug, one function or
+  file, a clear spec or a small script); routine investigations, reviews and explanations.
+- Hard: engineering across files, unknown bugs, features across parts and large reviews; many screenshots or computer
+  operation; financial models and documents from many sources; proofs; costly subtle errors in concurrency, security,
+  legal, medical and money work.
+
+Sources read **2026-11-11**: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/)
+and [cost and intelligence guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
+and [OpenAI models](https://developers.openai.com/codex/models) and
+[reasoning](https://developers.openai.com/api/docs/guides/reasoning). Measured floors and quota gates still apply.
 
 ## Rules for driving the CLIs
 

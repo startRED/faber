@@ -1,6 +1,6 @@
 //! One step up when the work shows it. A model that stops early looks like a turn that ended without checking itself, so
 //! two signs in the turn's own tools offer the next rung: the last check failed, or code changed and nothing checked it.
-//! The offer is one step at a time (more effort first, a stronger model only when the model is already at its top) and
+//! The offer is one step at a time (more effort first below high, then the cheaper sufficient improvement) and
 //! the person decides. Pure functions over a finished message; the engine feeds them.
 
 use crate::model::{Area, Message, Status, ToolUse, Vendor};
@@ -21,20 +21,28 @@ pub struct Nudge {
 
 const EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
 
-/// The next rung above a pick: the same model one effort up when the table has that row, else the next stronger model
-/// of the same vendor at its default (medium) effort, else None. Only profiles in `allowed` (what the account can run) are
-/// offered. A pick the table does not know has no rung.
+/// Below high, raise effort first. From high on, compare that row with the next stronger model's lowest effort that
+/// improves at least one score without lowering either; offer the cheaper (faster on a tie). Only account-allowed rows qualify.
 pub fn next_rung(now: &Pick, allowed: &[Profile]) -> Option<Pick> {
     let model = now.model.as_deref()?;
     let here = PROFILES.iter().find(|p| p.vendor == now.vendor && p.model == model && p.effort == now.effort)?;
     let up = EFFORTS.iter().position(|e| *e == here.effort)? + 1;
     let same = EFFORTS.get(up).and_then(|e| allowed.iter().find(|p| p.vendor == here.vendor && p.model == here.model && p.effort == *e));
-    let next = same.or_else(|| {
-        allowed
-            .iter()
-            .filter(|p| p.vendor == here.vendor && p.effort == "medium" && (p.iq, p.agent) > (here.iq, here.agent))
-            .min_by_key(|p| (p.iq, p.agent))
-    })?;
+    let stronger = allowed
+        .iter()
+        .filter(|p| {
+            p.vendor == here.vendor
+                && p.model != here.model
+                && p.iq >= here.iq
+                && p.agent >= here.agent
+                && (p.iq > here.iq || p.agent > here.agent)
+        })
+        .min_by_key(|p| (p.iq, p.agent));
+    let next = if up < 3 {
+        same.or(stronger)
+    } else {
+        same.into_iter().chain(stronger).min_by(|a, b| a.cost.total_cmp(&b.cost).then(a.secs.total_cmp(&b.secs)))
+    }?;
     Some(Pick {
         vendor: next.vendor,
         model: Some(next.model.into()),
@@ -314,25 +322,46 @@ mod tests {
         assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "medium"), to("claude-opus-5-5", "high"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "low"), to("gpt-6.1-sol", "medium"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "medium"), to("gpt-6.1-terra", "high"));
-        for (vendor, model) in [
-            (Vendor::Claude, "claude-opus-5-5"),
-            (Vendor::Claude, "claude-sonnet-5-5"),
-            (Vendor::Claude, "claude-haiku-5-5"),
-            (Vendor::Codex, "gpt-6.1-sol"),
-            (Vendor::Codex, "gpt-6.1-terra"),
+    }
+
+    #[test]
+    fn high_effort_compares_the_next_effort_with_the_next_models_sufficient_start() {
+        for (vendor, model, effort, next_model, next_effort) in [
+            (Vendor::Claude, "claude-sonnet-5-5", "high", "claude-opus-5-5", "medium"),
+            (Vendor::Claude, "claude-opus-5-5", "high", "claude-fable-5-2", "medium"),
+            (Vendor::Claude, "claude-opus-5-5", "xhigh", "claude-fable-5-2", "high"),
+            (Vendor::Claude, "claude-fable-5-2", "medium", "claude-fable-5-2", "high"),
+            (Vendor::Codex, "gpt-6.1-terra", "high", "gpt-6.1-sol", "medium"),
+            (Vendor::Codex, "gpt-6.1-sol", "high", "gpt-6.1-sol", "xhigh"),
+            (Vendor::Claude, "claude-haiku-5-5", "high", "claude-haiku-5-5", "xhigh"),
         ] {
-            assert_eq!(rung(vendor, model, "high"), to(model, "xhigh"));
+            assert_eq!(rung(vendor, model, effort), to(next_model, next_effort), "{model} {effort}");
         }
     }
 
     #[test]
-    fn a_model_at_its_top_effort_moves_to_the_next_model_at_medium() {
-        assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "xhigh"), to("claude-fable-5-2", "medium"));
-        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "xhigh"), to("claude-opus-5-5", "medium"));
-        assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "xhigh"), None);
-        assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "medium"), to("claude-fable-5-2", "high"));
-        assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6.1-terra", "medium"));
-        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "xhigh"), to("gpt-6.1-sol", "medium"));
+    fn a_model_at_its_top_effort_moves_to_the_next_models_lowest_sufficient_effort() {
+        assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "xhigh"), to("claude-opus-5-5", "high"));
+        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "xhigh"), to("claude-sonnet-5-5", "high"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6-luna", "high"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "high"), to("gpt-6.1-terra", "low"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "xhigh"), to("gpt-6.1-sol", "high"));
+    }
+
+    #[test]
+    fn high_rungs_compare_price_then_time_and_keep_working_when_only_one_option_is_allowed() {
+        let now = pick(Vendor::Claude, "claude-sonnet-5-5", "high");
+        let same = *PROFILES.iter().find(|p| p.model == "claude-sonnet-5-5" && p.effort == "xhigh").unwrap();
+        let next = *PROFILES.iter().find(|p| p.model == "claude-opus-5-5" && p.effort == "medium").unwrap();
+        assert_eq!(next_rung(&now, &[same]).unwrap().model.as_deref(), Some(same.model));
+        assert_eq!(next_rung(&now, &[next]).unwrap().model.as_deref(), Some(next.model));
+        assert!(next_rung(&now, &[]).is_none());
+        let tied = Profile { cost: same.cost, ..next };
+        assert_eq!(next_rung(&now, &[same, tied]).unwrap().model.as_deref(), Some(tied.model));
+        let expensive = Profile { cost: same.cost + 0.01, ..next };
+        assert_eq!(next_rung(&now, &[same, expensive]).unwrap().model.as_deref(), Some(same.model));
+        let weaker = Profile { agent: 32, ..next };
+        assert!(next_rung(&now, &[weaker]).is_none(), "a model change cannot lower either score");
     }
 
     #[test]
@@ -570,15 +599,16 @@ mod tests {
 
     #[test]
     fn a_rung_the_account_cannot_run_is_not_offered() {
-        // Codex lists Luna but not Sol: Luna has nothing above it that this account can run.
+        // Codex lists Luna only: medium can rise to high, then no stronger allowed row remains.
         let luna = candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]);
-        assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6-luna", "medium"), &luna), None);
+        assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6-luna", "medium"), &luna).unwrap().effort, "high");
+        assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6-luna", "high"), &luna), None);
         let mut m = turn(vec![bash("cargo test", false)]);
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6-luna".into());
-        m.effort = Some("medium".into());
+        m.effort = Some("high".into());
         assert_eq!(of(&m, Area::Project, &luna), None);
-        assert!(of(&m, Area::Project, &PROFILES).is_some(), "the full table still offers Sol");
+        assert!(of(&m, Area::Project, &PROFILES).is_some(), "the full table still offers Terra");
         // Without a connected Claude CLI, Haiku has no Sonnet to move to; effort steps stay on the same model.
         let sol = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string()]);
         assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6.1-sol", "low"), &sol).map(|p| p.effort), Some("medium".into()));

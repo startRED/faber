@@ -193,16 +193,17 @@ async fn a_router_without_an_answer_leaves_the_everyday_default() {
 }
 
 #[tokio::test]
-async fn one_usable_profile_skips_router_and_uses_that_profile() {
+async fn luna_only_has_two_efforts_and_routes_to_its_strongest_row() {
     let dir = crate::support::DataFolder::new();
     let calls = Calls::default();
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     engine.set_codex_models(vec!["gpt-6-luna".into()], Some("gpt-6-luna".into()));
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
-    assert!(calls.lock().unwrap().is_empty(), "one model/effort profile needs no classification");
+    assert_eq!(calls.lock().unwrap().len(), 1, "two measured efforts still need a task verdict");
     assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
-    assert_eq!(reply.acts[0].why.as_deref(), Some("reason.autoSingleProfile"));
+    assert_eq!(reply.reason.as_deref(), Some("reason.route.chat.easy"));
+    assert_eq!(reply.effort.as_deref(), Some("high"));
     assert!(engine.ledger().codex.unmetered.is_empty());
     engine.shutdown();
 }

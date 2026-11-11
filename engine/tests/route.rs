@@ -13,7 +13,7 @@ fn measured_picks_for_every_kind_level_and_connected_vendor() {
         ("claude-haiku-5-5", "medium"),
         ("claude-sonnet-5-5", "high"),
         ("claude-opus-5-5", "medium"),
-        ("claude-fable-5-2", "low"),
+        ("claude-fable-5-2", "medium"),
         ("claude-fable-5-2", "medium"),
     ];
     let codex = [
@@ -28,7 +28,12 @@ fn measured_picks_for_every_kind_level_and_connected_vendor() {
             let at = if kind == "math" && level == "medium" { 2 } else { i };
             let both = if at == 4 { claude[at] } else { codex[at] };
             for project in [false, true] {
-                for (set, expected) in sets.iter().zip([claude[at], codex[at], both]) {
+                for (vendor, (set, expected)) in sets.iter().zip([claude[at], codex[at], both]).enumerate() {
+                    let expected = if kind == "chat" && level == "medium" && !project {
+                        if vendor == 0 { ("claude-sonnet-5-5", "medium") } else { ("gpt-6.1-terra", "medium") }
+                    } else {
+                        expected
+                    };
                     let row = faber_engine::route::choose_scoped(kind, level, "glance", "tight", 0.9, project, set).unwrap();
                     assert_eq!((row.profile.model, row.profile.effort), expected, "{kind} {level} project={project} vendors={set:?}");
                 }
@@ -41,7 +46,7 @@ fn measured_picks_for_every_kind_level_and_connected_vendor() {
 fn measured_effort_ladder_inside_each_conversations_model() {
     use faber_engine::route::{Asked, PROFILES, choose_effort};
     let cases = [
-        ("claude-fable-5-2", ["low", "low", "low", "low", "medium"]),
+        ("claude-fable-5-2", ["medium", "medium", "medium", "medium", "medium"]),
         ("claude-opus-5-5", ["low", "medium", "medium", "high", "xhigh"]),
         ("claude-sonnet-5-5", ["low", "high", "xhigh", "xhigh", "xhigh"]),
         ("gpt-6.1-sol", ["low", "medium", "medium", "high", "xhigh"]),
@@ -55,7 +60,8 @@ fn measured_effort_ladder_inside_each_conversations_model() {
         ("code", "hard", "open", "blind"),
     ];
     for (model, expected) in cases {
-        let current = PROFILES.iter().find(|p| p.model == model && p.effort == "low").unwrap();
+        let current =
+            PROFILES.iter().find(|p| p.model == model && p.effort == if model == "claude-fable-5-2" { "medium" } else { "low" }).unwrap();
         for ((kind, difficulty, scope, check), effort) in tasks.into_iter().zip(expected) {
             let verdict = Asked { kind, difficulty, scope, check, confidence: 0.9 };
             let row = choose_effort(&verdict, false, current).unwrap().profile;
@@ -67,6 +73,7 @@ fn measured_effort_ladder_inside_each_conversations_model() {
 #[test]
 fn measured_profiles_have_no_max_duplicate_or_dominated_effort() {
     use faber_engine::route::PROFILES;
+    assert!(!PROFILES.iter().any(|p| p.model == "claude-fable-5-2" && p.effort == "low"));
     for (i, row) in PROFILES.iter().enumerate() {
         assert_ne!(row.effort, "max");
         for (j, other) in PROFILES.iter().enumerate().filter(|(j, p)| *j != i && p.model == row.model) {
@@ -138,9 +145,81 @@ fn the_router_never_sees_a_model_or_company_name() {
 }
 
 #[test]
+fn the_task_guide_names_every_kind_of_work_at_its_concrete_level() {
+    assert!(INSTRUCTIONS.chars().count() < 2_600);
+    assert!(INSTRUCTIONS.contains("judge what the work is, not how long the message is"));
+    assert!(INSTRUCTIONS.contains("When two levels fit, choose the harder one"));
+    assert!(INSTRUCTIONS.contains("writing (texts, emails, documents, slides, spreadsheets"));
+    for (level, next, examples) in [
+        (
+            "easy:",
+            "medium:",
+            &[
+                "greeting",
+                "short fact",
+                "sorting",
+                "tagging",
+                "extracting",
+                "summarising text already given",
+                "finding a file",
+                "reading a log",
+                "one-line rewrite",
+                "rename",
+                "simple arithmetic",
+            ][..],
+        ),
+        (
+            "medium:",
+            "hard:",
+            &[
+                "everyday document",
+                "email",
+                "slide",
+                "spreadsheet",
+                "translation",
+                "well-scoped code",
+                "named bug",
+                "one function or file",
+                "clear spec",
+                "small script",
+                "routine investigation",
+                "review",
+                "explanation",
+            ][..],
+        ),
+        (
+            "hard:",
+            "scope:",
+            &[
+                "engineering across several files",
+                "bug with no known cause",
+                "feature that touches several parts",
+                "reviewing a large change",
+                "reading many screenshots",
+                "operating a computer",
+                "financial model",
+                "document built from many sources",
+                "proof",
+                "subtle mistake is costly",
+                "concurrency",
+                "security",
+                "legal",
+                "medical",
+                "money",
+            ][..],
+        ),
+    ] {
+        let section = INSTRUCTIONS.split_once(level).unwrap().1.split_once(next).unwrap().0;
+        for example in examples {
+            assert!(section.contains(example), "{level} is missing {example}");
+        }
+    }
+}
+
+#[test]
 fn only_connected_vendors_and_models_the_account_lists_are_candidates() {
     let codex = candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]);
-    assert_eq!(codex.iter().map(|p| p.model).collect::<Vec<_>>(), ["gpt-6-luna"]);
+    assert_eq!(codex.iter().map(|p| (p.model, p.effort)).collect::<Vec<_>>(), [("gpt-6-luna", "high"), ("gpt-6-luna", "medium")]);
     assert!(candidates(&[Vendor::Claude], &[]).iter().all(|p| p.vendor == Vendor::Claude));
 }
 
@@ -169,7 +248,7 @@ fn an_account_that_lists_terra_sends_it_the_medium_work_sol_had() {
 
 #[test]
 fn an_unsure_verdict_gets_the_next_level() {
-    assert_eq!(picked("chat", "easy", 0.3, &all()), ("gpt-6.1-sol", "medium"));
+    assert_eq!(picked("chat", "easy", 0.3, &all()), ("gpt-6.1-sol", "low"));
     assert_eq!(picked("code", "medium", 0.3, &all()), ("gpt-6.1-sol", "medium"));
 }
 
@@ -179,7 +258,7 @@ fn with_one_vendor_the_table_stays_inside_it() {
     assert_eq!(picked("code", "hard", 0.9, &claude), ("claude-opus-5-5", "medium"));
     assert_eq!(picked("chat", "easy", 0.9, &claude), ("claude-haiku-5-5", "medium"));
     let luna_only = candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]);
-    assert_eq!(picked("code", "hard", 0.9, &luna_only), ("gpt-6-luna", "medium"));
+    assert_eq!(picked("code", "hard", 0.9, &luna_only), ("gpt-6-luna", "high"));
 }
 
 #[test]
@@ -341,11 +420,11 @@ fn scoped_pick_table() {
             ("gpt-6.1-terra", "medium"),
         ),
         ("code", "hard", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium")),
-        ("code", "hard", "tight", "blind", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
-        ("code", "hard", "open", "machine", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "tight", "blind", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "open", "machine", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "high")),
         ("code", "hard", "open", "blind", false, ("claude-fable-5-2", "medium"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "xhigh")),
         ("math", "medium", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium")),
-        ("research", "hard", "open", "machine", true, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
+        ("research", "hard", "open", "machine", true, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "high")),
     ];
     for (kind, difficulty, scope, check, project, both, claude, codex) in rows {
         for (set, expected) in sets.iter().zip([both, claude, codex]) {
@@ -366,15 +445,132 @@ fn scoped_pick_table() {
     }
 }
 
+/// Maker task and effort guidance read on 2026-11-11; models.md records sources and differences from these starts.
 #[test]
-fn frontier_does_not_step_up_again() {
+fn makers_task_table_for_each_connected_vendor_set() {
+    use faber_engine::route::choose_scoped;
+    let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+    let sets = [candidates(&[Vendor::Claude], &models), candidates(&[Vendor::Codex], &models), candidates(&BOTH, &models)];
+    let haiku = ("claude-haiku-5-5", "medium");
+    let sonnet = ("claude-sonnet-5-5", "high");
+    let opus = ("claude-opus-5-5", "medium");
+    let fable = ("claude-fable-5-2", "medium");
+    let terra_low = ("gpt-6.1-terra", "low");
+    let terra = ("gpt-6.1-terra", "medium");
+    let sol = ("gpt-6.1-sol", "medium");
+    let sol_high = ("gpt-6.1-sol", "high");
+    let sol_xhigh = ("gpt-6.1-sol", "xhigh");
+    // label, kind, difficulty, scope, check, [Claude only, Codex only, both]. No quota or learned lift.
+    let rows = [
+        (
+            "classification, routing, tagging and given-text extraction",
+            "research",
+            "easy",
+            "tight",
+            "machine",
+            [haiku, terra_low, terra_low],
+        ),
+        (
+            "helpers finding files, reading logs and summarising given text",
+            "code",
+            "easy",
+            "tight",
+            "machine",
+            [haiku, terra_low, terra_low],
+        ),
+        ("simple chat", "chat", "easy", "tight", "glance", [haiku, terra_low, terra_low]),
+        ("interactive chat", "chat", "medium", "tight", "glance", [("claude-sonnet-5-5", "medium"), terra, terra]),
+        (
+            "named bug, spec-driven feature iteration and repeated scoped coding",
+            "code",
+            "medium",
+            "tight",
+            "machine",
+            [sonnet, terra, terra],
+        ),
+        ("repeated routine investigation, review or drafting", "research", "medium", "tight", "machine", [sonnet, terra, terra]),
+        ("everyday document, email, slide or spreadsheet", "writing", "medium", "tight", "glance", [sonnet, terra, terra]),
+        ("everyday engineering, unknown bug and multi-PR feature", "code", "hard", "tight", "machine", [opus, sol, sol]),
+        ("many screenshots, vision and computer use", "image", "hard", "tight", "glance", [opus, sol, sol]),
+        ("complex financial model and document from many sources", "writing", "hard", "tight", "blind", [opus, sol, sol]),
+        ("major refactor or migration", "code", "hard", "open", "machine", [fable, sol_high, sol_high]),
+        ("architecture planning and leading many subagents", "code", "hard", "open", "machine", [fable, sol_high, sol_high]),
+        ("deep research", "research", "hard", "open", "blind", [fable, sol_xhigh, fable]),
+        ("scientific or quantitative analysis", "math", "hard", "open", "blind", [fable, sol_xhigh, fable]),
+        ("Sol repeated long-running code and app work", "code", "hard", "open", "blind", [fable, sol_xhigh, fable]),
+        ("Sol repeated long-running document work", "writing", "hard", "open", "blind", [fable, sol_high, sol_high]),
+        ("Terra efficient clear writing", "writing", "medium", "tight", "glance", [sonnet, terra, terra]),
+        ("Terra visual understanding and computer use", "image", "hard", "tight", "glance", [opus, sol, sol]),
+        ("Luna focused high-volume summarisation and extraction", "research", "easy", "tight", "machine", [haiku, terra_low, terra_low]),
+        ("Luna focused coding with a known good result", "code", "medium", "tight", "machine", [sonnet, terra, terra]),
+        (
+            "low effort: quick drafting and support chat",
+            "chat",
+            "medium",
+            "tight",
+            "glance",
+            [("claude-sonnet-5-5", "medium"), terra, terra],
+        ),
+        ("low effort: everyday drafting", "writing", "medium", "tight", "glance", [sonnet, terra, terra]),
+        ("low effort: scoped execution-oriented coding", "code", "medium", "tight", "machine", [sonnet, terra, terra]),
+        ("medium effort: agentic coding", "code", "hard", "tight", "machine", [opus, sol, sol]),
+        ("medium effort: research", "research", "medium", "tight", "blind", [opus, sol, sol]),
+        ("medium effort: spreadsheets and slides", "writing", "medium", "tight", "glance", [sonnet, terra, terra]),
+        (
+            "high effort: hard reasoning, complex debugging and deep planning",
+            "code",
+            "hard",
+            "open",
+            "machine",
+            [fable, sol_high, sol_high],
+        ),
+        ("extra high effort: deep research and long-running agents", "research", "hard", "open", "blind", [fable, sol_xhigh, fable]),
+        ("extra high effort: security and large code review", "code", "hard", "tight", "blind", [fable, sol_high, sol_high]),
+        ("extra high effort: challenging open coding", "code", "hard", "open", "blind", [fable, sol_xhigh, fable]),
+    ];
+    for (label, kind, difficulty, scope, check, expected) in rows {
+        for (set, expected) in sets.iter().zip(expected) {
+            let p = choose_scoped(kind, difficulty, check, scope, 0.9, false, set).unwrap().profile;
+            assert_eq!((p.model, p.effort), expected, "{label}: {kind}/{difficulty}/{scope}/{check}, {set:?}");
+        }
+    }
+    let luna = candidates(&[Vendor::Codex], &["gpt-6-luna".into()]);
+    for kind in ["research", "code"] {
+        let p = choose_scoped(kind, "medium", "machine", "tight", 0.9, false, &luna).unwrap().profile;
+        assert_eq!((p.model, p.effort, p.iq, p.agent, p.secs, p.cost), ("gpt-6-luna", "high", 21, 13, 336.0, 0.073));
+    }
+}
+
+#[test]
+fn frontier_steps_to_summit_only_with_spare_quota_or_learning_and_summit_stops() {
     use faber_engine::route::{Factor, choose_paced_scoped, choose_scoped, lifted};
     let candidates = candidates(&BOTH, &["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()]);
     let base = choose_scoped("code", "hard", "blind", "open", 0.2, true, &candidates).unwrap();
     assert_eq!(base.profile.model, "claude-fable-5-2");
     let factor = |_: &Profile| Factor { m: 0.01, ..Factor::NEUTRAL };
     let paced = choose_paced_scoped("code", "hard", "blind", "open", 0.2, true, &candidates, &factor).unwrap();
-    assert_eq!(paced.profile, base.profile);
-    assert!(paced.pace.is_none());
-    assert_eq!(lifted(base.clone(), &candidates, &factor), base);
+    assert_eq!(base.profile.effort, "medium");
+    assert_eq!(paced.profile.effort, "high");
+    assert_eq!(paced.pace.as_ref().unwrap().kind, "step");
+    assert_eq!(lifted(paced.clone(), &candidates, &factor), paced);
+    let learned = lifted(base.clone(), &candidates, &|_| Factor::NEUTRAL);
+    assert_eq!(learned.profile.effort, "high");
+    assert_eq!(learned.pace.as_ref().unwrap().kind, "learned");
+    let no_step = |_: &Profile| Factor { step_ok: false, ..Factor::NEUTRAL };
+    assert_eq!(choose_paced_scoped("code", "hard", "blind", "open", 0.2, true, &candidates, &no_step).unwrap().profile, base.profile);
+    assert_eq!(lifted(base.clone(), &candidates, &no_step), base);
+    for kind in ["code", "math", "research"] {
+        let summit = choose_scoped(kind, "summit", "machine", "tight", 0.9, true, &candidates).unwrap();
+        assert_eq!((summit.profile.iq, summit.profile.agent), (62, 53));
+        assert_eq!(
+            choose_paced_scoped(kind, "summit", "machine", "tight", 0.9, true, &candidates, &factor).unwrap().profile,
+            summit.profile
+        );
+        assert_eq!(lifted(summit.clone(), &candidates, &factor), summit);
+        let frontier = choose_scoped(kind, "hard", "blind", "open", 0.9, false, &candidates).unwrap();
+        assert_eq!(frontier.profile.effort, "medium");
+        assert_eq!(choose_paced_scoped(kind, "hard", "blind", "open", 0.9, false, &candidates, &factor).unwrap().profile.effort, "high");
+        assert_eq!(lifted(frontier.clone(), &candidates, &|_| Factor::NEUTRAL).profile.effort, "high");
+        assert_eq!(lifted(frontier.clone(), &candidates, &|_| Factor { m: 4.0, ..Factor::NEUTRAL }), frontier);
+    }
 }

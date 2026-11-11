@@ -1443,7 +1443,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_usable_profile_filters_quota_before_routing_or_warming() {
+    async fn quota_filter_keeps_both_luna_efforts_and_skips_routing_when_none_are_usable() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|c| {
@@ -1458,9 +1458,20 @@ mod tests {
             Vendor::Claude,
             vec![EngineEvent::Quota { window: "five_hour".into(), used: 1.0, resets_at: unix_secs() + 3600.0 }],
         );
-        let mut answer = engine.with(|c| {
-            assert_eq!(c.route_profiles(None).len(), 1);
+        engine.with(|c| {
+            let usable = c.route_profiles(None);
+            assert_eq!(
+                usable.iter().map(|p| (p.vendor, p.model, p.effort)).collect::<Vec<_>>(),
+                [(Vendor::Codex, "gpt-6-luna", "high"), (Vendor::Codex, "gpt-6-luna", "medium")]
+            );
             assert!(c.route_profiles(Some(Vendor::Claude)).is_empty());
+        });
+        engine.note_account_events(
+            Vendor::Codex,
+            vec![EngineEvent::Quota { window: "five_hour".into(), used: 1.0, resets_at: unix_secs() + 3600.0 }],
+        );
+        let mut answer = engine.with(|c| {
+            assert!(c.route_profiles(None).is_empty());
             c.route_for("sent", "test", 0, None)
         });
         assert_eq!(answer.try_recv().unwrap(), None, "no task, timeout or model request is needed");
