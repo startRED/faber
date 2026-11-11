@@ -240,7 +240,9 @@ html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: no
 
 /* The new conversation, one column in both areas: the greeting, the composer, the suggestions (Chat only) and the
    conversations to pick up under them. */
-.thread.welcome, .projects-stage.home { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
+/* The greeting sits at a fixed offset from the top, never centred: what loads or grows under the composer (results, goals,
+   memory, sessions) scrolls below it and cannot push the heading or Curioso up. */
+.thread.welcome, .projects-stage.home { display: grid; align-content: start; padding: clamp(32px, 12vh, 120px) clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
 .welcome-grid { display: grid; grid-template-columns: minmax(0, 640px); gap: 40px 64px; }
 .w-main, .resume { position: relative; z-index: 2; min-width: 0; }
 .hello { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; padding-bottom: 4px; }
@@ -1493,7 +1495,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .projects-stage { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; overflow-y: auto; padding: 24px; gap: 0; container-type: inline-size; }
 .projects-root { position: relative; grid-column: 1; grid-row: 1; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
 .projects-stage.home .empty { padding-top: 0; }
-.p-side h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
+.p-side h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 400 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .p-side { position: relative; z-index: 2; display: grid; align-content: start; gap: 28px; min-width: 0; }
 @container (min-width: 1000px) { .p-side { align-self: end; padding-bottom: 40px; } }
 .main:has(.projects-stage.home) .topbar { border-bottom-color: transparent; }
@@ -1524,7 +1526,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .cm-item.danger.armed { background: var(--danger); color: var(--bg); font-weight: 580; }
 /* Recent folders and saved environments on the open-a-project screen and in the Chat folder setting. */
 .recents { width: min(100%, 440px); display: grid; gap: 18px; }
-.recents h2 { margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
+.recents h2 { margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); font: 400 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .recents ul { margin: 0; padding: 0; list-style: none; }
 .rec { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
 .rec-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; padding: calc(8px * var(--dens)) 0; text-align: left; color: var(--ink); transition: color var(--dur-fast); }
@@ -1540,7 +1542,6 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .env-tray .hint { flex-basis: 100%; }
 .empty:has(.recents) { padding-top: 4vh; gap: 12px; }
 
-.projects-stage.home { padding-top: clamp(32px, 7vh, 72px); }
 .projects-stage.home > .welcome-grid { max-width: 640px; }
 /* The project's folder is one quiet line under Curioso's ledge: the sidebar and the crumb already name the project, so the
    header never says it a third time. */

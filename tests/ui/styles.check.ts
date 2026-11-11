@@ -105,3 +105,14 @@ check('forced colors: boundaries, selection and status remain visible', () => {
     groups.forEach((group, i) => group.media.mediaText = original[i]!);
   }
 });
+
+check('home: the greeting stays at the same height however much sits under the composer', () => {
+  for (const [width, height] of [[1920, 1080], [1280, 800]]) {
+    const top = (below: number) =>
+      onPage(`<div class="work" style="position:fixed;left:0;top:0;width:${width}px;height:${height}px">
+        <div class="thread welcome"><div class="welcome-grid"><div class="w-main">
+          <h1 class="display hello">Hello</h1><div style="height:120px"></div><div style="height:${below}px"></div>
+        </div></div></div></div>`, (root) => root.querySelector('h1')!.getBoundingClientRect().top);
+    equal(top(0), top(1600), `${width}x${height}: a tall block under the composer does not move the heading`);
+  }
+});

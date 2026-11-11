@@ -85,6 +85,7 @@ export function restoreReading(thread: HTMLElement, point: Reading, messages: Me
 
 /** Avoid waiting for a compositor commit when the tail is already in view. */
 export function followTail(thread: HTMLElement): void {
+  if (thread.classList.contains('welcome')) return; // the new-conversation home keeps its top: its greeting never scrolls away
   const end = Math.max(0, thread.scrollHeight - thread.clientHeight);
   if (Math.abs(thread.scrollTop - end) > 1) thread.scrollTop = end;
 }
