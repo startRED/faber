@@ -483,7 +483,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // timer, only for the newest reply, only while its age can change and the window is shown; a memo, so it is made again only
   // when that flips, never on the 33 ms ticks of the stream. It reads the ticking clock, so past a day the timer stops.
   tickWhile(createMemo(() => agePending(m(), !!props.last, ageNow())));
-  const foot = () => footText(m(), !!props.last, ageNow());
+  const foot = () => footText(m(), !!props.last, ageNow(), props.last ? props.running?.find((r) => r.conversationId === props.conversationId) : undefined);
   const waiting = () => m().permissions ?? [];
   // Its own memo, so a tick that adds only words never parses the thinking again.
   const thinkingText = createMemo(() => m().thinking ?? '');

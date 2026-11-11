@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import type { Message, RunningItem } from '../../ui/api.ts';
 import { footText, setAgeNow } from '../../ui/foot.ts';
 import { t } from '../../ui/i18n.ts';
-import { shownRunning, stopOffered } from '../../ui/running.ts';
+import { isWaiting, shownRunning, stopOffered, waitingOnWords } from '../../ui/running.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -68,4 +68,21 @@ check('running: a finished reply leaves what the screen shows as running and the
   equal(stopOffered(true, rows, 'c1'), false, 'finished: Send');
   equal(stopOffered(true, rows, 'c2'), true, 'at work: Stop');
   equal(stopOffered(false, rows, 'c2'), false, 'idle: Send');
+});
+
+check('foot: a finished reply whose conversation still waits says what it waits for, never "Done"', () => {
+  const finished = reply({ status: 'done', movedAt: START + 12 * MIN, finishedAt: START + 12 * MIN });
+  const waiting = row({ waitingOn: { ids: ['a', 'b'], since: START + 12 * MIN } });
+  equal(footText(finished, true, START + 72 * MIN, waiting), `${t('run.waitingOn', { n: 2 })} · ${t('foot.since', { time: '1 h' })}`);
+  equal(footText(finished, true, START + 72 * MIN, row({ keepGoing: true, keepWait: { why: 'rest', until: 0 } })), t('run.kg.wait.rest'));
+  equal(footText(finished, false, START + 72 * MIN, waiting), `${t('foot.done')} · ${t('foot.work', { time: '12 min' })}`, 'an older reply is what it was');
+  ok(footText(finished, true, START + 72 * MIN).startsWith(t('foot.done')), 'no row: the work is over');
+});
+
+check('running: a row that waits between turns counts as waiting, one answering now does not', () => {
+  ok(isWaiting(row({ waitingOn: { note: 'checks', since: 0 } })));
+  ok(isWaiting(row({ keepWait: { why: 'retry', until: 0 } })));
+  ok(!isWaiting(row()));
+  ok(!isWaiting(row({ state: 'needsYou', waitingOn: { since: 0 } })), 'a question is the person’s, not a wait');
+  equal(waitingOnWords({ note: 'the two lanes to land', since: 0 }), t('run.waitingNote', { note: 'the two lanes to land' }));
 });

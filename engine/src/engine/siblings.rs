@@ -964,6 +964,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_conversation_that_waits_for_others_stays_in_the_running_list() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with_saves(false, |core| {
+            started(core, 1, false);
+            let c = core.convs.values_mut().find(|c| c.started_by.is_some()).unwrap();
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            assert!(crate::engine::running_item(c, None).is_none(), "a finished turn with nothing pending leaves the list");
+            let wait = crate::model::WaitingOn { ids: vec!["child".into()], note: "Waiting for the two lanes to land".into(), since: 7 };
+            c.waiting_on = Some(wait.clone());
+            let item = crate::engine::running_item(c, None).expect("a waiting conversation is still at work");
+            assert_eq!(item.state, crate::model::RunState::Working);
+            assert_eq!(item.waiting_on, Some(wait));
+            assert!(!item.settled);
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
     async fn a_member_waiting_for_the_person_frees_a_working_place_but_stays_open() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);

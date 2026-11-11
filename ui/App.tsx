@@ -61,7 +61,7 @@ import { openedSite, showSite, siteWide, sitesOf, toggleSiteWide } from './Site.
 import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helperNumbers, helpersAtWork } from './worklog.ts';
-import { createAutoOpen, doneCards, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
+import { createAutoOpen, doneCards, isWaiting, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
@@ -515,6 +515,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // shows as running (the engine keeps it, so an update or the awake lock still waits for the process).
   const every = () => store.list().items;
   const items = createMemo(() => shownRunning(every()));
+  // The head button tells apart an AI answering now from work that waits between turns, so a waiting lead never reads as nothing.
+  const waitingCount = createMemo(() => items().filter(isWaiting).length);
+  const workingCount = createMemo(() => items().filter((i) => i.state === 'working' && !isWaiting(i)).length);
   const needing = () => new Set([...items().filter((i) => i.state === 'needsYou').map((i) => i.conversationId), ...agentAsks().map((a) => a.conversation)]).size;
   const allWaitingKeys = () => [...waitingKeys(items()), ...agentAsks().map((a) => `agent-ask:${a.id}`)];
   // A run that ended while nobody looked stays a done card in the column and a dot on its sidebar row (task 016) until the person
@@ -1601,7 +1604,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const engineBusy = () => {
     const last = current()?.messages.at(-1);
     // A working row in the running list that waits for no quota is the engine saying it is at work: an answer, Faber's checks, or a compaction.
-    return last?.status === 'streaming' || last?.checks?.state === 'running' || items().some((i) => i.conversationId === current()?.id && i.state === 'working' && !i.waitUntil);
+    return last?.status === 'streaming' || last?.checks?.state === 'running' || items().some((i) => i.conversationId === current()?.id && i.state === 'working' && !i.waitUntil && !i.waitingOn);
   };
   // What the composer shows: Stop ends the work; once the agent finished (only the CLI's turn is closing) it reads Send, and what is
   // written then waits in the queue like any message written while the engine is busy.
@@ -2165,9 +2168,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     onClick={toggleColumn}
                   >
                     <Show when={items().length > 0 || agentAsks().length > 0} fallback={<span class="seg">{t('run.none')}</span>}>
-                      <Show when={items().length > 0}><span class="seg">
+                      <Show when={workingCount() > 0}><span class="seg">
                         <span class="live" aria-hidden="true" />
-                        {t('run.running', { n: items().length })}
+                        {t('run.running', { n: workingCount() })}
+                      </span></Show>
+                      <Show when={waitingCount() > 0}><span class="seg wait">
+                        <span class="hold" aria-hidden="true" />
+                        {t('run.waitingCount', { n: waitingCount() })}
                       </span></Show>
                       <Show when={needing() > 0}>
                         <span class="seg ask">

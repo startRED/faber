@@ -6226,6 +6226,8 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     // and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
     let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
+    // An agent that waits for the conversations it started is not done: the row stays while it waits.
+    let waiting_on = c.waiting_on.clone().filter(|_| reply.status != Some(Status::Streaming));
     let approved_work = reply.status == Some(Status::Done)
         && live.is_some_and(|l| l.turn.as_deref() == Some(reply.id.as_str()))
         && c.queued.iter().any(|q| {
@@ -6236,6 +6238,7 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         && !c.compacting
         && kg_wait.is_none()
         && keep_wait.is_none()
+        && waiting_on.is_none()
         && !approved_work
         && permissions.is_empty()
         && parked.is_empty()
@@ -6266,6 +6269,7 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         && reply.wait_until.is_none()
         && !c.compacting
         && c.keep_going.is_none()
+        && c.waiting_on.is_none()
         && c.queued.is_empty()
         && checks != Some(ChecksState::Running);
     Some(RunningItem {
@@ -6287,6 +6291,7 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
         held,
         keep_going: c.keep_going.is_some(),
         keep_wait,
+        waiting_on,
         keep_progress: c.keep_going.as_ref().map(|k| crate::model::KeepProgress {
             turns: k.work,
             since: k.since,

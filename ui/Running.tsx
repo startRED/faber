@@ -18,6 +18,7 @@ import { QuickQuestion } from './QuickQuestion.tsx';
 import { stallText } from './StallNote.tsx';
 import type { Option } from './models.ts';
 import { SitePane, type OpenSite } from './Site.tsx';
+import { isWaiting, waitingOnWords } from './running.ts';
 import { VisualPane, type OpenVisual } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
 import { vendorName } from './models.ts';
@@ -115,7 +116,9 @@ export function Running(props: {
       ? t('run.waiting', { when: untilReset(item.waitUntil) })
       : item.state === 'needsYou'
         ? t('run.needsYou')
-        : item.keepWait
+        : item.waitingOn
+          ? waitingOnWords(item.waitingOn)
+          : item.keepWait
           ? t(`run.kg.wait.${item.keepWait.why}`)
           : item.keepGoing
             ? t('run.keepGoing')
@@ -197,7 +200,7 @@ export function Running(props: {
                                   <VendorMark vendor={item().vendor} />
                                   <Show when={item().vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
                                   <Show when={item().state !== 'needsYou'}>
-                                    <span class="verb"><StateGlyph state={item().waitUntil || item().keepWait ? 'waiting' : 'working'} small />{words(item())}</span>
+                                    <span class="verb"><StateGlyph state={isWaiting(item()) ? 'waiting' : 'working'} small />{words(item())}</span>
                                   </Show>
                                 </span>
                                 <span class="time num">{since(item())}</span>

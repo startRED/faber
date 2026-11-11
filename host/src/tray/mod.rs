@@ -176,6 +176,7 @@ mod tests {
             held: None,
             keep_going: false,
             keep_wait: None,
+            waiting_on: None,
             keep_progress: None,
             settled: false,
             plan: None,

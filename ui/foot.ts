@@ -2,7 +2,8 @@ import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js';
 import type { Message } from './api.ts';
 import { windowHidden } from './appearance.ts';
 import { t } from './i18n.ts';
-import { elapsed } from './running.ts';
+import type { RunningItem } from './api.ts';
+import { elapsed, waitingOnWords } from './running.ts';
 
 // The quiet line in the foot of a reply (docs/design/layout.md, "Answers"): whether the agent is still at work or
 // finished, how long it worked, and, on the newest reply only, how long ago it last changed.
@@ -32,11 +33,29 @@ function ageFrom(m: Message): number | undefined {
   return finished(m) ? (m.finishedAt ?? m.movedAt) : (m.movedAt ?? m.at);
 }
 
-/** The foot line of a reply, or '' when there is nothing to say (an error, a stop, or a reply from before Faber kept the times). */
-export function footText(m: Message, last: boolean, at: number): string {
+/** What the newest reply that finished says in place of "Done" while its conversation's work goes on between turns: it waits for
+ * the conversations its agent started, or Keep going rests before the next turn. Undefined when the work is really over. */
+function stillGoing(row: RunningItem | undefined, at: number): string | undefined {
+  if (!row || row.state !== 'working') return undefined;
+  if (row.waitingOn) {
+    const words = waitingOnWords(row.waitingOn);
+    if (!row.waitingOn.since) return words;
+    const e = elapsed(row.waitingOn.since, at);
+    return `${words} · ${t('foot.since', { time: t(e.key, { n: e.n }) })}`;
+  }
+  if (row.keepWait) return t(`run.kg.wait.${row.keepWait.why}`);
+  if (row.keepGoing) return t('run.keepGoing');
+  return undefined;
+}
+
+/** The foot line of a reply, or '' when there is nothing to say (an error, a stop, or a reply from before Faber kept the times).
+ * `row` is the conversation's running row, read only for the newest reply. */
+export function footText(m: Message, last: boolean, at: number, row?: RunningItem): string {
   if (m.status !== 'streaming' && m.status !== 'done') return '';
   if (m.movedAt === undefined && m.finishedAt === undefined) return '';
   const done = finished(m);
+  const going = done && last ? stillGoing(row, at) : undefined;
+  if (going) return going;
   const parts = [t(done ? 'foot.done' : 'foot.working')];
   const worked = (m.finishedAt ?? m.movedAt ?? m.at) - m.at;
   if (done && worked >= WORK_MIN_MS) {

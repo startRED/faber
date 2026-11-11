@@ -59,8 +59,11 @@ The numbers above are the usual widths. The person can change them, and the shel
 - The topbar has a crumb ("Chat › title" or "Project › title") and the run button. A separate copy's branch and folder are
   not in the crumb: they are the first row of Technical details. The model is not shown there: it is
   chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
-  fill (styled from the absence of the live mark, `.run-btn:not(:has(.live))`); the outline comes back on hover,
-  keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
+  fill (styled from the absence of the live and hold marks, `.run-btn:not(:has(.live, .hold))`); the outline comes back on hover,
+  keyboard focus and while the column is open. Otherwise it reads "{n} running" with the live mark for an AI answering now, and
+  "{n} waiting" with a hollow mark that breathes slowly for work between turns (a quota reset, a Keep going rest, or an agent that
+  waits for the conversations it started), so a lead that waits never reads as "Nothing running". The newest reply's foot
+  says that wait ("waiting for 2 conversations it started · for 1 h") in place of "Done". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
 - Before the run button, the open conversation's Context meter (R221): a 16 px ring and "Context {pct}%" in the quiet second ink, with the tokens in its tooltip. It is status (C003): it shows once the CLI has said both numbers, with no motion or setting (C011). A click opens a small panel under it (R274), on the right-click menu's surface and motion and anchored to its right edge: the tokens line, what fills the context (a quiet two-column list, the part at the left and its tokens at the right) when Claude Code counted it; below a hairline, "Catalog tools in this conversation": each tool the agent has now as an accent link with its Catalog name, and under it, in the quiet third ink, why it was picked ("Picked for: Fixing bugs"); a click closes the panel and opens that tool's Catalog detail, and with none one quiet line says so; then below another hairline "Compact now" with one quiet line under it. Nothing in it is a setting; Esc or a click outside closes it. It turns amber only from 85% of the window, near where the CLI compacts by itself (C002), never sooner.

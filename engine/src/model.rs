@@ -1583,6 +1583,10 @@ pub struct RunningItem {
     /// "Keep going" waits to send the next turn: the row stays between turns, and says until when.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_wait: Option<KeepWait>,
+    /// The agent declared it waits for the conversations it started, or for a reason of its own (`Conversation::waiting_on`):
+    /// its turn ended, yet the work is not over, so the row stays and says what it waits for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<WaitingOn>,
     /// "Keep going" is on: how far it has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_progress: Option<KeepProgress>,

@@ -67,6 +67,17 @@ export function doneCards(all: Summary[], items: RunningItem[], onScreen?: strin
     .sort((a, b) => b.ended!.at - a.ended!.at);
 }
 
+/** A row at work that waits between turns (a quota reset, a rest of Keep going, the conversations its agent started): no AI is
+ * answering in it right now, yet the work is not over. */
+export const isWaiting = (i: RunningItem): boolean => i.state === 'working' && !!(i.waitUntil || i.keepWait || i.waitingOn);
+
+/** What a row that waits for the conversations its agent started says: how many, else its agent's own words. */
+export function waitingOnWords(w: NonNullable<RunningItem['waitingOn']>): string {
+  if (w.ids?.length) return t('run.waitingOn', { n: w.ids.length });
+  const note = w.note?.trim();
+  return note ? t('run.waitingNote', { note: note.length > 80 ? `${note.slice(0, 79)}…` : note }) : t('run.waitingOn', { n: 1 });
+}
+
 /** What the screen shows as running: a reply whose agent finished, with only the CLI's turn still closing, is done for the person. The
  * engine keeps its row (an update and the awake lock still wait for the process), so the whole list is for those. */
 export const shownRunning = (items: RunningItem[]): RunningItem[] => items.filter((i) => !i.settled);
