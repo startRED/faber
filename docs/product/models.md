@@ -80,7 +80,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   Later messages never warm a spare router on keystrokes: a draft classification opens it only when it fires. Each later
   Auto message may ask the router up to twice, where previously it asked none. The router uses a thread on the shared
   Codex app-server when Luna is available and allowed, otherwise a separate Claude Haiku process for that request.
-- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. A verdict never reaches summit directly; spare quota or a learned rung can lift frontier to summit, currently cleared only by Fable high. Nothing steps above summit.
+- Open hard work gets the expert bar, and open medium work the hard one (the everyday model: Opus or Sol at medium), except
+  chat, which stays fast, and easy work, which stays easy: the smaller models are for work whose result one sentence can
+  state. An unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. A verdict never reaches summit directly; spare quota or a learned rung can lift frontier to summit, currently cleared only by Fable high. Nothing steps above summit.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
@@ -91,7 +93,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   then faster on a tie; only account-allowed rows qualify, ordered by measured scores. Sonnet high → Opus medium;
   Opus high → Fable medium; Opus xhigh → Fable high. It runs in a new branch (`engine/src/nudge.rs`).
 - **Each later Auto message has its own effort inside the conversation's model.** A finished verdict from typing picks the
-  cheapest sufficient effort using the same bars as a first message, or the held model's strongest row. No finished verdict
+  cheapest sufficient effort using the same bars as a first message, or the held model's strongest row. Open medium work
+  on a smaller model already held (Sonnet, Terra) runs at high at most, never extra high for the scope alone: past high the
+  next model at a lower effort costs less, so the answer offers it once (below). No finished verdict
   means the previous effort, with no wait. Raising is immediate; reducing requires confidence at least 0.7 and a non-blind
   check, plus two consecutive matching reductions for Claude's process restart. Claude lowering is held while its session
   has background work or is not idle. Both vendors hold lowering with no resumable session (including temporary Chat); held
@@ -120,23 +124,8 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 
-### Task guide and maker starting points (2026-11-11)
-
-Difficulty follows the work, not message length; ties use the harder level. The router sees no model or maker names.
-Writing includes documents, slides and spreadsheets.
-
-- Easy: greetings and short facts; sorting, tagging, extracting and summarising supplied text; finding files and reading
-  logs; one-line rewrites or renames; simple arithmetic.
-- Medium: everyday documents, emails, slides and spreadsheets; translations; scoped code (a named bug, one function or
-  file, a clear spec or a small script); routine investigations, reviews and explanations.
-- Hard: engineering across files, unknown bugs, features across parts and large reviews; many screenshots or computer
-  operation; financial models and documents from many sources; proofs; costly subtle errors in concurrency, security,
-  legal, medical and money work.
-
-Sources read **2026-11-11**: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/)
-and [cost and intelligence guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
-and [OpenAI models](https://developers.openai.com/codex/models) and
-[reasoning](https://developers.openai.com/api/docs/guides/reasoning). Measured floors and quota gates still apply.
+The router's task guide, what counts as well-defined or open work, and the makers' guidance it follows are in
+[auto-task-guide.md](auto-task-guide.md).
 
 ## Rules for driving the CLIs
 
@@ -184,7 +173,7 @@ phase.
 9. **Keep each Haiku request under 100K tokens and each GPT-6 request under 272K.** Above those points the whole request
    is billed more.
 
-A project agent can hand reading, building or review to a helper. Reading uses a low-cost model that clears the reading bar, with quota factors in its price; building uses the project work bar and quota factors, preferring a model no stronger than the lead. Review uses the other connected AI when possible. Economy lowers the build bar one level and retains the lower review bar. Helpers run on the connected AI when only one is available. The reply's token totals include the helpers' cached input and cache writes as well as their input and output.
+A project agent can hand reading, building or review to a helper. Reading uses a low-cost model that clears the reading bar, with quota factors in its price; building uses the project work bar and quota factors, preferring a model no stronger than the lead; a well-defined medium piece runs on the smaller model and an open one gets the hard bar, as in Auto (not in economy). Review uses the other connected AI when possible. Economy lowers the build bar one level and retains the lower review bar. Helpers run on the connected AI when only one is available. The reply's token totals include the helpers' cached input and cache writes as well as their input and output.
 
 Rules 1 to 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched; rule 7: a project agent gives an estimate in its plan, Faber counts the conversation's spend per turn from it, and past half again the estimate it warns once and switches to economy mode until the job ends, `engine/src/engine/plan.rs`, `engine/src/progress.rs`. The spend is a running total on the conversation, added to where each cost is written (a turn, a helper, a quick side question, and the same of the conversations its agent started), so it is read in one step; a cost with no known price counts 0 and a rewind takes no spend back, so the warning can come late; only an estimate sent after a costly first stretch of a turn counts that whole turn. The estimate ends only when `wrap_up` reports done). Every session start passes its mode, model and effort (the CLI probes that start no
 session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up

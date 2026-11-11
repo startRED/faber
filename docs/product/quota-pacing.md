@@ -17,7 +17,7 @@ Fable low is removed; Luna high (21/13, 336 s, US$0.073) is added. Medium chat u
 excludes rows over 300 s when a sufficient row within 300 s exists. At neutral factors: Sonnet medium with Claude
 alone, Terra medium when available, otherwise Sol low. Terra medium improves both scores for about 5% more.
 Other medium work still uses Sonnet high with Claude alone. The concrete easy/medium/hard task guide, unchanged
-scope/check contract and stronger-answer order are in [models.md](models.md#task-guide-and-maker-starting-points-2026-11-11):
+scope/check contract and stronger-answer order are in [auto-task-guide.md](auto-task-guide.md):
 below high raise effort first, then compare that row against the next stronger model's lowest sufficient effort by
 price and time. Sources read 2026-11-11: [Anthropic task guide](https://claude.dev/blog/which-claude-model-should-you-build-with/),
 [Anthropic cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
