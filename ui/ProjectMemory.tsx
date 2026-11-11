@@ -1,5 +1,5 @@
-import { createMemo, createResource, createSignal, For, onCleanup, Show } from 'solid-js';
-import { api, type MemoryEntry, type MemoryFile } from './api.ts';
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
+import { api, type MemoryEntry, type MemoryFile, type MemoryList } from './api.ts';
 import { Collapse } from './controls.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
@@ -36,10 +36,16 @@ function MemoryList(props: { projectId: string }) {
   const [busy, setBusy] = createSignal(false);
   useDraft(() => editing() !== undefined || busy());
   const [error, setError] = createSignal('');
-  const [files, { refetch }] = createResource(() => props.projectId, async (id) => {
-    try { return await api.projectMemory(id); }
-    catch (err) { setError(message(err)); return undefined; }
-  });
+  // The list is held here, not in a resource: a change shows on it at once and a re-read replaces it quietly, so it never
+  // goes back to "Loading". Only the first read says so.
+  const [files, setFiles] = createSignal<MemoryList>();
+  const [loading, setLoading] = createSignal(true);
+  const refetch = async () => {
+    try { setFiles(await api.projectMemory(props.projectId)); }
+    catch (err) { setError(message(err)); }
+    finally { setLoading(false); }
+  };
+  void refetch();
   const [shown, setShown] = createSignal(50);
   const rows = createMemo(() => files()?.files.flatMap((file) => file.entries.length
     ? file.entries.map((entry, index) => ({ file, entry: entry as MemoryEntry | undefined, first: index === 0 }))
@@ -60,6 +66,10 @@ function MemoryList(props: { projectId: string }) {
     let kept = false;
     setDirty(pending, true);
     setBusy(true); setError(''); setNotice('');
+    const before = files();
+    // What the person asked for is on the list before the engine answers; a refusal puts the old list back.
+    const change = (e: MemoryEntry): MemoryEntry | undefined => e.start !== entry.start ? e : text === null ? (keep ? { ...e, reviewed: true } : undefined) : { ...e, text, body: text };
+    setFiles((list) => list && { ...list, files: list.files.map((f) => f.path !== file.path ? f : { ...f, entries: f.entries.flatMap((e) => change(e) ?? []) }) });
     try {
       await api.editProjectMemory(props.projectId, { path: file.path, revision: file.revision, start: entry.start, end: entry.end, text, keep });
       if (alive && keep) {
@@ -68,7 +78,7 @@ function MemoryList(props: { projectId: string }) {
         await refetch();
         kept = true;
       } else if (alive) await refresh();
-    } catch (err) { if (alive) setError(message(err)); }
+    } catch (err) { if (alive) { setFiles(before); setError(message(err)); } }
     finally { if (alive) setBusy(false); setDirty(pending, false); }
     // The buttons are enabled again only now, and a disabled one cannot take focus.
     if (kept && alive) [...body.querySelectorAll<HTMLElement>('.memory-entry')].find((row) => row.dataset.entry === key(file, entry))?.querySelector<HTMLElement>('[data-edit]')?.focus();
@@ -83,13 +93,13 @@ function MemoryList(props: { projectId: string }) {
     void save(file, entry, null);
   };
   return (
-    <div class="memory-body" aria-busy={busy() || files.loading} ref={body}>
+    <div class="memory-body" aria-busy={busy() || loading()} ref={body}>
       <p class="sr-only" role="status">{notice()}</p>
-      <div class="memory-head"><p class="hint">{t('memory.scope')}</p><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void refresh()}>{t('memory.refresh')}</button></div>
+      <div class="memory-head"><p class="hint">{t('memory.scope')}</p><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => void refresh()}>{t('memory.refresh')}</button></div>
       <p class="hint">{t('memory.nextLaunch')}</p>
-      <Show when={files.loading}><p role="status">{t('memory.loading')}</p></Show>
+      <Show when={loading()}><p role="status">{t('memory.loading')}</p></Show>
       <Show when={error()}><p class="note err" role="alert">{error()}</p></Show>
-      <Show when={files() && !files.loading && !rows().length}><p class="hint">{t('memory.empty')}</p></Show>
+      <Show when={files() && !loading() && !rows().length}><p class="hint">{t('memory.empty')}</p></Show>
       <Show when={files()?.incomplete}><p class="hint" role="status">{t('memory.incomplete')}</p></Show>
       <ul class="memory-entries">
         <For each={rows().slice(0, shown())}>{({ file, entry, first }) => (
@@ -101,9 +111,9 @@ function MemoryList(props: { projectId: string }) {
                 <p class="memory-text">{(entry().body || entry().text).replace(/ \(stale\?\)$/u, '')}</p>
                 <Show when={entry().stale}><p class="hint memory-stale">{t('memory.stale')}</p></Show>
                 <Show when={file.path !== ".faber/rules.md"}><div class="memory-actions">
-                  <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
-                  <button type="button" class="btn ghost" data-edit disabled={busy() || files.loading} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
-                  <button type="button" class="btn ghost danger" disabled={busy() || files.loading}
+                  <Show when={entry().author === 'ai' && !entry().reviewed}><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => void save(file, entry(), null, true)}>{t('memory.keep')}</button></Show>
+                  <button type="button" class="btn ghost" data-edit disabled={busy() || loading()} onClick={() => { setConfirm(undefined); setEditing(key(file, entry())); setDraft(entry().text); }}>{t('memory.edit')}</button>
+                  <button type="button" class="btn ghost danger" disabled={busy() || loading()}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
                       if (event.repeat) event.preventDefault();
@@ -112,14 +122,14 @@ function MemoryList(props: { projectId: string }) {
                     onKeyUp={(event) => { if (event.key === 'Enter' || event.key === ' ') keyDown = needsRelease = false; }}
                     onFocusOut={() => { keyDown = needsRelease = false; if (confirm() === key(file, entry())) setConfirm(undefined); }}
                     onClick={() => remove(file, entry())}>{t(confirm() === key(file, entry()) ? 'memory.confirmDelete' : 'memory.delete')}</button>
-                  <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
+                  <Show when={confirm() === key(file, entry())}><button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => setConfirm(undefined)}>{t('memory.cancel')}</button></Show>
                 </div></Show>
               </>}>
-                <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !files.loading) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
-                  <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || files.loading} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />
+                <form onSubmit={(event) => { event.preventDefault(); if (!busy() && !loading()) void save(file, entry(), draft()); }} onKeyDown={(event) => { if (event.key === 'Escape' && !event.isComposing && !busy()) { event.preventDefault(); event.stopPropagation(); setEditing(undefined); } }}>
+                  <textarea class="field" aria-label={t('memory.editText')} value={draft()} disabled={busy() || loading()} onInput={(event) => setDraft(event.currentTarget.value)} ref={(el) => queueMicrotask(() => el.focus())} />
                   <div class="memory-actions">
-                    <button type="submit" class="btn ghost" disabled={busy() || files.loading || !draft().trim()}>{t('memory.save')}</button>
-                    <button type="button" class="btn ghost" disabled={busy() || files.loading} onClick={() => setEditing(undefined)}>{t('memory.cancel')}</button>
+                    <button type="submit" class="btn ghost" disabled={busy() || loading() || !draft().trim()}>{t('memory.save')}</button>
+                    <button type="button" class="btn ghost" disabled={busy() || loading()} onClick={() => setEditing(undefined)}>{t('memory.cancel')}</button>
                   </div>
                 </form>
               </Show>}

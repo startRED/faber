@@ -6,6 +6,7 @@ import { animateList, keepForExit } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
 import { helpersAtWork } from './worklog.ts';
 import { StopAsk } from './Composer.tsx';
+import { stopping as stopped, stopRun } from './stopping.ts';
 
 /** Whether the reply waits for quota: the card under the answer then says so, and nothing else on the screen repeats it. */
 export const quotaPending = (m: Message): boolean =>
@@ -22,6 +23,7 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
   const vendor = () => props.m.vendor;
   const account = () => props.usage.find((u) => u.vendor === vendor());
   const pending = () => quotaPending(props.m);
+  const stop = () => void stopRun(props.id).catch((e) => setError(fromEngine(String(e))));
   const run = async (request: () => Promise<void>) => {
     if (sending()) return;
     setSending(true); setError(undefined);
@@ -48,8 +50,8 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
         </Show>
       </Show>
       <Show when={pending()}>
-        <Show when={stopping() && helpers()} fallback={<button ref={(el) => (stopButton = el)} class="btn secondary" onClick={() => (helpers() ? setStopping(true) : void api.interrupt(props.id))}>{t('composer.stop')}</button>}>
-          <StopAsk helpers={helpers()} onStop={() => void api.interrupt(props.id)} onKeep={() => setStopping(false)} back={() => stopButton} />
+        <Show when={stopping() && helpers()} fallback={<button ref={(el) => (stopButton = el)} class="btn secondary" disabled={stopped(props.id)} onClick={() => (helpers() ? setStopping(true) : stop())}>{t(stopped(props.id) ? 'commands.stopping' : 'composer.stop')}</button>}>
+          <StopAsk helpers={helpers()} onStop={stop} onKeep={() => setStopping(false)} back={() => stopButton} />
         </Show>
       </Show>
       <Show when={error()}><p class="err">{error()}</p></Show>

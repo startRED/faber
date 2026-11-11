@@ -51,28 +51,38 @@ function GoalList(props: { projectId: string }) {
     setView(next);
     if (!next.checks.includes(check())) setCheck(next.checks[0] ?? '');
   };
-  const run = async (work: () => Promise<GoalsView>) => {
-    if (busy()) return false;
-    setBusy(true); setError('');
+  // A change with a `patch` shows at once on the list held now and goes back to it when the engine refuses; only a read (no
+  // patch) locks the fold, and the list is never blanked.
+  const run = async (work: () => Promise<GoalsView>, patch?: (v: GoalsView) => GoalsView) => {
+    const before = view();
+    if (!patch && busy()) return false;
+    if (patch && before) setView(patch(before)); else setBusy(true);
+    setError('');
     try {
       const next = await work();
       if (alive) take(next);
       return true;
     } catch (err) {
-      if (alive) setError(fromEngine(errorText(err)));
+      if (alive) { if (patch && before) setView(before); setError(fromEngine(errorText(err))); }
       return false;
-    } finally { if (alive) setBusy(false); }
+    } finally { if (alive && !patch) setBusy(false); }
   };
   onMount(() => void run(() => api.projectGoals(props.projectId)));
 
   const add = async (event: Event) => {
     event.preventDefault();
     if (!words().trim() || !check()) return;
-    if (await run(() => api.projectGoalAdd(props.projectId, words(), check()))) setWords('');
+    const typed = words();
+    const row: GoalRow = { id: `pending-${Date.now()}`, words: typed.trim(), check: check(), state: 'checking' };
+    setWords('');
+    if (!await run(() => api.projectGoalAdd(props.projectId, typed, row.check), (v) => ({ ...v, goals: [...v.goals, row] })) && !words()) setWords(typed);
   };
   const addCrashes = async () => {
     if (!words().trim()) return;
-    if (await run(() => api.projectGoalAddCrashes(props.projectId, words()))) setWords('');
+    const typed = words();
+    const row: GoalRow = { id: `pending-${Date.now()}`, words: typed.trim(), check: '', crashes: true, state: 'checking' };
+    setWords('');
+    if (!await run(() => api.projectGoalAddCrashes(props.projectId, typed), (v) => ({ ...v, goals: [...v.goals, row] })) && !words()) setWords(typed);
   };
   const remove = (goal: GoalRow) => {
     if (confirm() !== goal.id) {
@@ -82,7 +92,7 @@ function GoalList(props: { projectId: string }) {
     }
     if (needsRelease || performance.now() - armedAt < SAME_GESTURE) return;
     setConfirm(undefined);
-    void run(() => api.projectGoalRemove(props.projectId, goal.id));
+    void run(() => api.projectGoalRemove(props.projectId, goal.id), (v) => ({ ...v, goals: v.goals.filter((g) => g.id !== goal.id) }));
   };
   const when = (goal: GoalRow) => (goal.lastRun === undefined ? t('goals.never') : t('goals.checked', { when: checked(goal.lastRun) }));
 
@@ -109,7 +119,7 @@ function GoalList(props: { projectId: string }) {
                   <Show when={goal.state === 'needsYou' && goal.reason}><p class="hint" role="status">{fromEngine(goal.reason)}</p></Show>
                   <div class="memory-actions">
                     <Show when={goal.state === 'needsYou' || goal.state === 'paused'}>
-                      <button type="button" class="btn ghost" disabled={busy()} onClick={() => void run(() => api.projectGoalResume(props.projectId, goal.id))}>{t('goals.resume')}</button>
+                      <button type="button" class="btn ghost" disabled={busy()} onClick={() => void run(() => api.projectGoalResume(props.projectId, goal.id), (v) => ({ ...v, goals: v.goals.map((g) => g.id === goal.id ? { ...g, state: 'checking', reason: undefined } : g) }))}>{t('goals.resume')}</button>
                     </Show>
                     <button type="button" class="btn ghost danger" disabled={busy()}
                       onKeyDown={(event) => {

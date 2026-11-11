@@ -4,6 +4,7 @@ import { createStore, reconcile } from 'solid-js/store';
 import { UpdateLine } from './UpdateStage.tsx';
 import { api, type Area, type ChatGroup, type Conversation, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { windowHidden } from './appearance.ts';
+import * as opt from './optimistic.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { StateGlyph, stateKind } from './icons/kinds.tsx';
@@ -123,6 +124,8 @@ interface Props {
   onSettings: (section?: 'usage', from?: HTMLElement) => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
   onError?: (err: unknown) => void;
+  /** Runs a row action with its change shown first (ui/optimistic.ts); without it the action just runs and the list follows. */
+  onMutate?: <T>(patch: opt.Patch, call: () => Promise<T>, until?: 'read' | 'answer') => Promise<T>;
   /** The person skipped the account cards and one AI is still not connected: a quiet line offers it until the cards close. */
   remindConnect?: boolean;
   onConnect?: () => void;
@@ -208,6 +211,7 @@ export function Sidebar(props: Props) {
       }
     });
   });
+  const mutate = <T,>(patch: opt.Patch, call: () => Promise<T>, until?: 'read' | 'answer') => props.onMutate ? props.onMutate(patch, call, until) : call();
   const changed = () => props.onGroupsChanged?.();
   const changeGroup = (job: Promise<unknown>) => void job.then(changed, (err) => props.onError?.(err));
   // Titles filter immediately; message text is searched after a short pause.
@@ -343,18 +347,18 @@ export function Sidebar(props: Props) {
           ...(!row.c.archived ? [{
             key: 'p', id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
             label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
-            run: () => void api.pin(row.c.id, row.c.pinnedAt === undefined).catch((err) => props.onError?.(err)),
+            run: () => void mutate(opt.pinned(row.c.id, row.c.pinnedAt === undefined), () => api.pin(row.c.id, row.c.pinnedAt === undefined)).catch((err) => props.onError?.(err)),
           }] : []),
           { id: 'export', key: 'e', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
           ...(row.c.area === 'chat' ? [
             { id: 'move-group', key: 'g', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
-            ...(membership(row.c.id) ? [{ id: 'ungroup', key: 'u', label: t('menu.removeFromGroup'), run: () => changeGroup(api.moveChatToGroup(row.c.id)) }] : []),
+            ...(membership(row.c.id) ? [{ id: 'ungroup', key: 'u', label: t('menu.removeFromGroup'), run: () => changeGroup(mutate(opt.movedToGroup(row.c.id), () => api.moveChatToGroup(row.c.id))) }] : []),
           ] : []),
           ...(row.c.area === 'chat' && !row.c.archived && props.projects.length ? [{
             id: 'move', key: 'm', label: t('menu.moveToProject'),
             run: () => openMenu(e, props.projects.map((p) => ({
               id: p.id, label: p.name,
-              run: () => void api.moveToProject(row.c.id, p.id).then((c) => {
+              run: () => void mutate(opt.movedToProject(row.c.id, p.id), () => api.moveToProject(row.c.id, p.id)).then((c) => {
                 setQuery('');
                 toggle(p.id, true);
                 props.onMoved?.(c);
@@ -362,8 +366,8 @@ export function Sidebar(props: Props) {
             })), rowEl?.querySelector('.item') ?? null),
           }] : []),
           row.c.archived
-            ? { id: 'unarchive', key: 'a', label: t('menu.unarchive'), run: () => void api.archive(row.c.id, false).catch((err) => props.onError?.(err)) }
-            : { id: 'archive', key: 'a', label: t('menu.archive'), run: () => void api.archive(row.c.id, true).catch((err) => props.onError?.(err)) },
+            ? { id: 'unarchive', key: 'a', label: t('menu.unarchive'), run: () => void mutate(opt.archived(row.c.id, false), () => api.archive(row.c.id, false)).catch((err) => props.onError?.(err)) }
+            : { id: 'archive', key: 'a', label: t('menu.archive'), run: () => void mutate(opt.archived(row.c.id, true), () => api.archive(row.c.id, true)).catch((err) => props.onError?.(err)) },
           { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
         ])
       }
@@ -378,7 +382,7 @@ export function Sidebar(props: Props) {
           setMoving(undefined);
           if (id) {
             toggle(id, true);
-            void api.moveChatToGroup(row.c.id, id).then(changed, (err) => {
+            void mutate(opt.movedToGroup(row.c.id, id), () => api.moveChatToGroup(row.c.id, id)).then(changed, (err) => {
               if (moveFocus() === pending) setMoveFocus(undefined);
               props.onError?.(err);
             });
@@ -395,7 +399,7 @@ export function Sidebar(props: Props) {
             title={row.c.title}
             onDone={(title) => {
               setRenaming(undefined);
-              if (title?.trim() && title.trim() !== row.c.title) void api.rename(row.c.id, title).catch((err) => props.onError?.(err));
+              if (title?.trim() && title.trim() !== row.c.title) void mutate(opt.renamed(row.c.id, title), () => api.rename(row.c.id, title)).catch((err) => props.onError?.(err));
             }}
           />
         }
@@ -534,7 +538,7 @@ export function Sidebar(props: Props) {
                             : [
                                 { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
                                 { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
-                                { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
+                                { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void mutate(opt.withoutProject(p.id), () => api.removeProject(p.id)).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
                               ],
                         )
                       }
@@ -608,7 +612,7 @@ export function Sidebar(props: Props) {
             <div class="group-h"><span id="side-chat-groups" classList={{ sr: groups().length === 0 }}>{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
             <Show when={newGroup()}><RenameBox title="" onDone={(name) => {
               setNewGroup(false);
-              if (name?.trim()) void api.createChatGroup(name).then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));
+              if (name?.trim()) void mutate(opt.withGroup({ id: `pending-${Date.now()}`, name: name.trim(), instructions: '', files: [], conversationIds: [] }), () => api.createChatGroup(name), 'answer').then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));
             }} /></Show>
             <For each={groups().filter((g) => !searching() || matches(g.name, query()))}>{(g) => {
               const here = () => props.place.groupId === g.id || !!props.place.id && g.conversationIds.includes(props.place.id);
@@ -619,9 +623,9 @@ export function Sidebar(props: Props) {
               return <div class="proj" data-chat-group-id={g.id}>
                 <div class="prow" onContextMenu={(e) => openMenu(e, [
                   { id: 'rename', key: 'r', label: t('menu.rename'), run: () => setRenaming(g.id) },
-                  { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(api.removeChatGroup(g.id)) },
+                  { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(mutate(opt.withoutGroup(g.id), () => api.removeChatGroup(g.id))) },
                 ])}>
-                  <Show when={renaming() !== g.id} fallback={<RenameBox title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(api.saveChatGroup(g.id, name)); }} />}>
+                  <Show when={renaming() !== g.id} fallback={<RenameBox title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(mutate(opt.groupNamed(g.id, name), () => api.saveChatGroup(g.id, name))); }} />}>
                     <button class="item" aria-current={here() ? 'location' : undefined} aria-expanded={expanded()} onClick={() => { toggle(g.id, !(props.place.groupId === g.id && expanded())); props.onGroup?.(g.id); }}><Icon name="folder" small /><span class="t">{g.name}</span></button>
                   </Show>
                   <button class="plus" aria-label={t('group.newIn', { name: g.name })} title={t('group.newIn', { name: g.name })} onClick={() => { toggle(g.id, true); props.onNewGroupChat?.(g.id); }}><Icon name="plus" small /></button>

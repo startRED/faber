@@ -44,6 +44,7 @@ import './changes.check.ts';
 import './answer-changes.check.ts';
 import './project-memory.check.ts';
 import './goals.check.ts';
+import './optimistic.check.ts';
 import './visual-answers.check.ts';
 import './visual-pieces.check.ts';
 import './commands.check.ts';

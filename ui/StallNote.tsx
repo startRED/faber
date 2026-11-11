@@ -1,6 +1,7 @@
 import { createSignal, Show } from 'solid-js';
-import { api, type Message, type Stall } from './api.ts';
-import { t } from './i18n.ts';
+import type { Message, Stall } from './api.ts';
+import { fromEngine, t } from './i18n.ts';
+import { stopping as stopped, stopRun } from './stopping.ts';
 import { StopAsk } from './Composer.tsx';
 import { helpersAtWork } from './worklog.ts';
 
@@ -13,7 +14,8 @@ export function StallNote(props: { conversationId: string; m: Message }) {
   const [stopping, setStopping] = createSignal(false);
   let stopButton: HTMLButtonElement | undefined;
   const helpers = () => helpersAtWork([props.m]);
-  const stop = () => void api.interrupt(props.conversationId);
+  const [error, setError] = createSignal<string>();
+  const stop = () => void stopRun(props.conversationId).catch((e) => setError(fromEngine(String(e))));
   return (
     <Show when={props.m.stall}>
       {(stall) => (
@@ -22,13 +24,14 @@ export function StallNote(props: { conversationId: string; m: Message }) {
           <Show
             when={stopping() && helpers()}
             fallback={
-              <button ref={(el) => (stopButton = el)} type="button" class="btn" onClick={() => (helpers() ? setStopping(true) : stop())}>
-                {t('composer.stop')}
+              <button ref={(el) => (stopButton = el)} type="button" class="btn" disabled={stopped(props.conversationId)} onClick={() => (helpers() ? setStopping(true) : stop())}>
+                {t(stopped(props.conversationId) ? 'commands.stopping' : 'composer.stop')}
               </button>
             }
           >
             <StopAsk helpers={helpers()} onStop={stop} onKeep={() => setStopping(false)} back={() => stopButton} />
           </Show>
+          <Show when={error()}><span class="agent-why" role="alert">{error()}</span></Show>
         </div>
       )}
     </Show>

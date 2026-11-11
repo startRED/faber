@@ -68,6 +68,8 @@ import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from
 import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
+import { stopping, stopRun } from './stopping.ts';
+import { archived as archivedPatch, optimistic, withoutConversation, withoutProject } from './optimistic.ts';
 import { ToEnd } from './Floating.tsx';
 import { followTail, readingPoint, readingWindow, restoreReading, savedReading, type Reading } from './reading.ts';
 import { Thread } from './Thread.tsx';
@@ -442,7 +444,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
       store.offer(s.running);
       setState((current) => {
-        const next = refreshed(current, s);
+        const next = refreshed(current, mutate.reapply(s));
         // A row that did not change stays the same object, so the sidebar keeps its node.
         return {
           ...next,
@@ -454,6 +456,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       });
     });
   };
+  // Row actions show on the sidebar at once and are undone when the engine refuses (ui/optimistic.ts).
+  const mutate = optimistic(state, setState, refresh);
   const groupPage = () => area() === 'chat' && !place().id ? state().groups?.find((g) => g.id === place().groupId) : undefined;
   const groupForChat = () => state().groups?.find((g) => g.conversationIds.includes(place().id ?? ''));
   let groupReady: { id: string; wait: () => Promise<boolean> } | undefined;
@@ -1515,10 +1519,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const removeProjectFromFaber = async (id: string) => {
     try {
-      await api.removeProject(id);
+      await mutate.run(withoutProject(id), () => api.removeProject(id));
       forgetProject(id);
       if (projectId() === id) void fresh({ area: 'project', projectId: undefined });
-      await refresh();
     } catch (err) {
       fail(err);
     }
@@ -1544,7 +1547,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else and the person must say so first. */
   const remove = async (id: string, discard = false): Promise<'unsaved' | undefined> => {
     try {
-      await api.remove(id, discard);
+      await mutate.run(withoutConversation(id), () => api.remove(id, discard));
     } catch (err) {
       if (errorText(err) === 'error.copy.unsaved') return 'unsaved';
       setSaveError(failureText(err));
@@ -1596,7 +1599,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const archived = () => !!place().id && state().conversations.some((s) => s.id === place().id && s.archived);
   const unarchive = () => {
     const id = place().id;
-    if (id) void api.archive(id, false).then(() => refresh(), (err) => setSaveError(failureText(err)));
+    if (id) void mutate.run(archivedPatch(id, false), () => api.archive(id, false)).catch((err) => setSaveError(failureText(err)));
   };
   // With no AI, Projects says what Chat says ("No AI connected") instead of offering a folder nothing could work in.
   const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;
@@ -1667,7 +1670,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         about={helperTarget()?.conversationId === current()?.id ? helperTarget()?.name : undefined}
         onDropAbout={dropHelperTarget}
         onSend={(d) => void send(d)}
-        onStop={() => current() && void api.interrupt(current()!.id)}
+        stopping={stopping(current()?.id)}
+        onStop={() => current() && void stopRun(current()!.id).catch((err) => setSaveError(failureText(err)))}
         keepGoing={keepGoing()}
         onKeepGoing={(on) => {
           // Turning it on while the quota is poor asks first (the chip again closes the question); off never asks.
@@ -1979,6 +1983,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onGroup={(groupId) => { closeSide(false); void go({ area: 'chat', groupId }); }}
                 onNewGroupChat={(id) => { closeSide(false); void newGroupChat(id).catch(fail); }}
                 onGroupsChanged={() => void refresh()}
+                onMutate={mutate.run}
                 projects={state().projects}
                 vendors={state().vendors}
                 version={state().version}

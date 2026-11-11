@@ -8,14 +8,27 @@ import { keepForExit } from './motion.ts';
 
 export type Option<T> = [T, string];
 
+/** The choice a control shows while its save runs: the pick at once, then what was saved (the pick, or the old value again
+ * when the save failed) once the save has answered. */
+function leading<T>(value: () => T, save: (v: T) => unknown): [() => T, (v: T) => void] {
+  const [picked, setPicked] = createSignal<{ v: T }>();
+  return [() => picked()?.v ?? value(), (v) => {
+    const mine = { v };
+    setPicked(mine);
+    const done = () => { if (picked() === mine) setPicked(undefined); };
+    void Promise.resolve(save(v)).then(done, done);
+  }];
+}
+
 /** Choices that exclude each other. The one that is on says so with `aria-pressed`. With `bare` it is only the buttons,
  * for a row that already carries the name; otherwise the name sits above them. */
-export function Segmented<T extends string | number>(props: { id: string; label: string; value: T | undefined; options: Option<T>[]; onPick: (v: T) => void; bare?: boolean }) {
+export function Segmented<T extends string | number>(props: { id: string; label: string; value: T | undefined; options: Option<T>[]; onPick: (v: T) => unknown; bare?: boolean }) {
+  const [shown, pick] = leading<T | undefined>(() => props.value, (v) => props.onPick(v as T));
   // A saved snapshot can rebuild the option tuples without changing the focused choice.
   const buttons = (
     <For each={props.options.map(([value]) => value)}>
       {(v, index) => (
-        <button type="button" aria-pressed={v === props.value} onClick={() => props.onPick(v)}>
+        <button type="button" aria-pressed={v === shown()} onClick={() => pick(v)}>
           {props.options[index()]?.[1]}
         </button>
       )}
@@ -163,7 +176,8 @@ export function Fold(props: { id: string; title: string; hint?: string; children
 
 /** A select whose open menu shows each choice with its own line. Focus stays on the button (a select-only combobox); the
  * arrows move, Enter or Space picks, and Esc closes the menu without leaving Settings. */
-export function PickMenu<T extends string>(props: { id: string; label: string; value: T; options: [T, string, string][]; onPick: (v: T) => void; disabled?: boolean; compact?: boolean }) {
+export function PickMenu<T extends string>(props: { id: string; label: string; value: T; options: [T, string, string][]; onPick: (v: T) => unknown; disabled?: boolean; compact?: boolean }) {
+  const [chosen, save] = leading(() => props.value, (v) => props.onPick(v));
   const [open, setOpen] = createSignal(false);
   const [active, setActive] = createSignal(0);
   // The menu stays in the page for its short exit, and only in full motion.
@@ -171,7 +185,7 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
   let root: HTMLDivElement | undefined;
   let button: HTMLButtonElement | undefined;
   let menu: HTMLDivElement | undefined;
-  const at = () => Math.max(0, props.options.findIndex(([v]) => v === props.value));
+  const at = () => Math.max(0, props.options.findIndex(([v]) => v === chosen()));
   const name = () => props.options[at()]?.[1] ?? '';
   const show = () => {
     if (props.disabled) return;
@@ -185,7 +199,7 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
   const pick = (index: number) => {
     if (props.disabled) return;
     const choice = props.options[index];
-    if (choice) props.onPick(choice[0]);
+    if (choice) save(choice[0]);
     hide();
   };
   const move = (step: number) => setActive((i) => Math.min(props.options.length - 1, Math.max(0, i + step)));
@@ -253,14 +267,14 @@ export function PickMenu<T extends string>(props: { id: string; label: string; v
                 class="st-menu-opt"
                 id={`${props.id}-opt-${i()}`}
                 role="option"
-                aria-selected={v === props.value}
+                aria-selected={v === chosen()}
                 classList={{ active: i() === active() }}
                 onPointerEnter={() => setActive(i())}
                 onClick={() => pick(i())}
               >
                 <b>{text}</b>
                 <small>{line}</small>
-                <Show when={v === props.value}>
+                <Show when={v === chosen()}>
                   <Icon name="check" small />
                 </Show>
               </div>

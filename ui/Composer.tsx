@@ -47,6 +47,8 @@ interface Props {
   about?: string;
   onDropAbout?: () => void;
   onStop: () => void;
+  /** Stop was pressed and the engine has not answered yet. */
+  stopping?: boolean;
   onWarm: () => void;
   /** The user stopped typing for a moment: Auto routes the draft before it is sent. */
   onPause: (text: string) => void;
@@ -870,11 +872,11 @@ export function Composer(props: Props) {
           }} onKeep={() => setStopping(false)} back={() => (stopButton?.isConnected ? stopButton : field)} />
         </Show>
         <Show when={props.busy && !stopping()}>
-          <button ref={(el) => (stopButton = el)} type="button" class="send stop" onClick={() => (props.helpers ? setStopping(true) : props.onStop())} aria-label={t('composer.stop')}>
+          <button ref={(el) => (stopButton = el)} type="button" class="send stop" disabled={props.stopping} onClick={() => (props.helpers ? setStopping(true) : props.onStop())} aria-label={t(props.stopping ? 'commands.stopping' : 'composer.stop')}>
             <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
               <rect width="12" height="12" x="6" y="6" rx="2" />
             </svg>
-            <span aria-hidden="true">{t('composer.stop')}</span>
+            <span aria-hidden="true">{t(props.stopping ? 'commands.stopping' : 'composer.stop')}</span>
           </button>
         </Show>
         <Show when={!props.busy || hasContent()}>
