@@ -505,6 +505,10 @@ pub struct Message {
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudge: Option<crate::nudge::Nudge>,
+    /// Code changed in this reply and nothing checked it: the screen offers to ask the same model to check its work,
+    /// before any rung (`nudge::Offer::SelfCheck`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub self_check: bool,
     /// A reply that went from red to green, marked for the offer to look for the same mistake elsewhere (see `look`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look: Option<crate::look::Look>,
@@ -1110,6 +1114,7 @@ impl Message {
             native_point: None,
             recovery: None,
             nudge: None,
+            self_check: false,
             look: None,
             follow: None,
             wake: None,

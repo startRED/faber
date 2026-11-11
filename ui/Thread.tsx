@@ -165,14 +165,17 @@ function hideStop(text: string, streaming: boolean): string {
   return bare.length > 1 && STOP.startsWith(bare) ? out.slice(0, out.length - last.length) + blank(last) : out;
 }
 
-// The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
-/** Look around: starts the box with the request (and the places Faber found, when it found some), a blank line apart
- * from a draft already there, and only once. */
-function lookAround(look: NonNullable<Message['look']>) {
-  const places = look.places ?? [];
-  const ask = places.length ? `${t('look.ask')} ${t('look.askPlaces', { places: places.join(', ') })}` : t('look.ask');
+/** Starts the box with a request Faber wrote, a blank line apart from a draft already there, and only once. The person
+ * reads it and sends it. */
+function startWith(ask: string) {
   const draft = document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value ?? '';
   startMessage(draft.startsWith(ask) || !draft.trim() ? ask : `${ask}\n\n`);
+}
+
+/** Look around: the request, and the places Faber found when it found some. */
+function lookAround(look: NonNullable<Message['look']>) {
+  const places = look.places ?? [];
+  startWith(places.length ? `${t('look.ask')} ${t('look.askPlaces', { places: places.join(', ') })}` : t('look.ask'));
 }
 
 /** Why "Look around" is offered and what it does, with how many places Faber found. */
@@ -182,6 +185,7 @@ function lookTitle(look: NonNullable<Message['look']>): string {
   return look.reason === 'look.fixed' && n ? `${why} ${t('look.found', { n })}` : why;
 }
 
+// The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
 function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
   const entry = options.find((o) => o.choice.vendor === nudge.vendor && (o.choice.model === nudge.model || o.choice.model === nudge.model.split('-')[1]));
   return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
@@ -897,6 +901,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           <button type="button" class="iconbtn" title={t('answer.terminalHint')} aria-label={t('answer.terminal')} onClick={() => void api.openTerminal(props.conversationId)}>
             <Icon name="terminal" small />
           </button>
+          {/* Code nothing checked: the model that wrote it is asked to check it before anything runs again on a stronger
+              one. Like "Look around", it only starts the box, and only under the newest answer. */}
+          <Show when={props.last && props.onReply && m().selfCheck}>
+            <button type="button" class="nudge" title={t('nudge.selfCheck')} onClick={() => startWith(t('nudge.selfCheck.ask'))}>
+              {t('answer.check')}
+            </button>
+          </Show>
           <Show when={props.prompt && m().nudge} keyed>
             {(nudge) => (
               <button

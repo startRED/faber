@@ -2199,4 +2199,48 @@ pub(super) mod tests {
         engine.with(|c| c.handle(&id, 1, EngineEvent::MainIdle));
         assert_eq!(handed(&engine, &id), (1, vec![true]), "with only helpers at work it goes in at once");
     }
+
+    /// The makers' order under an answer whose code nothing checked: first the same model is asked to check it, and
+    /// only an answer still unchecked right after that offer names a stronger rung. The first offer is kept apart from
+    /// the rung, so nothing that reads a rung takes it for one.
+    #[tokio::test]
+    async fn unchecked_code_first_offers_the_self_check_and_the_answer_after_it_a_stronger_rung() {
+        let offered = |asked_before: bool| {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = engine(&dir);
+            let id = seed(&engine, Session::from_fn(|_| {}), &[("before", &[]), ("now", &[])]);
+            engine.with(|c| {
+                c.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+                let conv = c.convs.get_mut(&id).unwrap();
+                conv.area = Area::Project;
+                for reply in conv.messages.iter_mut().filter(|m| m.role == Role::Assistant) {
+                    (reply.model, reply.effort) = (Some("claude-sonnet-5-5".into()), Some("medium".into()));
+                    let edit = json!({ "id": "edit", "name": "Edit", "input": { "file_path": "src/a.rs" }, "ok": true });
+                    reply.tools = Some(vec![serde_json::from_value(edit).unwrap()]);
+                }
+                conv.messages[1].self_check = asked_before;
+                c.handle(
+                    &id,
+                    1,
+                    EngineEvent::Done {
+                        ok: true,
+                        reason: String::new(),
+                        cost_total_usd: Some(0.01),
+                        input_tokens: 10,
+                        output_tokens: 2,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                        cache_write_1h_tokens: 0,
+                        incomplete: false,
+                    },
+                );
+                let now = c.convs[&id].messages.iter().find(|m| m.id == "now").unwrap();
+                let saved = serde_json::to_value(now).unwrap();
+                (now.self_check, saved["selfCheck"].clone(), now.nudge.clone().map(|n| (n.reason, n.model, n.effort)))
+            })
+        };
+        assert_eq!(offered(false), (true, json!(true), None));
+        let rung = ("nudge.noCheck".to_string(), "claude-sonnet-5-5".to_string(), "high".to_string());
+        assert_eq!(offered(true), (false, serde_json::Value::Null, Some(rung)));
+    }
 }

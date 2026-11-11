@@ -3587,6 +3587,15 @@ impl Core {
                         .iter()
                         .any(|m| Some(&m.id) != turn_id.as_ref() && m.nudge.as_ref().is_some_and(|n| n.reason == "nudge.modelBar"))
                 });
+                // The answer before this one, if it offered the self-check: one still unchecked then offers the stronger rung.
+                let check_asked = self.convs.get(conv).is_some_and(|c| {
+                    c.messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == Role::Assistant && Some(&m.id) != turn_id.as_ref())
+                        .is_some_and(|m| m.self_check)
+                });
+                let before = nudge::Before { self_check: check_asked, model_bar: model_bar_offered };
                 let mut looked = None;
                 let mut offered = None;
                 if let Some(m) = self.turn(conv) {
@@ -3618,7 +3627,11 @@ impl Core {
                     } else {
                         m.permissions = None;
                     }
-                    m.nudge = nudge::of(m, area, &can_run).filter(|n| n.reason != "nudge.modelBar" || !model_bar_offered);
+                    (m.nudge, m.self_check) = match nudge::of(m, area, &can_run, before) {
+                        Some(nudge::Offer::Rung(rung)) => (Some(rung), false),
+                        Some(nudge::Offer::SelfCheck) => (None, true),
+                        None => (None, false),
+                    };
                     m.look = crate::look::of(m);
                     looked = ok.then(|| m.id.clone());
                     offered = m.look.as_ref().map(|l| l.reason.clone());

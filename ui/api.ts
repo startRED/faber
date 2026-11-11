@@ -224,6 +224,8 @@ export interface Message {
   movedFromModel?: string;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
+  /** Code changed in this reply and nothing checked it: the offer to ask the same model to check its work, before any rung. */
+  selfCheck?: boolean;
   /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine/src/look.rs`). */
   look?: { reason: string; places?: string[] };
   /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */

@@ -1,7 +1,9 @@
 //! One step up when the work shows it. A model that stops early looks like a turn that ended without checking itself, so
-//! two signs in the turn's own tools offer the next rung: the last check failed, or code changed and nothing checked it.
-//! The offer is one step at a time (more effort first below high, then the cheaper sufficient improvement) and
-//! the person decides. Pure functions over a finished message; the engine feeds them.
+//! two signs in the turn's own tools make an offer. Code that changed with nothing checking it first offers the cheapest
+//! step, the one the makers name first: the same model checks its own work. The next rung is offered when the last check
+//! failed, or when the answer after that offer is still unchecked. A rung is one step at a time (more effort first below
+//! high, then the cheaper sufficient improvement) and the person decides. Pure functions over a finished message; the
+//! engine feeds them.
 
 use crate::model::{Area, Message, Status, ToolUse, Vendor};
 use crate::route::{PROFILES, Profile};
@@ -17,6 +19,25 @@ pub struct Nudge {
     pub vendor: Vendor,
     pub model: String,
     pub effort: String,
+}
+
+/// What a finished answer offers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Offer {
+    /// Code changed and nothing checked it: the model that wrote it is asked to check it. Nothing runs again, so this
+    /// is kept apart from the rung (`Message::self_check`), and a build that knows only rungs offers nothing.
+    SelfCheck,
+    /// Run the request again one rung up.
+    Rung(Nudge),
+}
+
+/// What the conversation already offered, so the same step is not offered twice.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Before {
+    /// The answer just before this one offered the self-check: one still unchecked offers the rung instead.
+    pub self_check: bool,
+    /// An earlier answer offered the stronger model Auto would use; that offer is made once.
+    pub model_bar: bool,
 }
 
 const EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
@@ -265,32 +286,38 @@ pub(crate) fn is_source(path: &str) -> bool {
     path.rsplit_once('.').is_some_and(|(_, ext)| SOURCE.iter().any(|s| ext.eq_ignore_ascii_case(s)))
 }
 
-/// What a finished turn offers, if anything. Only a turn that ended done, on a model the table knows, with a rung above that
-/// `allowed` (the profiles the account can run) holds.
-pub fn of(m: &Message, area: Area, allowed: &[Profile]) -> Option<Nudge> {
+/// Whether a call checked the work, and how it ended: a command this reader knows, or Faber's own verify when it ran its
+/// checks. A declined check never ran, so it neither failed nor verified anything.
+fn checked(tool: &ToolUse) -> Option<bool> {
+    if is_check(tool) { (!tool.declined).then_some(tool.ok != Some(false)) } else { crate::verify::judged(tool) }
+}
+
+/// What a finished turn offers, if anything, and only when it ended done. A rung needs a model the table knows with a
+/// rung above that `allowed` (the profiles the account can run) holds; the self-check needs neither.
+pub fn of(m: &Message, area: Area, allowed: &[Profile], before: Before) -> Option<Offer> {
     if m.status != Some(Status::Done) {
         return None;
     }
-    let now = Pick { vendor: m.vendor?, model: m.model.clone(), effort: m.effort.clone()?, reason: String::new(), pace: None };
-    let next = next_rung(&now, allowed)?;
     let tools = m.tools.as_deref().unwrap_or_default();
-    // A declined check never ran, so it neither failed nor verified anything.
-    let last_check = tools.iter().rposition(|t| is_check(t) && !t.declined);
-    let reason = if last_check.is_some_and(|i| tools[i].ok == Some(false)) {
+    let last_check = tools.iter().enumerate().rev().find_map(|(i, t)| checked(t).map(|passed| (i, passed)));
+    let reason = if last_check.is_some_and(|(_, passed)| !passed) {
         "nudge.failedCheck"
-    } else if m.moved_from.is_none() && m.acts.iter().any(|a| a.params.get("modelBar").is_some_and(|v| v == "unmet")) {
+    } else if !before.model_bar && m.moved_from.is_none() && m.acts.iter().any(|a| a.params.get("modelBar").is_some_and(|v| v == "unmet")) {
         "nudge.modelBar"
     } else if area == Area::Project {
         // A refused edit (ok = false) changed nothing; only the last edit to source decides.
         let last_edit = tools.iter().rposition(|t| t.ok != Some(false) && edited(t).into_iter().any(is_source));
         match last_edit {
-            Some(i) if last_check.is_none_or(|c| c < i) => "nudge.noCheck",
+            Some(i) if last_check.is_none_or(|(c, _)| c < i) && !before.self_check => return Some(Offer::SelfCheck),
+            Some(i) if last_check.is_none_or(|(c, _)| c < i) => "nudge.noCheck",
             _ => return None,
         }
     } else {
         return None;
     };
-    Some(Nudge { reason: reason.into(), vendor: next.vendor, model: next.model?, effort: next.effort })
+    let now = Pick { vendor: m.vendor?, model: m.model.clone(), effort: m.effort.clone()?, reason: String::new(), pace: None };
+    let next = next_rung(&now, allowed)?;
+    Some(Offer::Rung(Nudge { reason: reason.into(), vendor: next.vendor, model: next.model?, effort: next.effort }))
 }
 
 #[cfg(test)]
@@ -418,8 +445,41 @@ mod tests {
         m
     }
 
+    /// How the tests name the offer that is not a rung.
+    const SELF_CHECK: &str = "selfCheck";
+
+    /// The offer under `m`; `asked` says the answer before it already offered the self-check.
+    fn offer(m: &Message, area: Area, allowed: &[Profile], asked: bool) -> Option<Offer> {
+        of(m, area, allowed, Before { self_check: asked, model_bar: false })
+    }
+
+    /// The rung offered, for a test that expects one.
+    fn rung_under(m: &Message, area: Area, allowed: &[Profile], asked: bool) -> Nudge {
+        match offer(m, area, allowed, asked) {
+            Some(Offer::Rung(n)) => n,
+            other => panic!("a rung was expected, not {other:?}"),
+        }
+    }
+
+    fn named(offer: Option<Offer>) -> Option<String> {
+        offer.map(|o| match o {
+            Offer::SelfCheck => SELF_CHECK.to_string(),
+            Offer::Rung(n) => n.reason,
+        })
+    }
+
     fn why(m: &Message, area: Area) -> Option<String> {
-        of(m, area, &PROFILES).map(|n| n.reason)
+        named(offer(m, area, &PROFILES, false))
+    }
+
+    /// The offer on an answer that follows one which already offered the self-check.
+    fn why_after_the_ask(m: &Message, area: Area) -> Option<String> {
+        named(offer(m, area, &PROFILES, true))
+    }
+
+    /// Faber's own verify as an answer keeps it: its result and the text the agent read.
+    fn verify(ok: bool, text: &str) -> ToolUse {
+        ToolUse { output: Some(text.into()), ..tool(crate::verify::TOOL, json!({ "level": "fast" }), Some(ok)) }
     }
 
     #[test]
@@ -437,7 +497,7 @@ mod tests {
     #[test]
     fn a_last_check_that_failed_on_a_turn_that_ended_done_offers_the_next_rung() {
         let m = turn(vec![edit("src/a.rs"), bash("cd engine && cargo test --lib", false)]);
-        let n = of(&m, Area::Project, &PROFILES).unwrap();
+        let n = rung_under(&m, Area::Project, &PROFILES, false);
         assert_eq!(
             (n.reason.as_str(), n.vendor, n.model.as_str(), n.effort.as_str()),
             ("nudge.failedCheck", Vendor::Claude, "claude-sonnet-5-5", "high")
@@ -467,15 +527,81 @@ mod tests {
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6.1-sol".into());
         m.effort = Some("medium".into());
-        let n = of(&m, Area::Project, &PROFILES).unwrap();
+        let n = rung_under(&m, Area::Project, &PROFILES, false);
         assert_eq!((n.reason.as_str(), n.model.as_str(), n.effort.as_str()), ("nudge.failedCheck", "gpt-6.1-sol", "high"));
     }
 
     #[test]
-    fn code_edited_and_never_checked_offers_the_next_rung_in_a_project_only() {
+    fn code_edited_and_never_checked_asks_the_same_model_to_check_before_any_stronger_rung_in_a_project_only() {
         let m = turn(vec![edit("src/a.rs"), bash("git diff", true)]);
-        assert_eq!(why(&m, Area::Project).as_deref(), Some("nudge.noCheck"));
+        assert_eq!(offer(&m, Area::Project, &PROFILES, false), Some(Offer::SelfCheck), "the first offer runs nothing again");
+        let still = rung_under(&m, Area::Project, &PROFILES, true);
+        assert_eq!(
+            (still.reason.as_str(), still.model.as_str(), still.effort.as_str()),
+            ("nudge.noCheck", "claude-sonnet-5-5", "high"),
+            "an answer still unchecked after the ask offers one step up"
+        );
         assert_eq!(why(&m, Area::Chat), None, "chat never asks for a check");
+        assert_eq!(why_after_the_ask(&m, Area::Chat), None);
+    }
+
+    #[test]
+    fn the_self_check_needs_no_rung_above_and_no_model_the_table_knows() {
+        let mut top = turn(vec![edit("src/a.rs")]);
+        (top.model, top.effort) = (Some("claude-fable-5-2".into()), Some("high".into()));
+        assert_eq!(next_rung(&pick(Vendor::Claude, "claude-fable-5-2", "high"), &PROFILES), None);
+        assert_eq!(why(&top, Area::Project).as_deref(), Some(SELF_CHECK));
+        assert_eq!(why_after_the_ask(&top, Area::Project), None, "nothing stronger exists to offer");
+        let mut unknown = turn(vec![edit("src/a.rs")]);
+        (unknown.vendor, unknown.model, unknown.effort) = (None, None, None);
+        assert_eq!(offer(&unknown, Area::Project, &PROFILES, false), Some(Offer::SelfCheck));
+        assert_eq!(why_after_the_ask(&unknown, Area::Project), None);
+    }
+
+    #[test]
+    fn a_failed_check_and_a_model_below_the_bar_still_offer_the_rung_at_once() {
+        let failed = turn(vec![edit("src/a.rs"), bash("cargo test", false)]);
+        assert_eq!(why(&failed, Area::Project).as_deref(), Some("nudge.failedCheck"), "the model already checked itself");
+        assert_eq!(why_after_the_ask(&failed, Area::Project).as_deref(), Some("nudge.failedCheck"));
+        let mut below = turn(vec![edit("src/a.rs")]);
+        let mut act = crate::act::FaberAct::route(&pick(Vendor::Claude, "claude-sonnet-5-5", "medium"), crate::act::Actor::Faber);
+        act.params.insert("modelBar".into(), "unmet".into());
+        below.acts.push(act);
+        assert_eq!(why(&below, Area::Project).as_deref(), Some("nudge.modelBar"));
+        // The stronger model is offered once: after that, the unchecked code still gets its own offer.
+        let once = Before { self_check: false, model_bar: true };
+        assert_eq!(of(&below, Area::Project, &PROFILES, once), Some(Offer::SelfCheck));
+        assert_eq!(of(&below, Area::Chat, &PROFILES, once), None);
+        below.tools = Some(vec![]);
+        assert_eq!(of(&below, Area::Project, &PROFILES, once), None);
+    }
+
+    #[test]
+    fn fabers_own_verify_counts_as_a_check_only_when_it_ran_its_checks() {
+        let passed = "Faber ran the fast checks of this folder in 4 s: 2 passed.\n";
+        let failed = "Faber ran the fast checks of this folder in 4 s: 1 failed, 1 passed.\n\nFAILED npm test (3 s): 1 test failed\n";
+        assert_eq!(why(&turn(vec![edit("src/a.rs"), verify(true, passed)]), Area::Project), None);
+        assert_eq!(why(&turn(vec![verify(true, passed), edit("src/a.rs")]), Area::Project).as_deref(), Some(SELF_CHECK));
+        assert_eq!(why(&turn(vec![edit("src/a.rs"), verify(false, failed)]), Area::Project).as_deref(), Some("nudge.failedCheck"));
+        assert_eq!(why(&turn(vec![verify(false, failed), edit("src/a.rs"), verify(true, passed)]), Area::Project), None);
+        // A verify that ran nothing proves nothing: no checks declared, nothing changed, refused, stopped.
+        for (ok, text) in [
+            (false, "This project declares no checks. Faber reads the commands under a \"Proof commands\" heading."),
+            (true, "No file changed in this folder since its base, so the fast checks had nothing to check."),
+            (false, "No check ran: Faber's checks run only in full access."),
+            (false, "These checks were stopped: a newer verify of this folder started, or Faber is closing."),
+        ] {
+            let m = turn(vec![edit("src/a.rs"), verify(ok, text)]);
+            assert_eq!(why(&m, Area::Project).as_deref(), Some(SELF_CHECK), "{text}");
+            assert_eq!(why(&turn(vec![verify(ok, text)]), Area::Project), None, "{text}");
+        }
+        let declined = ToolUse { declined: true, ..verify(false, failed) };
+        assert_eq!(why(&turn(vec![declined]), Area::Project), None);
+        let unfinished = ToolUse { ok: None, output: None, ..verify(true, passed) };
+        assert_eq!(why(&turn(vec![edit("src/a.rs"), unfinished]), Area::Project).as_deref(), Some(SELF_CHECK));
+        // Another tool that happens to print the same words is not Faber's verify.
+        let other = ToolUse { output: Some(passed.into()), ..tool("Read", json!({ "file_path": "log.txt" }), Some(true)) };
+        assert_eq!(why(&turn(vec![edit("src/a.rs"), other]), Area::Project).as_deref(), Some(SELF_CHECK));
     }
 
     #[test]
@@ -483,7 +609,8 @@ mod tests {
         let m = turn(vec![edit("src/a.rs"), bash("cargo build", true)]);
         assert_eq!(why(&m, Area::Project), None);
         let m = turn(vec![bash("cargo build", true), edit("src/a.rs")]);
-        assert_eq!(why(&m, Area::Project).as_deref(), Some("nudge.noCheck"));
+        assert_eq!(why(&m, Area::Project).as_deref(), Some(SELF_CHECK));
+        assert_eq!(why_after_the_ask(&m, Area::Project).as_deref(), Some("nudge.noCheck"));
         // Notes written after the check are not code.
         let m = turn(vec![edit("src/a.rs"), bash("cargo build", true), edit("docs/notes.md")]);
         assert_eq!(why(&m, Area::Project), None);
@@ -505,22 +632,23 @@ mod tests {
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6.1-sol".into());
         m.effort = Some("low".into());
-        let n = of(&m, Area::Project, &PROFILES).unwrap();
+        assert_eq!(offer(&m, Area::Project, &PROFILES, false), Some(Offer::SelfCheck));
+        let n = rung_under(&m, Area::Project, &PROFILES, true);
         assert_eq!((n.reason.as_str(), n.effort.as_str()), ("nudge.noCheck", "medium"));
         let notes = tool("fileChange", json!([{ "path": "docs/a.md", "kind": "add" }]), Some(true));
         m.tools = Some(vec![notes]);
-        assert_eq!(of(&m, Area::Project, &PROFILES), None);
+        assert_eq!(offer(&m, Area::Project, &PROFILES, false), None);
     }
 
     #[test]
     fn a_stopped_turn_and_a_pick_with_no_rung_offer_nothing() {
         let mut m = turn(vec![bash("cargo test", false)]);
         m.status = Some(Status::Stopped);
-        assert_eq!(of(&m, Area::Project, &PROFILES), None);
+        assert_eq!(offer(&m, Area::Project, &PROFILES, false), None);
         let mut m = turn(vec![bash("cargo test", false)]);
         m.model = Some("claude-fable-5-2".into());
         m.effort = Some("high".into());
-        assert_eq!(of(&m, Area::Project, &PROFILES), None);
+        assert_eq!(offer(&m, Area::Project, &PROFILES, false), None);
     }
 
     #[test]
@@ -584,14 +712,14 @@ mod tests {
         let m = turn(vec![bash(r#"rg "cargo test" README.md"#, false)]);
         assert_eq!(why(&m, Area::Project), None);
         let m = turn(vec![edit("src/a.rs"), bash(r#"echo "cargo test""#, true)]);
-        assert_eq!(why(&m, Area::Project).as_deref(), Some("nudge.noCheck"));
+        assert_eq!(why(&m, Area::Project).as_deref(), Some(SELF_CHECK));
     }
 
     #[test]
     fn a_declined_check_never_ran_so_it_is_neither_a_failure_nor_a_verification() {
         let declined = || ToolUse { declined: true, ..bash("cargo test", false) };
         assert_eq!(why(&turn(vec![declined()]), Area::Project), None);
-        assert_eq!(why(&turn(vec![edit("src/a.rs"), declined()]), Area::Project).as_deref(), Some("nudge.noCheck"));
+        assert_eq!(why(&turn(vec![edit("src/a.rs"), declined()]), Area::Project).as_deref(), Some(SELF_CHECK));
         // A check that ran and failed before the declined one still counts.
         let m = turn(vec![bash("cargo test", false), declined()]);
         assert_eq!(why(&m, Area::Project).as_deref(), Some("nudge.failedCheck"));
@@ -607,8 +735,8 @@ mod tests {
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6-luna".into());
         m.effort = Some("high".into());
-        assert_eq!(of(&m, Area::Project, &luna), None);
-        assert!(of(&m, Area::Project, &PROFILES).is_some(), "the full table still offers Terra");
+        assert_eq!(offer(&m, Area::Project, &luna, false), None);
+        assert!(offer(&m, Area::Project, &PROFILES, false).is_some(), "the full table still offers Terra");
         // Without a connected Claude CLI, Haiku has no Sonnet to move to; effort steps stay on the same model.
         let sol = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string()]);
         assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6.1-sol", "low"), &sol).map(|p| p.effort), Some("medium".into()));

@@ -39,6 +39,17 @@ pub const TOOL: &str = "Verify";
 pub const NAME: &str = "verify";
 /// The tool as Claude Code names it: `mcp__<server>__<tool>`.
 pub const CLAUDE_NAME: &str = "mcp__faber__verify";
+/// How the text of a verify that ran its checks begins (`Outcome::text`), which is how a saved call is told from one
+/// that ran nothing.
+const RAN: &str = "Faber ran the ";
+
+/// What a finished verify call says about the work, read from the call an answer keeps: whether its checks passed, or
+/// None when none ran (no checks declared, nothing changed, refused, stopped) or the call was declined or never ended.
+pub(crate) fn judged(tool: &crate::model::ToolUse) -> Option<bool> {
+    let ran = tool.name == TOOL && !tool.declined && tool.output.as_deref().is_some_and(|text| text.starts_with(RAN));
+    tool.ok.filter(|_| ran)
+}
+
 /// How long one check may run before it is ended: a cold Cargo build of a large workspace fits.
 pub const DEADLINE: Duration = Duration::from_secs(15 * 60);
 
@@ -249,7 +260,7 @@ impl Outcome {
                 tally.push(format!("{n} {words}"));
             }
         }
-        let mut out = format!("Faber ran the {level} checks of this folder in {}: {}.\n", seconds(self.millis), tally.join(", "));
+        let mut out = format!("{RAN}{level} checks of this folder in {}: {}.\n", seconds(self.millis), tally.join(", "));
         for check in self.checks.iter().filter(|c| matches!(c.verdict, Verdict::Failed | Verdict::NotFinished)) {
             out.push_str(&format!("\nFAILED {} ({}): {}\n", check.command, seconds(check.millis), check.summary));
             for failure in &check.failures {

@@ -57,3 +57,57 @@ check('nudge: the step-up button shows only under an answer with a nudge, and re
     streaming.close();
   }
 });
+
+// The conversation's box lives outside the thread; a bare one stands in for it.
+function mountWithBox(messages: Message[], onBranch: (id: string, text: string, choice?: Choice) => void, onReply?: (text: string) => void) {
+  const root = document.createElement('div');
+  const composer = document.createElement('div');
+  composer.className = 'composer';
+  const box = document.createElement('textarea');
+  composer.append(box);
+  document.body.append(root, composer);
+  const dispose = render(() => createComponent(Thread, { messages, from: 0, conversationId: 'self-check', options: [], onBranch, onReply }), root);
+  return { root, box, close: () => { dispose(); root.remove(); composer.remove(); } };
+}
+
+check('nudge: code nothing checked first offers to ask the same model to check it, and only starts the box', async () => {
+  const labels = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.actions .nudge')].map((b) => b.textContent);
+  const sent: string[] = [];
+  const redone: string[] = [];
+
+  const offered = mountWithBox([question, answer({ selfCheck: true })], (id) => { redone.push(id); }, (text) => sent.push(text));
+  try {
+    const buttons = offered.root.querySelectorAll<HTMLButtonElement>('.actions .nudge');
+    deepEqual(labels(offered.root), [t('answer.check')], 'the stronger retry is not offered beside it');
+    equal(buttons[0]!.title, t('nudge.selfCheck'), 'the tooltip says why and what it does');
+    buttons[0]!.click();
+    equal(offered.box.value, t('nudge.selfCheck.ask'), 'the box holds the request');
+    buttons[0]!.click();
+    equal(offered.box.value, t('nudge.selfCheck.ask'), 'a second click does not write it twice');
+    deepEqual([sent, redone], [[], []], 'nothing is sent or run again until the person sends it');
+  } finally {
+    offered.close();
+  }
+
+  const older = mountWithBox([question, answer({ selfCheck: true }), { ...question, id: 'q2' }, answer({ id: 'b' })], () => {}, () => {});
+  try {
+    deepEqual(labels(older.root), [], 'only the newest answer offers it');
+  } finally {
+    older.close();
+  }
+
+  const readOnly = mountWithBox([question, answer({ selfCheck: true })], () => {});
+  try {
+    deepEqual(labels(readOnly.root), [], 'a conversation that takes no reply offers nothing');
+  } finally {
+    readOnly.close();
+  }
+
+  // The answer after the ask is still unchecked: the engine names a rung, and the stronger retry is back.
+  const still = mountWithBox([question, answer({ nudge: { reason: 'nudge.noCheck', vendor: 'claude', model: 'claude-opus-5-5', effort: 'medium' } })], () => {}, () => {});
+  try {
+    deepEqual(labels(still.root), [t('answer.nudge')]);
+  } finally {
+    still.close();
+  }
+});

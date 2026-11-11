@@ -87,8 +87,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
   check (done, `engine/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
-- An answer whose last check failed, or whose code changed with nothing checking it, offers one step up. Below high,
-  raise the same model one effort first. From high onward, compare that row (if present) with the next stronger model
+- Code that changed with nothing checking it first offers the makers' first step: the same model checks its own work
+  ("Check the work", R565; Faber's verify counts as a check). An answer whose last check failed, or one still unchecked
+  right after that offer, offers one step up. Below high, raise the same model one effort first. From high onward, compare that row (if present) with the next stronger model
   of the same vendor at its lowest effort that improves at least one score without lowering either. Offer the cheaper,
   then faster on a tie; only account-allowed rows qualify, ordered by measured scores. Sonnet high → Opus medium;
   Opus high → Fable medium; Opus xhigh → Fable high. It runs in a new branch (`engine/src/nudge.rs`).

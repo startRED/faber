@@ -21,6 +21,7 @@ impl Core {
             m.status = Some(Status::Streaming);
             m.error = None;
             m.nudge = None;
+            m.self_check = false;
             m.look = None;
         }
         self.save(conv);
