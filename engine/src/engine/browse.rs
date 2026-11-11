@@ -6,6 +6,8 @@ use crate::browser;
 
 /// The longest a page may take to open; the agent and its turn wait for it all that time.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(45);
+/// A whole flow of steps: the host stops it at 120 seconds and answers; this is only the engine's last word.
+const FLOW_TIMEOUT: Duration = Duration::from_secs(135);
 
 impl Core {
     /// Whether a conversation offers the browser: a project's own agent in full access, where the shell has a browser. The
@@ -54,6 +56,7 @@ impl Core {
         let (me, conv, dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.join("attachments").join(conv));
         self.opts.runtime.spawn(async move {
             let mut picked = None;
+            let limit = if matches!(request, browser::Request::Steps(_)) { FLOW_TIMEOUT } else { OPEN_TIMEOUT };
             if let browser::Request::Sizes(sizes) = &mut request
                 && sizes.is_empty()
             {
@@ -66,12 +69,12 @@ impl Core {
                 *sizes = crate::screens::sizes_of(kind.screens());
                 picked = Some(kind);
             }
-            let (ok, text, pictures) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), tab, request)).await {
+            let (ok, text, pictures) = match tokio::time::timeout(limit, b.act(conv.clone(), tab, request)).await {
                 Ok(Ok(mut page)) => {
                     page.picked = picked;
                     // A picture that cannot be kept only leaves the card without one. Each size's picture is the call's
                     // with the size's place after it (`<call>-s1`), so the screen asks for it like any other.
-                    let pictures = std::iter::once((call.clone(), page.picture.as_ref()))
+                    let pictures = std::iter::once((call.clone(), page.shot.as_ref().or(page.picture.as_ref())))
                         .chain(page.looks.iter().enumerate().map(|(n, look)| (format!("{call}-s{}", n + 1), look.picture.as_ref())));
                     let mut kept = false;
                     for (id, picture) in pictures {
@@ -87,11 +90,14 @@ impl Core {
                     (true, browser::result_text(&page), browser::look_pictures(&page))
                 }
                 Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}."), Vec::new()),
-                Err(_) => {
-                    (false, "The page took longer than 45 seconds; it stays in Faber's browser, without its text.".into(), Vec::new())
-                }
+                Err(_) => (
+                    false,
+                    format!("The page took longer than {} seconds; it stays in Faber's browser, without its text.", limit.as_secs()),
+                    Vec::new(),
+                ),
             };
             let Some(core) = me.upgrade() else { return };
+            let text = if ok { text } else { browser::mask::mask(&text) };
             core.lock().unwrap_or_else(|e| e.into_inner()).answer_browse(&conv, sid, &call, ok, text, pictures);
         });
     }

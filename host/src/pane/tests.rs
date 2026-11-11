@@ -84,6 +84,8 @@ impl Fake {
                 let expression = params["expression"].as_str().unwrap_or_default();
                 let value = if expression.trim_end().ends_with("({ kind: 'settle' })") {
                     json!({ "changed": false })
+                } else if expression.contains("\"kind\":\"at\"") && expression.contains("\"x\":13,") {
+                    json!({ "ok": false, "why": "control", "seen": ["Buy now"] })
                 } else if expression.contains("kind: 'fits'") {
                     json!({ "wider": 0, "cut": [], "x": 0, "y": 0 })
                 } else if expression.contains("href: String(location.href)") {
@@ -315,7 +317,7 @@ async fn a_click_runs_only_on_a_page_of_the_same_conversation_that_was_read() {
     let acted: Vec<Value> = fake
         .calls_of("Runtime.evaluate")
         .into_iter()
-        .filter(|p| p["expression"].as_str().is_some_and(|e| e.contains("\"kind\":\"click\"")))
+        .filter(|p| p["expression"].as_str().is_some_and(|e| e.contains("\"kind\":\"click\"") && !e.contains("\"probe\"")))
         .collect();
     assert_eq!(acted.len(), 1);
     assert!(acted[0]["expression"].as_str().unwrap().contains(&format!("\"at\":\"{A}\"")), "it runs on the address that was read");
@@ -613,4 +615,93 @@ async fn the_screen_hears_the_pane_by_the_names_it_always_had() {
             ("faber:site-busy", json!({ "conversation": "c", "tab": "t", "busy": false })),
         ]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_agent_hears_what_the_page_did_once_and_a_watch_waits_for_news() {
+    let (pane, _fake, _) = world();
+    open(&pane, "c", "t1", A).await;
+    pane.event(View::Main, ViewEvent::Saw { line: "request failed: POST example.org/api/save 500".into() });
+    pane.event(View::Main, ViewEvent::Saw { line: "request failed: POST example.org/api/save 500".into() });
+    pane.event(View::Main, ViewEvent::Saw { line: "console error: token sk-live-4eC39HqLyjWDarjtT1zdp7dc\nrejected".into() });
+    let page = agent(&pane, "c", "t1", Request::Read).await.unwrap();
+    assert_eq!(page.seen.len(), 2, "a repeat of the line before is not kept again: {:?}", page.seen);
+    assert!(!page.seen[1].contains('\n'));
+    let told = faber_engine::browser::result_text(&page);
+    assert!(told.contains("Since your last call") && told.contains("POST example.org/api/save 500"), "{told}");
+    assert!(!told.contains("sk-live-4eC39"), "a key a page wrote is masked: {told}");
+    assert!(agent(&pane, "c", "t1", Request::Read).await.unwrap().seen.is_empty(), "and only once");
+    // A watch with nothing to hear gives up after its time; with news it answers at once.
+    let waiting = tokio::spawn({
+        let pane = pane.clone();
+        async move { agent(&pane, "c", "t1", Request::Watch(20)).await }
+    });
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    pane.event(View::Main, ViewEvent::Saw { line: "page error: boom".into() });
+    assert_eq!(waiting.await.unwrap().unwrap().seen, ["page error: boom"]);
+    let quiet = agent(&pane, "c", "t1", Request::Watch(3)).await.unwrap();
+    assert!(quiet.seen.is_empty());
+    pane.event(View::Main, ViewEvent::Gone);
+    assert!(agent(&pane, "c", "t1", Request::Read).await.is_err(), "the page is gone");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_flow_runs_its_steps_in_order_stops_at_the_first_that_fails_and_reads_once() {
+    use faber_engine::browser::Step;
+    let (pane, fake, _) = world();
+    open(&pane, "c", "t1", A).await;
+    let flow = vec![
+        Step::Act(Request::Click("More".into())),
+        Step::Assert { text: "hello".into(), absent: false },
+        Step::Assert { text: "gone".into(), absent: true },
+        Step::Act(Request::Back),
+    ];
+    let page = agent(&pane, "c", "t1", Request::Steps(flow)).await.unwrap();
+    assert_eq!(page.steps.len(), 3, "the fourth step never ran: {:?}", page.steps);
+    assert!(page.steps[0].contains("done") && page.steps[2].contains("failed: that text is still on the page"), "{:?}", page.steps);
+    let told = faber_engine::browser::result_text(&page);
+    assert!(told.contains("The flow, step by step") && told.contains("3. check \"gone\" is gone - failed"), "{told}");
+    let ran = |kind: &str| {
+        fake.calls_of("Runtime.evaluate")
+            .iter()
+            .filter(|p| p["expression"].as_str().is_some_and(|e| e.contains(&format!("\"kind\":\"{kind}\"")) && !e.contains("\"probe\"")))
+            .count()
+    };
+    assert_eq!((ran("click"), ran("back")), (1, 0));
+    // A wait for text that never comes gives up with its reason, after its seconds.
+    let waited = agent(&pane, "c", "t1", Request::Steps(vec![Step::Wait { text: Some("never".into()), seconds: 2 }])).await.unwrap();
+    assert!(waited.steps[0].contains("did not appear") || waited.steps[0].contains("done"), "{:?}", waited.steps);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_picture_comes_only_when_asked_and_a_point_is_clicked_only_where_there_is_no_control() {
+    use faber_engine::browser::Shot;
+    let (pane, fake, _) = world();
+    open(&pane, "c", "t1", A).await;
+    assert!(agent(&pane, "c", "t1", Request::Read).await.unwrap().shot.is_none(), "a read has no picture for the agent");
+    let shot = agent(&pane, "c", "t1", Request::Shot(Shot::Labeled)).await.unwrap();
+    assert_eq!(shot.shot.as_deref(), Some(&b"jpeg"[..]));
+    assert_eq!(faber_engine::browser::look_pictures(&shot).len(), 1);
+    let drawn = |kind: &str| {
+        fake.calls_of("Runtime.evaluate")
+            .iter()
+            .filter(|p| p["expression"].as_str().is_some_and(|e| e.contains(&format!("\"kind\":\"{kind}\""))))
+            .count()
+    };
+    assert_eq!((drawn("label"), drawn("unlabel")), (1, 1), "the numbers go on for the picture and come off again");
+    let zoom = agent(&pane, "c", "t1", Request::Shot(Shot::Region { x: 10, y: 20, width: 100, height: 50 })).await.unwrap();
+    let clip = fake.calls_of("Page.captureScreenshot").pop().unwrap()["clip"].clone();
+    assert_eq!((clip["width"].as_f64(), clip["height"].as_f64()), (Some(100.0), Some(50.0)));
+    assert!(clip["scale"].as_f64().unwrap() > 4.0 - 1e-9 && zoom.shot.is_some(), "a small region is enlarged: {clip}");
+    // A point with no control is clicked with the mouse; a drag moves in steps; a control is refused, with nothing sent.
+    let sent = || fake.calls_of("Input.dispatchMouseEvent").len();
+    agent(&pane, "c", "t1", Request::At { x: 40, y: 50, to: None }).await.unwrap();
+    assert_eq!(sent(), 3);
+    agent(&pane, "c", "t1", Request::At { x: 40, y: 50, to: Some((90, 50)) }).await.unwrap();
+    assert!(sent() > 3 + 8, "{}", sent());
+    let before = sent();
+    let refused = agent(&pane, "c", "t1", Request::At { x: 13, y: 5, to: None }).await.unwrap_err();
+    assert!(refused.contains("Buy now") && refused.contains("by its number"), "{refused}");
+    assert_eq!(sent(), before);
+    assert!(!fake.calls_of("Emulation.setFocusEmulationEnabled").is_empty(), "a covered pane keeps its focus");
 }

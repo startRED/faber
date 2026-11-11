@@ -59,6 +59,8 @@ pub struct Pane {
     /// The pages that started and the last of them that finished, so an open waits for its own page and never for a late
     /// end of the one before.
     loads: tokio::sync::watch::Sender<(u64, u64)>,
+    /// Counts the lines the page reported (`ViewEvent::Saw`), so a `watch` wakes on the next one.
+    noted: tokio::sync::watch::Sender<u64>,
     /// Held from a navigation to the last read of its page, so two calls never read each other's page.
     opening: tokio::sync::Mutex<()>,
     /// The person is looking at the pane: it is theirs until they go back.
@@ -70,7 +72,13 @@ pub struct Pane {
     mark: String,
     /// Held while the page's corners change, so two placings never add the script twice.
     rounding: tokio::sync::Mutex<()>,
+    /// What the agent's last read of each tab holds (`act.js`: the numbers of its controls and a hash per line), shared by both
+    /// panes so a tab that moves between them keeps its numbers. Only in this process.
+    memos: Memos,
 }
+
+/// The agent's reads, by conversation and tab. A few tabs at a time, each at most [`rules::MAX_MEMO`] bytes.
+pub(crate) type Memos = Arc<Mutex<std::collections::HashMap<String, serde_json::Value>>>;
 
 #[derive(Default)]
 struct State {
@@ -121,6 +129,8 @@ struct State {
     reported: Option<String>,
     /// The sites the person went to while the pane was theirs, since the agent's last call (`went_to`).
     visited: Vec<String>,
+    /// What the page did that nobody asked about since the agent's last call (`ViewEvent::Saw`), the last [`rules::MAX_SEEN`].
+    seen: Vec<String>,
     /// Pages Faber loaded (the agent's, or a card's) that have not finished: that many next finishes are not sites the
     /// person went to. A load that never finishes leaves one more skipped: the list can fall short, never say more.
     skip_finish: u32,
@@ -197,8 +207,9 @@ impl Drop for Making<'_> {
 impl Pane {
     /// The first pane, with the agent's pane behind it.
     pub fn new(driver: Arc<dyn Driver>, home: Arc<dyn Home>, runtime: Handle) -> Arc<Pane> {
-        let behind = Pane::made(&driver, &home, &runtime, View::Behind, rules::BEHIND_IDLE, None);
-        let main = Pane::made(&driver, &home, &runtime, View::Main, rules::IDLE, Some(behind.clone()));
+        let memos = Memos::default();
+        let behind = Pane::made(&driver, &home, &runtime, View::Behind, rules::BEHIND_IDLE, None, memos.clone());
+        let main = Pane::made(&driver, &home, &runtime, View::Main, rules::IDLE, Some(behind.clone()), memos);
         let _ = behind.front_of.set(Arc::downgrade(&main));
         main
     }
@@ -210,6 +221,7 @@ impl Pane {
         view: View,
         idle: Duration,
         behind: Option<Arc<Pane>>,
+        memos: Memos,
     ) -> Arc<Pane> {
         Arc::new(Pane {
             driver: driver.clone(),
@@ -221,10 +233,12 @@ impl Pane {
             front_of: OnceLock::new(),
             state: Mutex::default(),
             loads: tokio::sync::watch::channel((0, 0)).0,
+            noted: tokio::sync::watch::channel(0).0,
             opening: tokio::sync::Mutex::new(()),
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
             rounding: tokio::sync::Mutex::new(()),
+            memos,
             mark: format!("{:016x}", std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0u8)),
         })
     }

@@ -1,6 +1,6 @@
 //! Making, loading, keeping and closing the pane's view, and what the view tells back.
 
-use super::rules::{CALL, KEEP_EVERY, LOOK_CALL, MOVED, allowed, checked, keeps_now, went_to};
+use super::rules::{CALL, KEEP_EVERY, LOOK_CALL, MAX_SEEN, MAX_SEEN_LINE, MOVED, allowed, checked, keeps_now, went_to};
 use super::{Making, Pane, PaneEvent, Place, View, ViewEvent};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -105,6 +105,28 @@ impl Pane {
         }
     }
 
+    /// Keeps one line of what the page did, for the agent's next answer: the last [`MAX_SEEN`], a repeat of the line before it
+    /// not again, and a `watch` waiting for news wakes.
+    fn saw(&self, line: String) {
+        let line: String = line
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .filter(
+                |c| !matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}' | '\u{feff}' | '\u{e0000}'..='\u{e007f}'),
+            )
+            .take(MAX_SEEN_LINE * 2)
+            .collect();
+        let mut s = crate::lock(&self.state);
+        if s.seen.last() != Some(&line) {
+            s.seen.push(line);
+            if s.seen.len() > MAX_SEEN {
+                s.seen.remove(0);
+            }
+        }
+        drop(s);
+        self.noted.send_modify(|n| *n += 1);
+    }
+
     fn heard(self: &Arc<Self>, event: ViewEvent) {
         let made = {
             let s = crate::lock(&self.state);
@@ -114,7 +136,13 @@ impl Pane {
             s.made
         };
         match event {
-            ViewEvent::Gone => self.close(),
+            // What happens while the person has the pane is theirs: the agent hears none of it.
+            ViewEvent::Saw { line } if !*self.looking.borrow() => self.saw(line),
+            ViewEvent::Saw { .. } => {}
+            ViewEvent::Gone => {
+                self.saw("the page's view closed or crashed".into());
+                self.close();
+            }
             ViewEvent::Titled => self.keep_soon(made),
             ViewEvent::Moved { url } => {
                 let mut s = crate::lock(&self.state);

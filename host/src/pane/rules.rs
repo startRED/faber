@@ -49,6 +49,22 @@ pub(super) const MAX_VISITED: usize = 5;
 pub(super) const MOVED: &str = "the person moved Faber's browser to another tab meanwhile; try again";
 /// How many times the agent's call is sent before it gives up.
 pub(super) const SENDS: usize = 3;
+/// The most the agent's read of one tab keeps between calls, in bytes of JSON; a bigger one keeps only its counter.
+pub(super) const MAX_MEMO: usize = 200_000;
+/// The most tabs whose reads are kept at once.
+pub(super) const MAX_MEMOS: usize = 24;
+/// The lines of what the page did that the pane keeps for the agent's next answer, and the longest of them.
+pub(super) const MAX_SEEN: usize = 30;
+pub(super) const MAX_SEEN_LINE: usize = 240;
+/// A click waits for its control to hold still: how long between the two looks at its box, and how many tries.
+pub(super) const STILL: Duration = Duration::from_millis(120);
+pub(super) const CLICK_TRIES: usize = 4;
+/// A drag moves in this many steps; a picture of one control has this much around it, and no side longer than `SHOT_MAX`.
+pub(super) const DRAG_STEPS: u32 = 8;
+pub(super) const SHOT_PAD: f64 = 8.0;
+pub(super) const SHOT_MAX: f64 = 4000.0;
+/// A flow of steps stops here, whatever step it is at.
+pub(super) const FLOW_TIME: Duration = Duration::from_secs(120);
 
 pub(super) fn act_function() -> &'static str {
     ACT.split_once("export default ").map_or(ACT, |(_, f)| f.trim_end().trim_end_matches(';'))

@@ -50,6 +50,9 @@ pub enum ViewEvent {
     Moved { url: String },
     /// The page's title changed.
     Titled,
+    /// Something happened on the page that nobody asked about, as one short line from the shell (a console error, a failed
+    /// request by method, host, path and status, a blocked popup or download): the agent hears it with its next answer.
+    Saw { line: String },
     /// The view is gone: its window closed, or its page process died. The pane closes and opens fresh next time.
     Gone,
 }

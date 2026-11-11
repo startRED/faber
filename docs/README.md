@@ -73,6 +73,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
+| [research/aside-study.md](research/aside-study.md) | A static study of another app's browser and desk, and the build order the browser lane follows |
 | [dev/workflow.md](dev/workflow.md) | The lanes (how many, how big, how reviewed), lane claims, the task queue, a red base and the numbers given at landing |
 | [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |

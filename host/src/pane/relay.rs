@@ -37,6 +37,7 @@ pub fn event_of(note: ViewNote) -> ViewEvent {
         ViewNote::Finished { url, .. } => ViewEvent::Finished { url },
         ViewNote::Moved { url } => ViewEvent::Moved { url },
         ViewNote::Titled => ViewEvent::Titled,
+        ViewNote::Saw { line } => ViewEvent::Saw { line },
         ViewNote::Gone => ViewEvent::Gone,
     }
 }

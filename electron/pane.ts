@@ -24,7 +24,7 @@ export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
 );
 
 /** What a view tells the host (`ViewNote`). */
-type ViewNote = { kind: 'started'; url: string; navigation: number } | { kind: 'finished'; url: string; navigation: number } | { kind: 'moved'; url: string } | { kind: 'titled' } | { kind: 'gone' };
+type ViewNote = { kind: 'started'; url: string; navigation: number } | { kind: 'finished'; url: string; navigation: number } | { kind: 'moved'; url: string } | { kind: 'titled' } | { kind: 'gone' } | { kind: 'saw'; line: string };
 
 /** What the shell tells the host about the pane (`ShellNote::PaneAnswer` and `ShellNote::PaneEvent`). */
 export type PaneNote =
@@ -89,14 +89,32 @@ async function wipe(profile: Session): Promise<void> {
 }
 
 /** A session no page can ask anything of: no permission, no device, no download. Its certificate errors keep Chromium's answer. */
-function guard(profile: Session): void {
+function guard(profile: Session, saw: (contents: WebContents, line: string) => void): void {
   profile.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
   profile.setPermissionCheckHandler(() => false);
   profile.setDevicePermissionHandler(() => false);
   profile.setSpellCheckerEnabled(false);
   profile.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !allowedRequest(details.url) }));
-  profile.on('will-download', (event) => event.preventDefault());
+  profile.on('will-download', (event, item, contents) => {
+    event.preventDefault();
+    saw(contents, `download blocked: ${item.getFilename().slice(0, 80)}`);
+  });
 }
+
+/** An address as the host may hear it: host and path, without its query, fragment or sign-in part, and without path parts that look like an id or a token. */
+function placeOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '?';
+    const path = parsed.pathname.split('/').map((part) => (/^[A-Za-z0-9_-]{16,}$|\d{5,}|;/.test(part) ? '…' : part)).join('/');
+    return `${parsed.host}${path}`.slice(0, 120);
+  } catch {
+    return '?';
+  }
+}
+
+/** What a page wrote, with each address cut down to {@link placeOf} (a query often carries a token); the host masks, then cuts. */
+const plain = (text: string): string => text.replace(/\b(?:https?|data|blob|javascript):[^\s"'<>)]*/gi, (u) => placeOf(u)).slice(0, 400);
 
 export class Pane {
   private readonly host: PaneHost;
@@ -200,7 +218,9 @@ export class Pane {
     if (!spare) {
       // A name without `persist:` is a profile in memory only.
       const made = session.fromPartition(`faber-pane-slot-${++this.slots}`);
-      guard(made);
+      guard(made, (contents, line) => {
+        for (const entry of this.views.values()) if (entry.contents === contents) this.tell(entry, { kind: 'saw', line });
+      });
       spare = { session: made, ready: Promise.resolve() };
     }
     const held: Held = { session: spare.session, users: new Set(), ready: spare.ready };
@@ -247,6 +267,9 @@ export class Pane {
       contents.debugger.attach('1.3');
       // Interception keeps Chromium's native file chooser from opening for pane pages.
       await contents.debugger.sendCommand('Page.enable');
+      this.listen(entry);
+      await contents.debugger.sendCommand('Network.enable', { maxTotalBufferSize: 1, maxResourceBufferSize: 1 });
+      await contents.debugger.sendCommand('Runtime.enable');
       await contents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true, cancel: true });
       // Pages are told the browser they would have met anywhere, not the shell they run in.
       contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|Faber)\/\S+/gi, ''));
@@ -261,13 +284,18 @@ export class Pane {
   }
 
   /** Everything a view refuses, reports or survives; all silent, since the host's rules decided what is worth a word. */
+  private tell(entry: Entry, event: ViewNote): void {
+    if (entry.open) this.host.note({ kind: 'paneEvent', view: entry.name, event });
+  }
+
   private guard(entry: Entry): void {
     const { contents } = entry;
-    const tell = (event: ViewNote) => {
-      if (entry.open) this.host.note({ kind: 'paneEvent', view: entry.name, event });
-    };
-    // The page opens no window, whoever asks; a refused one is not reported.
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    const tell = (event: ViewNote) => this.tell(entry, event);
+    // The page opens no window, whoever asks; the host is told where it tried to go (address without its query).
+    contents.setWindowOpenHandler((details) => {
+      tell({ kind: 'saw', line: `popup blocked: ${placeOf(details.url)}` });
+      return { action: 'deny' };
+    });
     contents.on('will-attach-webview', (event) => event.preventDefault());
     // Only web pages load, whoever starts the navigation (the page, a redirect, the back button).
     const refuse = (event: { url: string; isMainFrame: boolean; preventDefault: () => void }) => {
@@ -307,6 +335,29 @@ export class Pane {
     contents.on('page-title-updated', () => tell({ kind: 'titled' }));
     contents.on('render-process-gone', () => this.gone(entry));
     contents.debugger.on('detach', () => this.gone(entry));
+  }
+
+  /**
+   * What happened on the page that the agent did not ask about, as short lines for the host (`ViewNote::Saw`): console errors,
+   * failed requests and error answers (method, host, path and status only: never headers, cookies, bodies or queries).
+   */
+  private listen(entry: Entry): void {
+    const asked = new Map<string, string>();
+    const tell = (line: string) => this.tell(entry, { kind: 'saw', line });
+    entry.contents.debugger.on('message', (_event, method, params: Record<string, any>) => {
+      if (method === 'Network.requestWillBeSent') {
+        if (asked.size >= 100) asked.delete(asked.keys().next().value as string);
+        asked.set(params.requestId, `${/^[A-Z]{1,8}$/.test(params.request.method) ? params.request.method : '?'} ${placeOf(params.request.url)}`);
+      } else if (method === 'Network.responseReceived') {
+        if (params.response.status >= 400) tell(`request failed: ${asked.get(params.requestId) ?? placeOf(params.response.url)} ${params.response.status}`);
+      } else if (method === 'Network.loadingFailed') {
+        if (!params.canceled && params.errorText !== 'net::ERR_BLOCKED_BY_CLIENT') tell(`request failed: ${asked.get(params.requestId) ?? '?'} ${String(params.errorText).replace(/^net::/, '')}`);
+      } else if (method === 'Runtime.consoleAPICalled') {
+        if (params.type === 'error') tell(`console error: ${plain((params.args as { value?: unknown; description?: string }[]).map((a) => String(a.value ?? a.description ?? '')).join(' '))}`);
+      } else if (method === 'Runtime.exceptionThrown') {
+        tell(`page error: ${plain(String(params.exceptionDetails?.exception?.description ?? params.exceptionDetails?.text ?? '').split('\n')[0] ?? '')}`);
+      }
+    });
   }
 
   /** The view died or lost its page: the host hears it once, and the view is closed. */

@@ -77,6 +77,20 @@ sample at 400 ms to allow shared CI contention while rejecting a fixed 500 ms de
 routing model is called. This covers the engine's own share, including the prompt,
 pipe and parser; model latency is measured only by hand with a live account, and screen handling/rendering are excluded.
 
+## Browser reads
+
+`bench/browse/` holds fixed local pages (shop, long article, sign-up form, secrets); `tests/ui/browse-bench.check.ts` reads them as the host does and counts tokens with `scripts/tool-tokens.mjs` plus 60 for the lines Faber adds. Old = the whole page text on every call.
+
+| Page | Old read | First read now | Repeat read now | Flow (calls) old → now |
+|---|---|---|---|---|
+| Shop (60+ controls) | 899 | 1788 | 67 | 3617 → 2112 (4) |
+| Article | 2254 | 2524 | 67 | 4508 → 2591 (2) |
+| Sign-up form | 121 | 277 | 67 | about 850 → 833 (7) |
+
+A repeat read is 92 to 97% smaller on the big pages (target 60 to 85%); the first read is larger than the old one because it also lists every control. The tiny form cannot win: its header and control list outweigh its text. The same checks click every enabled control of the shop by number: zero wrong targets, and a renamed control is refused.
+
+Flows in one call (`steps`): the sign-up form as one flow is two reads (the first and the last) plus a log line per step, under 700 tokens in the check, against seven reads before; a failed step stops the flow and the agent gets the page as it stands. A click now waits for its control to be on view, enabled and still, so a button that animates in is clicked once it rests.
+
 ## What it does not do yet
 
 - Codex: the harness runs plain Codex (`--plain codex`) and lets Faber use it (`--vendors claude,codex`), but its event reader was written from the documented format and has not met a live account.
@@ -90,3 +104,5 @@ pipe and parser; model latency is measured only by hand with a live account, and
 - The full ~40 requests, creative media (thumbnail, video, 3D, mod), live-model speed to first token, precision and memory are measured elsewhere or not yet. The engine-only first-word budget above does not certify the full 2 s goal.
 
 A dated report of a run lives in [research/](../history/research/) (the first: [2026-10-22/benchmark-light.md](../history/research/2026-10-22/benchmark-light.md)). Its pure parts (request files, the deal, the verdict, what a CLI reported, the cap, the tables) are `bench/pure.rs`, tested by `engine/tests/all.rs`; the runner is `engine/examples/bench.rs`.
+
+Pictures (`shot`): the check draws the numbers on the bench page, takes one control and refuses a point that has a control; a picture is asked for, so reads stay text and cost no picture tokens.

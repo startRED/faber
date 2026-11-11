@@ -34,7 +34,9 @@ export function allowedRequest(address: string): boolean {
 export const CALLS: ReadonlySet<string> = new Set([
   'Emulation.clearDeviceMetricsOverride',
   'Emulation.setDeviceMetricsOverride',
+  'Emulation.setFocusEmulationEnabled',
   'Emulation.setTouchEmulationEnabled',
+  'Input.dispatchMouseEvent',
   'Network.setCookie',
   'Network.setCookies',
   'Page.addScriptToEvaluateOnNewDocument',

@@ -83,7 +83,7 @@ pub fn fingerprint(dir: &Path) -> String {
 
 /// What the Vite build of the test screen reads: the screen, its checks, the one shell file they import, and the build's
 /// own configuration and packages. `a_screen_build_reads_nothing_outside_its_inputs` fails when an import reaches past them.
-const VITE_INPUTS: [&str; 14] = [
+const VITE_INPUTS: [&str; 16] = [
     "ui",
     "tests/ui",
     "tests/ux",
@@ -92,6 +92,8 @@ const VITE_INPUTS: [&str; 14] = [
     "src-tauri/src/themes.json",
     "engine-core/src/tools.json",
     "src-tauri/src/pane/act.js",
+    "host/src/pane/act.js",
+    "bench/browse",
     "vite.config.ts",
     "scripts/woff2-only.mjs",
     "package.json",

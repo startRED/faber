@@ -1462,7 +1462,7 @@ impl Pane {
             _ if crate::lock(&self.state).owner.as_deref() != Some(conversation.as_str()) => {
                 return Err("the page open in Faber's browser is not this conversation's; open yours again with its address".into());
             }
-            Request::Read => None,
+            Request::Read | Request::Controls | Request::Watch(_) => None,
             Request::Click(target) => Some(json!({ "kind": "click", "target": target, "at": bound(reported.as_deref())? })),
             Request::Type { target, text, submit } => {
                 Some(json!({ "kind": "type", "target": target, "text": text, "submit": submit, "at": bound(reported.as_deref())? }))
@@ -1474,6 +1474,7 @@ impl Pane {
                 None
             }
             Request::Sizes(_) => None,
+            Request::Steps(_) | Request::Shot(_) | Request::At { .. } => return Err("this view does not do that".into()),
         };
         // The size the agent chose holds for every call, after the person had the pane and on a page just opened; a check at
         // several sizes that was cut off (an error, the engine's deadline) left another drawn, which goes here.
@@ -1505,7 +1506,7 @@ impl Pane {
             tokio::time::sleep(Duration::from_millis(600)).await;
         } else if matches!(request, Request::Size(_)) {
             tokio::time::sleep(RESIZED).await;
-        } else if !matches!(request, Request::Read | Request::Sizes(_)) && refused.is_none() {
+        } else if !matches!(request, Request::Read | Request::Controls | Request::Watch(_) | Request::Sizes(_)) && refused.is_none() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
         let looks = match &request {

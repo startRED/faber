@@ -85,6 +85,7 @@ import './quiet.check.ts';
 import './agents.check.ts';
 import './site.check.ts';
 import './site-tabs.check.ts';
+import './browse-bench.check.ts';
 import './skills.check.ts';
 import './kits.check.ts';
 import './mcp-servers.check.ts';

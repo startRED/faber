@@ -147,6 +147,8 @@ pub enum ViewNote {
     Moved { url: String },
     /// The page's title changed.
     Titled,
+    /// Something happened on the page nobody asked about (a console error, a failed request, a blocked popup or download).
+    Saw { line: String },
     /// The view is gone: its window closed, or its page process died.
     Gone,
 }

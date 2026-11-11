@@ -15,7 +15,7 @@ import { Thread } from '../../ui/Thread.tsx';
 import { Cookies } from '../../ui/Cookies.tsx';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
 import { check, deepEqual, equal, frames, matches, ok } from './check.ts';
-import act from '../../src-tauri/src/pane/act.js';
+import act from '../../host/src/pane/act.js';
 
 // A page the agent opened in Faber's browser (R161 step 7; docs/product-map.md, "Page in Faber's browser").
 
@@ -400,7 +400,7 @@ check('page in the browser: a step of the log shows its picture in the page’s 
   }
 });
 
-// The agent's actions as they run inside the page (`src-tauri/src/pane/act.js`), here on a page made for the check.
+// The agent's actions as they run inside the page (`host/src/pane/act.js`), here on a page made for the check.
 
 function onPage(html: string, run: (page: HTMLElement) => void | Promise<void>) {
   const page = document.createElement('div');
