@@ -77,10 +77,7 @@ The area lists, pinning, archive and footer are in [sidebar.md](sidebar.md); sea
 
 ### The new conversation screen
 
-The homes and their pick-up lists are in [homes.md](homes.md). The greeting (Curioso, the heading, the composer) sits at a fixed
-distance from the top of the stage, `clamp(32px, 12vh, 120px)`, and is never centred: what sits under the composer (results,
-goals, memory, terminal sessions) or arrives late scrolls below it and cannot move it (check: `tests/ui/styles.check.ts`,
-`home: the greeting stays at the same height`).
+The homes and their pick-up lists are in [homes.md](homes.md).
 
 ### Recent folders and environments
 
