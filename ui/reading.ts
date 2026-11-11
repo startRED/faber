@@ -85,6 +85,9 @@ export function restoreReading(thread: HTMLElement, point: Reading, messages: Me
 
 /** Avoid waiting for a compositor commit when the tail is already in view. */
 export function followTail(thread: HTMLElement): void {
-  const end = Math.max(0, thread.scrollHeight - thread.clientHeight);
+  let end = Math.max(0, thread.scrollHeight - thread.clientHeight);
+  // The new-conversation home scrolls only until its composer is whole, never to the end: what sits under it is not news.
+  const composer = thread.classList.contains('welcome') ? thread.querySelector('.composer') : null;
+  if (composer) end = Math.min(end, Math.max(0, thread.scrollTop + composer.getBoundingClientRect().bottom - thread.getBoundingClientRect().bottom));
   if (Math.abs(thread.scrollTop - end) > 1) thread.scrollTop = end;
 }
