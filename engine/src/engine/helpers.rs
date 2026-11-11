@@ -68,6 +68,13 @@ impl Core {
     pub(super) fn helpers_in(&self, conv: &str) -> bool {
         self.helpers.values().any(|h| h.conv == conv) || self.waiting_helpers(conv, "") > 0
     }
+    /// The team names of the helpers still at work for `conv`, in order.
+    pub(super) fn working_helpers(&self, conv: &str) -> Vec<String> {
+        let mut names: Vec<String> =
+            self.helpers.iter().filter(|(_, h)| h.conv == conv).map(|(call, _)| self.team_name(conv, call)).collect();
+        names.sort();
+        names
+    }
     /// Whether a project conversation on `vendor` offers the helper tool.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
         if area == Area::Project && self.opts.clis.contains_key(&vendor) { Helper::Offers } else { Helper::Off }

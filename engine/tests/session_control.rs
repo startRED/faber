@@ -120,11 +120,11 @@ async fn an_agent_can_wait_for_a_child_and_cannot_act_on_itself() {
         ai,
         model: model.map(str::to_string),
         effort: effort.map(str::to_string),
+        work: None,
         keep_going: false,
         step: None,
     };
     assert!(engine.session_start(&parent, new(Some("unknown"), None, Ai::Same)).unwrap_err().contains("model"));
-    assert!(engine.session_start(&parent, new(Some("haiku"), None, Ai::Auto)).unwrap_err().contains("auto"));
     assert!(engine.session_start(&parent, new(None, Some("maximum"), Ai::Same)).unwrap_err().contains("effort"));
     for (id, args, error) in [
         (
@@ -164,7 +164,9 @@ async fn an_agent_can_wait_for_a_child_and_cannot_act_on_itself() {
     assert!(engine.session_archive(&parent, &child).is_err());
     assert!(engine.session_wait(&parent, vec![], None).is_err());
     assert!(engine.session_wait(&parent, vec![child.clone(); 13], None).is_err());
-    assert!(engine.session_wait(&parent, vec![], Some("a".repeat(201))).is_err());
+    // A note that is too long is cut, not refused: the refusal cost the lead a second call (the owner's project, 2026-11-11).
+    assert!(engine.session_wait(&parent, vec![], Some("a".repeat(201))).is_ok());
+    assert_eq!(engine.open(&parent).unwrap().waiting_on.unwrap().note.chars().count(), 200);
     assert!(engine.session_wait(&parent, vec![child.clone()], None).is_ok());
     assert_eq!(engine.open(&parent).unwrap().waiting_on.unwrap().ids, vec![child.clone()]);
     let call = json!({"type":"control_request","request_id":"wait","request":{"subtype":"mcp_message","server_name":"faber","message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":{"action":"wait","on":[child],"note":"waiting"},"_meta":{"claudecode/toolUseId":"wait-call"}}}}});
@@ -356,4 +358,95 @@ async fn an_agent_can_wait_for_a_child_and_cannot_act_on_itself() {
     reopened.archive(&parent, true).unwrap();
     assert!(reopened.open(&parent).unwrap().waiting_on.is_none());
     reopened.shutdown();
+}
+
+/// Three of the owner's leads asked for a model or an effort under Auto and were refused, then two parts ran on the
+/// everyday model with nobody judging their brief (2026-11-11). A start now takes what the lead states.
+#[tokio::test]
+async fn a_start_under_auto_takes_a_model_an_effort_or_the_stated_work() {
+    use faber_engine::sibling::Work;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let data = support::DataFolder::new();
+    let (spawn, made) = support::pipes();
+    let asked = Arc::new(AtomicUsize::new(0));
+    let count = asked.clone();
+    let opts = EngineOptions {
+        data_dir: data.path().into(),
+        #[cfg(windows)]
+        chat_dir: data.chat_path().into(),
+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: Some(Arc::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { None })
+        })),
+    };
+    let engine = Engine::new(opts, Arc::new(|_| {})).unwrap();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+            billing: Some(faber_engine::budget::Billing::Subscription),
+            ..Default::default()
+        })],
+    );
+    let project = engine.add_project(&data.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: Some(project.id),
+            text: "Lead".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+        })
+        .unwrap();
+    let mut agent = support::next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"lead","model":"claude-haiku-5-5"})).await;
+    let new = |ai, model: Option<&str>, effort: Option<&str>, work| NewSession {
+        title: "Part".into(),
+        brief: "Do it".into(),
+        ai,
+        model: model.map(str::to_string),
+        effort: effort.map(str::to_string),
+        work,
+        keep_going: false,
+        step: None,
+    };
+    // An effort alone says how hard the work is: the table picks the model at once and no classifier reads the brief.
+    let by_effort = engine.session_start(&parent, new(Ai::Auto, None, Some("high"), None)).unwrap();
+    support::until("the stated work never picked a model", || {
+        engine.open(&by_effort).unwrap().messages.get(1).is_some_and(|m| m.model.is_some())
+    })
+    .await;
+    let reply = engine.open(&by_effort).unwrap().messages[1].clone();
+    assert_eq!(reply.reason.as_deref(), Some("reason.route.code.hard"));
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "stated work is never sent to the classifier");
+    assert_eq!(engine.open(&by_effort).unwrap().choice.unwrap().vendor, "auto");
+    // A model names its AI.
+    let by_model = engine.session_start(&parent, new(Ai::Auto, Some("haiku"), None, None)).unwrap();
+    let choice = engine.open(&by_model).unwrap().choice.unwrap();
+    assert_eq!((choice.vendor.as_str(), choice.model.as_deref()), ("claude", Some("haiku")));
+    assert!(engine.session_start(&parent, new(Ai::Auto, Some("unknown"), None, None)).unwrap_err().contains("model"));
+    // The AI a model names answers for its quota, under Auto too: billed per use, nothing starts on it by itself.
+    let billing = |billing| {
+        let signals = faber_engine::signals::Signals { billing: Some(billing), ..Default::default() };
+        engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(signals)]);
+    };
+    billing(faber_engine::budget::Billing::UsageBilled);
+    assert!(engine.session_start(&parent, new(Ai::Auto, Some("haiku"), None, None)).unwrap_err().contains("billed"));
+    billing(faber_engine::budget::Billing::Subscription);
+    assert!(engine.session_start(&parent, new(Ai::Auto, None, Some("maximum"), None)).unwrap_err().contains("effort"));
+    // A named AI with the work stated runs the table's row for that work, not its everyday model.
+    let work = Work { kind: "code", difficulty: "hard", scope: "tight" };
+    let named = engine.session_start(&parent, new(Ai::Named(Vendor::Claude), None, None, Some(work))).unwrap();
+    let choice = engine.open(&named).unwrap().choice.unwrap();
+    assert_eq!(choice.model, reply.model, "the same row Auto took for the same work");
+    assert_eq!(choice.effort.map(|e| e.name()), reply.acts[0].params.get("effort").map(String::as_str));
+    engine.shutdown();
 }

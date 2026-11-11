@@ -66,13 +66,14 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   reading it all again.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
 - Routing runs on the first message and reads later drafts for effort. Only while an easy model was needed (a
-  greeting first) may a later verdict also select a stronger model. Those stay with their subscription, so the CLI keeps the history. Once a message
+  greeting first) may a later verdict also select a stronger model, inside the same subscription so the CLI keeps the history. Once a message
   needed more, the conversation stays with that model. One usable model/effort profile needs no classifier. Otherwise,
   the native router runs while the person types, with up to 30 s for CLI startup and inference. Sending reuses a finished,
-  still-matching draft verdict; when none is ready it starts immediately with the previous choice or everyday default,
-  without opening a classifier request on send. Reusing an easy route preserves its eligibility for later drafts, even
+  still-matching draft verdict or waits up to 2.5 s for one being read; a project's first message asks on send and
+  waits up to 12 s. With no verdict a first message runs the table's row for its area's usual work (hard code, medium
+  chat); a later one keeps its choice. Reusing an easy route preserves its eligibility for later drafts, even
   after an immediate send or a temporary single-profile limit; the displayed explanation is separate from that marker.
-  An injected classifier retains its bounded 2.5 s path on a first send; later sends only read finished verdicts. The first answer shows the chosen model and why. While the person types, the
+  Later sends only read finished verdicts. The first answer shows the chosen model and why. While the person types, the
   draft is routed at most twice per message. An accepted send, including queueing or steering into a running answer,
   resets that conversation's count and discards its queued draft classification; other conversations keep theirs
   (done, `engine/src/engine/auto.rs`).

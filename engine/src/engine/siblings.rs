@@ -139,8 +139,8 @@ impl Core {
         let is_start = matches!(sibling::request(&input), Ok(Request::Start { .. }));
         let (ok, text) = match sibling::request(&input) {
             Err(why) => (false, format!("Nothing was done: {why}.")),
-            Ok(Request::Start { title, brief, ai, model, effort, keep_going, step }) => {
-                match self.session_start(conv, NewSession { title: title.clone(), brief, ai, model, effort, keep_going, step }) {
+            Ok(Request::Start { title, brief, ai, model, effort, work, keep_going, step }) => {
+                match self.session_start(conv, NewSession { title: title.clone(), brief, ai, model, effort, work, keep_going, step }) {
                     Ok(id) => (true, sibling::started(&title, &id)),
                     Err(why) => (false, format!("No conversation was started: {why}.")),
                 }
@@ -183,7 +183,7 @@ impl Core {
     }
 
     fn start_sibling(&mut self, conv: &str, new: NewSession) -> Result<(String, bool), &'static str> {
-        let NewSession { title, brief, ai, keep_going, step, model, effort } = new;
+        let NewSession { title, brief, ai, keep_going, step, model, mut effort, mut work } = new;
         if self.goal_out_of_money(conv) {
             return Err(GOAL_CAP);
         }
@@ -214,22 +214,46 @@ impl Core {
         };
         if matches!(ai, Ai::Same) && choice.vendor == "auto" && (model.is_some() || effort.is_some()) {
             let vendor = self.live.get(conv).map(|l| l.vendor).ok_or("the current AI is not known yet")?;
-            choice.vendor = vendor.name().into();
+            // A model the lead's own AI does not run names its AI below, as under `auto`.
+            if model.as_ref().is_none_or(|m| self.runs_model(vendor, m)) {
+                choice.vendor = vendor.name().into();
+            }
         }
-        if choice.vendor == "auto" && (model.is_some() || effort.is_some()) {
-            return Err("model and effort cannot be used with auto; choose an AI");
+        // Auto never refuses a model or an effort (the owner's leads asked for both, 2026-11-11): a model names its AI, and an
+        // effort alone says how hard the work is, for the table to pick the model.
+        if choice.vendor == "auto" {
+            if let Some(model) = &model {
+                let vendor = Vendor::RUNNABLE
+                    .into_iter()
+                    .find(|v| self.opts.clis.contains_key(v) && self.runs_model(*v, model))
+                    .ok_or("unknown model; choose a model of a connected AI")?;
+                choice.vendor = vendor.name().into();
+            } else if let Some(effort) = effort.take() {
+                let difficulty = match effort.as_str() {
+                    "low" => "easy",
+                    "medium" => "medium",
+                    "high" => "hard",
+                    _ => return Err("effort must be low, medium or high"),
+                };
+                work = work.or(Some(sibling::Work { kind: "code", difficulty, scope: "tight" }));
+            }
         }
-        let selected_model = model.clone();
+        // A named AI with the work stated runs the table's row for that work inside it, not its everyday model.
+        if let (Ai::Named(vendor), Some(work), None, None) = (ai, work, &model, &effort)
+            && let Some(routed) = self.table_first(&work.asked(), Some(vendor), true, &crate::route::Reading::default())
+        {
+            choice.model = Some(routed.profile.model.into());
+            choice.effort = {
+                use crate::router::Effort::{High, Low, Medium, Xhigh};
+                [Low, Medium, High, Xhigh]
+            }
+            .into_iter()
+            .find(|e| e.name() == routed.profile.effort);
+        }
+        let selected_model = model.clone().or_else(|| choice.model.clone().filter(|_| matches!(ai, Ai::Named(_))));
         if let Some(model) = model {
             let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor).ok_or("choose a named AI for a model")?;
-            let valid = match vendor {
-                Vendor::Claude => {
-                    crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, &model))
-                }
-                Vendor::Codex => self.codex_models.contains(&model),
-                Vendor::Gemini => false,
-            };
-            if !valid {
+            if !self.runs_model(vendor, &model) {
                 return Err("unknown model; choose a model available for this AI");
             }
             choice.model = Some(model);
@@ -255,12 +279,24 @@ impl Core {
                 Some((vendor, model.as_deref().and_then(family_of).map(str::to_string)))
             }
         };
+        // The AI that really runs it answers for its quota: a model named under Auto, or by an Auto lead, chose its own.
+        let gate = match (gate, Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor)) {
+            (held, Some(runs)) if matches!(ai, Ai::Auto) || held.as_ref().is_some_and(|(vendor, _)| *vendor != runs) => {
+                let pick = crate::router::Pick { vendor: runs, model: None, effort: String::new(), reason: String::new(), pace: None };
+                let model = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models).model;
+                Some((runs, model.as_deref().and_then(family_of).map(str::to_string)))
+            }
+            (held, _) => held,
+        };
         let gate = match (gate, selected_model) {
             (Some((vendor, _)), Some(model)) => Some((vendor, family_of(crate::router::pinned(vendor, &model)).map(str::to_string))),
             (gate, _) => gate,
         };
         self.sibling_allowed(&gate)?;
         let id = self.blank(Area::Project, Some(project.clone()));
+        if let Some(work) = work.filter(|_| choice.vendor == "auto") {
+            self.given.insert(id.clone(), work.asked());
+        }
         if let Some(c) = self.convs.get_mut(&id) {
             c.started_by = Some(conv.to_string());
             c.goal_fix = fix;
@@ -290,6 +326,7 @@ impl Core {
                 Ok((id, true))
             }
             Err(_) => {
+                self.given.remove(&id);
                 // Its step is free to start again, whatever becomes of the conversation.
                 self.edit_worker_step(conv, &id, |s| (s.state, s.worker) = (StepState::Pending, None));
                 // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
@@ -299,6 +336,15 @@ impl Core {
                 let _ = self.remove(&id);
                 Err("the conversation could not start")
             }
+        }
+    }
+
+    /// Whether `model` is one `vendor` runs: a row of Auto's table for Claude, a model the account lists for ChatGPT.
+    fn runs_model(&self, vendor: Vendor, model: &str) -> bool {
+        match vendor {
+            Vendor::Claude => crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, model)),
+            Vendor::Codex => self.codex_models.iter().any(|m| m == model),
+            Vendor::Gemini => false,
         }
     }
 
@@ -769,9 +815,8 @@ impl Core {
         if on.len() > 12 {
             return Err("wait takes at most 12 ids".into());
         }
-        if note.chars().count() > 200 {
-            return Err("the note is longer than 200 characters".into());
-        }
+        // Cut, not refused: a refusal makes the agent call again for a line the person only glances at.
+        let note: String = if note.chars().count() > 200 { note.chars().take(199).chain(['…']).collect() } else { note };
         for id in &on {
             self.own(by, id)?;
         }
@@ -804,6 +849,15 @@ impl Core {
         self.list_changed();
         for id in on {
             self.tell_parent(&id);
+        }
+        // Helpers stop when their lead's turn ends (`stop_helpers`): a lead told to end its turn here lost a review two
+        // minutes in (the owner's project, 2026-11-11). The wait stands; the turn ends after they report.
+        let helpers = self.working_helpers(by);
+        if !helpers.is_empty() {
+            return Ok(format!(
+                "The wait is set, but do not end your turn yet: {} still working for you, and a helper stops when your turn ends.                  Get each report with helper({{\"to\":name,\"wait\":true}}), then end your turn; Faber wakes you when one of these                  conversations reports.",
+                helpers.join(", ")
+            ));
         }
         Ok("End your turn now; Faber wakes you when one of these conversations reports.".into())
     }

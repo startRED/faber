@@ -1,6 +1,6 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import type { Message, TeamMessage, ToolUse } from '../../ui/api.ts';
+import type { Message, Summary, TeamMessage, ToolUse } from '../../ui/api.ts';
 import { openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Team } from '../../ui/Team.tsx';
 import { Thread } from '../../ui/Thread.tsx';
@@ -700,4 +700,29 @@ check('team block: lead facts have middle dots and the sentence uses the stronge
     reference.style.color = 'var(--ink-2)'; equal(getComputedStyle(lead.querySelector('.team-model')!).color, getComputedStyle(reference).color);
     setModel(undefined); equal(lead.querySelectorAll('.team-dot').length, 1, 'no empty model fact');
   } finally { dispose(); root.remove(); restore(); }
+});
+
+check('team block: conversations the reply started sit in the block, stay under the fold and leave their step rows', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const done = ended(teamFixture());
+  const message: Message = { ...done, tools: [...done.tools!, { id: 'start-a', name: 'Conversation', input: { action: 'start', title: 'Part A' }, ok: true, output: 'Started.\n{"childId":"a"}' }] };
+  const [child, setChild] = createSignal<Summary>({ id: 'a', title: 'Part A', area: 'project', updatedAt: 0, startedBy: 'lead', childState: 'working', childLine: 'Reading files' });
+  let opened = '';
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'lead', options: [], onBranch: () => {}, get conversations() { return [child()]; }, onOpenChild: (c) => { opened = c.id; } }), root);
+  try {
+    const cards = () => [...root.querySelectorAll<HTMLButtonElement>('.child-conversation')];
+    equal(cards().length, 1, 'one card for the conversation, not one in the block and one under its step');
+    ok(cards()[0]!.closest('.team > .team-started'), 'the card sits in the team block');
+    equal(root.querySelector('.team-started')!.getAttribute('aria-label'), t('team.conversations'));
+    ok(cards()[0]!.textContent!.includes('Part A') && cards()[0]!.textContent!.includes('Working'));
+    equal(root.querySelector('.team-fold')?.getAttribute('aria-expanded'), 'false', 'the helpers ended and folded while the conversation still works');
+    setChild({ ...child(), childState: 'done' });
+    ok(cards()[0]!.textContent!.includes('Done'));
+    cards()[0]!.click();
+    equal(opened, 'a');
+    setChild({ ...child(), startedBy: 'another-lead' });
+    equal(cards().length, 0, 'another conversation cannot claim this child');
+  } finally { dispose(); root.remove(); }
 });

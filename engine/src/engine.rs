@@ -674,6 +674,9 @@ struct Core {
     looked: f64,
     /// How many times each draft was routed while the person typed it (`route_draft`); sending the message resets it.
     draft_routes: HashMap<String, u8>,
+    /// The work a lead stated for a conversation it just started (`siblings.rs`), until that conversation's first message
+    /// is routed: the table picks from it at once and no classifier reads the brief.
+    given: HashMap<String, crate::route::Asked>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
     follows: HashMap<String, pr_watch::Watch>,
     pr_reader: PrReader,
@@ -851,6 +854,7 @@ impl Engine {
                 listening: false,
                 looked: 0.0,
                 draft_routes: HashMap::new(),
+                given: HashMap::new(),
                 follows: HashMap::new(),
                 pr_reader,
                 browser: None,
@@ -4379,6 +4383,7 @@ impl Core {
         if !self.convs.contains_key(id) {
             return Err("error.conversationGone".into());
         }
+        let fallback = self.unjudged(self.convs[id].area, &fallback);
         let model_text = self.model_text(id, &item);
         let auto = item.choice.vendor == "auto";
         // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
@@ -4434,7 +4439,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
-        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly" | "reason.autoImmediate") {
             reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
         }
         reply.note = resent.then(|| "note.historyResent".to_string());
@@ -5427,6 +5432,7 @@ impl Core {
             self.check_project_folder(req.project_id.as_deref())?;
         }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
+        let fallback = self.unjudged(req.area, &fallback);
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
             return Err("error.rewind.busy".into());
         }
@@ -5525,7 +5531,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
-        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly") {
+        if auto && !routing && matches!(pick.reason.as_str(), "reason.autoDefault" | "reason.autoOnly" | "reason.autoImmediate") {
             reply.acts.push(crate::act::FaberAct::route(&pick, crate::act::Actor::Faber));
         }
         reply.note = resent.then(|| "note.historyResent".to_string());
@@ -5569,6 +5575,7 @@ impl Core {
         self.emit_message(&id, &question_id);
         if let Err(error) = self.prepare_research(&req.text) {
             // The intent is already durable: its reply fails, rather than asking the composer to resend it.
+            self.given.remove(&id);
             self.halt(&id, &reply_id, "reason.keepGoing.failed");
             self.fail_reply(&id, &reply_id, error);
             return Ok(id);
@@ -5591,10 +5598,16 @@ impl Core {
             },
         );
         if let Some(before) = route {
+            // A conversation a lead started carries the work it stated: the table picks from that, and nothing is asked.
+            let given = self.given.remove(&id).filter(|_| before.is_none());
             let only = before.as_ref().map(|p| p.vendor);
             let file_bytes = req.files.iter().map(|f| f.base64.len() / 4 * 3).sum();
             let reading = self.reading(&id, req.text.chars().count(), req.images.len(), file_bytes, before.as_ref());
-            let mut route = self.route_for(&id, &req.text, req.images.len() + req.files.len(), only);
+            let cold = before.is_none() && area == Area::Project;
+            let mut route = match given {
+                Some(verdict) => auto::ready(verdict),
+                None => self.route_for(&id, &req.text, req.images.len() + req.files.len(), only, cold),
+            };
             if before.is_some() {
                 let verdict = route.try_recv().ok().flatten();
                 let failed = verdict.as_ref().is_some_and(|(v, _)| v.is_none());
@@ -5608,7 +5621,7 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let result = tokio::time::timeout(auto::ROUTE_BUDGET, route).await;
+                let result = tokio::time::timeout(auto::budget(cold), route).await;
                 let failed = !matches!(&result, Ok(Ok(None)) | Ok(Ok(Some((Some(_), _)))));
                 let verdict = result.ok().and_then(|r| r.ok()).flatten().and_then(|(v, actor)| v.map(|v| (v, actor)));
                 if let Some(core) = me.upgrade() {
@@ -6002,6 +6015,7 @@ impl Core {
             }
             self.rewind_forget(id);
             self.draft_routes.remove(id);
+            self.given.remove(id);
             if self.old_inputs_active.contains(id) {
                 self.old_inputs_deleted.insert(id.to_string());
             }

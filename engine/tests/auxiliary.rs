@@ -77,8 +77,10 @@ async fn router_cold_send_starts_at_once_without_an_auxiliary_request() {
     engine.shutdown();
 }
 
+/// The owner sent before Auto had finished judging and the answer ran on a fixed everyday model (2026-11-11): a first send
+/// now waits for the classifier that is already reading its text, but never past the budget.
 #[tokio::test(start_paused = true)]
-async fn router_pending_draft_does_not_hold_the_send() {
+async fn router_pending_draft_holds_a_first_send_only_for_its_budget() {
     let dir = support::DataFolder::new();
     let mut recording = fixture("codex", "chat");
     recording.insert(0, support::Entry { input: false, msg: serde_json::json!({"faber_hold": 3200}) });
@@ -89,14 +91,16 @@ async fn router_pending_draft_does_not_hold_the_send() {
     let id = send(&engine);
     engine.rename(&id, "Router test");
     support::until("the pending draft held the send", || engine.open(&id).unwrap().messages[1].model.is_some()).await;
-    assert!(start.elapsed() < Duration::from_millis(500), "{:?}", start.elapsed());
-    assert_eq!(engine.open(&id).unwrap().messages[1].acts[0].why.as_deref(), Some("reason.autoImmediate"));
+    let waited = start.elapsed();
+    assert!(waited >= Duration::from_millis(2500) && waited < Duration::from_millis(3200), "{waited:?}");
+    let reply = engine.open(&id).unwrap().messages[1].clone();
+    assert_eq!(reply.reason.as_deref(), Some("reason.autoImmediate"));
+    assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
     engine.shutdown();
 }
 
-#[tokio::test]
-async fn router_draft_can_finish_after_the_old_send_deadline() {
-    let dir = support::DataFolder::new();
+/// A classifier's run that gives an easy chat verdict `hold` ms after its question.
+fn verdict_after(hold: u64) -> Vec<support::Entry> {
     let verdict = r#"{"kind":"chat","difficulty":"easy","check":"glance","confidence":0.95}"#;
     let mut recording = fixture("codex", "chat");
     let end = recording.iter().position(|e| e.msg["method"] == "turn/completed").unwrap();
@@ -111,15 +115,42 @@ async fn router_draft_can_finish_after_the_old_send_deadline() {
         }
     }
     let at = recording.iter().position(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
-    recording.insert(at, support::Entry { input: false, msg: serde_json::json!({"faber_hold": 3200}) });
-    let router = fake(recording);
+    recording.insert(at, support::Entry { input: false, msg: serde_json::json!({"faber_hold": hold}) });
+    recording
+}
+
+/// An engine whose classifier is `router` and whose answers come from the recorded chat.
+fn routed_engine(dir: &support::DataFolder, router: &support::Fake) -> Engine {
     let answer = fake(fixture("codex", "chat"));
     let (r, a) = (router.spawn.clone(), answer.spawn.clone());
-    let engine = engine(
-        &dir,
+    engine(
+        dir,
         Arc::new(move |bin, args, cwd| if args.iter().any(|a| a == "mcp_servers={}") { r(bin, args, cwd) } else { a(bin, args, cwd) }),
         Vendor::Codex,
-    );
+    )
+}
+
+#[tokio::test]
+async fn router_pending_draft_answers_a_first_send_inside_the_budget() {
+    let dir = support::DataFolder::new();
+    let router = fake(verdict_after(1200));
+    let engine = routed_engine(&dir, &router);
+    engine.route_draft(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice() }, QUESTION.into());
+    support::until("the draft question was not sent", || router.wire.lines_with("turn/start") == 1).await;
+    let id = send(&engine);
+    engine.rename(&id, "Router test");
+    support::until("the routed draft never started", || engine.open(&id).unwrap().messages[1].model.is_some()).await;
+    let reply = engine.open(&id).unwrap().messages[1].clone();
+    assert_eq!(reply.reason.as_deref(), Some("reason.route.chat.easy"), "the send used the verdict it waited for");
+    assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn router_draft_can_finish_after_the_old_send_deadline() {
+    let dir = support::DataFolder::new();
+    let router = fake(verdict_after(3200));
+    let engine = routed_engine(&dir, &router);
     engine.route_draft(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice() }, QUESTION.into());
     support::until("the draft question was not sent", || router.wire.lines_with("turn/start") == 1).await;
     tokio::time::sleep(Duration::from_millis(3500)).await;

@@ -234,29 +234,41 @@ function stepState(tool: ToolUse, working: boolean): 'running' | 'done' | 'faile
   return tool.ok ? 'done' : 'failed';
 }
 
+/** The conversation a step started, read from Faber's own answer to the call: the conversation tool's last line, or the
+ * command line's `conversation_started` marker. */
+function startedChild(tool: ToolUse): string | undefined {
+  const action = (tool.input as { action?: string } | undefined)?.action;
+  if (tool.ok !== true || !tool.output) return undefined;
+  const conversation = tool.name === 'Conversation' && (!action || action === 'start');
+  const command = ['Bash', 'PowerShell', 'commandExecution'].includes(tool.name);
+  if (!conversation && !command) return undefined;
+  try {
+    if (conversation) return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId;
+    for (const line of tool.output.split('\n').reverse()) {
+      if (!/^\{"(?:childId":"[A-Za-z0-9_-]+","event":"conversation_started|event":"conversation_started","childId":"[A-Za-z0-9_-]+)"\}\r?$/.test(line)) continue;
+      return (JSON.parse(line) as { childId: string }).childId;
+    }
+    return undefined;
+  } catch { return undefined; }
+}
+
+/** A conversation this one started: its title, who runs it and where it stands. A click opens it. */
+function ChildCard(props: { child: Summary; running?: RunningItem[]; onOpen: (c: Summary) => void }) {
+  const child = () => props.child;
+  const running = () => props.running?.find((r) => r.conversationId === child().id);
+  const state = () => child().archived ? 'archived' : child().childState ?? (running()?.state === 'needsYou' ? 'waiting' : running() ? 'working' : 'done');
+  return <button type="button" class="btn child-conversation" data-state={state()} onClick={() => props.onOpen(child())}>
+    <b>{child().title}</b>
+    <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), t(`child.${state()}`), child().waitingOn?.note, running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
+  </button>;
+}
+
 /** One step the agent took, as a thin row: what it did ("Read", "Running" while it works), what it acted on, the lines it
  * changed. A click opens what it ran and what came back, and closes it again; nothing else moves. */
 function Step(props: { conversationId: string; conversations?: Summary[]; running?: RunningItem[]; onOpenChild?: (c: Summary) => void; tool: Accessor<ToolUse>; working: boolean; long?: string; workingFolder?: string; preview?: boolean }) {
   const [open, setOpen] = createSignal(false);
-  const childId = createMemo(() => {
-    const tool = props.tool();
-    const action = (tool.input as { action?: string } | undefined)?.action;
-    if (tool.ok !== true || !tool.output) return undefined;
-    const conversation = tool.name === 'Conversation' && (!action || action === 'start');
-    const command = ['Bash', 'PowerShell', 'commandExecution'].includes(tool.name);
-    if (!conversation && !command) return undefined;
-    try {
-      if (conversation) return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId;
-      for (const line of tool.output.split('\n').reverse()) {
-        if (!/^\{"(?:childId":"[A-Za-z0-9_-]+","event":"conversation_started|event":"conversation_started","childId":"[A-Za-z0-9_-]+)"\}\r?$/.test(line)) continue;
-        return (JSON.parse(line) as { childId: string }).childId;
-      }
-      return undefined;
-    } catch { return undefined; }
-  });
+  const childId = createMemo(() => startedChild(props.tool()));
   const child = createMemo(() => props.conversations?.find((c) => c.id === childId() && c.startedBy === props.conversationId));
-  const running = () => props.running?.find((r) => r.conversationId === child()?.id);
-  const childState = () => child()?.archived ? 'archived' : child()?.childState ?? (running()?.state === 'needsYou' ? 'waiting' : running() ? 'working' : 'done');
   const state = () => stepState(props.tool(), props.working);
   const row = () => toolRow(props.tool(), state() !== 'running', props.workingFolder ?? '');
   const fullDetail = () => toolRow(props.tool(), state() !== 'running').detail;
@@ -278,10 +290,7 @@ function Step(props: { conversationId: string; conversations?: Summary[]; runnin
         <Show when={state() === 'running' && props.long}><span class="long" aria-hidden="true">· {props.long}</span></Show>
       </button>
       <Show when={child() && props.onOpenChild}>
-        <button type="button" class="btn child-conversation" onClick={() => props.onOpenChild?.(child()!)}>
-          <b>{child()!.title}</b>
-          <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child()!.childChoice?.vendor === 'auto' ? t('model.auto') : child()!.childChoice?.vendor ? vendorName(child()!.childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child()!.childChoice?.model), t(`child.${childState()}`), child()!.waitingOn?.note, running()?.now ?? child()!.childLine].filter(Boolean).join(' · ')}</span>
-        </button>
+        <ChildCard child={child()!} running={props.running} onOpen={props.onOpenChild!} />
       </Show>
       {/* The newest edit shows a few of its lines under its own row until the next step or words (R161 step 9). */}
       <Show when={props.preview && !open() && change()}>{(c) => <ChangedLines change={c()} />}</Show>
@@ -500,6 +509,12 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // a tick of the stream redraws only the part that grew.
   let before: Part[] | undefined;
   const parts = createMemo(() => (before = keepParts(before, timeline(m(), text()))));
+  // The conversations this reply started belong to its team: a lead that hands two parts to conversations and one to a
+  // helper has a team of three, not of one (the owner's project, 2026-11-11). They show in the reply's first team block,
+  // which then replaces the card under each start step.
+  const startedIds = createMemo(() => parts().some((part) => part.kind === 'team') && props.onOpenChild
+    ? (m().tools ?? []).flatMap((tool) => { const id = startedChild(tool); return id && props.conversations?.some((c) => c.id === id && c.startedBy === props.conversationId) ? [id] : []; })
+    : [], [] as string[], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
   const agentOf = (id: string) => agents().find((step) => step.call.id === id);
   const hasKit = () => !!(m().toolKit?.ids.length || m().toolKit?.suggested || m().toolKit?.error);
   const kitLine = () => {
@@ -700,10 +715,16 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
                 </div>
               </Match>
               <Match when={part().kind === 'steps'}>
-                <Steps conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={props.onOpenChild} items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
+                <Steps conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={startedIds().length ? undefined : props.onOpenChild} items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
               </Match>
               <Match when={part().kind === 'team'}>
-                <Team members={team()} streaming={working()} lead={m().vendor} leadModel={m().model} conversationId={props.conversationId} messageId={m().id} />
+                <Team members={team()} streaming={working()} lead={m().vendor} leadModel={m().model} conversationId={props.conversationId} messageId={m().id}>
+                  <Show when={startedIds().length && i === parts().findIndex((p) => p.kind === 'team')}>
+                    <div class="team-started" role="group" aria-label={t('team.conversations')}>
+                      <For each={startedIds()}>{(id) => <Show when={props.conversations?.find((c) => c.id === id)}>{(child) => <ChildCard child={child()} running={props.running} onOpen={props.onOpenChild!} />}</Show>}</For>
+                    </div>
+                  </Show>
+                </Team>
               </Match>
               <Match when={step()}>
                 <div class="agents" role="list" aria-label={t('agent.label')}>

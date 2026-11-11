@@ -12,10 +12,12 @@ pub struct NewSession {
     pub title: String,
     pub brief: String,
     pub ai: Ai,
-    /// A model of the AI named by `ai` (or of the starter's own AI when `ai` is `same`); never with `auto`.
+    /// A model of the AI named by `ai` (or of the starter's own AI when `ai` is `same`); with `auto` its AI is found from it.
     pub model: Option<String>,
-    /// `low`, `medium` or `high`; never with `auto`.
+    /// `low`, `medium` or `high`; with `auto` and no model it says how hard the work is (easy, medium, hard).
     pub effort: Option<String>,
+    /// The work as the starter states it: with no model named, Auto's table picks from it.
+    pub work: Option<crate::sibling::Work>,
     pub keep_going: bool,
     pub step: Option<String>,
 }

@@ -217,6 +217,19 @@ async fn team_question_releases_the_whole_batch_and_wait_returns_the_other_repor
     }
 }
 
+/// A helper stops when its lead's turn ends. The owner's lead set a wait, ended its turn as the answer told it to, and its
+/// helper was stopped two minutes into the work (2026-11-11).
+#[tokio::test]
+async fn team_wait_with_helpers_at_work_keeps_the_leads_turn_open() {
+    let t = Team::new(Vendor::Claude, 2);
+    let wait = |t: &Team| t.engine.with(|core| core.session_wait(&t.conv, vec![], Some("until the team reports".into()))).unwrap();
+    let said = wait(&t);
+    assert!(said.contains("do not end your turn yet") && said.contains("Piece 0, Piece 1") && said.contains(r#""wait":true"#), "{said}");
+    t.report("h0");
+    t.report("h1");
+    assert!(wait(&t).starts_with("End your turn now"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn team_question_lapses_after_five_minutes_and_stale_timers_do_not_answer_again() {
     for vendor in [Vendor::Claude, Vendor::Codex] {

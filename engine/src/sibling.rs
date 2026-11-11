@@ -33,8 +33,11 @@ fn schema() -> Value {
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: self-contained goal, files and done criteria; no overlapping work. Returns id and reports when finished. keep_going gives ordered tasks and one final report." },
             "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: same by default or auto by task and quota; check quota, spread across available AIs, use the other AI for code review." },
-            "model": { "type": "string", "description": "start: model of the chosen AI; not with auto." },
+            "model": { "type": "string", "description": "start: a model; with auto its AI is found from it." },
             "effort": { "type": "string", "enum": ["low", "medium", "high"] },
+            "kind": { "type": "string", "enum": crate::route::KINDS },
+            "difficulty": { "type": "string", "enum": crate::route::LEVELS, "description": "start: with kind and scope, the work as for a helper; it picks the model when none is named." },
+            "scope": { "type": "string", "enum": crate::route::SCOPES },
             "on": { "type": "array", "items": { "type": "string" }, "description": "wait: child conversation ids." },
             "note": { "type": "string", "description": "wait: optional reason." },
             "keep_going": { "type": "boolean", "description": "start: true when the brief is an ordered list of tasks it goes through by itself." },
@@ -60,17 +63,73 @@ pub fn mcp_tool() -> Value {
 /// What one call asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
-    Start { title: String, brief: String, ai: Ai, model: Option<String>, effort: Option<String>, keep_going: bool, step: Option<String> },
-    Read { id: String },
+    Start {
+        title: String,
+        brief: String,
+        ai: Ai,
+        model: Option<String>,
+        effort: Option<String>,
+        work: Option<Work>,
+        keep_going: bool,
+        step: Option<String>,
+    },
+    Read {
+        id: String,
+    },
     List,
-    Ask { id: String, message: String },
-    Archive { id: Option<String> },
-    Stop { id: String },
-    Resume { id: String, message: Option<String> },
-    Wait { on: Vec<String>, note: Option<String> },
+    Ask {
+        id: String,
+        message: String,
+    },
+    Archive {
+        id: Option<String>,
+    },
+    Stop {
+        id: String,
+    },
+    Resume {
+        id: String,
+        message: Option<String>,
+    },
+    Wait {
+        on: Vec<String>,
+        note: Option<String>,
+    },
     Context,
-    Compact { next: Option<String> },
-    Clear { next: String },
+    Compact {
+        next: Option<String>,
+    },
+    Clear {
+        next: String,
+    },
+}
+
+/// The work a started conversation does, in the words of a helper's piece (`crate::helper::Piece`). With no model named,
+/// Auto's table picks from it on the quota of that moment and no classifier reads the brief.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Work {
+    pub kind: &'static str,
+    pub difficulty: &'static str,
+    pub scope: &'static str,
+}
+
+impl Work {
+    /// None when the call states none of the three; a word that is not one of the known ones reads as the usual one.
+    pub fn of(input: &Value) -> Option<Self> {
+        let word = |key: &str, known: &[&'static str], usual: &'static str| {
+            known.iter().copied().find(|v| Some(*v) == input[key].as_str()).unwrap_or(usual)
+        };
+        ["kind", "difficulty", "scope"].iter().any(|key| input.get(*key).is_some()).then(|| Self {
+            kind: word("kind", &crate::route::KINDS, "code"),
+            difficulty: word("difficulty", &crate::route::LEVELS, "medium"),
+            scope: word("scope", &crate::route::SCOPES, "tight"),
+        })
+    }
+
+    /// The same work as a verdict the table reads: stated by the agent that hands it out, so never in doubt.
+    pub fn asked(self) -> crate::route::Asked {
+        crate::route::Asked { kind: self.kind, difficulty: self.difficulty, check: "glance", scope: self.scope, confidence: 1.0 }
+    }
 }
 
 /// Which AI runs a conversation an agent starts.
@@ -159,6 +218,7 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
                 ai,
                 model,
                 effort,
+                work: Work::of(input),
                 keep_going: input["keep_going"].as_bool().unwrap_or(false),
                 step: text("step"),
             })
@@ -424,6 +484,7 @@ mod tests {
                 ai: Ai::Same,
                 model: None,
                 effort: None,
+                work: None,
                 keep_going: false,
                 step: None
             })
@@ -437,6 +498,7 @@ mod tests {
                 ai: Ai::Named(Vendor::Codex),
                 model: None,
                 effort: None,
+                work: None,
                 keep_going: true,
                 step: None
             })
@@ -445,6 +507,17 @@ mod tests {
             matches!(on("auto"), Ok(Request::Start { ai: Ai::Auto, .. })) && matches!(on("same"), Ok(Request::Start { ai: Ai::Same, .. }))
         );
         assert!(matches!(request(&json!({"brief":"x","step":" s2 "})), Ok(Request::Start { step: Some(s), .. }) if s == "s2"));
+        // The work is stated in a helper's words; one word is enough, and an unknown one reads as the usual one.
+        let work = |input: Value| match request(&input) {
+            Ok(Request::Start { work, .. }) => work,
+            _ => None,
+        };
+        assert_eq!(work(json!({"brief":"x"})), None);
+        assert_eq!(work(json!({"brief":"x","difficulty":"hard"})), Some(Work { kind: "code", difficulty: "hard", scope: "tight" }));
+        assert_eq!(
+            work(json!({"brief":"x","kind":"research","difficulty":"huge","scope":"open"})),
+            Some(Work { kind: "research", difficulty: "medium", scope: "open" })
+        );
         assert_eq!(on("gemini"), Err("ai is not one of same, auto, claude or codex"));
         assert_eq!(request(&json!({"id":"abc"})), Ok(Request::Read { id: "abc".into() }));
         assert_eq!(request(&json!({"action":"list","id":"x"})), Ok(Request::List));

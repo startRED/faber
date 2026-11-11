@@ -12,6 +12,12 @@ process or timer is introduced: a backward scan of the current request's acts an
 Cards and their accessible names use the job word Advice (hand-written in all five locales), with the same maker mark,
 model, effort and state as other members. The helper view also names the advice job. No new screen or control.
 
+The conversations the same reply started (the conversation tool's `start`, or the command line's marker) show in its
+first team block, under the helpers: title, AI, model, state and current line, each opening its conversation. They stay
+in view when the helpers end and the block folds, because a conversation goes on after them, and the card under each
+start step leaves so the conversation shows once. A reply with no helper keeps the card under its step. No new state:
+the cards read the conversation list the screen already holds (`tests/ui/team.check.ts`, "conversations the reply started").
+
 Completed-reply coverage in `engine/tests/engine.rs` exercises a Codex lead with each of read and build, checks the
 first helper uses Claude, and verifies both makers and the successful helper report remain after the reply ends.
 The existing Claude-lead replay covers the reverse direction. Disabling first-piece mixing must fail the Codex-lead check.

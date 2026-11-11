@@ -176,20 +176,56 @@ async fn a_failed_router_keeps_the_previous_choice() {
     engine.shutdown();
 }
 
+/// The first message of a project conversation fixes its model for the whole conversation, so it waits longer for its
+/// judgement than a chat message does: 5 of 6 project starts in the owner's own use had run unjudged (2026-11-11).
 #[tokio::test]
-async fn a_router_without_an_answer_leaves_the_everyday_default() {
+async fn a_first_project_message_waits_past_the_chat_budget_for_its_route() {
+    let dir = crate::support::DataFolder::new();
+    let slow: Ask = Arc::new(|_| {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(3000)).await;
+            Some(r#"{"kind":"code","difficulty":"easy","confidence":0.95}"#.to_string())
+        })
+    });
+    let (spawn, _made) = support::pipes();
+    let (engine, _rx) = engine(&dir, Vendor::Claude, spawn, slow);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine.send(SendRequest { area: Area::Project, project_id: Some(project.id), ..auto("Rename the helper") }).unwrap();
+    let reply = routed(&engine, &id, 0).await;
+    engine.shutdown();
+    assert_eq!(reply.reason.as_deref(), Some("reason.route.code.easy"));
+}
+
+/// With no verdict a first message runs the table's row for the usual work of its area, never one fixed model.
+#[tokio::test]
+async fn a_first_project_message_nobody_judged_runs_the_tables_hard_code_row() {
+    let dir = crate::support::DataFolder::new();
+    let silent: Ask = Arc::new(|_| Box::pin(async { None }));
+    let (spawn, _made) = support::pipes();
+    let (engine, _rx) = engine(&dir, Vendor::Claude, spawn, silent);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let id = engine.send(SendRequest { area: Area::Project, project_id: Some(project.id), ..auto("Rename the helper") }).unwrap();
+    let reply = routed(&engine, &id, 0).await;
+    engine.shutdown();
+    assert_eq!(reply.reason.as_deref(), Some("reason.autoImmediate"));
+    assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
+    assert_eq!((reply.model.as_deref(), reply.acts[0].params.get("effort").map(String::as_str)), (Some("claude-opus-5-5"), Some("medium")));
+}
+
+#[tokio::test]
+async fn a_router_without_an_answer_runs_the_tables_medium_chat_row() {
     let dir = crate::support::DataFolder::new();
     let silent: Ask = Arc::new(|_| Box::pin(async { None }));
     let (engine, mut rx) = engine(&dir, Vendor::Codex, fake(fixture("codex", "chat")).spawn, silent);
     let models = vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()];
-    engine.set_codex_models(models.clone(), None);
+    engine.set_codex_models(models, None);
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
     assert_eq!(reply.status, Some(Status::Done));
-    assert_eq!(reply.reason.as_deref(), Some("reason.autoOnly"));
+    assert_eq!(reply.reason.as_deref(), Some("reason.autoImmediate"));
     assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
-    assert_eq!(reply.acts[0].params.get("model"), Some(&faber_engine::router::default_model(Vendor::Codex, None, &models)));
+    assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
 }
 
 #[tokio::test]

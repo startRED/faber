@@ -391,7 +391,7 @@ table! {
                     .ok_or_else(|| refused("ai is not one of same, auto, claude or codex".into()))?,
             ),
         };
-        let new = faber_engine::engine::NewSession { title, brief, ai, model, effort, keep_going: keep_going.unwrap_or(false), step };
+        let new = faber_engine::engine::NewSession { title, brief, ai, model, effort, work: None, keep_going: keep_going.unwrap_or(false), step };
         h.engine.session_start(&by, new).map_err(refused)
     }
     /// Sends `message` to another unarchived conversation of the same project as a message from this AI. Refused outside

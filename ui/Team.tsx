@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show, type JSX } from 'solid-js';
 import type { TeamMessage, Vendor } from './api.ts';
 import { agentActivity, agentMeta, openedAgent, showAgent } from './AgentChat.tsx';
 import { askedQuestions } from './Ask.tsx';
@@ -90,8 +90,9 @@ function Wire(props: { line: WireLine; members: AgentStep[] }) {
   </div>;
 }
 
-/** One helper run in its place in the reply. Details leave the DOM when folded; no clock or polling. */
-export function Team(props: { members: AgentStep[]; streaming: boolean; lead?: Vendor; leadModel?: string; conversationId: string; messageId: string }) {
+/** One helper run in its place in the reply. Details leave the DOM when folded; no clock or polling. `children` are the
+ * conversations the same reply started: they stay in view under the fold, since they go on after the helpers end. */
+export function Team(props: { members: AgentStep[]; streaming: boolean; lead?: Vendor; leadModel?: string; conversationId: string; messageId: string; children?: JSX.Element }) {
   const heading = createUniqueId();
   const counts = createMemo(() => teamCounts(props.members, props.streaming));
   const wire = createMemo(() => teamWire(props.members));
@@ -157,5 +158,6 @@ export function Team(props: { members: AgentStep[]; streaming: boolean; lead?: V
         </div>
       </Show>
     </Collapse>
+    {props.children}
   </section>;
 }

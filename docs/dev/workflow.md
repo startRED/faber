@@ -217,3 +217,10 @@ Anything else stops
 the landing with its files: a conflict in code, a file one side deleted, or a line both sides changed, which is a real
 disagreement for the lane to settle. The squash is checked like any other, `engine/tests/product_map.rs` included. A
 conflict that GitHub shows on a pull request in those files alone needs nothing: the landing settles it.
+
+## Real-use check
+
+`node scripts/real-use.mjs` (`--days`, `--data`) reads the conversations Faber saved on this PC, with no token, no CLI
+and nothing written: Auto starts nobody judged, each sentence Faber refused a call or stopped a helper with (ids masked),
+and failed steps by tool name. `--check` exits 1 when most project starts were unjudged or a refusal listed in `FIXED`
+comes back after its fix date. Run it after a week of use; a fixed bug adds its sentence to `FIXED`.
