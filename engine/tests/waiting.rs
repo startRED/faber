@@ -718,8 +718,8 @@ async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict(
     support::until("the turn never moved to Claude", || !r.claude.args.lock().unwrap().is_empty()).await;
     let args = r.claude.args.lock().unwrap().first().cloned().expect("the turn moved to Claude");
     let flag = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].clone());
-    assert_eq!(flag("--model").as_deref(), Some("claude-sonnet-5-5"));
-    assert_eq!(flag("--effort").as_deref(), Some("high"), "blind code keeps its step up after the move");
+    assert_eq!(flag("--model").as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(flag("--effort").as_deref(), Some("medium"), "blind code keeps its step up after the move");
     r.engine.shutdown();
 }
 

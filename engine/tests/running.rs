@@ -342,7 +342,7 @@ async fn an_auto_reply_is_listed_at_once_without_a_vendor_and_gets_one_when_the_
 
     let lists = lists_until(&mut rx, WAIT, |items| items.first().is_some_and(|i| i.vendor.is_some())).await;
     let picked = &lists.last().unwrap().1[0];
-    assert_eq!((picked.vendor, picked.model.as_deref()), (Some(Vendor::Codex), Some("gpt-6-luna")));
+    assert_eq!((picked.vendor, picked.model.as_deref()), (Some(Vendor::Codex), Some("gpt-6.1-sol")));
     assert_eq!(picked.turn_id, waiting.turn_id, "the same row, not a new one");
     lists_until(&mut rx, WAIT, |items| items.is_empty()).await;
     engine.shutdown();

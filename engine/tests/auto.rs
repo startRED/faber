@@ -121,7 +121,7 @@ async fn auto_routes_the_first_message_blind_and_says_why() {
     assert_eq!(reply.reason.as_deref(), Some("reason.route.chat.easy"));
     let act = serde_json::to_value(&reply).unwrap()["acts"][0].clone();
     assert_eq!(act["kind"], "route");
-    assert_eq!(act["params"]["model"], "gpt-6-luna");
+    assert_eq!(act["params"]["model"], "gpt-6.1-sol");
     assert_eq!(act["why"], "reason.route.chat.easy");
     let prompt = calls.lock().unwrap()[0].to_lowercase();
     assert!(prompt.contains(&SKY.to_lowercase()) && !prompt.contains("luna") && !prompt.contains("gpt"));
@@ -254,7 +254,7 @@ async fn once_a_message_needs_more_than_an_easy_model_the_conversation_stays_wit
     engine.shutdown();
     assert_eq!(calls.lock().unwrap().len(), 1, "only the first message is routed");
     let args = f.args.lock().unwrap()[0].clone();
-    assert_eq!((flag(&args, "--model"), flag(&args, "--effort")), (Some("claude-sonnet-5-5".into()), Some("medium".into())));
+    assert_eq!((flag(&args, "--model"), flag(&args, "--effort")), (Some("claude-sonnet-5-5".into()), Some("high".into())));
     assert_eq!((second.vendor, second.model, second.reason), (Some(Vendor::Claude), first.model, first.reason));
 }
 
@@ -271,11 +271,11 @@ async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does()
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
     let second = routed(&engine, &id, 1).await;
     engine.shutdown();
-    assert_eq!((second.model.as_deref(), second.reason.as_deref()), (Some("claude-sonnet-5-5"), Some("reason.route.code.hard")));
+    assert_eq!((second.model.as_deref(), second.reason.as_deref()), (Some("claude-opus-5-5"), Some("reason.route.code.hard")));
     let args = f.args.lock().unwrap().clone();
     assert_eq!(flag(&args[0], "--model").as_deref(), Some("claude-haiku-5-5"));
     // The same subscription picks the conversation up where it was, with its history.
-    assert_eq!((flag(&args[1], "--model").as_deref(), flag(&args[1], "--effort").as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+    assert_eq!((flag(&args[1], "--model").as_deref(), flag(&args[1], "--effort").as_deref()), (Some("claude-opus-5-5"), Some("medium")));
     assert!(flag(&args[1], "--resume").is_some());
 }
 
@@ -600,7 +600,7 @@ async fn first_word(rx: &mut UnboundedReceiver<AppEvent>, start: std::time::Inst
 }
 
 #[tokio::test]
-async fn auto_effort_ten_mixed_messages_keep_model_vendor_and_deliver_each_effort_to_codex() {
+async fn auto_effort_mixed_messages_keep_model_vendor_and_deliver_each_effort_to_codex() {
     let dir = support::DataFolder::new();
     let cli = EffortCli::new(false);
     let verdict = Arc::new(Mutex::new(None));
@@ -620,6 +620,7 @@ async fn auto_effort_ten_mixed_messages_keep_model_vendor_and_deliver_each_effor
         ("code", "hard", "machine", "open", 0.95, "high", Some("reason.autoEffortRaised")),
         ("chat", "easy", "glance", "tight", 0.95, "low", Some("reason.autoEffortLowered")),
         ("chat", "easy", "glance", "tight", 0.95, "low", None),
+        ("code", "hard", "blind", "open", 0.95, "xhigh", Some("reason.autoEffortRaised")),
     ];
     for (i, (kind, level, check, scope, confidence, effort, reason)) in cases.into_iter().enumerate() {
         set_verdict(&verdict, kind, level, check, scope, confidence);
@@ -634,7 +635,7 @@ async fn auto_effort_ten_mixed_messages_keep_model_vendor_and_deliver_each_effor
         }
         assert_eq!(cli.efforts().last().map(String::as_str), Some(effort));
     }
-    assert_eq!(cli.efforts().len(), 10);
+    assert_eq!(cli.efforts().len(), 11);
     assert_eq!(cli.args.lock().unwrap().len(), 1, "effort changes reuse the Codex app-server process");
     engine.shutdown();
 }
@@ -649,35 +650,35 @@ async fn auto_effort_claude_reductions_need_two_messages_and_resume_but_raises_a
     let start = std::time::Instant::now();
     let id = engine.send(auto("hard first")).unwrap();
     let (first, cold) = first_word(&mut rx, start).await;
-    assert_eq!((first.model.as_deref(), first.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+    assert_eq!((first.model.as_deref(), first.effort.as_deref()), (Some("claude-opus-5-5"), Some("medium")));
     set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
     draft(&engine, Some(&id), "first easy").await;
     let start = std::time::Instant::now();
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("first easy") }).unwrap();
     let (held, warm) = first_word(&mut rx, start).await;
-    assert_eq!(held.effort.as_deref(), Some("high"));
+    assert_eq!(held.effort.as_deref(), Some("medium"));
     assert!(!held.reason.unwrap().starts_with("reason.autoEffort"));
     assert_eq!(cli.args.lock().unwrap().len(), 1);
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("gap without a verdict") }).unwrap();
-    assert_eq!(finished(&mut rx).await.effort.as_deref(), Some("high"));
+    assert_eq!(finished(&mut rx).await.effort.as_deref(), Some("medium"));
     let held = next_effort(&engine, &mut rx, &id, "easy after the gap").await;
-    assert_eq!(held.effort.as_deref(), Some("high"), "a gap breaks consecutive reductions");
+    assert_eq!(held.effort.as_deref(), Some("medium"), "a gap breaks consecutive reductions");
     for (text, check, confidence) in [("blind easy", "blind", 0.95), ("unsure easy", "glance", 0.69)] {
         set_verdict(&verdict, "chat", "easy", check, "tight", confidence);
         let held = next_effort(&engine, &mut rx, &id, text).await;
-        assert_eq!(held.effort.as_deref(), Some("high"));
+        assert_eq!(held.effort.as_deref(), Some("medium"));
     }
     set_verdict(&verdict, "chat", "easy", "glance", "tight", 0.95);
-    assert_eq!(next_effort(&engine, &mut rx, &id, "easy after the veto").await.effort.as_deref(), Some("high"));
+    assert_eq!(next_effort(&engine, &mut rx, &id, "easy after the veto").await.effort.as_deref(), Some("medium"));
     draft(&engine, Some(&id), "second easy").await;
     let start = std::time::Instant::now();
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("second easy") }).unwrap();
     let (lower, resumed) = first_word(&mut rx, start).await;
-    assert_eq!(lower.effort.as_deref(), Some("medium"));
+    assert_eq!(lower.effort.as_deref(), Some("low"));
     assert_eq!(lower.reason.as_deref(), Some("reason.autoEffortLowered"));
     set_verdict(&verdict, "code", "hard", "machine", "tight", 0.95);
     let raised = next_effort(&engine, &mut rx, &id, "hard again").await;
-    assert_eq!(raised.effort.as_deref(), Some("high"));
+    assert_eq!(raised.effort.as_deref(), Some("medium"));
     assert_eq!(raised.reason.as_deref(), Some("reason.autoEffortRaised"));
     assert_eq!(raised.model, first.model);
     assert_eq!(next_effort(&engine, &mut rx, &id, "still hard").await.reason.as_deref(), Some("reason.route.code.hard"));
@@ -687,8 +688,8 @@ async fn auto_effort_claude_reductions_need_two_messages_and_resume_but_raises_a
     assert!(answers.iter().all(|m| m.vendor == first.vendor && m.model == first.model));
     let launches = cli.args.lock().unwrap().clone();
     assert_eq!(launches.len(), 3);
-    assert_eq!(flag(&launches[1], "--effort").as_deref(), Some("medium"));
-    assert_eq!(flag(&launches[2], "--effort").as_deref(), Some("high"));
+    assert_eq!(flag(&launches[1], "--effort").as_deref(), Some("low"));
+    assert_eq!(flag(&launches[2], "--effort").as_deref(), Some("medium"));
     for args in &launches[1..] {
         assert_eq!(flag(args, "--model"), first.model);
         assert_eq!(flag(args, "--resume").as_deref(), Some("effort-session"));
@@ -753,14 +754,14 @@ async fn auto_effort_model_below_the_bar_offers_a_stronger_branch_once() {
     assert_eq!(first.model.as_deref(), Some("claude-sonnet-5-5"));
     set_verdict(&verdict, "code", "hard", "blind", "open", 0.95);
     let reply = next_effort(&engine, &mut rx, &id, "frontier follow-up").await;
-    assert_eq!((reply.model, reply.effort), (first.model, Some("high".into())));
+    assert_eq!((reply.model, reply.effort), (first.model, Some("xhigh".into())));
     let offer = reply.nudge.expect("a stronger branch must be offered");
     assert_eq!(offer.reason, "nudge.modelBar");
     assert_eq!(offer.vendor, Vendor::Claude);
     assert_ne!(offer.model, "claude-sonnet-5-5");
     for text in ["frontier again", "frontier once more"] {
         let reply = next_effort(&engine, &mut rx, &id, text).await;
-        assert_eq!((reply.model.as_deref(), reply.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+        assert_eq!((reply.model.as_deref(), reply.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("xhigh")));
         assert!(reply.nudge.is_none(), "an ignored offer must not repeat");
         assert!(reply.acts.iter().any(|a| a.params.get("modelBar").is_some_and(|v| v == "unmet")), "route metadata stays");
     }
@@ -814,7 +815,7 @@ async fn auto_effort_queued_messages_keep_their_own_finished_verdicts() {
         let id = engine.send(auto("medium running")).unwrap();
         support::until("the first fake answer did not start", || engine.open(&id).is_some_and(|c| !c.messages[1].text.is_empty())).await;
         let first = engine.open(&id).unwrap().messages[1].clone();
-        assert_eq!(first.effort.as_deref(), Some("medium"));
+        assert_eq!(first.effort.as_deref(), Some(if vendor == Vendor::Codex { "medium" } else { "high" }));
         set_verdict(&verdict, "code", "hard", "machine", "open", 0.95);
         draft(&engine, Some(&id), "hard queued").await;
         engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("hard queued") }).unwrap();
@@ -829,17 +830,20 @@ async fn auto_effort_queued_messages_keep_their_own_finished_verdicts() {
         assert_eq!(finished(&mut rx).await.effort, first.effort);
         let queued = finished(&mut rx).await;
         assert_eq!(queued.status, Some(Status::Done));
-        assert_eq!((queued.vendor, queued.model, queued.effort.as_deref()), (first.vendor, first.model, Some("high")));
+        assert_eq!(
+            (queued.vendor, queued.model, queued.effort.as_deref()),
+            (first.vendor, first.model, Some(if vendor == Vendor::Codex { "high" } else { "xhigh" }))
+        );
         assert_eq!(queued.reason.as_deref(), Some("reason.autoEffortRaised"));
         let easy = finished(&mut rx).await;
         assert_eq!(easy.status, Some(Status::Done));
-        assert_eq!(easy.effort.as_deref(), Some(if vendor == Vendor::Codex { "low" } else { "high" }));
+        assert_eq!(easy.effort.as_deref(), Some(if vendor == Vendor::Codex { "low" } else { "xhigh" }));
         if vendor == Vendor::Codex {
             assert_eq!(cli.efforts(), vec!["medium", "high", "low"]);
         } else {
             let args = cli.args.lock().unwrap();
             assert_eq!(args.len(), 2);
-            assert_eq!(flag(&args[1], "--effort").as_deref(), Some("high"));
+            assert_eq!(flag(&args[1], "--effort").as_deref(), Some("xhigh"));
             assert_eq!(flag(&args[1], "--resume").as_deref(), Some("effort-session"));
         }
         engine.shutdown();
@@ -879,7 +883,7 @@ async fn auto_effort_queued_messages_ignore_late_and_edited_verdicts() {
             support::until("the first fake answer did not start", || engine.open(&id).is_some_and(|c| !c.messages[1].text.is_empty()))
                 .await;
             let first = engine.open(&id).unwrap().messages[1].clone();
-            assert_eq!(first.effort.as_deref(), Some("medium"));
+            assert_eq!(first.effort.as_deref(), Some(if vendor == Vendor::Codex { "medium" } else { "high" }));
             draft(&engine, Some(&id), "hard queued").await;
             engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("hard queued") }).unwrap();
             if edit {

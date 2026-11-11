@@ -418,7 +418,7 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     const model = act?.actor.who === 'ai' ? act.actor.model : undefined;
     const job = act?.params?.job;
     const jobWord = job === 'read' ? t('tool.read') : job === 'build' ? t('tool.write') : job === 'review' ? t('review.kind') : '';
-    const helperModel = model ? [jobWord, prettyModel(model), act?.params?.effort ? t(`answer.effort.${act.params.effort as 'low' | 'medium' | 'high'}`) : ''].filter(Boolean).join(' · ') : helperKind;
+    const helperModel = model ? [jobWord, prettyModel(model), act?.params?.effort ? t(`answer.effort.${act.params.effort as 'low' | 'medium' | 'high' | 'xhigh'}`) : ''].filter(Boolean).join(' · ') : helperKind;
     return {
       call,
       review: call.name === 'Review' ? rounds.find((r) => r.call === call.id) : undefined,

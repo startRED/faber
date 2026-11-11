@@ -3644,10 +3644,10 @@ mod tests {
     #[tokio::test]
     async fn helper_jobs_launch_the_selected_vendor_and_model() {
         for (job, difficulty, vendor, expected) in [
-            ("read", "easy", Vendor::Claude, "claude-haiku-5-5"),
-            ("build", "easy", Vendor::Claude, "claude-haiku-5-5"),
-            ("build", "hard", Vendor::Claude, "claude-sonnet-5-5"),
-            ("review", "medium", Vendor::Codex, "gpt-6.1-sol"),
+            ("read", "easy", Vendor::Codex, "gpt-6.1-terra"),
+            ("build", "easy", Vendor::Codex, "gpt-6.1-terra"),
+            ("build", "hard", Vendor::Codex, "gpt-6.1-sol"),
+            ("review", "medium", Vendor::Codex, "gpt-6.1-terra"),
         ] {
             let dir = crate::workspace::TestRoot::new();
             let folder = dir.path().canonicalize().unwrap();
@@ -3754,7 +3754,7 @@ mod tests {
                 core.launch_helper("kit", "child", &json!({"brief":"Do it", "job":"build"}), None).unwrap();
                 let act = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
                 assert!(matches!(&act.actor, crate::act::Actor::Ai { model: Some(m), .. } if m == "gpt-6.1-sol"));
-                assert_eq!(act.params["effort"], "low", "lead effort {effort}");
+                assert_eq!(act.params["effort"], "medium", "lead effort {effort}");
             });
             engine.shutdown();
         }

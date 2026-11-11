@@ -241,10 +241,9 @@ pub fn other(vendor: Vendor) -> Vendor {
     }
 }
 
-/// The model a helper runs: the cheapest of the vendor's profiles that clears a bar for multi-step agent work (Terminal-Bench
-/// 44 and up), so a helper is good at the work and light on the quota. In economy mode (rule 7) the bar drops to 30.
+/// The cheapest profile that clears the hard coding bar (39), or the medium bar (32) in economy mode.
 pub fn profile(candidates: &[Profile], vendor: Vendor, economy: bool) -> Option<Profile> {
-    let bar: u8 = if economy { 30 } else { 44 };
+    let bar: u8 = if economy { 32 } else { 39 };
     candidates
         .iter()
         .filter(|p| p.vendor == vendor && p.agent >= bar)
@@ -277,7 +276,7 @@ pub fn select(
     } else {
         difficulty
     };
-    let bar = if job == "read" { (34, 15) } else { crate::route::bar(kind, level, true) };
+    let bar = if job == "read" { (24, 15) } else { crate::route::bar(kind, level, true) };
     let eligible: Vec<Profile> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
     let within: Vec<Profile> = eligible.iter().copied().filter(|p| lead.is_none_or(|l| p.iq <= l.iq && p.agent <= l.agent)).collect();
     let pool = if job == "build" && !within.is_empty() { &within } else { &eligible };
@@ -426,7 +425,7 @@ mod tests {
         let pick = |job, difficulty, vendor, candidates: &[Profile]| {
             select(job, "code", difficulty, None, vendor, candidates, &neutral, false).unwrap()
         };
-        assert_eq!(pick("read", "easy", Vendor::Claude, &all).model, "claude-haiku-5-5");
+        assert_eq!(pick("read", "easy", Vendor::Claude, &all).model, "gpt-6.1-terra");
         assert!(pick("build", "easy", Vendor::Claude, &all).agent < pick("build", "hard", Vendor::Claude, &all).agent);
         assert_eq!(pick("review", "medium", Vendor::Claude, &all), profile(&all, Vendor::Codex, false).unwrap());
         for vendor in [Vendor::Claude, Vendor::Codex] {
@@ -611,10 +610,10 @@ mod tests {
     #[test]
     fn a_helper_runs_the_cheapest_model_of_the_other_vendor_that_is_good_at_agent_work() {
         let all = crate::route::PROFILES;
-        assert_eq!(profile(&all, Vendor::Claude, false).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "high")));
-        assert_eq!(profile(&all, Vendor::Codex, false).map(|p| (p.model, p.effort)), Some(("gpt-6.1-sol", "medium")));
+        assert_eq!(profile(&all, Vendor::Claude, false).map(|p| (p.model, p.effort)), Some(("claude-opus-5-5", "medium")));
+        assert_eq!(profile(&all, Vendor::Codex, false).map(|p| (p.model, p.effort)), Some(("gpt-6.1-terra", "high")));
         // Economy mode (rule 7) lowers the bar, so support work runs one rung cheaper; Haiku and luna stay out.
-        assert_eq!(profile(&all, Vendor::Claude, true).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "medium")));
+        assert_eq!(profile(&all, Vendor::Claude, true).map(|p| (p.model, p.effort)), Some(("claude-sonnet-5-5", "high")));
         assert_eq!(profile(&all, Vendor::Codex, true).map(|p| (p.model, p.effort)), Some(("gpt-6.1-terra", "medium")));
         let only_luna: Vec<_> = all.into_iter().filter(|p| p.model == "gpt-6-luna").collect();
         assert_eq!(profile(&only_luna, Vendor::Codex, false).map(|p| p.model), Some("gpt-6-luna"));

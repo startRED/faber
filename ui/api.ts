@@ -26,7 +26,7 @@ export interface UpdateStatus {
   percent?: number;
   mb?: number;
 }
-export type Effort = 'low' | 'medium' | 'high';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
 /** The level a model starts at; the engine keeps the same default (`Effort` in engine/src/router.rs). */
 export const DEFAULT_EFFORT: Effort = 'medium';
 export type Area = 'chat' | 'project';

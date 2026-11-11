@@ -9,10 +9,10 @@ const MONDAY: f64 = 345_600.0;
 const HOUR: f64 = 3600.0;
 const WEEKS: usize = 4;
 const SEEDS: u64 = 200;
-// Seed 12 exercises unpaced exhaustion; the original four seeds all tied at zero exhausted hours.
+// Keep the original smoke cases, now against every measured Codex model.
 const SMOKE_SEEDS: [u64; 4] = [0, 1, 2, 12];
-/// Weekly quota of each vendor in cost units: Claude is the small plan, Codex the large one.
-const QUOTA: [f64; 2] = [100.0, 400.0];
+/// Weekly synthetic quota in US$ (one old cost unit was US$1.901): Claude is the small plan, Codex the large one.
+const QUOTA: [f64; 2] = [190.1, 760.4];
 /// The mix of the 22 real requests, as (kind, level, share in percent).
 const MIX: [(&str, &str, u32); 8] = [
     ("chat", "easy", 20),
@@ -72,7 +72,7 @@ fn vendor_index(v: Vendor) -> usize {
 
 fn run(seed: u64, paced: bool) -> Outcome {
     let shape = week_shape();
-    let cands = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()]);
+    let cands = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()]);
     let mut rng = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B54A32D192ED03);
     // Faber's tasks per week: 65% of the combined capacity at the cost of what the plain table picks on average.
     let mean_cost: f64 =
@@ -183,6 +183,7 @@ fn judge(seeds: &[u64]) {
     for &seed in seeds {
         on.push(run(seed, true));
         off.push(run(seed, false));
+        eprintln!("seed {seed}: exhausted hours on {} off {}", on.last().unwrap().exhausted_hours, off.last().unwrap().exhausted_hours);
     }
     let share = |v: &[Outcome]| v.iter().filter(|o| o.exhausted).count() as f64 / v.len() as f64;
     let hours = |v: &[Outcome]| v.iter().map(|o| o.exhausted_hours as f64).sum::<f64>() / v.len() as f64;

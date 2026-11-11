@@ -4,6 +4,12 @@ How Auto paces the shared quota, and what was measured about it.
 
 ## Auto quota pacing
 
+Auto prices the 2026-11-10 Artificial Analysis per-task runs republished by [Slopalytics](https://slopalytics.com/),
+using rounded intelligence and coding sub-index, seconds per task and US$ per task. The class floors and exclusions
+are in [models.md](models.md#auto-a-blind-router). Spare quota buys one rung within 600 seconds per task, or 1,200
+for hard-or-higher code and non-easy math. Multipliers, gates and learned adjustments keep their existing rules.
+Claude-only medium work uses Sonnet high, easy work has a quality floor, and Fable can answer at low effort.
+
 Auto requires billing confirmed as a subscription before any user, router or summary request. The same quota gate
 checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell
 starts account watching before Auto, and the screen supplies the local UTC offset on start and each minute. Vendor-wide
@@ -111,7 +117,9 @@ elsewhere than a late counter. Points per dollar are not measured for every mode
 ### Synthetic monthly acceptance
 
 `engine/tests/simulation.rs` runs four weeks with 200 deterministic seeds, busy weekday usage, shared-account use and
-a burst. Both modes use the same gate and synthetic capacity: 100 cost units for the smaller vendor, 400 for the larger.
+a burst. Both modes use the same gate and synthetic capacity: US$190.10 for the smaller vendor, US$760.40 for the larger
+(100 and 400 old cost units, each US$1.901). The results below describe the original 2026-10-12 profiles;
+they are historical measurements, not a rerun of the 2026-11-10 table.
 The simulation provides ideal fresh readings; it does not model real account latency or establish a live guarantee.
 The full test is ignored in ordinary runs and was run explicitly with
 `cargo test --release -p faber-engine --test simulation -- --ignored --nocapture` on 2026-10-12.
@@ -125,11 +133,14 @@ The full test is ignored in ordinary runs and was run explicitly with
 | Dropped task share | 0.597% | 0.151% |
 | Mean dropped tasks per four-week run | 65.5 | 16.6 |
 
-No budget constants were tuned for this run. The four-seed smoke uses `[0, 1, 2, 12]`; seed 12 adds an unpaced-exhaustion
+No budget constants were tuned for that historical run. Its four-seed smoke used `[0, 1, 2, 12]`; seed 12 added an unpaced-exhaustion
 case because the original first four seeds all tied at zero exhausted hours. The smoke asserts strictly fewer exhausted
 hours, fewer than 1% dropped tasks, no worse quality, fewer than 5% exhausted seeds, and less than 25% unused larger quota.
 It passed with 0.000 versus 1.500 exhausted hours and 0.844% versus 0.325% drops. The full 200-seed run passed all the same
-acceptance limits.
+acceptance limits. The current simulation lists Terra alongside Sol and Luna and keeps every original seed and
+acceptance limit; the historical results above do not describe the 2026-11-10 profiles.
+The 2026-11-10 smoke passed: 0.000 versus 1.000 exhausted hours, about 0.041% versus 1.024% dropped tasks,
+and mean quality 76.82 versus 76.41 (pacing on versus off). The updated 200-seed run has not been repeated.
 
 ### Cache and router, measured on 13/10/2026
 

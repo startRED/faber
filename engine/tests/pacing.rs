@@ -201,7 +201,7 @@ async fn a_claude_with_quota_to_spare_buys_one_step_up_on_a_task_that_matters_an
     spare_claude(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
-    assert_eq!(went, claude("claude-sonnet-5-5", "high"), "one rung above medium");
+    assert_eq!(went, claude("claude-opus-5-5", "medium"), "one rung above medium");
     assert_eq!(reply.reason.as_deref(), Some("reason.route.code.medium"), "the stored reason is unchanged");
     assert_eq!(reply.pace, Some(PaceNote { kind: "step".into(), vendor: Vendor::Claude }));
     r.engine.shutdown();
@@ -217,7 +217,7 @@ async fn nothing_changes_for_an_easy_chat_or_when_there_is_no_reading() {
     spare_claude(&r.engine);
     let id = r.engine.send(auto(SKY)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
-    assert_eq!((went, reply.pace), (Went::Codex("gpt-6-luna"), None), "easy chat stays on the fast model");
+    assert_eq!((went, reply.pace), (claude("claude-haiku-5-5", "medium"), None), "easy chat stays on its cheapest sufficient row");
     r.engine.shutdown();
 
     let dir = support::DataFolder::new();
@@ -225,7 +225,7 @@ async fn nothing_changes_for_an_easy_chat_or_when_there_is_no_reading() {
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
     assert_eq!((went, reply.pace), (Went::Codex("gpt-6.1-sol"), None), "no reading, no news: today's pick");
-    assert_eq!(r.codex.wire.lines_with("\"effort\":\"low\""), 1);
+    assert_eq!(r.codex.wire.lines_with("\"effort\":\"medium\""), 1);
     r.engine.shutdown();
 }
 
@@ -287,7 +287,7 @@ async fn a_vendor_running_low_is_left_for_the_other_and_the_answer_says_so() {
     low_codex(&r.engine);
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
-    assert_eq!(went, claude("claude-sonnet-5-5", "medium"));
+    assert_eq!(went, claude("claude-sonnet-5-5", "high"));
     assert_eq!(reply.pace, Some(PaceNote { kind: "low".into(), vendor: Vendor::Codex }));
     r.engine.shutdown();
 }
@@ -300,7 +300,7 @@ async fn a_vendor_ahead_of_its_line_but_far_from_its_limit_is_left_without_an_al
     r.engine.note_account_events(Vendor::Codex, vec![plan("pro"), quota("seven_day", 0.30, 6 * DAY + DAY / 2)]);
     let id = r.engine.send(auto(CODE)).unwrap();
     let (reply, went) = r.went(&id, 0).await;
-    assert_eq!(went, claude("claude-sonnet-5-5", "medium"));
+    assert_eq!(went, claude("claude-sonnet-5-5", "high"));
     assert_eq!(reply.pace, Some(PaceNote { kind: "fast".into(), vendor: Vendor::Codex }));
     r.engine.shutdown();
 }
@@ -373,6 +373,7 @@ async fn with_only_a_login_billed_by_use_auto_ends_with_an_error_and_starts_noth
 async fn an_easy_start_still_moves_up_after_a_turn_that_carried_a_quota_reason() {
     let dir = support::DataFolder::new();
     let mut r = both(&dir, verdicts(vec![("chat", "easy"), ("code", "hard")]));
+    r.engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     low_codex(&r.engine);
     let id = r.engine.send(auto(SKY)).unwrap();
     let first = finished(&mut r.rx).await;

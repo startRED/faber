@@ -2769,7 +2769,7 @@ async fn r121_full_access_leaves_the_persons_hooks_on_and_ask_keeps_them_off_unt
 #[tokio::test]
 async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
     for vendor in Vendor::RUNNABLE {
-        for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High)] {
+        for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High), Some(Effort::Xhigh)] {
             let dir = support::DataFolder::new();
             let f = fake(fixture(vendor.name(), "chat"));
             let (engine, mut rx) = engine(&dir, vendor, f.spawn.clone());
@@ -2819,13 +2819,17 @@ async fn changing_effort_while_a_turn_runs_applies_only_to_the_next_message() {
 }
 
 #[test]
-fn manual_effort_accepts_only_three_levels_and_auto_ignores_a_manual_effort() {
-    for effort in ["max", "xhigh", "unknown"] {
+fn effort_accepts_the_retry_ladder_and_auto_ignores_a_manual_effort() {
+    for effort in ["max", "unknown"] {
         assert!(serde_json::from_value::<Choice>(serde_json::json!({ "vendor": "claude", "model": "haiku", "effort": effort })).is_err());
     }
+    let retry: Choice = serde_json::from_value(serde_json::json!({ "vendor": "claude", "model": "haiku", "effort": "xhigh" })).unwrap();
+    assert_eq!(pick_model(&retry, &Vendor::RUNNABLE, None).unwrap().effort, "xhigh");
     let before = choice("auto", None);
-    let after = Choice { effort: Some(Effort::High), ..before.clone() };
-    assert_eq!(pick_model(&before, &Vendor::RUNNABLE, Some("gpt-6-luna")), pick_model(&after, &Vendor::RUNNABLE, Some("gpt-6-luna")));
+    for effort in [Effort::High, Effort::Xhigh] {
+        let after = Choice { effort: Some(effort), ..before.clone() };
+        assert_eq!(pick_model(&before, &Vendor::RUNNABLE, Some("gpt-6-luna")), pick_model(&after, &Vendor::RUNNABLE, Some("gpt-6-luna")));
+    }
 }
 
 #[tokio::test]

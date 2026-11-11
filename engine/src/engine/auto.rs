@@ -718,8 +718,8 @@ impl Core {
                 && *model == pick.model
                 && *effort != pick.effort
             {
-                let raised = ["low", "medium", "high"].iter().position(|e| *e == pick.effort)
-                    > ["low", "medium", "high"].iter().position(|e| e == effort);
+                let raised = ["low", "medium", "high", "xhigh"].iter().position(|e| *e == pick.effort)
+                    > ["low", "medium", "high", "xhigh"].iter().position(|e| e == effort);
                 m.reason = Some(if raised { "reason.autoEffortRaised" } else { "reason.autoEffortLowered" }.into());
             }
             if fallback.2 && shown_pick.reason != "reason.autoSingleProfile" {
@@ -921,7 +921,7 @@ mod tests {
                 let hard = Asked { kind: "code", difficulty: "hard", ..easy };
                 assert_eq!(
                     c.table_at(&id, &hard, Some(pick.vendor), Some(&lower), false, &Reading::default()).unwrap().profile.effort,
-                    "high",
+                    "xhigh",
                     "raises stay immediate"
                 );
             });
@@ -959,7 +959,7 @@ mod tests {
                     let hard = Asked { kind: "code", difficulty: "hard", scope: "open", ..easy };
                     assert_eq!(
                         c.table_at(&id, &hard, Some(vendor), Some(&pick), false, &Reading::default()).unwrap().profile.effort,
-                        "high"
+                        if vendor == Vendor::Claude { "xhigh" } else { "high" }
                     );
                 });
                 engine.shutdown();
@@ -1323,8 +1323,14 @@ mod tests {
         engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto_send(hard) }).unwrap();
         let third = turn_finished(&engine, &id, 2).await;
         assert_eq!(third.vendor, Some(vendor));
-        assert_eq!(third.reason.as_deref(), Some("reason.route.code.hard"));
-        assert_ne!(third.model, first.model);
+        if vendor == Vendor::Codex {
+            assert_eq!(third.reason.as_deref(), Some("reason.autoEffortRaised"));
+            assert_eq!(third.model, first.model, "Sol already clears easy; harder work raises its effort");
+            assert_eq!(third.effort.as_deref(), Some("medium"));
+        } else {
+            assert_eq!(third.reason.as_deref(), Some("reason.route.code.hard"));
+            assert_ne!(third.model, first.model);
+        }
         assert_eq!(drafts.lock().unwrap().len(), expected);
         assert_eq!(engine.open(&id).unwrap().messages[3].reason.as_deref(), Some("reason.route.chat.easy"));
         let saved = engine.with(|c| c.store.get(&id).unwrap());

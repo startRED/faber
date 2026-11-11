@@ -10,10 +10,10 @@ use crate::model::{PaceNote, Vendor};
 use crate::router::Pick;
 use serde::Deserialize;
 
-/// One way to run a model. Numbers from Artificial Analysis (artificialanalysis.ai/models/<model>-<effort>), read
-/// between 22/09 and 08/10/2026 (GPT-6.1 Terra on 27/10/2026; Claude Fable 5.2 on 10/11/2026, scaled from AA's new per-task
-/// numbers against Opus 5.5 high on the same pages, and `agent` estimated from the index gap until AA lists Terminal-Bench): `iq` is the Intelligence Index, `agent` Terminal-Bench (multi-step coding and terminal
-/// work, %), `secs` a typical whole answer, `cost` US$ to run the index, which is how much a task weighs on the quota.
+/// One way to run a model. Artificial Analysis per-task runs, republished by slopalytics.com on 2026-11-10.
+/// Intelligence Index (`iq`) and the coding sub-index (`agent`) are rounded to whole numbers; `secs` is seconds per
+/// task and `cost` US$ per task, all from the same run and scale. No `max`: its extra quota and time are outside Auto's
+/// ladder. Fable xhigh has negligible gain; Luna high/xhigh lose to Terra low. Luna medium is an account's last resort.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
     pub vendor: Vendor,
@@ -29,23 +29,32 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
     Profile { vendor, model, effort, iq, agent, secs, cost }
 }
 
-// No maximum effort (minutes per answer at two to three times the cost) and no model another one here beats on every
-// number. ponytail: compiled in; it moves to the live manifest (roadmap phase 4) so a new model joins without a release.
-pub const PROFILES: [Profile; 14] = [
-    p(Vendor::Claude, "claude-fable-5-2", "high", 64, 67, 81.4, 4.78),
-    p(Vendor::Claude, "claude-fable-5-2", "medium", 58, 61, 37.7, 2.0),
-    p(Vendor::Claude, "claude-opus-5-5", "high", 54, 57, 44.2, 1.82),
-    p(Vendor::Claude, "claude-opus-5-5", "medium", 51, 53, 27.9, 1.34),
-    p(Vendor::Claude, "claude-sonnet-5-5", "high", 47, 44, 17.5, 0.88),
-    p(Vendor::Claude, "claude-sonnet-5-5", "medium", 41, 30, 7.0, 0.48),
-    p(Vendor::Claude, "claude-haiku-5-5", "medium", 34, 15, 16.6, 0.05),
-    p(Vendor::Codex, "gpt-6.1-sol", "high", 50, 52, 64.8, 0.32),
-    p(Vendor::Codex, "gpt-6.1-sol", "medium", 48, 48, 13.4, 0.21),
-    p(Vendor::Codex, "gpt-6.1-sol", "low", 42, 31, 8.6, 0.13),
-    p(Vendor::Codex, "gpt-6.1-terra", "high", 44, 42, 14.6, 0.134),
-    p(Vendor::Codex, "gpt-6.1-terra", "medium", 41, 32, 7.2, 0.095),
-    p(Vendor::Codex, "gpt-6.1-terra", "low", 36, 15, 7.2, 0.055),
-    p(Vendor::Codex, "gpt-6-luna", "medium", 30, 3, 8.8, 0.02),
+// shortcut: compiled in until the live manifest lets measured models join without a release.
+pub const PROFILES: [Profile; 24] = [
+    p(Vendor::Claude, "claude-fable-5-2", "high", 62, 53, 1059.0, 9.078),
+    p(Vendor::Claude, "claude-fable-5-2", "medium", 56, 47, 497.0, 3.803),
+    p(Vendor::Claude, "claude-fable-5-2", "low", 54, 45, 393.0, 3.097),
+    p(Vendor::Claude, "claude-opus-5-5", "xhigh", 57, 50, 976.0, 6.047),
+    p(Vendor::Claude, "claude-opus-5-5", "high", 52, 44, 573.0, 3.465),
+    p(Vendor::Claude, "claude-opus-5-5", "medium", 48, 41, 427.0, 2.451),
+    p(Vendor::Claude, "claude-opus-5-5", "low", 35, 22, 181.0, 0.976),
+    p(Vendor::Claude, "claude-sonnet-5-5", "xhigh", 50, 44, 913.0, 4.092),
+    p(Vendor::Claude, "claude-sonnet-5-5", "high", 42, 33, 427.0, 1.636),
+    p(Vendor::Claude, "claude-sonnet-5-5", "medium", 31, 19, 221.0, 0.781),
+    p(Vendor::Claude, "claude-sonnet-5-5", "low", 26, 13, 155.0, 0.511),
+    p(Vendor::Claude, "claude-haiku-5-5", "xhigh", 35, 30, 584.0, 0.248),
+    p(Vendor::Claude, "claude-haiku-5-5", "high", 30, 23, 389.0, 0.159),
+    p(Vendor::Claude, "claude-haiku-5-5", "medium", 25, 16, 245.0, 0.092),
+    p(Vendor::Claude, "claude-haiku-5-5", "low", 19, 10, 128.0, 0.044),
+    p(Vendor::Codex, "gpt-6.1-sol", "xhigh", 53, 45, 556.0, 0.764),
+    p(Vendor::Codex, "gpt-6.1-sol", "high", 50, 43, 394.0, 0.591),
+    p(Vendor::Codex, "gpt-6.1-sol", "medium", 46, 39, 229.0, 0.359),
+    p(Vendor::Codex, "gpt-6.1-sol", "low", 35, 24, 106.0, 0.161),
+    p(Vendor::Codex, "gpt-6.1-terra", "xhigh", 45, 41, 364.0, 0.401),
+    p(Vendor::Codex, "gpt-6.1-terra", "high", 42, 39, 241.0, 0.259),
+    p(Vendor::Codex, "gpt-6.1-terra", "medium", 38, 34, 156.0, 0.169),
+    p(Vendor::Codex, "gpt-6.1-terra", "low", 29, 21, 65.0, 0.071),
+    p(Vendor::Codex, "gpt-6-luna", "medium", 19, 9, 202.0, 0.042),
 ];
 
 /// The router itself: the fastest cheap model of each vendor.
@@ -178,28 +187,28 @@ pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
 /// The bar a task must clear: (general intelligence, agentic work). Projects always have an agent bar.
 pub(crate) fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
     let (iq, agent): (u8, u8) = match (level, kind) {
-        ("easy", "code") => (0, 15),
-        ("easy", _) => (0, 0),
-        ("medium", "code") => (0, 30),
+        ("easy", "code") => (24, 15),
+        ("easy", _) => (24, 0),
+        ("medium", "code") => (24, 32),
         // A wrong number reads as right: math gets the hard bar a level early.
-        ("medium", "math") => (47, 0),
-        ("medium", _) => (41, 0),
-        ("hard", "code") => (47, 44),
-        ("frontier", "code") => (58, 61),
-        ("frontier", _) => (58, 0),
-        ("expert", "code") => (50, 52),
+        ("medium", "math") => (46, 0),
+        ("medium", _) => (38, 0),
+        ("hard", "code") => (46, 39),
+        ("frontier", "code") => (56, 46),
+        ("frontier", _) => (56, 0),
+        ("expert", "code") => (50, 42),
         ("expert", _) => (50, 0),
-        _ => (47, 0),
+        _ => (46, 0),
     };
     (
         iq,
         if project {
             agent.max(match level {
                 "easy" => 15,
-                "medium" => 30,
-                "hard" => 44,
-                "expert" => 52,
-                _ => 61,
+                "medium" => 32,
+                "hard" => 39,
+                "expert" => 42,
+                _ => 46,
             })
         } else {
             agent
@@ -216,9 +225,9 @@ fn next_bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
     LADDER[at + 1..].iter().map(|l| bar(kind, l, project)).find(|b| *b != own).unwrap_or(own)
 }
 
-/// Whole-answer time a step up may take: hard or higher code and non-easy math take about 3 minutes, the rest about 1.
+/// Seconds per task a step up may take: 1,200 for hard-or-higher code and non-easy math, otherwise 600.
 fn cap_secs(kind: &str, level: &str) -> f32 {
-    if (kind == "code" && matches!(level, "hard" | "expert" | "frontier")) || (kind == "math" && level != "easy") { 180.0 } else { 60.0 }
+    if (kind == "code" && matches!(level, "hard" | "expert" | "frontier")) || (kind == "math" && level != "easy") { 1200.0 } else { 600.0 }
 }
 
 /// Spare quota only buys quality where quality matters.
@@ -283,11 +292,7 @@ impl Reading {
     }
 }
 
-/// US$ of one `Profile::cost` unit: Opus 5.5 high costs US$3.46 per Intelligence Index task on Artificial Analysis
-/// (10/11/2026) and 1.82 in the table.
-const USD_PER_COST: f64 = 3.46 / 1.82;
-
-/// What `reading` costs on a profile, in `Profile::cost` units, at its API price per token (`usage::api_price_for_prompt`,
+/// What `reading` costs on a profile, in US$, at its API price per token (`usage::api_price_for_prompt`,
 /// with its long-prompt tiers): what its own model holds is read from cache, the rest is written to it. A model with no
 /// known price reads for free, as before.
 pub fn read_cost(p: &Profile, reading: &Reading) -> f64 {
@@ -295,7 +300,7 @@ pub fn read_cost(p: &Profile, reading: &Reading) -> f64 {
     let prompt = fresh + cached;
     // Claude Code writes its cache for an hour; Codex prices a write as plain input.
     let hour = if p.vendor == Vendor::Claude { fresh } else { 0 };
-    crate::usage::api_price_for_prompt(p.model, prompt, 0, cached, fresh, hour, prompt).unwrap_or(0.0) / USD_PER_COST
+    crate::usage::api_price_for_prompt(p.model, prompt, 0, cached, fresh, hour, prompt).unwrap_or(0.0)
 }
 
 fn clears(p: &Profile, bar: (u8, u8)) -> bool {

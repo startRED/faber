@@ -19,7 +19,7 @@ pub struct Nudge {
     pub effort: String,
 }
 
-const EFFORTS: [&str; 3] = ["low", "medium", "high"];
+const EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
 
 /// The next rung above a pick: the same model one effort up when the table has that row, else the next stronger model
 /// of the same vendor at its default (medium) effort, else None. Only profiles in `allowed` (what the account can run) are
@@ -314,23 +314,32 @@ mod tests {
         assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "medium"), to("claude-opus-5-5", "high"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "low"), to("gpt-6.1-sol", "medium"));
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "medium"), to("gpt-6.1-terra", "high"));
+        for (vendor, model) in [
+            (Vendor::Claude, "claude-opus-5-5"),
+            (Vendor::Claude, "claude-sonnet-5-5"),
+            (Vendor::Claude, "claude-haiku-5-5"),
+            (Vendor::Codex, "gpt-6.1-sol"),
+            (Vendor::Codex, "gpt-6.1-terra"),
+        ] {
+            assert_eq!(rung(vendor, model, "high"), to(model, "xhigh"));
+        }
     }
 
     #[test]
     fn a_model_at_its_top_effort_moves_to_the_next_model_at_medium() {
-        assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "high"), to("claude-opus-5-5", "medium"));
-        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "medium"), to("claude-sonnet-5-5", "medium"));
-        assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "high"), to("claude-fable-5-2", "medium"));
+        assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "xhigh"), to("claude-fable-5-2", "medium"));
+        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "xhigh"), to("claude-opus-5-5", "medium"));
+        assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "xhigh"), None);
         assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "medium"), to("claude-fable-5-2", "high"));
         assert_eq!(rung(Vendor::Codex, "gpt-6-luna", "medium"), to("gpt-6.1-terra", "medium"));
-        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "high"), to("gpt-6.1-sol", "medium"));
+        assert_eq!(rung(Vendor::Codex, "gpt-6.1-terra", "xhigh"), to("gpt-6.1-sol", "medium"));
     }
 
     #[test]
     fn the_strongest_pick_of_a_vendor_and_a_pick_the_table_does_not_know_have_no_rung() {
         assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "high"), None);
-        assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "high"), None);
-        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "high"), None);
+        assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "xhigh"), None);
+        assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "max"), None);
         assert_eq!(rung(Vendor::Claude, "sonnet", "medium"), None);
         assert_eq!(next_rung(&Pick { model: None, ..pick(Vendor::Codex, "x", "medium") }, &PROFILES), None);
     }
@@ -576,6 +585,6 @@ mod tests {
         assert_eq!(next_rung(&pick(Vendor::Claude, "claude-haiku-5-5", "medium"), &sol), None);
         // A stronger model skips a missing one and lands on the next the account has.
         let no_sonnet: Vec<Profile> = PROFILES.into_iter().filter(|p| p.model != "claude-sonnet-5-5").collect();
-        assert_eq!(rung_in(&no_sonnet, Vendor::Claude, "claude-haiku-5-5", "medium"), to("claude-opus-5-5", "medium"));
+        assert_eq!(rung_in(&no_sonnet, Vendor::Claude, "claude-haiku-5-5", "xhigh"), to("claude-opus-5-5", "medium"));
     }
 }

@@ -20,6 +20,9 @@ default) precede older models in a disclosure; the selected older model is revea
 above eight manual models, matches partial names without case sensitivity and searches folded entries too.
 
 Picking another model resets effort to Medium; picking the same model preserves effort. Auto removes manual effort.
+Auto can choose low through xhigh from the measured rows of its held model; manual choices stay low, medium and high.
+The existing answer and helper rows name xhigh in every language; the stronger retry carries it through the choice
+contract and saves it like the other efforts. No control or picker layout changes.
 The menu uses named groups and pressed buttons, native light dismissal, Escape with focus return, and arrow/Home/End
 navigation alongside ordinary Tab and Enter/Space. Folded models stay outside keyboard navigation. Effort stays inside
 the menu; the closed chip states both values.

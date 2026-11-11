@@ -31,10 +31,25 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
 - On 10/11/2026 the updated router was checked twice on 42 hand-labelled requests. Haiku returned 84 valid lines at each effort: at medium, kind 90%, difficulty 74%, check 85% and scope 98% agreement; at low, 89%, 74%, 79% and 98%. Median time was 2.7 s for both. Luna returned one valid line at medium and none at low, so this run cannot establish its accuracy. These labels are one person’s judgement, not proven answers.
-- Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026, GPT-6.1 Terra on
-  27/10/2026 and Claude Fable 5.2, the strongest and dearest rung, on 10/11/2026; compiled in for now) and move
-  to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
-  manifest, so a new model joins without an app release.
+- Profiles use Artificial Analysis per-task runs, republished by [Slopalytics](https://slopalytics.com/) on
+  2026-11-10: rounded intelligence and coding sub-index, seconds per task and US$ per task, all on one scale.
+  No maximum effort: its extra quota and time are outside Auto's ladder. Fable xhigh and Luna high/xhigh are
+  excluded for poor marginal value or dominance. Luna medium is a last resort when the account has no Terra.
+  The compiled table later moves to the live manifest and Faber's own scoreboard of kept and retried answers.
+
+  | Level | General intelligence | Code / project coding |
+  | --- | ---: | ---: |
+  | Easy | 24 | 15 |
+  | Medium | 38 | 32 |
+  | Hard | 46 | 39 |
+  | Expert | 50 | 42 |
+  | Frontier | 56 | 46 |
+
+  Medium code has the easy intelligence floor (24); medium math gets the hard intelligence floor (46).
+  Projects add the coding floor to every kind. Other general tasks have no coding floor.
+  Claude-only medium work now uses Sonnet high; easy work no longer takes the weakest row just for price.
+  A Fable conversation can answer at low effort, and Auto can use xhigh on the models with that row.
+  The existing stronger retry also carries xhigh through the choice contract; the manual picker still offers three buttons.
 - **Long reads are priced by the token** (`engine/src/route.rs`, `read_cost`). Per-task prices assume a typical read; a
   message with a long document or many pictures, or a long conversation moved to another model, reads far more, so each
   model's cost adds what that read costs at its own price per token (its long-prompt tiers included), with the context
@@ -56,7 +71,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   Later messages never warm a spare router on keystrokes: a draft classification opens it only when it fires. Each later
   Auto message may ask the router up to twice, where previously it asked none. The router uses a thread on the shared
   Codex app-server when Luna is available and allowed, otherwise a separate Claude Haiku process for that request.
-- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 58, agent 61). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. Quota and learned steps stop at frontier.
+- Open hard work gets the expert bar; an unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. Quota and learned steps stop at frontier.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can

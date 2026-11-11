@@ -344,14 +344,16 @@ fn neutral(_: &Profile) -> Factor {
 fn the_lift_is_one_rung_of_the_ladder_and_says_it_is_learned() {
     let all = both();
     let base = usual("chat", "easy", &all);
-    assert_eq!(base.profile.model, "gpt-6-luna");
+    assert_eq!(base.profile.model, "claude-haiku-5-5");
     let up = lifted(base.clone(), &all, &neutral);
-    // Easy's bar is nothing; medium's is a general intelligence of 41: the cheapest model that clears it.
-    assert_eq!((up.profile.model, up.profile.effort), ("gpt-6.1-sol", "low"));
+    // Easy's intelligence floor is 24; medium's is 38: the cheapest model that clears it.
+    assert_eq!((up.profile.model, up.profile.effort), ("gpt-6.1-sol", "medium"));
     assert_eq!(up.pace.as_ref().map(|p| (p.kind.as_str(), p.vendor)), Some(("learned", Vendor::Codex)));
-    let hard = lifted(usual("code", "medium", &all), &all, &neutral);
-    assert!((hard.profile.iq, hard.profile.agent) >= (47, 44), "medium code goes to hard's bar, no further");
-    assert!(hard.profile.secs <= 60.0);
+    let with_terra = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".into(), "gpt-6.1-terra".into()]);
+    let hard = lifted(usual("code", "medium", &with_terra), &with_terra, &neutral);
+    assert_eq!((hard.profile.model, hard.profile.effort), ("gpt-6.1-sol", "medium"));
+    assert!((hard.profile.iq, hard.profile.agent) >= (46, 39), "medium code goes to hard's bar, no further");
+    assert!(hard.profile.secs <= 600.0);
 }
 
 #[test]
@@ -384,10 +386,10 @@ fn the_lift_respects_the_quota_rules_of_the_vendor_it_would_use() {
     let codex_only_has_room = |p: &Profile| Factor { m: 1.0, w: 1.0, step_ok: p.vendor == Vendor::Codex, read: 0.0 };
     let up = lifted(base.clone(), &all, &codex_only_has_room);
     assert_eq!(up.profile.vendor, Vendor::Codex);
-    // A step over the time cap is not taken: hard research caps at one minute, and ChatGPT's strongest takes longer.
-    let sol = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()]);
-    let hard = usual("research", "hard", &sol);
-    assert_eq!(lifted(hard.clone(), &sol, &neutral), hard);
+    // A step over 600 seconds per task is refused even when it clears the next bar.
+    let capped: Vec<_> = PROFILES.into_iter().filter(|p| p.model == "claude-opus-5-5" && matches!(p.effort, "medium" | "xhigh")).collect();
+    let hard = usual("research", "hard", &capped);
+    assert_eq!(lifted(hard.clone(), &capped, &neutral), hard);
 }
 
 /// Quota to spare at Claude makes it cheap: the table buys Claude's step up on its own, with no learning in it.

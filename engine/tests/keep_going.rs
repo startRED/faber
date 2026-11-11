@@ -1051,7 +1051,7 @@ async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Optio
             let result = match m["method"].as_str() {
                 Some("thread/start") => {
                     seen.0 = m["params"]["model"].as_str().map(String::from);
-                    json!({ "thread": { "id": "t1", "model": "gpt-6.1-sol" } })
+                    json!({ "thread": { "id": "t1", "model": m["params"]["model"] } })
                 }
                 Some("turn/start") => {
                     seen.1 = m["params"]["effort"].as_str().map(String::from);
@@ -1077,11 +1077,12 @@ async fn helper_models(claude: &mut Pipe, made: &Made) -> (Option<String>, Optio
 async fn a_helper_started_in_economy_mode_runs_one_rung_cheaper() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     ends_costing(&mut pipe, 1.6).await;
     until(&engine, &id, economy_on).await;
     let seen = helper_models(&mut pipe, &made).await;
-    assert_eq!(seen, (Some("gpt-6.1-sol".to_string()), Some("low".to_string())), "Sol at low effort, not medium");
+    assert_eq!(seen, (Some("gpt-6.1-terra".to_string()), Some("medium".to_string())), "Terra at medium effort, not high");
     engine.shutdown();
 }
 
@@ -1091,6 +1092,7 @@ async fn a_helper_started_in_economy_mode_runs_one_rung_cheaper() {
 async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_mode() {
     let (dir, project) = (support::DataFolder::new(), support::work_folder());
     let (engine, mut pipe, id, made) = started_made(&dir, project.path(), &[Vendor::Claude, Vendor::Codex]).await;
+    engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6.1-terra".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     calls(&mut pipe, "p1", "plan", steps_with(1.0)).await;
     let (said, error) = calls(&mut pipe, "c1", "conversation", json!({ "title": "Docs", "brief": "Write the docs." })).await;
     assert!(!error, "{said}");
@@ -1102,7 +1104,7 @@ async fn a_helper_of_a_conversation_the_lead_started_follows_the_leads_economy_m
     ends_costing(&mut pipe, 0.0).await;
     until(&engine, &id, economy_on).await;
     let seen = helper_models(&mut child, &made).await;
-    assert_eq!(seen, (Some("gpt-6.1-sol".to_string()), Some("low".to_string())), "the child's helper runs cheaper as well");
+    assert_eq!(seen, (Some("gpt-6.1-terra".to_string()), Some("medium".to_string())), "the child's helper runs cheaper as well");
     engine.shutdown();
 }
 

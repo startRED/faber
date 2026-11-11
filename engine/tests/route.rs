@@ -5,6 +5,79 @@ use faber_engine::router::Pick;
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
 #[test]
+fn measured_picks_for_every_kind_level_and_connected_vendor() {
+    let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+    let sets = [candidates(&[Vendor::Claude], &models), candidates(&[Vendor::Codex], &models), candidates(&BOTH, &models)];
+    let levels = ["easy", "medium", "hard", "expert", "frontier"];
+    let claude = [
+        ("claude-haiku-5-5", "medium"),
+        ("claude-sonnet-5-5", "high"),
+        ("claude-opus-5-5", "medium"),
+        ("claude-fable-5-2", "low"),
+        ("claude-fable-5-2", "medium"),
+    ];
+    let codex = [
+        ("gpt-6.1-terra", "low"),
+        ("gpt-6.1-terra", "medium"),
+        ("gpt-6.1-sol", "medium"),
+        ("gpt-6.1-sol", "high"),
+        ("gpt-6.1-sol", "xhigh"),
+    ];
+    for kind in KINDS {
+        for (i, level) in levels.into_iter().enumerate() {
+            let at = if kind == "math" && level == "medium" { 2 } else { i };
+            let both = if at == 4 { claude[at] } else { codex[at] };
+            for project in [false, true] {
+                for (set, expected) in sets.iter().zip([claude[at], codex[at], both]) {
+                    let row = faber_engine::route::choose_scoped(kind, level, "glance", "tight", 0.9, project, set).unwrap();
+                    assert_eq!((row.profile.model, row.profile.effort), expected, "{kind} {level} project={project} vendors={set:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn measured_effort_ladder_inside_each_conversations_model() {
+    use faber_engine::route::{Asked, PROFILES, choose_effort};
+    let cases = [
+        ("claude-fable-5-2", ["low", "low", "low", "low", "medium"]),
+        ("claude-opus-5-5", ["low", "medium", "medium", "high", "xhigh"]),
+        ("claude-sonnet-5-5", ["low", "high", "xhigh", "xhigh", "xhigh"]),
+        ("gpt-6.1-sol", ["low", "medium", "medium", "high", "xhigh"]),
+        ("gpt-6.1-terra", ["low", "medium", "xhigh", "xhigh", "xhigh"]),
+    ];
+    let tasks = [
+        ("chat", "easy", "tight", "glance"),
+        ("research", "medium", "tight", "glance"),
+        ("code", "hard", "tight", "machine"),
+        ("code", "hard", "open", "machine"),
+        ("code", "hard", "open", "blind"),
+    ];
+    for (model, expected) in cases {
+        let current = PROFILES.iter().find(|p| p.model == model && p.effort == "low").unwrap();
+        for ((kind, difficulty, scope, check), effort) in tasks.into_iter().zip(expected) {
+            let verdict = Asked { kind, difficulty, scope, check, confidence: 0.9 };
+            let row = choose_effort(&verdict, false, current).unwrap().profile;
+            assert_eq!((row.model, row.effort), (model, effort), "{model}: {verdict:?}");
+        }
+    }
+}
+
+#[test]
+fn measured_profiles_have_no_max_duplicate_or_dominated_effort() {
+    use faber_engine::route::PROFILES;
+    for (i, row) in PROFILES.iter().enumerate() {
+        assert_ne!(row.effort, "max");
+        for (j, other) in PROFILES.iter().enumerate().filter(|(j, p)| *j != i && p.model == row.model) {
+            assert_ne!(row.effort, other.effort, "duplicate rows {i} and {j}");
+            let dominates = other.iq >= row.iq && other.agent >= row.agent && other.secs <= row.secs && other.cost <= row.cost;
+            assert!(!dominates, "{other:?} dominates {row:?}");
+        }
+    }
+}
+
+#[test]
 fn effort_stays_in_the_model_and_only_confident_visible_work_can_lower_it() {
     use faber_engine::route::{Asked, PROFILES, choose_effort};
     let current = PROFILES.iter().find(|p| p.model == "gpt-6.1-sol" && p.effort == "high").unwrap();
@@ -19,7 +92,7 @@ fn effort_stays_in_the_model_and_only_confident_visible_work_can_lower_it() {
     let hard = Asked { kind: "code", difficulty: "hard", scope: "open", ..easy };
     assert_eq!(choose_effort(&hard, true, low).unwrap().profile.effort, "high");
     let frontier = Asked { check: "blind", ..hard };
-    assert_eq!(choose_effort(&frontier, true, low).unwrap().profile.effort, "high");
+    assert_eq!(choose_effort(&frontier, true, low).unwrap().profile.effort, "xhigh");
 }
 
 #[test]
@@ -44,7 +117,7 @@ fn effort_uses_the_strongest_row_of_the_same_model_when_no_row_meets_the_bar() {
     let current = PROFILES.iter().find(|p| p.model == "gpt-6.1-terra" && p.effort == "low").unwrap();
     let verdict = Asked { kind: "code", difficulty: "hard", check: "blind", scope: "open", confidence: 0.9 };
     let selected = choose_effort(&verdict, true, current).unwrap().profile;
-    assert_eq!((selected.vendor, selected.model, selected.effort), (current.vendor, current.model, "high"));
+    assert_eq!((selected.vendor, selected.model, selected.effort), (current.vendor, current.model, "xhigh"));
 }
 
 fn all() -> Vec<Profile> {
@@ -74,17 +147,17 @@ fn only_connected_vendors_and_models_the_account_lists_are_candidates() {
 #[test]
 fn each_task_goes_to_the_cheapest_model_that_clears_its_bar() {
     let all = all();
-    assert_eq!(picked("chat", "easy", 0.9, &all), ("gpt-6-luna", "medium"));
+    assert_eq!(picked("chat", "easy", 0.9, &all), ("claude-haiku-5-5", "medium"));
     assert_eq!(picked("code", "easy", 0.9, &all), ("claude-haiku-5-5", "medium"));
-    assert_eq!(picked("writing", "medium", 0.9, &all), ("gpt-6.1-sol", "low"));
-    assert_eq!(picked("code", "medium", 0.9, &all), ("gpt-6.1-sol", "low"));
+    assert_eq!(picked("writing", "medium", 0.9, &all), ("gpt-6.1-sol", "medium"));
+    assert_eq!(picked("code", "medium", 0.9, &all), ("gpt-6.1-sol", "medium"));
     assert_eq!(picked("math", "medium", 0.9, &all), ("gpt-6.1-sol", "medium"));
     assert_eq!(picked("research", "hard", 0.9, &all), ("gpt-6.1-sol", "medium"));
     assert_eq!(picked("code", "hard", 0.9, &all), ("gpt-6.1-sol", "medium"));
 }
 
 #[test]
-fn an_account_that_lists_terra_sends_it_the_medium_work_sol_low_had() {
+fn an_account_that_lists_terra_sends_it_the_medium_work_sol_had() {
     let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
     let all = candidates(&BOTH, &models);
     assert_eq!(picked("writing", "medium", 0.9, &all), ("gpt-6.1-terra", "medium"));
@@ -96,14 +169,14 @@ fn an_account_that_lists_terra_sends_it_the_medium_work_sol_low_had() {
 
 #[test]
 fn an_unsure_verdict_gets_the_next_level() {
-    assert_eq!(picked("chat", "easy", 0.3, &all()), ("gpt-6.1-sol", "low"));
+    assert_eq!(picked("chat", "easy", 0.3, &all()), ("gpt-6.1-sol", "medium"));
     assert_eq!(picked("code", "medium", 0.3, &all()), ("gpt-6.1-sol", "medium"));
 }
 
 #[test]
 fn with_one_vendor_the_table_stays_inside_it() {
     let claude = candidates(&[Vendor::Claude], &[]);
-    assert_eq!(picked("code", "hard", 0.9, &claude), ("claude-sonnet-5-5", "high"));
+    assert_eq!(picked("code", "hard", 0.9, &claude), ("claude-opus-5-5", "medium"));
     assert_eq!(picked("chat", "easy", 0.9, &claude), ("claude-haiku-5-5", "medium"));
     let luna_only = candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]);
     assert_eq!(picked("code", "hard", 0.9, &luna_only), ("gpt-6-luna", "medium"));
@@ -115,7 +188,7 @@ fn the_answer_names_the_reason() {
     let pick = routed.pick();
     assert_eq!(
         (pick.vendor, pick.model.as_deref(), pick.reason.as_str()),
-        (Vendor::Codex, Some("gpt-6-luna"), "reason.route.writing.easy")
+        (Vendor::Claude, Some("claude-haiku-5-5"), "reason.route.writing.easy")
     );
 }
 
@@ -136,7 +209,7 @@ fn a_conversation_under_way_never_moves_down() {
         pace: None,
     };
     let easy_chat = choose("chat", "easy", "glance", 0.9, &codex).unwrap();
-    assert!(easy_chat.weaker_than(&current("gpt-6.1-sol", "low")));
+    assert!(easy_chat.weaker_than(&current("gpt-6.1-sol", "high")));
     assert!(!easy_chat.weaker_than(&current("gpt-6-luna", "medium")));
     // A model with no profile is never treated as stronger.
     assert!(!easy_chat.weaker_than(&current("gpt-6.1-astra", "medium")));
@@ -151,8 +224,13 @@ fn a_blind_medium_request_where_quality_matters_gets_the_hard_bar() {
     for kind in ["code", "math", "research"] {
         assert_eq!(checked(kind, "medium", "blind", 0.9), checked(kind, "hard", "glance", 0.9), "{kind}");
     }
-    // The bump is real: blind medium code is not what glance medium code gets.
-    assert_ne!(checked("code", "medium", "blind", 0.9), checked("code", "medium", "glance", 0.9));
+    // Terra makes the distinction visible: Sol medium already clears both bars without Terra.
+    let models = ["gpt-6.1-sol", "gpt-6.1-terra"].map(String::from);
+    let all = candidates(&BOTH, &models);
+    assert_ne!(
+        choose("code", "medium", "blind", 0.9, &all).unwrap().profile,
+        choose("code", "medium", "glance", 0.9, &all).unwrap().profile
+    );
 }
 
 #[test]
@@ -229,7 +307,7 @@ fn scoped_pick_table() {
     let sets = [candidates(&BOTH, &models), candidates(&[Vendor::Claude], &models), candidates(&[Vendor::Codex], &models)];
     // kind, difficulty, scope, check, project, both, Claude only, Codex only (model and effort)
     let rows = [
-        ("chat", "easy", "tight", "glance", false, ("gpt-6-luna", "medium"), ("claude-haiku-5-5", "medium"), ("gpt-6-luna", "medium")),
+        ("chat", "easy", "tight", "glance", false, ("gpt-6.1-terra", "low"), ("claude-haiku-5-5", "medium"), ("gpt-6.1-terra", "low")),
         (
             "writing",
             "medium",
@@ -237,10 +315,10 @@ fn scoped_pick_table() {
             "glance",
             false,
             ("gpt-6.1-terra", "medium"),
-            ("claude-sonnet-5-5", "medium"),
+            ("claude-sonnet-5-5", "high"),
             ("gpt-6.1-terra", "medium"),
         ),
-        ("research", "hard", "tight", "glance", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
+        ("research", "hard", "tight", "glance", false, ("gpt-6.1-sol", "medium"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium")),
         (
             "research",
             "hard",
@@ -249,18 +327,9 @@ fn scoped_pick_table() {
             false,
             ("claude-fable-5-2", "medium"),
             ("claude-fable-5-2", "medium"),
-            ("gpt-6.1-sol", "high"),
+            ("gpt-6.1-sol", "xhigh"),
         ),
-        (
-            "code",
-            "easy",
-            "tight",
-            "machine",
-            false,
-            ("claude-haiku-5-5", "medium"),
-            ("claude-haiku-5-5", "medium"),
-            ("gpt-6.1-terra", "low"),
-        ),
+        ("code", "easy", "tight", "machine", false, ("gpt-6.1-terra", "low"), ("claude-haiku-5-5", "medium"), ("gpt-6.1-terra", "low")),
         (
             "code",
             "medium",
@@ -268,15 +337,15 @@ fn scoped_pick_table() {
             "machine",
             false,
             ("gpt-6.1-terra", "medium"),
-            ("claude-sonnet-5-5", "medium"),
+            ("claude-sonnet-5-5", "high"),
             ("gpt-6.1-terra", "medium"),
         ),
-        ("code", "hard", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
-        ("code", "hard", "tight", "blind", false, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
-        ("code", "hard", "open", "machine", false, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
-        ("code", "hard", "open", "blind", false, ("claude-fable-5-2", "medium"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "high")),
-        ("math", "medium", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-sonnet-5-5", "high"), ("gpt-6.1-sol", "medium")),
-        ("research", "hard", "open", "machine", true, ("gpt-6.1-sol", "high"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium")),
+        ("code", "hard", "tight", "blind", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "open", "machine", false, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
+        ("code", "hard", "open", "blind", false, ("claude-fable-5-2", "medium"), ("claude-fable-5-2", "medium"), ("gpt-6.1-sol", "xhigh")),
+        ("math", "medium", "tight", "machine", false, ("gpt-6.1-sol", "medium"), ("claude-opus-5-5", "medium"), ("gpt-6.1-sol", "medium")),
+        ("research", "hard", "open", "machine", true, ("gpt-6.1-sol", "high"), ("claude-fable-5-2", "low"), ("gpt-6.1-sol", "high")),
     ];
     for (kind, difficulty, scope, check, project, both, claude, codex) in rows {
         for (set, expected) in sets.iter().zip([both, claude, codex]) {
