@@ -79,11 +79,14 @@ img, svg, a { -webkit-user-drag: none; }
 .shell { --side-w: 288px; --side-track: var(--side-w); --run-w: 360px; position: relative; display: grid; grid-template-columns: var(--side-track) minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
 /* The docked column keeps the stage 440 px (STAGE_MIN, ui/layout.ts) and is never under 300 px, whatever width was dragged. */
 .shell.docked { grid-template-columns: var(--side-track) minmax(0, 1fr) clamp(300px, var(--run-w), calc(100vw - var(--side-track) - 440px)); }
-/* Switching views while the column is open glides the width; a drag (html.sizing) and a window resize follow at once. */
-.shell.glide { transition: grid-template-columns var(--dur-ui) var(--ease); }
-.shell.glide > .main { transition: margin-left var(--dur-ui) var(--ease); }
-.shell.glide .work > .runcol { transition: width var(--dur-ui) var(--ease); }
-html.sizing :is(.shell, .shell > .main, .shell .work > .runcol) { transition: none; }
+/* The tracks and the stage never animate: whatever opens or closes beside the stage, the stage settles in one step and the layer that
+   comes (the sidebar, the column, a view inside it) slides and fades over transform and opacity only (docs/design/looks.md, "Layers"). */
+/* Settings and Catalog are layers over a shell that stays mounted: Settings covers it, hidden once its entrance has covered it (the
+   delay), shown again at once when it closes; its animations pause meanwhile. */
+.app > .shell, .app > .settings { grid-area: 2 / 1; }
+.app > .settings { position: relative; z-index: 12; background: var(--frame); }
+.shell.under { visibility: hidden; transition: visibility 0s linear var(--dur-ui); }
+.shell.under, .shell.under *, .shell.under *::before, .shell.under *::after { animation-play-state: paused; }
 .settings { display: grid; grid-template-columns: 288px 1fr; min-height: 0; }
 .side { display: flex; flex-direction: column; gap: 14px; padding: 8px 12px 40px; min-height: 0; min-width: 0; }
 .s-nav { padding: 8px 12px; align-content: start; }
@@ -336,7 +339,7 @@ svg.i.sm { width: 14px; height: 14px; }
 /* Docked, it is a card of its own beside the stage with the frame between them, as round as the stage; a look with no inset
    keeps it flush, its stage shadow drawing the edge. */
 .shell > .runcol { margin: 0 var(--stage-inset) var(--stage-inset); border-radius: var(--r-stage); box-shadow: var(--stage-shadow); overflow: hidden; }
-.work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(var(--run-w), 100%); border-left: 1px solid var(--line-2); box-shadow: -18px 0 40px -22px rgba(0, 0, 0, 0.7); }
+.work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(var(--run-w), 100%); border-left: 1px solid transparent; box-shadow: var(--lift-shadow); }
 /* An opened subagent as a full thread: the column covers the work area, its text keeps the reading column's width, and the composer stays below. */
 .work > .runcol.wide { width: 100%; border-left: 0; box-shadow: none; }
 .runcol.wide :is(.rc-head, .rc-body) { padding-inline: max(18px, calc((100% - 660px) / 2)); }
@@ -542,6 +545,10 @@ svg.i.sm { width: 14px; height: 14px; }
   .shell:is(.focus, .folded) > .main { margin-left: var(--stage-inset); }
   .shell:is(.focus, .folded) > .side { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(calc(-1 * var(--motion-slide))); transition: transform var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
 }
+/* Peek: a stepped-aside sidebar floats over the stage as a layer (transform and opacity only; the stage keeps its width). The edge is its
+   hot strip, only there while the sidebar is away. */
+.side-edge { position: absolute; left: 0; top: 0; bottom: 0; z-index: 7; width: 8px; }
+.shell:is(.focus, .folded).floated > .side { opacity: 1; visibility: visible; pointer-events: auto; transform: none; z-index: 8; width: var(--side-w); justify-self: start; margin: 0 0 var(--stage-inset) var(--stage-inset); background: var(--frame); border-radius: var(--r-stage); box-shadow: var(--lift-shadow); transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s; }
 .topbar .focus-exit { flex: none; margin: 0 0 0 -8px; overflow: hidden; transition: width var(--dur-ui) var(--ease), margin var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s, background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .topbar .focus-exit.off { width: 0; margin: 0 -10px 0 0; opacity: 0; visibility: hidden; transition: width var(--dur-exit) var(--ease-in), margin var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in), visibility 0s linear var(--dur-exit); }
 .grip { position: absolute; top: 0; bottom: 0; z-index: 5; width: 9px; cursor: col-resize; touch-action: none; outline: none; }
@@ -1831,8 +1838,12 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
   .piece-tabs button[aria-selected='true'] { border-color: Highlight; color: CanvasText; }
 }
 
-/* Catalog: a browsing surface, unmounted when another tab opens. */
-.main:has(> .catalog):not(:has(> .topbar)) { grid-template-rows: minmax(0, 1fr); }
+/* Catalog: a browsing surface, a layer over the stage; the thread stays mounted under it, hidden once the entrance has covered it, so
+   its scroll and draft survive (docs/design/layout.md). It arrives with the screen's usual rise and leaves with its shorter exit. */
+.main > .layer { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; min-height: 0; border-radius: inherit; background: var(--bg); animation: arrive var(--dur-ui) var(--ease) both; }
+.main > .layer.leaving { pointer-events: none; animation: arrive var(--dur-exit) var(--ease-in) both reverse; }
+.main.covered > :not(.layer) { visibility: hidden; transition: visibility 0s linear var(--dur-ui); }
+.main.covered > :not(.layer), .main.covered > :not(.layer) * { animation-play-state: paused; }
 .catalog { flex: 1; min-height: 0; overflow: auto; }
 .catalog-content { width: min(100%, 1120px); margin: 0 auto; padding: 32px clamp(18px, 4vw, 48px) 64px; }
 .catalog h1 { font-family: var(--font-display); font-size: var(--fs-h2); line-height: 1.2; margin: 0; }

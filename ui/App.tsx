@@ -104,6 +104,9 @@ function remember(key: string, value: unknown) {
 
 // A long conversation opens its latest page and keeps older pages only when requested.
 const PAGE = 40;
+/** How long a pointer rests on the left edge before the stepped-aside sidebar floats over the stage, and how long it stays after the pointer leaves. */
+const PEEK_DWELL = 100;
+const PEEK_GRACE = 300;
 // Faber's browser is a pane of the window only on Windows (R161 step 7).
 const isWindows = navigator.userAgent.includes('Windows');
 const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), [contenteditable]';
@@ -546,6 +549,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     remember('faber.layout', { ...recall<Record<string, unknown>>('faber.layout', {}), ...widths() });
   };
   const [focus, setFocus] = createSignal(false);
+  const catalogShown = keepForExit(catalogOpen);
   const dropping = createFileDrop();
   const dropShown = keepForExit(dropping);
 
@@ -555,6 +559,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const sideOverlay = () => narrow() && sideOpen();
   let sideEl: HTMLElement | undefined;
   let menuButton: HTMLButtonElement | undefined;
+  let layerMenu: HTMLButtonElement | undefined;
   const openSide = () => {
     // The column over the stage, if open, makes way: the sidebar overlay is a dialog of its own.
     if (columnOpen() && !docked()) closeColumn();
@@ -562,13 +567,43 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     queueMicrotask(() => sideEl?.querySelector<HTMLElement>('button')?.focus());
   };
   const closeSide = (focusBack = true) => {
+    setPeek(false);
     if (!sideOpen()) return;
     setSideOpen(false);
-    if (focusBack) menuButton?.focus();
+    if (focusBack) (catalogOpen() ? layerMenu : menuButton)?.focus();
   };
   createEffect(() => {
     if (!narrow()) setSideOpen(false);
   });
+
+  // ---- Peek: with the sidebar stepped aside (focus mode, or folded by a wide view) a pointer resting on the window's left edge
+  // floats it over the stage, as a layer; it goes after a short grace once the pointer and the focus have left, or on Esc.
+  const [peek, setPeek] = createSignal(false);
+  const away = () => !narrow() && (focus() || folded());
+  const peeking = () => peek() && away() && !settingsOpen();
+  let peekTimer: ReturnType<typeof setTimeout> | undefined;
+  let peekOver = false;
+  onCleanup(() => clearTimeout(peekTimer));
+  const peekIn = () => {
+    peekOver = true;
+    clearTimeout(peekTimer);
+    if (away() && !peek()) peekTimer = setTimeout(() => setPeek(true), PEEK_DWELL);
+  };
+  const settlePeek = () => {
+    clearTimeout(peekTimer);
+    if (peek()) peekTimer = setTimeout(() => { if (!peekOver && !sideEl?.matches(':focus-within')) setPeek(false); }, PEEK_GRACE);
+  };
+  const peekOut = () => {
+    peekOver = false;
+    settlePeek();
+  };
+  const closePeek = () => {
+    clearTimeout(peekTimer);
+    // Focus inside the layer goes to the box that stays, asked before the layer goes inert.
+    if (sideEl?.contains(document.activeElement)) (document.querySelector<HTMLElement>('.composer textarea') ?? runButton)?.focus();
+    setPeek(false);
+  };
+  createEffect(() => { if (!away()) { clearTimeout(peekTimer); setPeek(false); } });
 
   // ---- The running column: closed when the window opens. Beside the stage from 1,100 px, over it below that. Opened by
   // the user over the stage it is modal; opened by itself it is never modal and never moves focus.
@@ -604,8 +639,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // window leaves it. A drag that ends on the usual width goes back to following the window.
   const autoWidth = () => fit(paneUsual(paneKind(), win(), sideTake()), runLimits());
   const runWidth = () => fit(widths().panes[paneKind()] ?? paneUsual(paneKind(), win(), sideTake()), runLimits());
-  // Switching views while the column stays open glides its width in the column's own motion (the stylesheet turns it off with
-  // reduced motion); opening and closing it are the list's own move.
+  // Switching views while the column stays open marks the switch (`.shell.glide`): the width changes in one step and the views cross-fade
+  // (the column's own list); opening and closing the column are a slide over transform and opacity.
   const [glide, setGlide] = createSignal(false);
   let glideTimer: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(glideTimer));
@@ -1255,6 +1290,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
       if (e.key === 'Escape') {
         if (CSS.supports('selector(select:open)') && document.querySelector('select:open')) return;
+        if (peeking() && inShell) return closePeek();
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
         if (inShell && colShown() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
@@ -1910,9 +1946,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
           </Show>
         }
       >
-        <Show
-          when={!settingsOpen()}
-          fallback={
+        <>
+          <Show when={settingsOpen()}>
             <Settings
               look={state().look}
               saved={state().settings}
@@ -1955,14 +1990,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 setSettingsOpen(false);
               }}
             />
-          }
-        >
+          </Show>
           <div
             class="shell"
             data-screen={catalogOpen() ? 'catalog' : `${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
-            classList={{ docked: colShown() && docked() && !wide(), focus: focus(), folded: folded(), glide: glide() }}
+            classList={{ docked: colShown() && docked() && !wide(), focus: focus(), folded: folded(), glide: glide(), floated: peeking(), under: settingsOpen() }}
             style={{ '--side-w': `${sideWidth()}px`, '--run-w': `${runWidth()}px`, ...(folded() ? { '--side-track': '0px' } : {}) }}
-            inert={tourOpen() || notesOpen() || startScreen()}
+            inert={tourOpen() || notesOpen() || startScreen() || settingsOpen()}
             ref={animateList}
           >
             <aside
@@ -1973,8 +2007,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped() || (narrow() && !sideOverlay()) || ((focus() || folded()) && !narrow())}
-              aria-hidden={(narrow() && !sideOverlay()) || ((focus() || folded()) && !narrow()) ? 'true' : undefined}
+              inert={trapped() || (narrow() && !sideOverlay()) || (away() && !peeking())}
+              aria-hidden={(narrow() && !sideOverlay()) || (away() && !peeking()) ? 'true' : undefined}
+              onPointerEnter={peekIn}
+              onPointerLeave={peekOut}
+              onFocusOut={() => queueMicrotask(settlePeek)}
             >
               <Sidebar
                 onClose={narrow() ? closeSide : undefined}
@@ -2029,14 +2066,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 <Grip edge="side" label={t('side.resize')} value={sideWidth()} limits={sideLimits()} fallback={SIDE.fallback} onChange={setSideWidth} />
               </Show>
             </aside>
+            <Show when={away()}>
+              <div class="side-edge" aria-hidden="true" onPointerEnter={peekIn} onPointerLeave={peekOut} />
+            </Show>
             <Show when={sideOverlay()}>
               <button class="scrim" tabindex="-1" aria-label={t('side.hide')} onClick={() => closeSide()} />
             </Show>
-            <main class="main" inert={sideOverlay()}>
-              <Show when={!catalogOpen()} fallback={<>
-                <Show when={narrow()}><div class="topbar"><button class="iconbtn menu" ref={(el) => (menuButton = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}><Icon name="menu" /></button></div></Show>
-                <Catalog projects={state().projects} projectId={projectId()} vendors={state().vendors} />
-              </>}>
+            <main class="main" classList={{ covered: catalogOpen() }} inert={sideOverlay()}>
               <div class="topbar" classList={{ bare: newChat() }} inert={trapped()}>
                 <Show when={narrow()}>
                   <button class="iconbtn menu" ref={(el) => (menuButton = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}>
@@ -2052,6 +2088,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   title={t('focus.exit')}
                   inert={!focus() || narrow()}
                   onClick={() => setFocus(false)}
+                  onPointerEnter={peekIn}
+                  onPointerLeave={peekOut}
                 >
                   <Icon name="menu" />
                 </button>
@@ -2315,12 +2353,18 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 }>{(id) => <ChatGroup group={state().groups?.find((g) => g.id === id)!} inert={trapped() || (colShown() && wide())} onChanged={changeGroup} onNew={() => newGroupChat(id)} onReady={(wait) => { groupReady = wait ? { id, wait } : undefined; }} />}</Show>
                 <Show when={colShown() && (!docked() || wide())}>{runningColumn()}</Show>
               </div>
-              <Find enabled={!newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />
+              <Find enabled={!catalogOpen() && !newChat() && !needsProject() && !loading() && !!current()?.messages.length && !(colShown() && wide())} root={() => thread} />
+              {/* Catalog is a layer over the stage: the thread stays mounted beneath it, so its scroll and draft survive. */}
+              <Show when={catalogShown()}>
+                <div class="layer" classList={{ leaving: !catalogOpen() }} inert={!catalogOpen()}>
+                  <Show when={narrow()}><div class="topbar"><button class="iconbtn menu" ref={(el) => (layerMenu = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}><Icon name="menu" /></button></div></Show>
+                  <Catalog projects={state().projects} projectId={projectId()} vendors={state().vendors} />
+                </div>
               </Show>
             </main>
             <Show when={colShown() && docked() && !wide()}>{runningColumn()}</Show>
           </div>
-        </Show>
+        </>
       </Show>
       <Show when={tourOpen()}>
         <Tutorial experience={state().settings.experience} onEnd={endTour} />

@@ -421,7 +421,8 @@ function paintedCover(box: HTMLElement, departing: boolean): boolean {
   const ys = [r.top + 4, r.top + r.height / 2, r.bottom - 4];
   return xs.some((x) => ys.some((y) => {
     const top = document.elementFromPoint(x, y);
-    return top !== null && !box.contains(top) && !(departing && top.contains(box));
+    // The column's own resize handle leaves with it; it never covers the page it belongs to.
+    return top !== null && !box.contains(top) && !(departing && (top.contains(box) || top.classList.contains('grip')));
   }));
 }
 

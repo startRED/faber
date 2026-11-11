@@ -160,14 +160,15 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             page.eval(r#"(() => {
           const shell=document.querySelector('.shell');
           window.__widthRecord('after-aside');
-          const active=()=>shell.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty) && a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty,time:a.currentTime}));
+          // The layered shell settles the width in one step: what moves is the column's own entrance and the views' cross-fade.
+          const active=()=>(document.querySelector('.runcol')?.getAnimations({subtree:true})??[]).filter(a=>a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty??a.animationName??'animate',time:a.currentTime}));
           window.__interruptPreparation={events:[]};
           window.__interruptClick=null;
           window.__interruptMissed=false;
+          window.__interruptX=undefined;
           let pending=false;
-          const observe=event=>{
-            if(!['width','grid-template-columns'].includes(event.propertyName))return;
-            window.__interruptPreparation.events.push({property:event.propertyName,t:performance.now()});
+          const observe=()=>{
+            window.__interruptPreparation.events.push({property:'view',t:performance.now()});
             if(pending || window.__interruptClick)return;
             pending=true;
             const until=performance.now()+1000;
@@ -176,16 +177,19 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
               window.__interruptPreparation.native={shown:native.shown,x:native.x,t:performance.now()};
               const column=document.querySelector('.runcol');
               const button=column?.querySelector('.site-head button[aria-label="Close the running list"]');
+              // The layered shell settles the column's width in one step: close once it has stopped moving sideways, while its entrance still runs.
+              const x=column?.getBoundingClientRect().x,steady=window.__interruptX!==undefined&&Math.abs(x-window.__interruptX)<0.5;
+              window.__interruptX=x;
               const moving=active(),rect=button?.getBoundingClientRect();
               window.__widthRecord?.('close-subject',{moving,shown:native.shown,nativeX:native.x,
                 connected:!!button?.isConnected,disabled:button?.disabled,inert:!!button?.closest('[inert]'),
                 buttonWidth:rect?.width,buttonHeight:rect?.height});
-              if(!native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
+              if(!steady || !native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
                 if(performance.now()<until)requestAnimationFrame(close);
-                else{shell.removeEventListener('transitionrun',observe);window.__interruptMissed=true;}
+                else{watcher.disconnect();window.__interruptMissed=true;}
                 return;
               }
-              shell.removeEventListener('transitionrun',observe);
+              watcher.disconnect();
               button.addEventListener('click',event=>{
                 window.__interruptClick={active:active(),trusted:event.isTrusted,glide:shell.classList.contains('glide'),native:window.__interruptPreparation.native,x:column.getBoundingClientRect().x,t:performance.now()};
                 window.__interruptDone=window.__sampleBrowserClose(650);
@@ -194,8 +198,9 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
             };
             requestAnimationFrame(close);
           };
-          shell.addEventListener('transitionrun',observe);
-          window.__widthStopClose=()=>shell.removeEventListener('transitionrun',observe);
+          const watcher=new MutationObserver(()=>{if(document.querySelector('.runcol')?.children.length)observe();});
+          watcher.observe(shell,{childList:true,subtree:true});
+          window.__widthStopClose=()=>watcher.disconnect();
           window.__widthRecord('listener-installed');
           window.__widthRecord('before-browser');
         })()"#)?;
@@ -274,7 +279,8 @@ fn interrupt_width(ctx: &mut Ctx) -> Result {
                 .all(|s| s["shown"] == true && s["nativeX"].as_f64().is_some_and(|x| x > -10000.0)),
             || format!("the native page disappeared while its moving column was visible: {trace}"),
         )?;
-        let mut previous = clicked["x"].as_f64().ok_or("the click omitted the column's position")?;
+        // The width settles in one step, possibly just after the click: travel is judged from where the exit begins.
+        let mut previous = departing.first().and_then(|s| s["x"].as_f64()).ok_or("no departing frame carried the column's position")?;
         for sample in &departing {
             let x = sample["x"].as_f64().ok_or("departing column omitted its position")?;
             ensure(x >= previous - 2.0, || format!("the exiting pane reversed from {previous:.1}px to {x:.1}px: {trace}"))?;

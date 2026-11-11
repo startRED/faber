@@ -620,12 +620,12 @@ check('catalog: the sidebar opens a browse-only tab and Chat unmounts it without
     ok(host.querySelector('[data-screen=catalog]')); equal(tab.getAttribute('aria-pressed'), 'true');
     const stage = host.querySelector('.main')!.getBoundingClientRect(), catalog = host.querySelector('[data-catalog]')!.getBoundingClientRect();
     ok(catalog.height >= stage.height - 60, 'Catalog fills the main stage, including when the wide screen has no topbar');
-    equal(host.querySelector('.composer, .thread'), null);
+    ok(host.querySelector('.main.covered'), 'the work waits beneath the layer');
     equal(host.querySelector('.areas')!.getBoundingClientRect().top, tabsTop, 'the navigation keeps its place when Catalog opens');
     ok(host.querySelector('.newchat'), 'New conversation remains available');
     const reads = view.calls.list;
     await tap(button(host.querySelector('.areas')!, 'area.chat'));
-    equal(host.querySelector('[data-catalog]'), null); equal(view.calls.list, reads); equal(started, 0);
+    await new Promise((done) => setTimeout(done, 260)); equal(host.querySelector('[data-catalog]'), null, 'the layer leaves after its exit'); equal(view.calls.list, reads); equal(started, 0);
     for (let attempt = 0; attempt < 2; attempt++) {
       await tap(host.querySelector<HTMLButtonElement>('[data-catalog-tab]')!);
       equal(host.querySelector('#running'), null, 'Catalog hides an already open running column too');
@@ -635,7 +635,7 @@ check('catalog: the sidebar opens a browse-only tab and Chat unmounts it without
       input.value = t('run.toggle'); input.dispatchEvent(new Event('input', { bubbles: true }));
       const action = [...host.querySelectorAll<HTMLElement>('.pal [role=option]')].find((el) => el.querySelector('.pal-t')?.textContent === t('run.toggle'));
       ok(action, 'the running action is available'); await tap(action);
-      equal(host.querySelector('[data-catalog]'), null, 'the action returns to work');
+      await new Promise((done) => setTimeout(done, 260)); equal(host.querySelector('[data-catalog]'), null, 'the action returns to work');
       ok(host.querySelector('[data-screen="chat.new"] .composer textarea'), 'the last work area returns');
       equal(host.querySelector('.run-btn')?.getAttribute('aria-expanded'), 'true', 'the running column opens even if it was already open behind Catalog');
       ok(host.querySelector('#running')?.getBoundingClientRect().width, 'the column is visible');
