@@ -1,5 +1,25 @@
 # Helper team channel
 
+Pieces declare read, build, review or advise, their kind, difficulty and tight/open scope. Selection follows the
+[mixed team contract](../product/building.md#building-software-one-voice-a-team-behind-it): the first qualifying piece
+uses the other connected, allowed maker, then the mixed team returns to quota-priced selection. Economy does not force
+the mix. Hard open builds use the expert bar within the lead's cap. Advice uses a dominating expert row (hard in
+economy), is read-only, shares the three slots and refuses when no stronger qualifying row exists.
+
+The engine derives makers from existing helper-start acts after the last user message without a wake marker; automatic
+continuations and ended helpers still count. Only a real person message resets this view. No additional stored state,
+process or timer is introduced: a backward scan of the current request's acts and two stack enum values suffice.
+Cards and their accessible names use the job word Advice (hand-written in all five locales), with the same maker mark,
+model, effort and state as other members. The helper view also names the advice job. No new screen or control.
+
+Completed-reply coverage in `engine/tests/engine.rs` exercises a Codex lead with each of read and build, checks the
+first helper uses Claude, and verifies both makers and the successful helper report remain after the reply ends.
+The existing Claude-lead replay covers the reverse direction. Disabling first-piece mixing must fail the Codex-lead check.
+
+Design sources, read 2026-11-11: [Anthropic, Mixing models](https://claude.dev/blog/which-claude-model-should-you-build-with/#mixing-models)
+and [OpenAI, Codex Models](https://developers.openai.com/codex/models/); their recommendations and Faber's limits are
+described in the product contract above. Physical memory/CPU remain unmeasured; no additional idle work is retained.
+
 Reports target 1,200 characters; above 2,000, excerpts end at a paragraph or sentence when possible. If saved, the lead gets a path (the newest 20 helper logs are kept) and the person's note is appended after the cut; the full report remains visible.
 
 Each Faber helper outside a Review round receives only its own brief and a helper-only `team` tool, through the existing

@@ -55,6 +55,16 @@ struct Ended {
 }
 
 impl Core {
+    /// Existing helper-start acts survive helper exit and automatic continuations; the next user message is the boundary.
+    fn reply_has_maker(&self, conv: &str, vendor: Vendor) -> bool {
+        self.convs.get(conv).is_some_and(|c| {
+            c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some()).flat_map(|m| &m.acts).any(|act| {
+                act.kind == crate::act::ActKind::Helper
+                    && matches!(act.actor, crate::act::Actor::Ai { vendor: v, role: crate::act::ActorRole::Helper, .. } if v == vendor)
+            })
+        })
+    }
+
     pub(super) fn helpers_in(&self, conv: &str) -> bool {
         self.helpers.values().any(|h| h.conv == conv) || self.waiting_helpers(conv, "") > 0
     }
@@ -141,17 +151,11 @@ impl Core {
             return Err("error.rewind.busy");
         }
         let l = self.live.get(conv).ok_or("the conversation is gone")?;
-        let job = if review.is_some() {
-            "review"
-        } else {
-            match input["job"].as_str() {
-                Some("read") => "read",
-                Some("build") => "build",
-                _ => "review",
-            }
-        };
-        let kind = crate::route::KINDS.into_iter().find(|k| Some(*k) == input["kind"].as_str()).unwrap_or("code");
-        let difficulty = crate::route::LEVELS.into_iter().find(|k| Some(*k) == input["difficulty"].as_str()).unwrap_or("medium");
+        let mut piece = helper::Piece::of(input);
+        if review.is_some() {
+            piece.job = "review";
+        }
+        let job = piece.job;
         let lead_vendor = l.vendor;
         // A model absent from the table stays uncapped: its strength is unknown.
         let lead = crate::route::PROFILES
@@ -160,7 +164,7 @@ impl Core {
             .max_by_key(|p| (p.iq, p.agent));
         let (sid, permissions, tuning, cwd) = (
             l.sid,
-            if review.is_some() || job == "read" { Permissions::Plan } else { l.permissions },
+            if review.is_some() || piece.read_only() { Permissions::Plan } else { l.permissions },
             Tuning { web: l.tuning.web, summary: l.tuning.summary, language: l.tuning.language.clone(), ..Default::default() },
             l.cwd.clone(),
         );
@@ -217,7 +221,9 @@ impl Core {
         let selected = if let Some(vendor) = review {
             helper::profile(&candidates, vendor, economy)
         } else {
-            helper::select(job, kind, difficulty, lead, lead_vendor, &candidates, &factor, economy)
+            let other = helper::other(lead_vendor);
+            let makers = [lead_vendor, if self.reply_has_maker(conv, other) { other } else { lead_vendor }];
+            helper::select(piece, lead, lead_vendor, &candidates, &makers, &factor, economy)
         };
         // Before the account lists its models, retain the recommended Codex model for independent reviews.
         let fallback = (job == "review" && review_vendor == Vendor::Codex && self.vendors().contains(&Vendor::Codex))
@@ -230,7 +236,11 @@ impl Core {
         } else if let Some(p) = selected {
             (p.vendor, Some(p.model.to_string()), p.effort.to_string())
         } else {
-            return Err(refused.map(refusal).unwrap_or("no connected AI has a model for this"));
+            return Err(if job == "advise" {
+                helper::NO_ADVISER
+            } else {
+                refused.map(refusal).unwrap_or("no connected AI has a model for this")
+            });
         };
         let cli = self.opts.clis.get(&vendor).cloned().ok_or("the AI is not connected")?;
         let family = model.as_deref().and_then(family_of);
@@ -400,7 +410,7 @@ impl Core {
         if self.team_of(conv, call).is_some() {
             return;
         }
-        let job = input["job"].as_str().filter(|job| matches!(*job, "read" | "build")).unwrap_or("review");
+        let job = helper::Piece::of(input).job;
         let title = input["title"].as_str().unwrap_or("A piece of work").to_string();
         let number = self.turn(conv).map_or(1, |m| {
             m.tools

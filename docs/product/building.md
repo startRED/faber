@@ -25,6 +25,27 @@ on another project. Delivery checks do not establish a measured gain in generate
 Normal mode feels like Claude Code: the user talks only to Faber. Behind it, Claude and Codex sessions work in
 parallel, each on what it does best, and the result must read as if one careful team made it.
 
+Helpers split by kind of work rather than size. Each piece supplies `job` (read, build, review or advise), `kind`,
+`difficulty` and `scope` (tight by default, or open). A hard open build reaches Auto's expert bar, while a build stays
+within the lead model's strongest known row whenever a row there can do it. Economy lowers the level as before. Dependent pieces start after their
+prerequisite reports; all helpers see the same folder. Briefs stand alone and reports stay short.
+
+When both subscriptions allow the piece, the first eligible read, build or advice goes to the other maker. The team
+includes the lead and every helper started since the last real person message, even if a helper ended or an automatic
+continuation followed. Once mixed, quota-aware price chooses normally. Missing quota, billing restrictions, a missing
+qualifying row or one connected maker retain normal selection; economy never forces a mix. Reviews still prefer the
+other maker. An adviser only reads and recommends an approach, the main risk and what to check, using the cheapest
+quota-priced row that clears the expert bar (hard in economy) and dominates the lead in both scores, strictly in at
+least one. It may exceed the lead's row. Without one, the lead is told to decide itself. Advisers share the three-helper
+limit. No model switches in the middle of a piece.
+
+Sources read 2026-11-11: Anthropic's [Which Claude model should you build with?, Mixing models](https://claude.dev/blog/which-claude-model-should-you-build-with/#mixing-models)
+describes natural handoffs, smaller workers and consulting a stronger adviser. Its reported cost and pass-rate changes
+are their experiments, not Faber measurements. OpenAI's [Codex Models](https://developers.openai.com/codex/models/)
+(now redirects to Models) distinguishes focused repeatable work, fast writing/visual/computer work and sustained
+complex work. Faber applies these patterns through its existing task bars, quota gates and team rather than changing
+models during a running task. Checks: `helper::mixing_tests`, the engine helper tests and `tests/ui/team.check.ts`.
+
 - **The lead keeps the thread.** One live session plans, splits the work and answers the user. Workers get a short
   brief and return a short report; a worker that stays on a part keeps its session while the prompt cache is warm, and
   each step loads only what it needs.

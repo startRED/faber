@@ -33,7 +33,7 @@ pub enum Helper {
     Aside,
 }
 
-const DESCRIPTION: &str = "helper({title, brief}) starts a helper; helper({to, answer}) answers and waits; helper({to, tell}) instructs immediately; helper({to, wait:true}) waits for a question or report. Hand reading many files to a read helper instead of reading them yourself; hand a self-contained change to a build helper; ask for a review of finished work. The brief must stand alone with the goal, files and what done looks like. Do a piece yourself if it needs a stronger model than yours. The report is short; a longer report is saved in a file.";
+const DESCRIPTION: &str = "Split by kind of work, not size. For each piece give title, brief, job, kind, difficulty and scope: Faber picks the right model and keeps both AIs on the team when available. Many files, logs or searches: read; a self-contained change: build; at a hard point ask for advice (advise) before spending effort; finished work: review. Start a dependent piece after its prerequisite reports: helpers share this folder and see its files. Do a piece yourself only when it needs a stronger model than any helper can be. The brief must stand alone: goal, files and what done looks like. Reports are short; longer reports are saved in a file. helper({to, answer}) answers and waits; {to, tell} instructs immediately; {to, wait:true} waits for a question or report.";
 
 fn schema() -> Value {
     json!({
@@ -45,9 +45,10 @@ fn schema() -> Value {
             "wait": { "type": "boolean" },
             "title": { "type": "string", "description": "A few words naming the piece of work, shown to the person." },
             "brief": { "type": "string", "description": "Everything the helper needs to do the work on its own." },
-            "job": { "type": "string", "enum": ["read", "build", "review"], "description": "The kind of work; defaults to review." },
-            "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "Difficulty of a build; defaults to medium." },
-            "kind": { "type": "string", "enum": ["chat", "writing", "code", "math", "research", "image", "other"], "description": "The kind of task; defaults to code." }
+            "job": { "type": "string", "enum": ["read", "build", "review", "advise"], "description": "Read, change, review, or read-only advice; default review." },
+            "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "easy: sort, extract, summarise, find a file, read a log, rename; medium: everyday document, scoped code, routine investigation; hard: cross-file feature, unknown bug, migration, costly subtle mistake. Default medium." },
+            "scope": { "type": "string", "enum": ["tight", "open"], "default": "tight", "description": "tight: named bug/file/function, spec, one deliverable; open: explore and decide, many files/sources, migration, major refactor, architecture, deep research, long unattended run." },
+            "kind": { "type": "string", "enum": ["chat", "writing", "code", "math", "research", "image", "other"], "description": "chat: talk/facts; writing: texts, documents, slides, spreadsheets, translation, plans; code: programs, debugging, review; math: calculations/proofs; research: analysis, comparisons, explanations, advice; image: make/edit pictures; other. Default code." }
         },
         "additionalProperties": false
     })
@@ -252,18 +253,43 @@ pub fn profile(candidates: &[Profile], vendor: Vendor, economy: bool) -> Option<
         .copied()
 }
 
-/// Select a helper using the same project bars and quota factors as Auto.
-#[allow(clippy::too_many_arguments)]
+/// Normalized at the tool boundary, shared by selection and permission checks.
+#[derive(Debug, Clone, Copy)]
+pub struct Piece {
+    pub job: &'static str,
+    pub kind: &'static str,
+    pub difficulty: &'static str,
+    pub scope: &'static str,
+}
+
+impl Piece {
+    pub fn of(input: &Value) -> Self {
+        Self {
+            job: ["read", "build", "review", "advise"].into_iter().find(|v| Some(*v) == input["job"].as_str()).unwrap_or("review"),
+            kind: crate::route::KINDS.into_iter().find(|v| Some(*v) == input["kind"].as_str()).unwrap_or("code"),
+            difficulty: crate::route::LEVELS.into_iter().find(|v| Some(*v) == input["difficulty"].as_str()).unwrap_or("medium"),
+            scope: crate::route::SCOPES.into_iter().find(|v| Some(*v) == input["scope"].as_str()).unwrap_or("tight"),
+        }
+    }
+
+    pub fn read_only(self) -> bool {
+        matches!(self.job, "read" | "advise")
+    }
+}
+
+pub const NO_ADVISER: &str = "You are already the strongest model available for this piece; decide yourself.";
+
+/// Select a helper using the same project bars and quota factors as Auto; makers includes the lead.
 pub fn select(
-    job: &str,
-    kind: &'static str,
-    difficulty: &'static str,
+    piece: Piece,
     lead: Option<Profile>,
     lead_vendor: Vendor,
     candidates: &[Profile],
+    makers: &[Vendor],
     factor: &dyn Fn(&Profile) -> crate::route::Factor,
     economy: bool,
 ) -> Option<Profile> {
+    let Piece { job, kind, difficulty, scope } = piece;
     if job == "review" {
         let other = other(lead_vendor);
         return profile(candidates, if candidates.iter().any(|p| p.vendor == other) { other } else { lead_vendor }, economy);
@@ -276,22 +302,43 @@ pub fn select(
     } else {
         difficulty
     };
-    let bar = if job == "read" { (24, 15) } else { crate::route::bar(kind, level, true) };
-    let eligible: Vec<Profile> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
-    let within: Vec<Profile> = eligible.iter().copied().filter(|p| lead.is_none_or(|l| p.iq <= l.iq && p.agent <= l.agent)).collect();
-    let pool = if job == "build" && !within.is_empty() { &within } else { &eligible };
-    if job == "read" {
+    let rung = if job == "advise" {
+        if economy { "hard" } else { "expert" }
+    } else if level == "hard" && scope == "open" {
+        "expert"
+    } else {
+        level
+    };
+    let bar = if job == "read" { (24, 15) } else { crate::route::bar(kind, rung, true) };
+    let clearing: Vec<Profile> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
+    let mut eligible: Vec<Profile> = clearing
+        .iter()
+        .copied()
+        .filter(|p| match job {
+            "build" => lead.is_none_or(|l| p.iq <= l.iq && p.agent <= l.agent),
+            "advise" => lead.is_some_and(|l| p.iq >= l.iq && p.agent >= l.agent && (p.iq > l.iq || p.agent > l.agent)),
+            _ => true,
+        })
+        .collect();
+    // A build above the lead's own level still gets a model that can do it (as before the mix): the cap only orders the choice.
+    if job == "build" && eligible.is_empty() {
+        eligible = clearing;
+    }
+    let other = other(lead_vendor);
+    let mixed: Vec<Profile> = eligible.iter().copied().filter(|p| p.vendor == other).collect();
+    let pool = if !economy && !makers.contains(&other) && !mixed.is_empty() { &mixed } else { &eligible };
+    if matches!(job, "read" | "advise") {
         pool.iter()
             .min_by(|a, b| {
                 let price = |p: &Profile| {
                     let f = factor(p);
-                    (p.cost as f64 + f.read) * f.w * f.m.max(1.0)
+                    (p.cost as f64 + f.read) * f.w * if job == "read" { f.m.max(1.0) } else { f.m }
                 };
                 price(a).total_cmp(&price(b))
             })
             .copied()
     } else {
-        crate::route::choose_paced_scoped(kind, level, "machine", "tight", 1.0, true, pool, factor).map(|r| r.profile)
+        crate::route::choose_paced_scoped(kind, level, "machine", scope, 1.0, true, pool, factor).map(|r| r.profile)
     }
 }
 
@@ -308,10 +355,14 @@ pub fn worker_prompt(input: &Value, team: bool) -> Option<String> {
     } else {
         "Decide yourself and state any assumptions in your report."
     };
+    let report = if Piece::of(input).job == "advise" {
+        "Finish with a report of about 1,200 characters at most. Give advice only; change no file. Report the approach you recommend, the main risk, and what to check."
+    } else {
+        "Finish with a report of about 1,200 characters at most, in this order: the outcome in one or two sentences; files changed; checks run and their results; anything you could not do or assumed."
+    };
     Some(format!(
         "You are a helper. Another AI agent working in this folder handed you the piece of work below. You cannot see its \
-         conversation. {decisions} Finish with a report of about 1,200 characters at most, in this order: \
-         the outcome in one or two sentences; files changed; checks run and their results; anything you could not do or assumed.\n\nTask: {title}\n\n{brief}"
+         conversation. {decisions} {report}\n\nTask: {title}\n\n{brief}"
     ))
 }
 
@@ -423,7 +474,16 @@ mod tests {
         let all = crate::route::PROFILES;
         let neutral = |_: &Profile| crate::route::Factor::NEUTRAL;
         let pick = |job, difficulty, vendor, candidates: &[Profile]| {
-            select(job, "code", difficulty, None, vendor, candidates, &neutral, false).unwrap()
+            select(
+                Piece { job, kind: "code", difficulty, scope: "tight" },
+                None,
+                vendor,
+                candidates,
+                &[Vendor::Claude, Vendor::Codex],
+                &neutral,
+                false,
+            )
+            .unwrap()
         };
         assert_eq!(pick("read", "easy", Vendor::Claude, &all).model, "gpt-6.1-terra");
         assert!(pick("build", "easy", Vendor::Claude, &all).agent < pick("build", "hard", Vendor::Claude, &all).agent);
@@ -436,7 +496,12 @@ mod tests {
         }
         let scarce =
             |p: &Profile| crate::route::Factor { m: if p.vendor == Vendor::Claude { 10.0 } else { 1.0 }, ..crate::route::Factor::NEUTRAL };
-        assert_eq!(select("read", "code", "easy", None, Vendor::Claude, &all, &scarce, false).unwrap().vendor, Vendor::Codex);
+        assert_eq!(
+            select(Piece::of(&json!({"job":"read"})), None, Vendor::Claude, &all, &[Vendor::Claude, Vendor::Codex], &scarce, false)
+                .unwrap()
+                .vendor,
+            Vendor::Codex
+        );
         let dir = crate::workspace::TestRoot::new();
         let full = format!("{}.\n\n{}", "a".repeat(1000), "b".repeat(1500));
         let short = short_report(dir.path(), &full, false);
@@ -629,6 +694,250 @@ mod tests {
         assert!(ok && text.starts_with("Read it.") && text.contains("approval, so it did not: Bash."), "{text}");
         assert_eq!(report(false, "", &[], Some("error.quotaOut")), (false, "The helper stopped: error.quotaOut.".into()));
         assert_eq!(report(true, "", &[], None), (false, "The helper stopped: it ended without a report.".into()));
+    }
+}
+
+#[cfg(test)]
+mod mixing_tests {
+    use super::*;
+    use crate::route::{Factor, PROFILES};
+
+    const BOTH: &[Vendor] = &[Vendor::Claude, Vendor::Codex];
+    fn neutral(_: &Profile) -> Factor {
+        Factor::NEUTRAL
+    }
+    fn piece(job: &'static str, difficulty: &'static str, scope: &'static str) -> Piece {
+        Piece { job, difficulty, scope, kind: "code" }
+    }
+    fn lead(vendor: Vendor) -> Profile {
+        PROFILES.into_iter().filter(|p| p.vendor == vendor).max_by_key(|p| (p.iq, p.agent)).unwrap()
+    }
+
+    #[test]
+    fn first_read_and_build_mix_each_lead_then_return_to_price() {
+        for vendor in BOTH {
+            for job in ["read", "build"] {
+                let task = piece(job, "easy", "tight");
+                let first = select(task, Some(lead(*vendor)), *vendor, &PROFILES, &[*vendor], &neutral, false).unwrap();
+                assert_eq!(first.vendor, other(*vendor), "{vendor:?}/{job}");
+                let next = select(task, Some(lead(*vendor)), *vendor, &PROFILES, BOTH, &neutral, false).unwrap();
+                assert_eq!((next.model, next.effort), ("gpt-6.1-terra", "low"));
+                let costly_other = |p: &Profile| Factor { m: if p.vendor == other(*vendor) { 10.0 } else { 1.0 }, ..Factor::NEUTRAL };
+                assert_eq!(
+                    select(task, Some(lead(*vendor)), *vendor, &PROFILES, &[*vendor], &costly_other, false).unwrap().vendor,
+                    other(*vendor)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_other_and_economy_keep_the_price_pick() {
+        for vendor in BOTH {
+            let only: Vec<_> = PROFILES.into_iter().filter(|p| p.vendor == *vendor).collect();
+            for job in ["read", "build"] {
+                for difficulty in crate::route::LEVELS {
+                    let task = piece(job, difficulty, "tight");
+                    // Candidates already exclude disconnected, billed or exhausted families at the engine boundary.
+                    assert_eq!(
+                        select(task, Some(lead(*vendor)), *vendor, &only, &[*vendor], &neutral, false),
+                        select(task, Some(lead(*vendor)), *vendor, &only, BOTH, &neutral, false)
+                    );
+                    assert_eq!(
+                        select(task, Some(lead(*vendor)), *vendor, &PROFILES, &[*vendor], &neutral, true),
+                        select(task, Some(lead(*vendor)), *vendor, &PROFILES, BOTH, &neutral, true)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reviews_always_prefer_the_other_maker_even_after_the_mix() {
+        for vendor in BOTH {
+            for makers in [&[*vendor][..], BOTH] {
+                assert_eq!(
+                    select(piece("review", "medium", "tight"), Some(lead(*vendor)), *vendor, &PROFILES, makers, &neutral, false)
+                        .unwrap()
+                        .vendor,
+                    other(*vendor)
+                );
+            }
+        }
+    }
+
+    // The previous picker is retained only as a test oracle for the report and unchanged cases.
+    fn before(task: Piece, l: Profile, candidates: &[Profile], economy: bool) -> Option<Profile> {
+        if task.job == "advise" {
+            return None;
+        }
+        if task.job == "review" {
+            let other = other(l.vendor);
+            return profile(candidates, if candidates.iter().any(|p| p.vendor == other) { other } else { l.vendor }, economy);
+        }
+        let level = if economy { if task.difficulty == "hard" { "medium" } else { "easy" } } else { task.difficulty };
+        let bar = if task.job == "read" { (24, 15) } else { crate::route::bar(task.kind, level, true) };
+        let eligible: Vec<_> = candidates.iter().copied().filter(|p| p.iq >= bar.0 && p.agent >= bar.1).collect();
+        let within: Vec<_> = eligible.iter().copied().filter(|p| p.iq <= l.iq && p.agent <= l.agent).collect();
+        let pool = if task.job == "build" && !within.is_empty() { &within } else { &eligible };
+        if task.job == "read" {
+            pool.iter().min_by(|a, b| a.cost.total_cmp(&b.cost)).copied()
+        } else {
+            crate::route::choose_paced_scoped(task.kind, level, "machine", "tight", 1.0, true, pool, &neutral).map(|r| r.profile)
+        }
+    }
+
+    #[test]
+    fn picks_before_and_after_for_the_result_table() {
+        let row = |p: Option<Profile>| p.map_or_else(|| "unavailable".to_string(), |p| format!("{} / {}", p.model, p.effort));
+        println!("| Lead | Job | Difficulty | Scope | Connected | Before | After (first piece) | After (mixed) |");
+        println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
+        for vendor in BOTH {
+            let l = if *vendor == Vendor::Claude {
+                PROFILES.into_iter().find(|p| p.model == "claude-opus-5-5" && p.effort == "xhigh").unwrap()
+            } else {
+                lead(*vendor)
+            };
+            for job in ["read", "build", "review", "advise"] {
+                for difficulty in crate::route::LEVELS {
+                    for scope in crate::route::SCOPES {
+                        for connected in ["both", "lead only"] {
+                            let candidates: Vec<_> = PROFILES.into_iter().filter(|p| connected == "both" || p.vendor == *vendor).collect();
+                            let task = piece(job, difficulty, scope);
+                            let old = before(task, l, &candidates, false);
+                            let first = select(task, Some(l), *vendor, &candidates, &[*vendor], &neutral, false);
+                            let mixed = select(task, Some(l), *vendor, &candidates, BOTH, &neutral, false);
+                            if job != "advise" && (scope == "tight" || difficulty != "hard" || job != "build") {
+                                assert_eq!(old, mixed, "{task:?}/{connected}");
+                            }
+                            println!(
+                                "| {vendor:?} | {job} | {difficulty} | {scope} | {connected} | {} | {} | {} |",
+                                row(old),
+                                row(first),
+                                row(mixed)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn builds_stay_within_the_lead_when_it_can_do_the_piece_and_open_hard_reaches_expert() {
+        for l in PROFILES {
+            for kind in crate::route::KINDS {
+                for difficulty in crate::route::LEVELS {
+                    for scope in crate::route::SCOPES {
+                        for economy in [false, true] {
+                            let task = Piece { kind, ..piece("build", difficulty, scope) };
+                            let within: Vec<_> = PROFILES.into_iter().filter(|p| p.iq <= l.iq && p.agent <= l.agent).collect();
+                            let p = select(task, Some(l), l.vendor, &PROFILES, &[l.vendor], &neutral, economy).unwrap();
+                            // The lead's level is the cap whenever a row inside it can do the piece; else a stronger row does it.
+                            if select(task, Some(l), l.vendor, &within, &[l.vendor], &neutral, economy).is_some() {
+                                assert!(p.iq <= l.iq && p.agent <= l.agent, "{task:?}: {l:?} -> {p:?}");
+                            } else {
+                                assert!(p.iq > l.iq || p.agent > l.agent, "{task:?}: {l:?} -> {p:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let l = lead(Vendor::Claude);
+        let tight = select(piece("build", "hard", "tight"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
+        let open = select(piece("build", "hard", "open"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
+        assert_eq!((tight.iq, tight.agent), (46, 39));
+        assert!(open.iq >= 50 && open.agent >= 42);
+        let capped = PROFILES.into_iter().find(|p| p.model == "gpt-6.1-terra" && p.effort == "medium").unwrap();
+        let above =
+            select(piece("build", "hard", "open"), Some(capped), capped.vendor, &PROFILES, &[capped.vendor], &neutral, false).unwrap();
+        assert!(above.iq >= 50 && above.agent >= 42, "a piece above the lead still gets a model that can do it: {above:?}");
+        let below_bar: Vec<_> =
+            PROFILES.into_iter().filter(|p| p.vendor == Vendor::Claude && p.iq < 46 || p.vendor == Vendor::Codex).collect();
+        assert_eq!(
+            select(
+                piece("build", "hard", "tight"),
+                Some(lead(Vendor::Codex)),
+                Vendor::Codex,
+                &below_bar,
+                &[Vendor::Codex],
+                &neutral,
+                false
+            )
+            .unwrap()
+            .vendor,
+            Vendor::Codex
+        );
+    }
+
+    #[test]
+    fn adviser_dominates_the_lead_respects_mix_and_quota_and_is_read_only() {
+        let task = piece("advise", "easy", "tight");
+        assert!(task.read_only());
+        assert!(piece("read", "hard", "open").read_only());
+        assert!(!piece("build", "hard", "open").read_only());
+        assert!(!piece("review", "hard", "open").read_only());
+        for vendor in BOTH {
+            let l = PROFILES
+                .into_iter()
+                .find(|p| p.vendor == *vendor && p.effort == "medium" && matches!(p.model, "claude-opus-5-5" | "gpt-6.1-sol"))
+                .unwrap();
+            let p = select(task, Some(l), *vendor, &PROFILES, &[*vendor], &neutral, false).unwrap();
+            assert_eq!(p.vendor, other(*vendor));
+            assert!(p.iq >= 50 && p.agent >= 42 && p.iq >= l.iq && p.agent >= l.agent && (p.iq > l.iq || p.agent > l.agent));
+        }
+        let l = PROFILES.into_iter().find(|p| p.model == "gpt-6.1-terra" && p.effort == "low").unwrap();
+        let cheaper = |p: &Profile| Factor { m: if p.model == "claude-opus-5-5" { 0.01 } else { 1.0 }, ..Factor::NEUTRAL };
+        assert_eq!(select(task, Some(l), l.vendor, &PROFILES, BOTH, &cheaper, false).unwrap().model, "claude-opus-5-5");
+        let expert = select(task, Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
+        let hard = select(task, Some(l), l.vendor, &PROFILES, BOTH, &neutral, true).unwrap();
+        assert_eq!((expert.iq, expert.agent), (50, 43));
+        assert_eq!((hard.iq, hard.agent), (46, 39));
+        let strongest = lead(Vendor::Claude);
+        assert!(select(task, Some(strongest), strongest.vendor, &PROFILES, BOTH, &neutral, false).is_none());
+        assert!(select(task, None, Vendor::Claude, &PROFILES, BOTH, &neutral, false).is_none());
+        let prompt = prompt(&json!({"job":"advise", "brief":"Why does the approach fail?"})).unwrap();
+        for words in ["change no file", "approach you recommend", "main risk", "what to check", "1,200 characters"] {
+            assert!(prompt.contains(words), "{words}");
+        }
+    }
+
+    #[test]
+    fn tool_guide_is_concrete_bounded_and_maker_neutral_in_both_transports() {
+        assert!(DESCRIPTION.len() < 900, "{}", DESCRIPTION.len());
+        for tool in [
+            codex_tool(),
+            match mcp(&json!({"id":1,"method":"tools/list"}), Tools { helper: true, ..Default::default() }) {
+                Mcp::Answer(a) => a["result"]["tools"][0].clone(),
+                _ => panic!(),
+            },
+        ] {
+            let text = format!("{}{}", tool["description"], tool["inputSchema"]).to_lowercase();
+            for name in [
+                "claude",
+                "anthropic",
+                "codex",
+                "openai",
+                "chatgpt",
+                "gemini",
+                "google",
+                "fable",
+                "opus",
+                "sonnet",
+                "haiku",
+                "gpt-",
+                "astra",
+                "terra",
+                "luna",
+            ] {
+                assert!(!text.contains(name), "{name}");
+            }
+            assert_eq!(tool["inputSchema"]["properties"]["scope"]["default"], "tight");
+            assert_eq!(tool["inputSchema"]["properties"]["job"]["enum"], json!(["read", "build", "review", "advise"]));
+        }
+        assert_eq!(Piece::of(&json!({"scope":"OPEN"})).scope, "tight");
+        assert_eq!(Piece::of(&json!({"scope":"open"})).scope, "open");
     }
 }
 

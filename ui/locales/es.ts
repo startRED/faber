@@ -15,6 +15,7 @@ export const es: Messages = {
   'team.label': "Equipo",
   'team.job.read': "Leer",
   'team.job.build': "Crear",
+  'team.job.advise': "Consejo",
   'team.working': { one: "{n} trabajando", other: "{n} trabajando" },
   'team.done': { one: "{n} terminó", other: "{n} terminaron" },
   'team.questions': { one: "{n} hizo una pregunta", other: "{n} hicieron una pregunta" },

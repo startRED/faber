@@ -68,6 +68,25 @@ check('team block: one helper carries model, effort, job and piece title, opens 
   } finally { dispose(); root.remove(); showAgent(); }
 });
 
+check('team block: adviser job is drawn and named in every locale and helper view', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const message = teamFixture();
+  message.tools = message.tools!.slice(0, 1);
+  message.tools[0]!.input = { title: 'Plan', brief: 'Recommend an approach', job: 'advise' };
+  message.tools[0]!.team!.job = 'advise';
+  message.acts![0]!.params!.job = 'advise';
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'team', options: [], onBranch: () => {} }), root);
+  try {
+    for (const [language, word] of [['en', 'Advice'], ['pt-BR', 'Conselho'], ['es', 'Consejo'], ['fr', 'Conseil'], ['de', 'Rat']]) {
+      useLanguage(language!);
+      equal(t('team.job.advise'), word);
+      equal(root.querySelector('.team-job')!.textContent, word);
+      ok(root.querySelector('.team-member')!.getAttribute('aria-label')!.includes(word!));
+      ok(members(message)[0]!.kind.includes(word!), 'the existing helper view receives the adviser job too');
+    }
+  } finally { dispose(); root.remove(); useLanguage('en'); }
+});
+
 check('team block: three cards fit reading width, stack narrowly, largest text and every look stay inside', async () => {
   const restore = keepRoot();
   const root = document.createElement('div'); root.style.cssText = 'position:fixed;left:0;top:0;width:660px'; document.body.append(root);

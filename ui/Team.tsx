@@ -13,7 +13,7 @@ import { agentState, agentWord, type AgentStep } from './worklog.ts';
 
 const pieceTitle = (step: AgentStep) => step.call.team?.title || step.title || t('agent.untitled');
 const modelLine = (step: AgentStep) => [step.model ? prettyModel(step.model) : '', step.effort && t(`effort.${step.effort as 'low' | 'medium' | 'high'}`)].filter(Boolean).join(' · ');
-const jobWord = (step: AgentStep) => ['read', 'build', 'review'].includes(step.job ?? '') ? step.job === 'review' ? t('review.kind') : t(`team.job.${step.job as 'read' | 'build'}`) : '';
+const jobWord = (step: AgentStep) => ['read', 'build', 'review', 'advise'].includes(step.job ?? '') ? step.job === 'review' ? t('review.kind') : t(`team.job.${step.job as 'read' | 'build' | 'advise'}`) : '';
 const duration = (step: AgentStep) => {
   const { started, ended, declined } = step.call;
   const took = started !== undefined && ended !== undefined && ended - started >= 1000 && !declined ? elapsed(started, ended) : undefined;

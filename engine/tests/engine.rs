@@ -5331,6 +5331,12 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
         faber_engine::act::Actor::Ai { vendor: Vendor::Codex, model: Some(_), role: faber_engine::act::ActorRole::Helper }
     ));
     assert_eq!(act.what, "act.helper.started");
+    let mut makers = vec![reply.vendor.expect("the completed reply names its lead")];
+    makers.extend(reply.acts.iter().filter_map(|act| match act.actor {
+        faber_engine::act::Actor::Ai { vendor, role: faber_engine::act::ActorRole::Helper, .. } => Some(vendor),
+        _ => None,
+    }));
+    assert!(makers.contains(&Vendor::Claude) && makers.contains(&Vendor::Codex), "a completed reply includes both makers: {makers:?}");
     assert_eq!(act.params.get("vendor").map(String::as_str), Some("codex"));
     assert!(act.params.contains_key("model"));
     let tools = reply.tools.as_ref().unwrap();
@@ -5351,6 +5357,72 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     assert!(reply.cache_read_tokens.unwrap() > 72649, "helper cached input joins the reply");
     assert_eq!(reply.cache_write_tokens, Some(36698));
     assert_eq!(reply.cache_write_1h_tokens, Some(36587));
+}
+
+#[tokio::test]
+async fn a_completed_codex_lead_reply_includes_both_makers_for_read_and_build_helpers() {
+    for job in ["read", "build"] {
+        let dir = support::DataFolder::new();
+        let input = json!({"title":"Check config", "brief":"Inspect config.toml for risky values.", "job":job, "difficulty":"easy"});
+        let report = "config.toml sets timeout = 30 and retries = 3; nothing risky.";
+        let mut lead_events = fixture("codex", "helper-call");
+        for entry in &mut lead_events {
+            if entry.msg["method"] == "item/tool/call" {
+                entry.msg["params"]["arguments"] = input.clone();
+            }
+            if entry.msg["params"]["item"]["type"] == "dynamicToolCall" {
+                entry.msg["params"]["item"]["arguments"] = input.clone();
+            }
+        }
+        let helper_events = vec![
+            Entry {
+                input: true,
+                msg: json!({"type":"user", "message":{"role":"user", "content":faber_engine::helper::prompt(&input).unwrap()}, "parent_tool_use_id":null, "session_id":""}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"system", "subtype":"init", "session_id":"mixed-helper", "model":"claude-haiku-5-5"}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"stream_event", "parent_tool_use_id":null, "event":{"type":"content_block_delta", "delta":{"type":"text_delta", "text":report}}}),
+            },
+            Entry { input: false, msg: json!({"type":"result", "subtype":"success", "is_error":false, "total_cost_usd":0.0, "usage":{}}) },
+        ];
+        let (codex, claude) = (fake(lead_events), fake(helper_events));
+        let (to_codex, to_claude) = (codex.spawn.clone(), claude.spawn.clone());
+        let spawn: Spawner =
+            Arc::new(move |bin, argv, cwd| if bin == "codex" { to_codex(bin, argv, cwd) } else { to_claude(bin, argv, cwd) });
+        let engine = two_vendors(&dir, spawn);
+        // Keep a cheaper same-maker worker available so price alone cannot satisfy this check.
+        engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6.1-terra".into()], Some("gpt-6.1-sol".into()));
+        let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+        let text = "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+        let id = engine
+            .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", Some("gpt-6.1-sol"))) })
+            .unwrap();
+        let started = until(&engine, &id, |c| c.messages[1].acts.iter().any(|act| act.kind == faber_engine::act::ActKind::Helper)).await;
+        let helper = started.messages[1].acts.iter().find(|act| act.kind == faber_engine::act::ActKind::Helper).unwrap();
+        assert!(matches!(helper.actor, faber_engine::act::Actor::Ai { vendor: Vendor::Claude, .. }), "first {job} helper: {helper:?}");
+        let completed = until(&engine, &id, |c| settled(c, 2)).await;
+        engine.shutdown();
+        assert_eq!(codex.mismatches.lock().unwrap().clone(), Vec::<String>::new(), "{job}: the lead receives the helper report");
+        assert_eq!(claude.mismatches.lock().unwrap().clone(), Vec::<String>::new(), "{job}: the helper receives the brief");
+        let reply = &completed.messages[1];
+        assert_eq!(reply.status, Some(Status::Done), "{job}");
+        assert_eq!(reply.vendor, Some(Vendor::Codex));
+        assert!(
+            reply.acts.iter().any(|act| matches!(
+                act.actor,
+                faber_engine::act::Actor::Ai { vendor: Vendor::Claude, role: faber_engine::act::ActorRole::Helper, .. }
+            )),
+            "{job}: the completed reply retains the other maker"
+        );
+        let call = reply.tools.iter().flatten().find(|tool| tool.name == "Helper").unwrap();
+        assert_eq!(call.team.as_ref().unwrap().job, job);
+        assert_eq!(call.ok, Some(true), "{job}: {call:?}");
+        assert_eq!(call.output.as_deref(), Some(report), "{job}");
+    }
 }
 
 #[tokio::test]

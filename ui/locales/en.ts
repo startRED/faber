@@ -15,6 +15,7 @@ export const en = {
   'team.label': "Team",
   'team.job.read': "Read",
   'team.job.build': "Build",
+  'team.job.advise': "Advice",
   'team.working': { one: "{n} working", other: "{n} working" },
   'team.done': { one: "{n} done", other: "{n} done" },
   'team.questions': { one: "{n} asked a question", other: "{n} asked a question" },

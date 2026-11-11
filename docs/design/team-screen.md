@@ -21,7 +21,7 @@ draw it, without measuring positions. Every member owns one decorative drop. Wor
 same quiet --accent-soft on their border and drop; finished cards return to --line. A waiting-lead drop uses neutral ink
 until answered; waiting-person and stuck drops use amber. Enlarged text, unbroken titles and models fit 280 and 180 px blocks.
 
-Each card reads: mark and strong two-line piece title; one model · effort line with Read, Build or Review at its right
+Each card reads: mark and strong two-line piece title; one model · effort line with Read, Build, Review or Advice at its right
 end; a state pill; one detail line. The job never shrinks: only the model text ellipsizes, with full metadata in the
 accessible name. Pills start lowercase in all five locales, preserving native noun casing. Working members retain
 their observed activity; waiting members show their current recorded lead question or pending AskUserQuestion text.

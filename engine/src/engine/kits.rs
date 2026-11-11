@@ -3642,6 +3642,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn helper_mixing_survives_helper_exit_and_continuation_then_resets_at_the_next_person_message() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for job in ["read", "build"] {
+                let dir = crate::workspace::TestRoot::new();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, _, _) = fake();
+                let engine = engine(&dir, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                    core.launch("kit", &pick(vendor)).unwrap();
+                    core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                    let input = json!({"brief":"A focused piece", "job":job, "difficulty":"easy"});
+                    core.launch_helper("kit", "first", &input, None).unwrap();
+                    let first = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                    assert!(matches!(first.actor, crate::act::Actor::Ai { vendor:v, .. } if v == crate::helper::other(vendor)));
+                    core.stop_helpers("kit", true);
+                    assert!(core.helpers.is_empty());
+                    let c = core.convs.get_mut("kit").unwrap();
+                    let mut wake = Message::new("automatic-wake".into(), Role::User, "Continue".into(), 2);
+                    wake.wake = Some(Wake::of("wake.keepGoing"));
+                    c.messages.push(wake);
+                    c.messages.push(Message::new("continued".into(), Role::Assistant, String::new(), 2));
+                    core.live.get_mut("kit").unwrap().turn = Some("continued".into());
+                    core.launch_helper("kit", "second", &input, None).unwrap();
+                    let second = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                    assert!(
+                        matches!(second.actor, crate::act::Actor::Ai { vendor: Vendor::Codex, .. }),
+                        "the completed helper still counts in this reply's team"
+                    );
+                    core.stop_helpers("kit", true);
+                    let c = core.convs.get_mut("kit").unwrap();
+                    c.messages.push(Message::new("next-user".into(), Role::User, "Next task".into(), 3));
+                    c.messages.push(Message::new("next-reply".into(), Role::Assistant, String::new(), 3));
+                    core.live.get_mut("kit").unwrap().turn = Some("next-reply".into());
+                    core.launch_helper("kit", "third", &input, None).unwrap();
+                    let third = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                    assert!(
+                        matches!(third.actor, crate::act::Actor::Ai { vendor:v, .. } if v == crate::helper::other(vendor)),
+                        "the person's next message resets the mix"
+                    );
+                });
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_adviser_is_read_only_counts_in_three_and_refuses_without_a_stronger_row() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, messages) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.launch("kit", &pick(vendor)).unwrap();
+                let live = core.live.get_mut("kit").unwrap();
+                live.turn = Some("reply".into());
+                live.model = Some(if vendor == Vendor::Claude { "claude-sonnet-5-5" } else { "gpt-6.1-terra" }.into());
+                let input = json!({"brief":"Recommend a plan", "job":"advise"});
+                core.launch_helper("kit", "adviser", &input, None).unwrap();
+                for call in ["reader", "builder"] {
+                    core.launch_helper("kit", call, &json!({"brief":"Check one file", "job":"read"}), None).unwrap();
+                }
+                assert_eq!(core.helpers.len(), 3);
+                assert_eq!(
+                    core.launch_helper("kit", "fourth", &input, None),
+                    Err("three helpers are already working; wait for one to finish")
+                );
+                let act = core.convs["kit"]
+                    .messages
+                    .last()
+                    .unwrap()
+                    .acts
+                    .iter()
+                    .find(|a| a.params.get("call").map(String::as_str) == Some("adviser"))
+                    .unwrap();
+                assert_eq!(act.params["job"], "advise");
+                assert!(act.sent.as_ref().unwrap().contains("change no file"));
+            });
+            if vendor == Vendor::Codex {
+                let args = args.lock().unwrap();
+                let adviser = &args.iter().find(|(bin, _)| bin == "claude").unwrap().1;
+                assert!(adviser.windows(2).any(|a| a[0] == "--permission-mode" && a[1] == "plan"), "{adviser:?}");
+            } else {
+                let opened = until_message(&messages, "thread/start").await;
+                let config = &opened["params"]["config"];
+                let name = config["default_permissions"].as_str().unwrap();
+                let filesystem = &config[format!("permissions.{name}")]["filesystem"];
+                assert_eq!(filesystem[":workspace_roots"]["."], "read");
+                assert_eq!(filesystem[":tmpdir"], "read");
+                assert_eq!(filesystem[":slash_tmp"], "read");
+            }
+            engine.with(|core| {
+                core.stop_helpers("kit", true);
+                let live = core.live.get_mut("kit").unwrap();
+                live.vendor = Vendor::Claude;
+                live.model = Some("claude-fable-5-2".into());
+                assert_eq!(
+                    core.launch_helper("kit", "unneeded", &json!({"brief":"Recommend a plan", "job":"advise"}), None),
+                    Err(crate::helper::NO_ADVISER)
+                );
+            });
+            engine.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_mix_falls_back_when_the_other_maker_is_out_or_billed() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            for billed in [false, true] {
+                let dir = crate::workspace::TestRoot::new();
+                let folder = dir.path().canonicalize().unwrap();
+                let (spawn, _, _) = fake();
+                let engine = engine(&dir, spawn);
+                let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+                engine.with(|core| {
+                    conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                    core.launch("kit", &pick(vendor)).unwrap();
+                    core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                    let other = crate::helper::other(vendor);
+                    if billed {
+                        core.ledger.of_mut(other).billing = Billing::UsageBilled;
+                    } else {
+                        core.ledger.of_mut(other).reach = crate::budget::Reach::Out(Some(core.secs() + 600.0));
+                    }
+                    for job in ["read", "build"] {
+                        core.launch_helper("kit", job, &json!({"brief":"A focused piece", "job":job, "difficulty":"easy"}), None).unwrap();
+                        let act = core.convs["kit"].messages.last().unwrap().acts.last().unwrap();
+                        assert!(matches!(act.actor, crate::act::Actor::Ai { vendor:v, .. } if v == vendor));
+                    }
+                });
+                engine.shutdown();
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn helper_jobs_launch_the_selected_vendor_and_model() {
         for (job, difficulty, vendor, expected) in [
             ("read", "easy", Vendor::Codex, "gpt-6.1-terra"),

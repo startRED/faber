@@ -15,6 +15,7 @@ export const ptBR: Messages = {
   'team.label': "Equipe",
   'team.job.read': "Ler",
   'team.job.build': "Construir",
+  'team.job.advise': "Conselho",
   'team.working': { one: "{n} trabalhando", other: "{n} trabalhando" },
   'team.done': { one: "{n} terminou", other: "{n} terminaram" },
   'team.questions': { one: "{n} fez uma pergunta", other: "{n} fizeram uma pergunta" },
