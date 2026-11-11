@@ -163,8 +163,9 @@ pub fn scrub(text: &str) -> String {
     out
 }
 
-const FILE_BYTES: usize = 6_000;
-const FILES_BYTES: usize = 30_000;
+/// A single-file page is often 8 to 30 KB: a cap below that showed the judge half a script, which it took for broken work.
+const FILE_BYTES: usize = 48_000;
+const FILES_BYTES: usize = 120_000;
 const REPLY_CHARS: usize = 12_000;
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -222,7 +223,8 @@ pub const JUDGE_INSTRUCTIONS: &str = "You judge two answers, A and B, to the sam
 either, and names that appear inside an answer say nothing about it. Judge what the person receives: does it do what was asked, is it \
 correct, complete and clear, without padding or invented facts. When work was done in a folder, the files matter more than the words \
 about them. An automatic check is a fact: a failed check is a real defect, and a passed one does not make the work good. A longer answer \
-is not a better one. Think briefly, then end with one line of JSON and nothing after it: \
+is not a better one. A file marked [cut] is longer than what you were shown: never count the part you cannot see as missing or broken. \
+Think briefly, then end with one line of JSON and nothing after it: \
 {\"winner\":\"A\" or \"B\" or \"tie\",\"a\":<1-10>,\"b\":<1-10>,\"reason\":\"one or two plain sentences\"}. Say tie only when you \
 cannot tell them apart.";
 
@@ -829,7 +831,12 @@ mod tests {
         ];
         let entry = render_entry("Done by Faber.", &files, None);
         assert!(!entry.to_ascii_lowercase().contains("faber"));
-        assert!(entry.contains("- pic.png") && entry.contains("[cut]") && entry.len() < 45_000, "{}", entry.len());
+        assert!(entry.contains("- pic.png") && entry.contains("[cut]") && entry.len() < 60_000, "{}", entry.len());
+        // A one-file page left in Faber's copy reaches the judge whole: at 6 KB it was cut mid-script and judged broken.
+        let page = format!("<script>{}</script>", "x".repeat(20_000));
+        let entry = render_entry("r", &[("index.html".to_string(), Some(page.clone()))], None);
+        assert!(entry.contains(&page) && !entry.contains("[cut]"));
+        assert!(JUDGE_INSTRUCTIONS.contains("[cut]"));
         let proof = Proof { pass: false, checks: vec![Check { name: "a".into(), ok: false, detail: "x".into() }] };
         assert!(render_entry("r", &[], Some(&proof)).contains("Automatic check: FAILED"));
     }

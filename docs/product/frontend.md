@@ -9,8 +9,8 @@ Faber supplies two original instruction skills beside its own guide in the exist
 
 | Skill | When it applies | Source |
 | :--- | :--- | :--- |
-| frontend-craft | Building or improving a website or application UI | [Instructions](../../engine/src/frontend-skills/frontend-craft/SKILL.md) |
-| frontend-proof | Verifying an implemented UI or an explicitly requested audit | [Instructions](../../engine/src/frontend-skills/frontend-proof/SKILL.md) |
+| frontend-craft | Before writing anything a person sees in a browser: a site, an app screen, a form or an explainer, even one HTML file | [Instructions](../../engine/src/frontend-skills/frontend-craft/SKILL.md) |
+| frontend-proof | Before saying a page or screen is done, or an explicitly requested audit | [Instructions](../../engine/src/frontend-skills/frontend-proof/SKILL.md) |
 
 These are first-party instructions, not copies or bundled versions of catalog skills. Existing design, motion and
 framework skills remain useful; these supply the project-aware interaction and proof workflow between them. They
@@ -39,8 +39,17 @@ the allocation model, not a measured whole-app RAM/CPU result or proof that ever
    work application, desktop shell and game HUD have different constraints. Preserve the person's visual direction.
 2. Implement the affected states and recovery path with semantic controls, keyboard/focus behavior, responsive
    content, reduced motion and bounded rendering. Inspect the running result, not just the source.
-3. Retain proof of the affected task and visual result, independent review where required, actual measurements and
+3. Look at the result at a desktop and a phone size before saying it is done, with the session's browser tool, the
+   project's harness or an installed Chromium browser run headless (no window, pictures kept in the temporary
+   folder), fix what shows and look again. Faber starts nothing for this: the agent runs it under the permission mode
+   in force, for under a second per picture, and nothing stays running.
+4. Retain proof of the affected task and visual result, independent review where required, actual measurements and
    anything unverified. Never present a visual score as proof of reliability or an automated scan as AA conformance.
+
+A new screen in a folder with no design system gets a direction taken from its subject (a named brand, a layout
+that uses a wide screen, one type contrast, a small palette, a drawn mark) instead of a card centered on a gradient.
+A page that teaches lists the facts an expert expects, draws every step it names with text readable on a phone, and
+is reread once as a checker before delivery; the persona asks the same reread of any explanation in Chat.
 
 For forms collecting information about the form user, the skills cover supported, defined input purposes through
 matching programmatic metadata (such as HTML `autocomplete`). Labels and input types alone may not establish that

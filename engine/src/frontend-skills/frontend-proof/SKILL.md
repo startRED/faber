@@ -1,6 +1,6 @@
 ---
 name: frontend-proof
-description: Verify implemented UIs through real flows, keyboard, responsive visuals and resource evidence. Use before frontend delivery or for a requested UI audit.
+description: Use before saying a page or screen is done, or for a UI audit: look at it at desktop and phone size with no visible window, then verify flows.
 ---
 
 # Frontend proof
@@ -8,6 +8,38 @@ description: Verify implemented UIs through real flows, keyboard, responsive vis
 Prove the requested task, then judge the visible result. A passing compilation, accessibility scan or screenshot alone
 cannot establish that the interface works. Choose the checks affected by the change; do not run every check below on
 an unrelated one-line edit. Respect the project's stronger proof and review rules.
+
+## Look at it before you say it is done
+
+Never hand over a page or screen you have not seen, and never ask the person for a look you can take yourself. Use
+the first that applies:
+
+1. The browser tool this session offers, at a desktop and a phone size.
+2. The project's own screenshot or end-to-end harness.
+3. An installed Chromium browser (Chrome, Edge, Brave) run headless, which opens no window. Find the program, then:
+   `<browser> --headless --disable-gpu --hide-scrollbars --user-data-dir=<temp>/profile --screenshot=<temp>/desktop.png --window-size=1280,900 <file:/// address or local URL>`
+   A headless window does not go narrower than about 500px: a smaller `--window-size` crops the picture instead of
+   narrowing the page. For the phone, write a temporary wrapper page next to the pictures,
+   `<body style="margin:0"><iframe src="<address>" width="390" height="844" style="border:0"></iframe>`, and take its
+   picture with `--window-size=390,844`. Raise both heights (such as 2600) to see a long page whole.
+   Keep pictures and profile in the system's temporary folder, never in the project or the person's own browser
+   profile, and delete them when finished.
+
+Read both pictures as the person would. Is anything clipped, overlapping or off-screen? Is every text readable on
+the phone, including text inside drawings? Does the wide layout use its width with intent, or is it a phone column
+floating in emptiness? Is each requested element present? Fix what you see and look again; stop after two rounds
+unless a defect remains. Text under 14px on the phone, in a drawing too, is a defect to fix, not a note to report.
+What a picture shows is what the person gets: never explain a defect away as an effect of the capture. A panel
+that stops short of the window, a gap or a cut edge is fixed, then seen fixed. Look once more after any later
+change, however small.
+
+A picture does not prove behavior. To exercise a page's script with no window, make a temporary copy of the page
+that ends with a short script which clicks and types through the flow and writes what it observed into the page,
+then read it back: `<browser> --headless --disable-gpu --user-data-dir=<temp>/profile --virtual-time-budget=3000 --dump-dom <address>`.
+
+Finish, do not offer. Run every check you can run yourself before the closing message; never end by asking
+whether to run one. Ask the person only for a decision that is theirs. The request is done when it is met, seen
+and exercised; state plainly anything left unexercised. If no browser can run under the current permissions, say so.
 
 ## Establish what can actually be checked
 

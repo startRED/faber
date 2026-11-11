@@ -1,6 +1,6 @@
 ---
 name: frontend-craft
-description: Build or refine website and app UIs with project-aware composition, interaction states and accessibility. Excludes video, images and backend-only work.
+description: Use before writing anything a person sees in a browser (page, screen, form, explainer, even one HTML file). Composition, states, accuracy. Not video.
 ---
 
 # Frontend craft
@@ -24,6 +24,40 @@ are not evidence of a better result. Preserve the request, the project's identit
   composition or identity. These interaction rules complement that work; reading a reference or running a helper
   script alone does not apply the design workflow. A local behavior repair should retain the existing direction.
 
+## A new screen with no design system
+
+With no tokens, components or brand to extend, the first layout that comes to mind is the one every generator
+produces: a rounded card centered on a soft gradient, a pill button, an emoji or circle icon, every section in an
+identical shadowed card. People recognize it at a glance. Before writing markup, decide:
+
+- **Who and where.** Give a placeholder brand a specific plausible name, a tone and one detail of its world (opening
+  hours, today's bake). Write copy with a voice, never "Welcome back" alone.
+- **A layout with a point of view.** Use a wide screen's width: an editorial side beside the task, an offset column,
+  a full-bleed band, a large heading against small text. On a phone collapse to one deliberate column and keep the
+  identity (name, mark, one line) above the task.
+- **Type does the work.** One contrast from system stacks, such as a serif display (`Georgia, serif`) over a sans
+  body. Body text at least 16px on a phone.
+- **A palette from the subject.** Two or three related colors and one accent on a flat ground. A gradient needs a
+  reason (sky, heat); blurred blobs have none. Prefer hairlines and spacing to shadows, one container level at most.
+- **Drawn, not pasted.** A small inline SVG mark in the palette instead of an emoji or a generic icon in a circle.
+- **Then remove** every card, shadow, badge or line that does not group or explain something.
+
+## Pages that teach
+
+For an explainer, a lesson or a quiz, correct and complete content outranks decoration.
+
+- First list what an expert would expect: each step of the mechanism in order with its proper name, the key number
+  or angle, the full set of items (every color, every stage) and a common misconception. Cover them in the stated
+  reader's words, giving each technical term once with its plain meaning.
+- The diagram is content. Draw every step the text names, with the same numbers, labels beside the parts and a
+  caption saying what is simplified. Count listed items against the drawing: seven named colors, seven rays.
+- Keep drawing text readable on a phone: a narrow `viewBox` (about 360 to 420 units wide with 14 to 16 unit text),
+  never a wide drawing whose labels shrink to 8px. Give the SVG a title and a description.
+- Reread as a checker: verify each sentence, number and name against what you know with confidence. Fix what is
+  wrong, cut what you cannot support, never trade a true statement for a simpler false one.
+- A quiz asks only what the page taught, has one defensible answer per question, explains why after each choice and
+  uses native radio inputs or buttons with a live status line.
+
 ## Compose before decorating
 
 For illustrated demos, follow `frontend-proof` and Stageshow when installed. Scene limits do not govern real work screens.
@@ -45,6 +79,10 @@ For illustrated demos, follow `frontend-proof` and Stageshow when installed. Sce
   Shortcuts complement a usable interface; they do not compensate for unclear navigation.
 
 ## Specify the interaction, not just its ideal screenshot
+
+Write the page's words in the language of the request, and keep any label it quotes ("Sign in") word for word. What it calls a link is a real link, what it calls a button a real button.
+Every control the request names does something a person can see: a link or button whose destination does not exist
+yet says so in place when used, and never sits inert.
 
 For each affected flow, implement the states it actually needs: initial/empty, loading, populated, selected, disabled,
 submitting, success and recoverable error. Avoid adding state machinery where a native control already handles it.
@@ -99,7 +137,8 @@ and determinate progress only when progress is measured. Keep usable controls av
 
 ## Inspect and deliver
 
-Use the sibling `frontend-proof` skill for the affected flows before claiming they work. Fix the most consequential
+Use the sibling `frontend-proof` skill for the affected flows before claiming they work: at the least, look at the
+result yourself at a desktop and a phone size, which needs no visible window. Fix the most consequential
 observed defect, inspect again, and stop when the requested behavior and its relevant quality checks hold. Name
 anything unverified. A beautiful screenshot never proves persistence, accessibility or a successful operation.
 
@@ -111,7 +150,5 @@ anything unverified. A beautiful screenshot never proves persistence, accessibil
 - [WCAG 2.2](https://www.w3.org/TR/WCAG22/): normative criteria; distinguish them from advisory techniques.
 - [GOV.UK errors](https://design-system.service.gov.uk/components/error-message/): input errors and recovery.
 - [web.dev INP](https://web.dev/articles/optimize-inp): responsiveness measurement and main-thread work.
-- [Emil Kowalski](https://emilkowal.ski/ui/7-practical-animation-tips): motion judgment, not universal visual rules.
 - [IBM Carbon loading](https://www.carbondesignsystem.com/building-blocks/core/patterns/loading): choosing loading cues.
 - [Josh W. Comeau on Grid](https://www.joshwcomeau.com/css/interactive-guide-to-grid/): layout and keyboard order.
-- [NN/g on recognition](https://www.nngroup.com/articles/recognition-and-recall/): discoverability and context.

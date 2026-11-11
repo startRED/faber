@@ -20,6 +20,7 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--cap-usd`, `--cap-tokens`, `--per-run-usd` | 8, 3000000, 1.5 | The run's cap in API-equivalent dollars and first-time tokens, and what one side of one request may spend |
 | `--plain-model`, `--plain-effort` | claude-sonnet-5-5 medium | The plain CLI's model, the everyday default Faber itself starts on |
 | `--judge-model`, `--judge-effort` | strongest measured profile of the selected vendor | Optional overrides for the fresh judge; default model and effort come from `route::PROFILES`, ordered by intelligence then agent score |
+| `--busy-account` | off | Skip the wait for a quiet account (below). Each request's dollars come from the CLI's own report and stay exact; `results.json` records `accountQuiet: false`, and the run says nothing about the account's windows |
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
 
 ## What a run does
@@ -65,7 +66,7 @@ Each run needs a new run folder: an existing `--run-id` is rejected before savin
 
 ## Request coverage
 
-The eight-request sample has five Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, and summarize a CSV export) and three Chat requests. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
+The ten-request sample has seven Projects (organize files, build a to-do app, fix an invoice bug, migrate preferences without data loss, summarize a CSV export, a sign-in screen and a page that explains rainbows with a drawing and a quiz) and three Chat requests. The two visual requests have no proof program: the blind judge reads each whole page (a file up to 48 KB is shown uncut) and scores it. The three maintenance/data proofs run local Node programs with independent fresh inputs, invalid-input checks and source-preservation checks. They use no network or AI calls. Their own regression checks are in `scripts/bench/practical.test.mjs`. They measure executable contracts; the blind judge still assesses the answer and regression-test quality. This is a sample, not the full first-public qualification set.
 
 ## First-word engine budget
 
@@ -82,7 +83,7 @@ pipe and parser; model latency is measured only by hand with a live account, and
 - Judge availability means an installed CLI on PATH, not a verified sign-in or spare quota. A failed judge is reported without retrying another vendor or starting an unbudgeted call. Independence describes recorded answer vendors, not external services invoked by arbitrary commands or user-installed MCP tools. Native subagents use their CLI vendor; Faber helper/conversation calls lack persisted contributor vendors, so such rows are conservatively unqualified. All verdicts remain visible, with separate qualified totals.
 - One judging pass per request, without the swapped second pass that removes the leaning toward the first answer; the alternating deal spreads it.
 - Routing and auxiliary tokens are unavailable in the public ledger; reports mark Faber token counts as partial. Their ledger costs are counted.
-- The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The eight prompts are benign.
+- The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The ten prompts are benign.
 - `spawns.log` writes each argument, except the values of `--settings`, `--mcp-config` and the system-prompt flags, which are logged as their length.
 - The proofs run the agent's code on this PC, as the agent itself already did.
 - The research proof checks at most 20 distinct cited links; extra links make coverage incomplete and the proof fails. Reachability (including 401, 403 and 429) does not verify the cited facts, official authorship or page contents. A passing link check alone does not qualify research accuracy.

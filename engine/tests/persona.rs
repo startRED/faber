@@ -30,7 +30,9 @@ fn chat_persona_speaks_in_the_ais_own_voice_and_only_a_project_agent_owes_eviden
             assert!(!t.contains(gone), "{gone}");
         }
     }
-    assert!(text(ReplyStyle::Default).chars().count() <= 3200);
+    // 3200 until the fact-check sentence (about 40 tokens a session): a taught page with a wrong fact lost a blind comparison.
+    assert!(text(ReplyStyle::Default).chars().count() <= 3400);
+    assert!(text(ReplyStyle::Default).contains("reread it once as a checker"));
     assert!(text(ReplyStyle::Short).contains("Keep replies short and direct"), "brevity comes only from the setting");
     assert!(!text(ReplyStyle::Default).contains("short"), "no brevity without the setting");
     let project = faber_engine::persona::PROJECT_DETAILS;

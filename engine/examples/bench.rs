@@ -7,7 +7,7 @@
 //!
 //!     cargo run -p faber-engine --example bench -- [--dry-run] [--plain claude|codex] [--vendors claude[,codex]]
 //!         [--only id,id] [--run-id id] [--dir folder] [--cap-usd 8] [--cap-tokens 3000000] [--per-run-usd 1.5]
-//!         [--plain-model m] [--plain-effort e] [--judge-model m] [--judge-effort e]
+//!         [--plain-model m] [--plain-effort e] [--judge-model m] [--judge-effort e] [--busy-account]
 //!     --tool-definitions exports both toolbox wire formats as JSON without starting a CLI or spending quota.
 //!
 //! The pure parts (request files, the A/B deal, the verdict, what a CLI reported, the cap, the tables) are
@@ -56,6 +56,7 @@ struct Options {
     cap: Cap,
     per_run_usd: f64,
     dry_run: bool,
+    busy_account: bool,
 }
 
 impl Options {
@@ -89,6 +90,7 @@ impl Options {
             cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
             per_run_usd: number("--per-run-usd", 1.5)?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
+            busy_account: args.iter().any(|a| a == "--busy-account"),
         })
     }
 }
@@ -818,6 +820,7 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "only": options.only,
         "plain": { "cli": options.plain.name(), "model": options.plain_model, "effort": options.plain_effort },
         "faberVendors": options.vendors.iter().map(|v| v.name()).collect::<Vec<_>>(),
+        "accountQuiet": !options.busy_account,
         "judgeOverrides": { "model": options.judge_model, "effort": options.judge_effort },
         "cap": { "usd": options.cap.max_usd, "freshTokens": options.cap.max_fresh_tokens, "perRunUsd": options.per_run_usd },
         "spent": spent,
@@ -897,6 +900,7 @@ async fn main() -> Result<(), Failure> {
 
     let (mut rows, mut spent) = (Vec::new(), Spend::default());
     let mut accounts = bench_quiet::Accounts::new(&root);
+    accounts.busy = options.busy_account;
     write_results(&root, &options, &rows, &spent)?;
     for (index, request) in requests.iter().enumerate() {
         let a = pure::a_side(&options.run_id, index);

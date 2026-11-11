@@ -136,14 +136,14 @@ impl Guide {
     pub fn note(&self) -> Option<String> {
         match self {
             Guide::Text(language) => Some(format!(
-                "{}\nFrontend fallback (frontend-craft and frontend-proof): for website or application UI work, extend the project's existing design system; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Inspect the running result at supported sizes, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.",
+                "{}\nFrontend fallback (frontend-craft and frontend-proof): for anything a person will look at in a browser (a page, screen, form or explainer, even one HTML file), extend the project's existing design system, or with none choose a layout, type and palette from the subject instead of a centered card on a gradient; verify every taught fact; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Look at the result yourself at a desktop and a phone size without a visible window (an installed Chromium browser run headless takes the pictures), fix what you see, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.",
                 text_for(*language)
             )),
             Guide::Index { language, .. } => {
                 let file = crate::project::git::native_path(&self.file()?);
                 let skills = crate::project::git::native_path(&self.folder()?.join("skills"));
                 Some(format!(
-                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. For website or application UI work, read \"{skills}/frontend-craft/SKILL.md\" to build and \"{skills}/frontend-proof/SKILL.md\" to verify; follow the project's own design system and current permissions. The screen is shown in {}.",
+                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. Whenever the result is something a person will look at in a browser (a page, a screen, a form, a dashboard or an explainer with a diagram, even one HTML file), read \"{skills}/frontend-craft/SKILL.md\" before writing it and \"{skills}/frontend-proof/SKILL.md\" before saying it is done; follow the project's own design system and current permissions. The screen is shown in {}.",
                     language.name()
                 ))
             }
@@ -236,13 +236,23 @@ mod tests {
             let header = crate::tools::front_matter(&text).expect("a native skill has valid front matter");
             let description = header.lines().find_map(|line| line.strip_prefix("description: ")).unwrap();
             assert!(description.len() <= 160, "discovery stays as small as catalog descriptions");
-            assert!(text.len() < 10_000, "load only the relevant frontend workflow");
+            // Raised from 10,000 with the first-screen, teaching-page and look-at-it sections: about 700 more tokens, read once per task.
+            assert!(text.len() < 13_000, "load only the relevant frontend workflow");
             std::fs::write(&file, "tampered").unwrap();
             assert_eq!(plugin(dir.path(), Language::En), Some(root.clone()));
             assert_eq!(std::fs::read_to_string(file).unwrap(), text);
             let note = Guide::Index { dir: root.clone(), language: Language::En }.note().unwrap();
             assert!(note.contains(name), "both CLIs can discover {name}");
         }
+        // A one-file page is browser work too, and the agent looks at it itself: the side-by-side test of 2026-11-11 lost on both.
+        let note = Guide::Index { dir: root.clone(), language: Language::En }.note().unwrap();
+        assert!(note.contains("even one HTML file") && note.contains("before saying it is done"));
+        let skill = |name: &str| FRONTEND_SKILLS.iter().find(|(n, _)| *n == name).unwrap().1;
+        assert!(
+            skill("frontend-craft").contains("## A new screen with no design system")
+                && skill("frontend-craft").contains("## Pages that teach")
+        );
+        assert!(skill("frontend-proof").contains("--headless") && skill("frontend-proof").contains("width=\"390\""));
         assert!(Guide::Off.note().is_none(), "internal requests receive no skills");
         let fallback = Guide::Text(Language::En).note().unwrap();
         assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));

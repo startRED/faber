@@ -26,6 +26,9 @@ struct Account {
 }
 
 pub struct Accounts {
+    /// `--busy-account`: admit work without waiting for quiet readings. Dollar costs come from each CLI's own report,
+    /// so they stay exact; only the claim that nothing else moved the account's windows is given up.
+    pub busy: bool,
     root: PathBuf,
     accounts: BTreeMap<Vendor, Account>,
 }
@@ -36,7 +39,7 @@ fn now() -> f64 {
 
 impl Accounts {
     pub fn new(root: &Path) -> Self {
-        Self { root: root.into(), accounts: BTreeMap::new() }
+        Self { busy: false, root: root.into(), accounts: BTreeMap::new() }
     }
 
     pub fn worked(&mut self, vendors: &[Vendor]) {
@@ -55,6 +58,13 @@ impl Accounts {
     }
 
     pub async fn wait(&mut self, clis: &BTreeMap<Vendor, Cli>, vendors: &[Vendor], spent: &mut super::pure::Spend) -> Result<(), String> {
+        if self.busy {
+            return if self.root.join("CANCEL").exists() {
+                Err("benchmark cancelled; completed results were saved".into())
+            } else {
+                Ok(())
+            };
+        }
         println!("  checking fresh quiet intervals; create {} to cancel", self.root.join("CANCEL").display());
         loop {
             if self.root.join("CANCEL").exists() {
@@ -145,6 +155,19 @@ fn samples(events: Vec<EngineEvent>, time: f64) -> BTreeMap<String, policy::Samp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_busy_account_admits_at_once_without_reading_and_still_cancels() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut accounts = Accounts::new(dir.path());
+        accounts.busy = true;
+        let mut spent = crate::pure::Spend::default();
+        // No CLI is given: any reading would fail with "quota CLI is not installed".
+        assert_eq!(accounts.wait(&BTreeMap::new(), &[Vendor::Claude], &mut spent).await, Ok(()));
+        assert!(!spent.unknown_cost);
+        std::fs::write(dir.path().join("CANCEL"), "").unwrap();
+        assert!(accounts.wait(&BTreeMap::new(), &[Vendor::Claude], &mut spent).await.is_err());
+    }
 
     #[tokio::test]
     async fn cancellation_before_admission_never_reads_an_account_or_changes_spending() {
