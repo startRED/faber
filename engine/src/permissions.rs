@@ -959,6 +959,13 @@ pub fn relocated_credentials(var: &dyn Fn(&str) -> Option<String>) -> Vec<(Strin
         .collect()
 }
 
+/// Where a documented variable moved an AI tool's own sign-in folder right now (never the folders of the person's other
+/// tools, which Full access leaves open), as `relocated_credentials` gives them.
+pub fn relocated_sign_ins(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    const OWN: [&str; 3] = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_CLI_HOME"];
+    relocated_credentials(&|name| if OWN.contains(&name) { var(name) } else { None }).into_iter().map(|(path, _)| path).collect()
+}
+
 /// The path as a Claude Code permission rule writes an absolute one: `//c/Users/me/x` on Windows, `//home/me/x` elsewhere.
 /// Windows matching ignores case and slash direction (checked against the installed CLI), so one form is enough. A network
 /// path (`//host/share/x`) keeps its two slashes; the CLI's spelling of it could not be checked, so the caller adds that
@@ -1014,6 +1021,88 @@ pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) 
     })
 }
 
+/// The fields that hold what a request writes (a file's text, an edit's old and new strings, a patch), not what it acts on.
+const CONTENTS: [&str; 5] = ["content", "old_string", "new_string", "diff", "new_source"];
+
+/// Every string a request acts on, wherever it sits (a field's value, or a key: one request shape keys its changes by
+/// path): what it writes is left out, since text that mentions a name opens nothing.
+fn acted_on<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+    match value {
+        Value::String(s) => out.push(s),
+        Value::Array(items) => items.iter().for_each(|v| acted_on(v, out)),
+        Value::Object(map) => map.iter().for_each(|(key, v)| {
+            out.push(key.as_str());
+            if !CONTENTS.contains(&key.as_str()) {
+                acted_on(v, out);
+            }
+        }),
+        _ => {}
+    }
+}
+
+/// Does this request name an AI tool's own sign-in file, the release signing key or one of Faber's approval records? The one
+/// refusal Full access keeps (R564): a token a tool printed would be saved in the conversation and sent to the model's maker.
+/// `auth.json` is a common name, so it counts only beside its folder (`.codex`, a moved sign-in folder) or in a command run
+/// from inside one. Best effort for a command line, like `touches_credentials`.
+pub fn touches_sign_in(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) -> Option<String>) -> bool {
+    // A path's pieces without the trailing dots and spaces Windows drops from each.
+    let trimmed =
+        |path: &str| path.split('/').map(|p| if p == ".." { p } else { p.trim_end_matches(['.', ' ']) }).collect::<Vec<_>>().join("/");
+    // A full path with its `.` and `..` folded; a network path keeps its two slashes, as a moved folder's own spelling does.
+    let full = |path: &str| {
+        let folded = resolve("", &trimmed(path));
+        match path {
+            p if p.starts_with("//") => format!("/{folded}"),
+            p if p.starts_with('/') => folded,
+            _ => folded.trim_start_matches('/').to_string(),
+        }
+    };
+    let cwd = cwd.map(|c| full(&normal(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned()))));
+    let mut texts = Vec::new();
+    acted_on(input, &mut texts);
+    if cwd.as_deref().is_some_and(|c| c.split('/').any(record_piece))
+        || texts.iter().any(|text| names_record(&Value::String((*text).to_string())))
+    {
+        return true;
+    }
+    let moved: Vec<String> = relocated_sign_ins(var).iter().map(|p| normal(p)).collect();
+    let cut = |c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c);
+    // A piece of a path without what Windows ignores at its end (dots, spaces, a stream name).
+    let name = |piece: &str| piece.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']).to_string();
+    // A moved sign-in folder named in a text, ending where a path piece ends: `cred` is not `credits`, and Windows drops a
+    // piece's trailing dots and its stream name.
+    let names_moved = |text: &str| {
+        moved.iter().filter(|dir| !dir.is_empty()).any(|dir| {
+            text.match_indices(dir.as_str())
+                .any(|(at, _)| text[at + dir.len()..].chars().next().is_none_or(|c| "/.:".contains(c) || cut(c)))
+        })
+    };
+    // The folder `auth.json` belongs to, named anywhere in a text: `.codex` as a whole path piece, a moved sign-in folder, or
+    // the variable that moves it.
+    let home = |text: &str| {
+        text.split(|c: char| c == '/' || cut(c)).any(|piece| name(piece) == ".codex") || names_moved(text) || text.contains("codex_home")
+    };
+    let from_home = cwd.as_deref().is_some_and(home);
+    // The same once a path is read from the working folder with its `.` and `..` folded: the whole text (a path field may
+    // hold spaces), what sits between quotes, and each word of a command.
+    let lands_home =
+        |text: &str| {
+            std::iter::once(text).chain(text.split(['"', '\''])).chain(text.split(cut)).map(str::trim).filter(|path| !path.is_empty()).any(
+                |path| if absolute(path) { home(&full(path)) } else { cwd.as_deref().is_some_and(|c| home(&resolve(c, &trimmed(path)))) },
+            )
+        };
+    texts.iter().any(|text| {
+        let text = normal(text);
+        let pieces = || text.split(cut).flat_map(|token| token.split('/')).map(name);
+        pieces().any(|piece| {
+            piece == ".credentials.json"
+                || piece == "oauth_creds.json"
+                || piece.starts_with(".claude.json")
+                || piece.contains("updater.key")
+        }) || (pieces().any(|piece| piece == "auth.json") && (from_home || home(&text) || lands_home(&text)))
+    })
+}
+
 /// A normalized path component that holds sign-ins or keys; shared with project-source readers before content I/O.
 pub(crate) fn credential_piece(piece: &str) -> bool {
     let piece = piece.trim_end_matches(['.', ' ']);
@@ -1031,7 +1120,6 @@ fn record_piece(piece: &str) -> bool {
 /// Does a path or command name one of `FABER_RECORDS` or `ENGINE_NOTES`? What is written (a file's text, an edit's old
 /// and new strings, a patch) is skipped: a source file or a note that mentions a record's name is ordinary work.
 fn names_record(input: &Value) -> bool {
-    const CONTENTS: [&str; 5] = ["content", "old_string", "new_string", "diff", "new_source"];
     match input {
         Value::String(s) => normal(s).split(|c: char| c == '/' || c.is_whitespace() || ":\"'`;|&<>()=,".contains(c)).any(record_piece),
         Value::Array(items) => items.iter().any(names_record),

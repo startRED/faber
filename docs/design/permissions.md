@@ -73,13 +73,16 @@ Mode details distinguish requested CLI policy from machine isolation, which rema
   also sets `model_verbosity` to low for Short and high for Explained, otherwise leaving the model's own length.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
   run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
-  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and
-  Edit deny rules for the credential folders (`.claude`, `.codex`, `.gemini`, `.ssh` and the other key files, and where a
-  documented variable moved them), which apply in bypass mode to its file tools but not to arbitrary commands. Codex runs with
-  `danger-full-access` and `never` approvals and has no way to block reads of the credential folders in that mode (see the
-  R121 section of [the R97 security review](../security-r97-review.md)). Ask names its modes (Claude `default`, Codex
-  `untrusted`) and carries the same credential denies and the same refusal of forwarded credential requests; it asks except for
-  what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
+  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode. Since R564 its
+  file tools reach every folder, the person's key folders (`.ssh`, cloud and GitHub sign-ins), the tools' own settings
+  folders and `.git` included, as commands and Codex already did. The deny rules it keeps (`claude::full_access_deny`) close
+  only the AI tools' own sign-in files (`.credentials.json`, `.claude.json`, Codex `auth.json`, Gemini `oauth_creds.json`,
+  also where a documented variable moved their folder), the release signing key and changes to Faber's approval records. A
+  token a file tool read would be saved in the conversation and sent to the model's maker, which is why those stay closed;
+  the rules bind the file tools, not arbitrary commands. Codex runs with `danger-full-access` and `never` approvals and blocks
+  nothing (see the R121 section of [the R97 security review](../security-r97-review.md)). Ask names its modes (Claude
+  `default`, Codex `untrusted`), keeps the folder-wide credential denies and refuses a forwarded request that names a
+  credential folder; it asks except for what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
   by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
   end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Known residual: the CLI is
   created suspended and joins its job a moment later (about 100 ms, measured on Windows 11), so if Faber ends in that
@@ -88,16 +91,14 @@ Mode details distinguish requested CLI policy from machine isolation, which rema
   asked for its models only while Faber has none, one asking at a time. Settings shows the
   details; the thread shows nothing about it (R168). The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
-- No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once
-  at start, and again when a launch fails with "unknown option", which also drops the newer flags at once; present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
-  tool: a request that would have prompted is denied at once, listed in the turn's `permission_denials`, and kept on the reply as a
-  parked request, as safe metadata only (tool, a kind, a file path or a page host, for a command one fixed word for what it would
-  have done, the time; never a command or any input, which could hold a token), at most 20 and 4 KB per turn with the rest counted
-  ("+N more"). The row of the running list says "Needs you" with a card that has nothing to allow (the CLI is past it, and the work
-  was not done) until the next message or its "Got it", which leaves the note on the reply. The tray notifies once
-  per turn ("N requests need you"), with a one-minute cooldown across turns (R92). It is never allowed on its own, and a request on a
-  credential folder is not parked at all: the deny rules refuse it for good. A CLI without the flag, Ask and the isolated mode start
-  as before. Where the CLI lists `--autocompact`, every launch but a side question compacts at its model's window (Haiku 150k,
+- No prompt can block a full-access turn (R564). The host answers the CLI's permission requests in every mode (R160), so a
+  question the agent asks the person is a card. Whatever else Claude Code still holds back in bypass mode (a protected path,
+  a delete it finds risky, the person's own ask rules) is answered yes at once, on every CLI version: refusing it left the work
+  undone behind a note with nothing to allow. Only a request that names one of the sign-in files or approval records above
+  is refused, with no card (`permissions::touches_sign_in`: what a request writes is not judged, `auth.json` counts only
+  beside its folder, and a command line is matched by its text, so best effort). A reply saved before R564 may still carry
+  such a held-back request ("Needs you", a card with nothing to allow) as safe metadata only (tool, a kind, a file path or a
+  page host, for a command one fixed word, the time; never a command or any input), until its "Got it". Where the CLI lists `--autocompact`, every launch but a side question compacts at its model's window (Haiku 150k,
   Sonnet 300k, Opus 400k, R150); side questions, unknown models and a CLI without the flag keep the CLI default.
 - R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories
   and key files; Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.

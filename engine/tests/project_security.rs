@@ -834,7 +834,7 @@ fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_f
     let project = settings(&claude_args(&launch(Area::Project, Permissions::Isolated)));
     for key in ["permissions", "sandbox", "env"] {
         if key == "permissions" {
-            let base = denied(&claude_args(&launch(Area::Chat, Permissions::FullAccess)));
+            let base = faber_engine::claude::tool_deny(&|name| std::env::var(name).ok());
             for config in [&chat, &project] {
                 let rules = config["permissions"]["deny"].as_array().unwrap();
                 assert!(base.iter().all(|rule| rules.contains(&json!(rule))));
@@ -942,20 +942,136 @@ fn denied(args: &[String]) -> Vec<String> {
 }
 
 #[test]
-fn r121_full_access_and_ask_deny_the_credential_folders_exactly_as_the_isolated_mode_does() {
-    for area in [Area::Chat, Area::Project] {
-        let full = denied(&claude_args(&launch(area, Permissions::FullAccess)));
-        let isolated = denied(&claude_args(&launch(area, Permissions::Isolated)));
-        assert!(full.iter().all(|rule| isolated.contains(rule)), "{area:?}");
-        for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)"] {
-            assert!(full.contains(&rule.to_string()), "{area:?} {rule}");
-        }
-    }
-    // Ask asks as well, and carries the same credential denies (R124b).
+fn r121_ask_denies_the_credential_folders_exactly_as_the_isolated_mode_does() {
     for area in [Area::Chat, Area::Project] {
         let ask = denied(&claude_args(&launch(area, Permissions::Ask)));
-        assert!(denied(&claude_args(&launch(area, Permissions::FullAccess))).iter().all(|rule| ask.contains(rule)), "{area:?}");
+        let isolated = denied(&claude_args(&launch(area, Permissions::Isolated)));
+        for rule in faber_engine::claude::tool_deny(&|name| std::env::var(name).ok()) {
+            assert!(ask.contains(&rule) && isolated.contains(&rule), "{area:?} {rule}");
+        }
+        for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)", "Edit(//**/.git/**)"] {
+            assert!(ask.contains(&rule.to_string()), "{area:?} {rule}");
+        }
     }
+}
+
+/// R564: Full access closes only the AI tools' own sign-in files (where they are, and where a documented variable moved
+/// their folder), the release signing key and changes to Faber's approval records. Key folders, the tools' settings folders
+/// and `.git` are open to the file tools, as they were to commands.
+#[test]
+fn full_access_closes_only_sign_in_files_and_approval_records() {
+    use faber_engine::claude::{full_access_deny, tool_deny};
+    let env = |name: &str| match name {
+        "CLAUDE_CONFIG_DIR" => Some("E:/Accounts/work".to_string()),
+        "AWS_SHARED_CREDENTIALS_FILE" => Some("/srv/aws/credentials".to_string()),
+        "GH_CONFIG_DIR" => Some("E:/Accounts/hub".to_string()),
+        _ => None,
+    };
+    let rules = full_access_deny(&env);
+    for path in [
+        "~/.claude/.credentials.json",
+        "~/.claude.json*",
+        "~/.codex/auth.json",
+        "~/.gemini/oauth_creds.json",
+        "//e/Accounts/work/.credentials.json",
+        "//e/Accounts/work/auth.json",
+        "//**/*updater.key*",
+    ] {
+        for tool in ["Read", "Edit"] {
+            assert!(rules.contains(&format!("{tool}({path})")), "{tool} {path}: {rules:?}");
+        }
+    }
+    for rule in ["Edit(//**/decisions-kept.json)", "Edit(//**/faber-trust/**)", "Edit(//**/taste.md)", "Edit(//**/lessons.md)"] {
+        assert!(rules.contains(&rule.to_string()), "{rule}: {rules:?}");
+    }
+    for open in
+        ["~/.ssh", "~/.aws", "~/.kube", "~/.docker", "~/.claude/**", "~/.codex/**", ".git/", "~/.npmrc", "/srv/aws", "work/**", "hub"]
+    {
+        assert!(!rules.iter().any(|rule| rule.contains(open)), "{open} stays open: {rules:?}");
+    }
+    // Every other mode keeps the whole folders closed.
+    let guarded = tool_deny(&env);
+    for rule in ["Read(~/.ssh/**)", "Read(~/.claude/**)", "Read(//e/Accounts/work/**)", "Edit(//**/.git/**)"] {
+        assert!(guarded.contains(&rule.to_string()), "{rule}: {guarded:?}");
+    }
+    for area in [Area::Chat, Area::Project] {
+        let full = denied(&claude_args(&launch(area, Permissions::FullAccess)));
+        assert!(full.contains(&"Read(~/.claude/.credentials.json)".to_string()), "{area:?}: {full:?}");
+        assert!(full.contains(&"Edit(//**/decisions-kept.json)".to_string()), "{area:?}");
+        assert!(!full.iter().any(|rule| rule.contains("~/.ssh") || rule.contains(".git/")), "{area:?}: {full:?}");
+        for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::Isolated] {
+            assert!(denied(&claude_args(&launch(area, mode))).contains(&"Read(~/.ssh/**)".to_string()), "{area:?} {mode:?}");
+        }
+    }
+}
+
+/// R564: the one refusal Full access keeps for a forwarded request. A key folder, a tool's settings and a risky delete pass;
+/// a sign-in file is caught under any spelling, and `auth.json` only beside its folder.
+#[test]
+fn only_a_sign_in_file_or_an_approval_record_is_refused_in_full_access() {
+    use faber_engine::permissions::touches_sign_in;
+    let none = |_: &str| None;
+    let bs = char::from(92);
+    let refused = [
+        (json!({ "file_path": format!("C:{bs}Users{bs}me{bs}.claude{bs}.Credentials.json") }), None),
+        (json!({ "file_path": "/home/me/.claude/.credentials.json::$DATA" }), None),
+        (json!({ "command": format!("type %USERPROFILE%{bs}.codex{bs}auth.json") }), None),
+        (json!({ "command": "cd ~/.codex && cat auth.json" }), None),
+        (json!({ "command": "cat auth.json" }), Some("C:/Users/me/.codex")),
+        (json!({ "command": "cat ~/.claude.json.backup" }), None),
+        (json!({ "command": "cat ~/.gemini/oauth_creds.json. " }), None),
+        (json!({ "file_path": "E:/keys/faber-updater.key.pub" }), None),
+        (json!({ "file_path": "C:/Users/me/AppData/Roaming/Faber/decisions-kept.json", "content": "{}" }), None),
+        (json!({ "command": "echo x > rules.json" }), Some("C:/Users/me/AppData/Roaming/Faber/faber-trust")),
+        (json!([{ "path": ".faber/taste.md", "kind": { "type": "update" }, "diff": "+x" }]), None),
+        // One request shape keys its changes by path.
+        (json!({ "C:/Users/me/.codex/auth.json": { "diff": "+x" } }), None),
+        (json!({ ".faber/lessons.md": { "diff": "+x" } }), None),
+        (json!({ "command": "cat $CODEX_HOME/auth.json" }), None),
+        (json!({ "command": "type %CODEX_HOME%/auth.json" }), None),
+    ];
+    for (input, cwd) in refused {
+        assert!(touches_sign_in(&input, cwd, &none), "{input}");
+    }
+    let open = [
+        (json!({ "file_path": format!("C:{bs}Users{bs}me{bs}.ssh{bs}config") }), None),
+        (json!({ "file_path": "E:/app/.claude/settings.json", "content": "{}" }), None),
+        (json!({ "file_path": "~/.codex/config.toml" }), None),
+        (json!({ "file_path": "E:/app/src/auth.json" }), None),
+        (json!({ "command": "cat src/auth.json" }), Some("E:/app")),
+        (json!({ "file_path": "E:/my.codex-notes/auth.json" }), None),
+        (json!({ "command": "cat auth.json" }), Some("E:/old.codex.bak")),
+        (json!({ "command": "rm -rf .git/hooks && git status" }), None),
+        (json!({ "command": "cat ~/.aws/credentials ~/.npmrc" }), None),
+        (json!({ "file_path": "E:/app/notes.md", "content": "never print .credentials.json or decisions-kept.json" }), None),
+    ];
+    for (input, cwd) in open {
+        assert!(!touches_sign_in(&input, cwd, &none), "{input}");
+    }
+    // A sign-in folder a documented variable moved: `auth.json` counts there, by a full or a relative path.
+    let moved = |name: &str| (name == "CODEX_HOME").then(|| "E:/work/cred".to_string());
+    assert!(touches_sign_in(&json!({ "file_path": "E:/Work/Cred/auth.json" }), None, &moved));
+    assert!(touches_sign_in(&json!({ "command": "cat cred/auth.json" }), Some("E:/work"), &moved));
+    assert!(touches_sign_in(&json!({ "command": "cat ../cred/auth.json" }), Some("E:/work/sub"), &moved));
+    assert!(!touches_sign_in(&json!({ "command": "cat sub/auth.json" }), Some("E:/work"), &moved));
+    assert!(!touches_sign_in(&json!({ "file_path": "E:/work/cred/config.toml" }), None, &moved));
+    // A full path is read with its `..` folded, and a folder that only starts like the moved one is another folder.
+    assert!(touches_sign_in(&json!({ "file_path": "E:/work/sub/../cred/auth.json" }), None, &moved));
+    assert!(touches_sign_in(&json!({ "file_path": "E:/work/cred./auth.json" }), None, &moved));
+    assert!(touches_sign_in(&json!({ "file_path": "E:/work./cred/auth.json" }), None, &moved));
+    assert!(touches_sign_in(&json!({ "command": "cat auth.json" }), Some("E:/work/sub/../cred"), &moved));
+    assert!(!touches_sign_in(&json!({ "file_path": "E:/work/credits/auth.json" }), None, &moved));
+    let share = |name: &str| (name == "CODEX_HOME").then(|| "//nas/home/cred".to_string());
+    assert!(touches_sign_in(&json!({ "file_path": "//NAS/home/sub/../cred/auth.json" }), None, &share));
+    assert!(!touches_sign_in(&json!({ "file_path": "//nas/home/sub/auth.json" }), None, &share));
+    // A moved folder with a space in its name, by a relative path field and between a command's quotes.
+    let spaced = |name: &str| (name == "CODEX_HOME").then(|| "E:/work/my creds".to_string());
+    assert!(touches_sign_in(&json!({ "file_path": "my creds/auth.json" }), Some("E:/work"), &spaced));
+    assert!(touches_sign_in(&json!({ "command": "cat \"my creds/auth.json\"" }), Some("E:/work"), &spaced));
+    assert!(!touches_sign_in(&json!({ "file_path": "my notes/auth.json" }), Some("E:/work"), &spaced));
+    // A folder of the person's other tools is theirs: moved or not, it is open.
+    let hub = |name: &str| (name == "GH_CONFIG_DIR").then(|| "E:/Accounts/hub".to_string());
+    assert!(!touches_sign_in(&json!({ "file_path": "E:/Accounts/hub/auth.json" }), None, &hub));
 }
 
 #[test]

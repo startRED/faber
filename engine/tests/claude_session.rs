@@ -664,6 +664,15 @@ fn rule_6_every_result_subtype_and_terminal_reason_becomes_a_reason_key_and_neve
 
 const CREDENTIAL_DENIES: [&str; 5] =
     ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)", "Read(~/.claude.json*)"];
+/// What Full access keeps closed (R564): the AI tools' own sign-in files and changes to Faber's approval records.
+const SIGN_IN_DENIES: [&str; 6] = [
+    "Read(~/.claude/.credentials.json)",
+    "Read(~/.claude.json*)",
+    "Read(~/.codex/auth.json)",
+    "Read(~/.gemini/oauth_creds.json)",
+    "Edit(~/.codex/auth.json)",
+    "Edit(//**/decisions-kept.json)",
+];
 
 /// The settings JSON of a launch: where the deny rules travel (the command line would split a rule at its spaces).
 fn settings_of(args: &[String]) -> serde_json::Value {
@@ -675,15 +684,26 @@ fn deny_rules(args: &[String]) -> Vec<String> {
 }
 
 #[test]
-fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_credential_folders() {
+fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_sign_in_files() {
     for area in [Area::Chat, Area::Project] {
+        // Every other mode keeps the whole folders closed.
+        for permissions in [Permissions::Ask, Permissions::Isolated] {
+            let deny = deny_rules(&claude_args(&ClaudeLaunch { permissions, ..launch(area) }));
+            for rule in CREDENTIAL_DENIES {
+                assert!(deny.contains(&rule.to_string()), "{area:?} {permissions:?} {rule}");
+            }
+        }
         for hooks in [false, true] {
             let args = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, user_hooks: hooks, ..launch(area) });
             assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]), "{area:?}");
-            // Deny rules still apply in bypassPermissions, so the credential folders stay out of reach of the file tools.
+            // Deny rules still apply in bypassPermissions, so the sign-in files stay out of reach of the file tools; the
+            // key and settings folders around them are open (R564).
             let deny = deny_rules(&args);
-            for rule in CREDENTIAL_DENIES {
+            for rule in SIGN_IN_DENIES {
                 assert!(deny.contains(&rule.to_string()), "{area:?} {rule}");
+            }
+            for open in ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Edit(//**/.git/**)"] {
+                assert!(!deny.contains(&open.to_string()), "{area:?} {open}");
             }
             assert!(!args.contains(&"--disallowedTools".into()), "the rules travel in the settings JSON");
             // Nothing that isolates: no sandbox, ask rules, folder confinement or scrubbed environment ...
@@ -1099,6 +1119,11 @@ fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edi
                 "{permissions:?} {area:?}: the command line would split a rule at a space"
             );
             let deny = deny_rules(&args);
+            // Full access closes the sign-in files alone (R564); the folders around them and `.git` are open.
+            let full = matches!(permissions, Permissions::FullAccess);
+            for rule in SIGN_IN_DENIES.iter().filter(|_| full) {
+                assert!(deny.contains(&rule.to_string()), "{area:?} {rule}");
+            }
             for folder in [
                 "~/.claude",
                 "~/.codex",
@@ -1112,16 +1137,19 @@ fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edi
                 "~/AppData/Roaming/GitHub CLI",
             ] {
                 for tool in ["Read", "Edit"] {
-                    assert!(deny.contains(&format!("{tool}({folder}/**)")), "{permissions:?} {area:?} {tool} {folder}");
+                    assert_eq!(deny.contains(&format!("{tool}({folder}/**)")), !full, "{permissions:?} {area:?} {tool} {folder}");
                 }
             }
-            for file in ["~/.claude.json*", "~/.git-credentials", "~/.npmrc"] {
+            for file in ["~/.git-credentials", "~/.npmrc"] {
                 for tool in ["Read", "Edit"] {
-                    assert!(deny.contains(&format!("{tool}({file})")), "{tool} {file}");
+                    assert_eq!(deny.contains(&format!("{tool}({file})")), !full, "{permissions:?} {tool} {file}");
                 }
+            }
+            for tool in ["Read", "Edit"] {
+                assert!(deny.contains(&format!("{tool}(~/.claude.json*)")), "{permissions:?} {tool}");
             }
             assert!(deny.contains(&"Read(//**/*updater.key*)".to_string()) && deny.contains(&"Edit(//**/*updater.key*)".to_string()));
-            assert!(deny.contains(&"Edit(//**/.git/**)".to_string()));
+            assert_eq!(deny.contains(&"Edit(//**/.git/**)".to_string()), !full, "{permissions:?} {area:?}");
             for rule in &deny {
                 if rule == "Monitor" {
                     assert!(permissions.guarded(), "only guarded modes deny this whole tool");
@@ -1172,7 +1200,7 @@ fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
 }
 
 #[test]
-fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_credential_deny_still_wins() {
+fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_sign_in_deny_still_wins() {
     for area in [Area::Chat, Area::Project] {
         for hooks in [false, true] {
             let args = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags: NEWER, user_hooks: hooks, ..launch(area) });
@@ -1181,10 +1209,10 @@ fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_cred
                 "{area:?}"
             );
             assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]), "an explicit mode, never the CLI's own");
-            // The credential denies are the very ones of the launch without the new flag, and none was dropped.
+            // The sign-in denies are the very ones of the launch without the new flag, and none was dropped.
             let deny = deny_rules(&args);
             assert_eq!(deny, deny_rules(&full(area, ClaudeFlags::default())), "{area:?}");
-            for rule in CREDENTIAL_DENIES.iter().chain(&["Edit(~/.ssh/**)", "Edit(~/.codex/**)", "Edit(//**/.git/**)"]) {
+            for rule in SIGN_IN_DENIES {
                 assert!(deny.contains(&rule.to_string()), "{area:?} {rule}");
             }
             // Nothing in the settings allows anything: the denies are the only rules, and no allow rule or ask override exists.
@@ -1388,7 +1416,7 @@ async fn deny_wins_in_the_no_stdio_path_a_real_recording_of_a_denied_credential_
     // Recorded with nobody answering; Faber's full access now lets the host answer (R160), and the deny rules are the same.
     assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
     assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
-    assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "the same kind of rule as the recording's");
+    assert!(deny_rules(&args).contains(&"Read(~/.codex/auth.json)".to_string()), "the same kind of rule as the recording's");
 
     let entries = fixture("claude", "deny-wins");
     let recorded = serde_json::to_string(&entries.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()).unwrap();
@@ -1521,7 +1549,9 @@ fn r140_each_mode_names_the_native_claude_mode_in_chat_and_projects() {
             let args = claude_args(&ClaudeLaunch { permissions, flags: NEWER, ..launch(area) });
             let at = args.iter().position(|a| a == "--permission-mode").unwrap();
             assert_eq!(args[at + 1], name, "{permissions:?} {area:?}");
-            assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "credentials stay blocked in {permissions:?}");
+            // Full access closes the sign-in files alone (R564); every other mode closes their folders.
+            let closed = if matches!(permissions, Permissions::FullAccess) { "Read(~/.codex/auth.json)" } else { "Read(~/.ssh/**)" };
+            assert!(deny_rules(&args).contains(&closed.to_string()), "credentials stay blocked in {permissions:?}");
             assert!(!args.contains(&"--allow-dangerously-skip-permissions".into()));
             let restricted = args.contains(&"--restricted".into());
             assert_eq!(restricted, area == Area::Chat && permissions.guarded(), "{permissions:?} {area:?}");
@@ -1583,7 +1613,7 @@ fn r140_web_search_is_live_in_the_saved_settings_and_off_or_cached_change_the_to
         assert_eq!(allowed(&off), None);
         assert!(deny_rules(&off).contains(&"WebFetch".to_string()) && deny_rules(&off).contains(&"WebSearch".to_string()));
     }
-    // Full access and the person's project sessions deny through the settings as well; the credential rules stay.
+    // Full access and the person's project sessions deny through the settings as well; the sign-in rules stay.
     for area in [Area::Chat, Area::Project] {
         let off = claude_args(&ClaudeLaunch {
             temporary: false,
@@ -1595,7 +1625,7 @@ fn r140_web_search_is_live_in_the_saved_settings_and_off_or_cached_change_the_to
         assert!(
             rules.contains(&"WebSearch".to_string())
                 && rules.contains(&"WebFetch".to_string())
-                && rules.contains(&"Read(~/.ssh/**)".to_string())
+                && rules.contains(&"Read(~/.codex/auth.json)".to_string())
         );
         let live = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(area) });
         assert!(!deny_rules(&live).iter().any(|r| r.starts_with("Web")));

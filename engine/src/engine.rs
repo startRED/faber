@@ -3446,11 +3446,24 @@ impl Core {
                 } else {
                     &input
                 };
+                // Full access keeps one refusal (R564): the AI tools' own sign-in files and Faber's approval records.
+                let full = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess);
+                let var = |name: &str| std::env::var(name).ok();
+                let place = cwd.as_deref().and_then(Path::to_str);
+                let refused = if full {
+                    // A command that names its own working folder runs there (read from the conversation's when relative).
+                    let own = input["cwd"].as_str().map(|own| cwd.as_deref().map_or_else(|| PathBuf::from(own), |base| base.join(own)));
+                    crate::permissions::touches_sign_in(guarded, place, &var)
+                        || own
+                            .as_deref()
+                            .and_then(Path::to_str)
+                            .is_some_and(|own| crate::permissions::touches_sign_in(guarded, Some(own), &var))
+                } else {
+                    crate::permissions::touches_credentials(guarded, place, &var)
+                };
                 if let Some(l) = self.live.get(conv)
                     && !question
-                    && crate::permissions::touches_credentials(guarded, cwd.as_deref().and_then(Path::to_str), &|name| {
-                        std::env::var(name).ok()
-                    })
+                    && refused
                 {
                     drop(l.session.answer(&request_id, false));
                     return;
@@ -3458,17 +3471,10 @@ impl Core {
                 if !question && self.hold_plan_boundary(conv, &request_id, &tool, &input) {
                     return;
                 }
-                if !question && self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
-                    // Claude Code asks the host in Full access only for what bypass mode still holds back (the person's own ask
-                    // rules, protected paths): on a CLI that has `--permission-prompts` it is denied and parked, never allowed on its own, as
-                    // `--permission-prompts none` did; an older CLI keeps the yes it always had (R124).
-                    if vendor == Vendor::Claude && self.claude_flags.permission_prompts {
-                        if let Some(l) = self.live.get(conv) {
-                            drop(l.session.answer(&request_id, false));
-                        }
-                        self.park(conv, request_id, tool, input);
-                        return self.push(conv, turn_id.as_deref(), true);
-                    }
+                if !question && full {
+                    // Full access is full (R564): what bypass mode still holds back (protected paths, a delete it finds risky,
+                    // the person's own ask rules) is answered yes at once, on every CLI. Refusing it left the work undone behind
+                    // a note with nothing to allow (five times in the owner's projects up to 2026-11-04).
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
                 // Plan never takes a remembered grant: nothing may change under it without a card.

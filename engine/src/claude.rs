@@ -193,11 +193,41 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
         rules.push(format!("Read({path})"));
         rules.push(format!("Edit({path})"));
     }
-    // Faber's approval records may be read but never changed (`permissions::FABER_RECORDS`); an Edit rule covers Write too.
-    let [kept, trust] = crate::permissions::FABER_RECORDS;
-    rules.extend([format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)")]);
-    rules.extend(crate::permissions::ENGINE_NOTES.map(|name| format!("Edit(//**/{name})")));
+    rules.extend(record_rules());
     rules
+}
+
+/// Faber's approval records may be read but never changed (`permissions::FABER_RECORDS`); an Edit rule covers Write too.
+fn record_rules() -> Vec<String> {
+    let [kept, trust] = crate::permissions::FABER_RECORDS;
+    [format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)")]
+        .into_iter()
+        .chain(crate::permissions::ENGINE_NOTES.map(|name| format!("Edit(//**/{name})")))
+        .collect()
+}
+
+/// The AI tools' own sign-in files: their names inside a sign-in folder, and where they sit when nothing moved them.
+const SIGN_IN_NAMES: [&str; 4] = [".credentials.json", ".claude.json*", "auth.json", "oauth_creds.json"];
+const SIGN_IN_FILES: [&str; 5] =
+    ["~/.claude/.credentials.json", "~/.claude.json*", "~/.codex/auth.json", "~/.gemini/oauth_creds.json", "//**/*updater.key*"];
+
+/// The deny rules of Full access (R564): the file tools reach every folder, the person's key folders and `.git` included, as
+/// commands already did. What stays closed is the AI tools' own sign-in files (a token a file tool read would be saved in
+/// the conversation and sent to the model's maker), wherever a documented variable moved their folder, the release signing
+/// key, and changes to Faber's approval records.
+pub fn full_access_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let moved = crate::permissions::relocated_sign_ins(var).into_iter().flat_map(|p| {
+        let rule = crate::permissions::claude_rule_path(&p);
+        let forms = if p.starts_with("//") { vec![p, rule] } else { vec![rule] };
+        forms.into_iter().flat_map(|dir| SIGN_IN_NAMES.map(|name| format!("{dir}/{name}")))
+    });
+    SIGN_IN_FILES
+        .iter()
+        .map(|f| (*f).to_string())
+        .chain(moved)
+        .flat_map(|path| [format!("Read({path})"), format!("Edit({path})")])
+        .chain(record_rules())
+        .collect()
 }
 
 /// The deny rules the web setting adds (R140): Off drops both web tools; Cached has no equivalent in Claude Code, so it keeps
@@ -392,7 +422,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             let path = crate::permissions::claude_rule_path(&crate::project::git::native_path(guide));
             catalog_deny.extend([format!("Edit({path}/**)"), format!("Write({path}/**)")]);
         }
-        let deny = || tool_deny(&env).into_iter().chain(web.iter().cloned()).chain(catalog_deny.iter().cloned()).collect::<Vec<_>>();
+        let with_own =
+            |rules: Vec<String>| rules.into_iter().chain(web.iter().cloned()).chain(catalog_deny.iter().cloned()).collect::<Vec<_>>();
+        let deny = || with_own(tool_deny(&env));
         match launch.permissions.for_claude(launch.flags) {
             Permissions::Isolated => {
                 if launch.area == Area::Project {
@@ -407,16 +439,17 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
                 settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
                 settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
             }
-            // Full access (R121): no sandbox, no ask rules, network on. Deny rules still apply in bypassPermissions.
+            // Full access (R121, R564): no sandbox, no ask rules, network on, every folder. Deny rules still apply in
+            // bypassPermissions, so the few it keeps (`full_access_deny`) hold for the file tools.
             Permissions::FullAccess => {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
-                settings["permissions"] = json!({ "deny": deny() });
+                settings["permissions"] = json!({ "deny": with_own(full_access_deny(&env)) });
                 if !servers.is_empty() {
                     // Scope the process-wide allowlist to catalog sessions; inline settings beat user env overrides.
                     settings["env"] = json!({ "CLAUDE_CODE_MCP_ALLOWLIST_ENV": "1" });
                 }
             }
-            // Every guarded mode carries the same credential denies as full access: a person's own rule or an approval card
+            // Every guarded mode carries every credential deny: a person's own rule or an approval card
             // must not open them.
             mode => {
                 args.extend(["--permission-mode".into(), permission_mode(mode).into()]);
