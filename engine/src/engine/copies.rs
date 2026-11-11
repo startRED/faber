@@ -133,7 +133,11 @@ impl Engine {
             && !discard
         {
             let mut exec = run.as_ref().and_then(|run| run());
-            if *busy || exec.as_mut().is_none_or(|exec| copy::unsaved(&mut **exec, copy)) {
+            let had = exec.is_some();
+            let lost = exec.as_mut().is_none_or(|exec| copy::unsaved(&mut **exec, copy));
+            // One line for whoever reads the log: which look kept the copy (a person only sees "Discard changes?").
+            eprintln!("faber: deleting {id} asks first (at work: {busy}, git answered: {had}, work found nowhere else: {lost})");
+            if *busy || lost {
                 return Err("error.copy.unsaved".into());
             }
         }

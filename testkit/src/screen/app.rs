@@ -1169,17 +1169,30 @@ fn copy_per_conversation(ctx: &mut Ctx) -> Result {
     ensure(copies[0].0 != copies[1].0 && copies[0].1 != copies[1].1, || format!("each conversation has its own: {copies:?}"))?;
     let first = css(".proj-chats .crow").has_text("Fix the first thing");
     page.hover(&first.clone().css(".item"))?;
-    let x = first.css(".x");
+    let x = first.clone().css(".x");
     page.click(&x)?;
     page.click(&x)?;
-    page.wait_gone(&css(".proj-chats .crow").has_text("Fix the first thing"))?;
+    // The row leaves at once and comes back if Faber asks first. On a slow runner a reply that has just been stopped can
+    // still count as at work (CI 2026-11-11, three runs in thirteen): then the row asks to discard, and a person says yes.
+    let mut asked = false;
     for _ in 0..40 {
         if !copies[0].1.exists() {
             break;
         }
+        if !asked && page.count(&first.clone().css(".x.confirm"))? > 0 {
+            asked = true;
+            page.hover(&first.clone().css(".item"))?;
+            page.click(&first.clone().css(".x"))?;
+        }
         pause(0.25);
     }
-    ensure(!copies[0].1.exists(), || format!("the deleted conversation's copy is gone: {:?}", copies[0].1))?;
+    let why =
+        || ctx.stderr(app.id).lines().filter(|l| l.contains("asks first") || l.contains("copy stays")).collect::<Vec<_>>().join(" | ");
+    if asked {
+        eprintln!("note  the delete asked to discard first: {}", why());
+    }
+    page.wait_gone(&css(".proj-chats .crow").has_text("Fix the first thing"))?;
+    ensure(!copies[0].1.exists(), || format!("the deleted conversation's copy is gone: {:?}; {}", copies[0].1, why()))?;
     ensure(copies[1].1.is_dir(), || format!("the other copy stays: {:?}", copies[1].1))?;
     ctx.shot(&mut app, "copy-per-conversation")
 }
