@@ -48,6 +48,25 @@ pub(super) fn state_of(busy: bool, c: &Conversation) -> State {
     }
 }
 
+/// A member whose lead hears from it again without anyone acting: it works, it waits for conversations it started, or a
+/// question card of its turn is still open. One whose turn ended asking for the person (its closing box says blocked or
+/// needs you) is not: nobody is told unless the person happens to open it, and its lead waited for ever (the owner's
+/// project, 2026-11-11).
+pub(super) fn reports_later(busy: bool, c: &Conversation) -> bool {
+    match state_of(busy, c) {
+        State::Working => true,
+        State::Waiting => {
+            c.waiting_on.is_some()
+                || c.messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::Assistant)
+                    .is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()))
+        }
+        _ => false,
+    }
+}
+
 /// Where a plan step's conversation stands (task 040), in a subagent row's words.
 pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
     match state_of(busy, c) {
@@ -92,7 +111,7 @@ impl Core {
             for id in waiting.ids {
                 let Some(mut child) = store.get(&id) else { continue };
                 child.messages.iter_mut().for_each(settle);
-                if child.keep_going.is_none() && !matches!(state_of(false, &child), State::Working | State::Waiting) {
+                if child.keep_going.is_none() && !reports_later(false, &child) {
                     pending.entry(parent.clone()).or_default().insert(id);
                 }
             }
@@ -535,7 +554,7 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return };
         let Some(parent) = c.started_by.clone() else { return };
         let state = state_of(busy, c);
-        if c.keep_going.is_some() || c.compacting || state == State::Working || state == State::Waiting {
+        if c.keep_going.is_some() || c.compacting || reports_later(busy, c) {
             return;
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
@@ -545,8 +564,10 @@ impl Core {
             format!("No confirmed conclusion. Latest output: {text}")
         });
         let text = sibling::finished(&c.title, conv, state, &last);
-        // Stopped working: the plan step waits for its work to be joined.
-        self.edit_worker(conv, |w| w.joining = true);
+        // Stopped working: the plan step waits for its work to be joined. One that waits for an answer is not done yet.
+        if state != State::Waiting {
+            self.edit_worker(conv, |w| w.joining = true);
+        }
         let mut recipients = vec![parent.clone()];
         let mut cursor = parent;
         let mut seen = HashSet::new();
@@ -827,7 +848,7 @@ impl Core {
             let reply = child.messages.iter().rev().find(|m| m.role == Role::Assistant);
             let report_id = format!("report-{id}-{}", reply.map_or("empty", |m| m.id.as_str()));
             let busy = self.live.get(id).is_some_and(|l| l.turn.is_some());
-            let ended = !matches!(state_of(busy, child), State::Working | State::Waiting);
+            let ended = !reports_later(busy, child);
             let delivered = self
                 .convs
                 .get(by)
@@ -995,6 +1016,51 @@ mod tests {
             assert_eq!(core.sibling_room("other"), Ok(()), "the limits are per project");
             started(core, 1, false);
             assert!(core.sibling_room("p").unwrap_err().starts_with("three conversations"), "three working is the first limit");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_member_that_ends_needing_the_person_tells_its_lead_and_ends_the_wait() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.with_saves(false, |core| {
+            let parent = core.blank(Area::Project, Some("p".into()));
+            let child = core.blank(Area::Project, Some("p".into()));
+            // The lead is mid-turn, so the report waits in its queue where the test can read it.
+            let mut turn = Message::new("lead".into(), Role::Assistant, String::new(), 1);
+            turn.status = Some(Status::Streaming);
+            let p = core.convs.get_mut(&parent).unwrap();
+            p.messages.push(turn);
+            p.waiting_on = Some(crate::model::WaitingOn { ids: vec![child.clone()], note: String::new(), since: 1 });
+            let c = core.convs.get_mut(&child).unwrap();
+            c.started_by = Some(parent.clone());
+            c.title = "Sidebar".into();
+            let mut reply = Message::new("r1".into(), Role::Assistant, "Shipped; the checks still run.".into(), 2);
+            reply.status = Some(Status::Done);
+            reply.wrap_up = Some(
+                crate::progress::wrap_up(&serde_json::json!({
+                    "outcome": "needs_you",
+                    "did": "Shipped the sidebar.",
+                    "result": "The sidebar is on the base.",
+                    "not_done": "The checks still run."
+                }))
+                .unwrap(),
+            );
+            c.messages.push(reply);
+            assert_eq!(state_of(false, c), State::Waiting);
+            assert!(!reports_later(false, c), "nothing else will ever wake its lead");
+            c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "review".into(), since: 2 });
+            assert!(reports_later(false, c), "a member that waits for its own conversations reports when they do");
+            c.waiting_on = None;
+
+            core.tell_parent(&child);
+
+            let p = &core.convs[&parent];
+            let report = p.queued.iter().find(|q| q.id == format!("report-{child}-r1")).expect("the lead is told");
+            assert!(report.text.contains("is waiting for the person to answer it"), "{}", report.text);
+            assert!(report.text.contains("answer it with `ask`"), "{}", report.text);
+            assert_eq!(p.waiting_on, None, "the lead no longer waits for a member that will not go on by itself");
         });
         engine.shutdown();
     }

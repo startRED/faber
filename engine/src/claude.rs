@@ -613,6 +613,11 @@ pub fn context_parts(usage: &Value) -> Vec<crate::model::ContextPart> {
         .collect()
 }
 
+/// The first line of a main-agent answer. Outside a turn Faber sent, it is a turn the CLI began by itself.
+fn own_turn_begins(msg: &Value) -> bool {
+    msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null()
+}
+
 /// Turns one stream-json line into engine events. Claude Code's JSON is loosely typed, so fields are read
 /// defensively; lines that carry nothing the app shows give no events.
 pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
@@ -1055,6 +1060,14 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                             }
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
                                 request_began = Some(turn_sent_ms);
+                            }
+                            // A turn nobody sent: the CLI tells its agent that a background command ended, and the agent answers
+                            // (fixture `background-command-own-turn`). It is watched like any turn: a stop reaches it, its result ends it.
+                            if own_turn_begins(&msg) && !watch.active() && !closed && !retiring {
+                                watch.begin();
+                                on_event(writers.snapshot());
+                                turn_sent_ms = unix_ms();
+                                on_event(EngineEvent::OwnTurn);
                             }
                             let finished = background.ends_reply(&msg, watch.stopping());
                             if finished {

@@ -132,6 +132,7 @@ mod tests {
             ("wake.approvedPlan", None),
             ("wake.asked", Some("act.why.asked")),
             ("wake.childDone", Some("act.why.childDone")),
+            ("wake.commandDone", None),
             ("wake.unknown", None),
         ] {
             assert_eq!(FaberAct::wake(&Wake::of(key), "sent").why.as_deref(), why, "{key}");

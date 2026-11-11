@@ -688,7 +688,8 @@ impl FollowState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
-    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.compacted`, `wake.cleared`).
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`, `wake.asked`, `wake.commandDone`, `wake.compacted`,
+    /// `wake.cleared`).
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
@@ -716,7 +717,8 @@ pub struct KeepGoing {
     /// Every AI it may use is out of quota: it goes on by itself at this time (Unix seconds), and the screen says so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
-    /// Turns in a row that ended in under a minute with no tool: Faber lets a longer rest pass before the next.
+    /// Turns in a row that ended in under a minute and changed no file: from the second, Faber lets a rest pass before the
+    /// next, longer each time.
     #[serde(default)]
     pub idle: u32,
     /// The error of the last failure, so one that cannot mend by waiting stops it when it comes again.
@@ -749,8 +751,9 @@ pub struct KeepGoing {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeepWait {
-    /// `retry` (after an error), `rest` (the last turn only waited), `busy` (Faber was busy with an update), `start` (Faber
-    /// just opened) or `question` (the closing box asks the person, task 017). A wait for quota is `wait_until` instead.
+    /// `retry` (after an error), `rest` (the last turn only waited), `command` (it waits for its own background command to
+    /// end), `busy` (Faber was busy with an update), `start` (Faber just opened) or `question` (the closing box asks the
+    /// person, task 017). A wait for quota is `wait_until` instead.
     pub why: String,
     /// Seconds since the Unix epoch.
     pub until: f64,

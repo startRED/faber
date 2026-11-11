@@ -5,7 +5,85 @@
 use super::*;
 use crate::model::Wake;
 
+/// What stands in the conversation for the notice the CLI gave its agent. It is also what goes out again if the turn has to
+/// move to another AI, so it reads as an instruction.
+const OWN_TURN: &str = "A background command you started has ended. Read its result and go on with the task.";
+
 impl Core {
+    /// The CLI began a turn nobody sent. Claude Code tells its agent itself when a background command ends, and the agent
+    /// answers. Faber used to drop those words, so an agent that ended its turn with "I will tell you when the build ends"
+    /// never spoke again (recorded 2026-11-11, fixture `background-command-own-turn`). The turn joins the conversation
+    /// under a line of Faber's (`wake.commandDone`), like a message taken in mid-turn (`taken_in`); nothing is sent, the
+    /// turn already runs. A conversation that cannot take it (the person stopped it, it is archived or being compacted, a
+    /// reply is still being routed, its goal is out of money) has the turn interrupted instead of working unseen.
+    pub(super) fn own_turn(&mut self, conv: &str) {
+        let secs = self.secs();
+        // A turn of Faber's runs: the words already have their reply.
+        if self.live.get(conv).is_none_or(|l| l.turn.is_some()) {
+            return;
+        }
+        let refused = self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
+            || self.goal_out_of_money(conv)
+            || self.convs.get(conv).is_none_or(|c| {
+                c.stopped
+                    || c.archived_at.is_some()
+                    || c.compacting
+                    || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+            });
+        let Some(l) = self.live.get(conv) else { return };
+        if refused {
+            l.session.interrupt();
+            return;
+        }
+        let (vendor, model) = (l.vendor, l.running.clone().or_else(|| l.model.clone()));
+        let c = self.convs.get_mut(conv).expect("checked above");
+        let at = now();
+        let wake = Wake::of("wake.commandDone");
+        let mut question = Message::new(new_id(), Role::User, OWN_TURN.into(), at);
+        question.acts.push(crate::act::FaberAct::wake(&wake, OWN_TURN));
+        question.wake = Some(wake);
+        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
+        reply.vendor = Some(vendor);
+        reply.model = model;
+        reply.reason = same_as_before(c, self.live.get(conv)).map(|p| p.reason);
+        reply.tools = Some(vec![]);
+        reply.status = Some(Status::Streaming);
+        let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
+        c.messages.push(question);
+        c.messages.push(reply);
+        c.updated_at = at;
+        // A turn that starts ends any wait of keep going: its end decides again. A wait for conversations it started stands:
+        // a command of its own that ended is not their report.
+        if let Some(kg) = c.keep_going.as_mut() {
+            kg.wait_until = None;
+            kg.waiting = None;
+        }
+        if let Some(l) = self.live.get_mut(conv) {
+            l.turn = Some(reply_id.clone());
+            l.started = secs;
+            l.answer_started = false;
+            l.trailer = Default::default();
+            l.break_pending = false;
+            l.settled = false;
+            l.open_tools.clear();
+            l.by_hand = false;
+            l.approved = false;
+        }
+        self.listen(conv);
+        // A plan limit now continues this reply.
+        if let Some(t) = self.transfers.get_mut(conv) {
+            (t.reply, t.request, t.text, t.images) = (reply_id.clone(), OWN_TURN.into(), OWN_TURN.into(), vec![]);
+            t.approved = None;
+            t.by_hand = false;
+        }
+        self.save(conv);
+        self.list_changed();
+        self.emit_queue(conv);
+        self.emit_message(conv, &question_id);
+        self.push(conv, Some(&reply_id), true);
+    }
+
     /// Sends `text` as the next turn of `conv`, with the choice its last message used. While a turn runs, or the person's
     /// own messages wait, it joins the queue behind them. Agent coordination enters the running turn at a safe step;
     /// other continuations wait for their own turn. Otherwise it starts now, subject to subscription and quota.
@@ -73,6 +151,101 @@ impl Core {
 mod tests {
     use super::*;
     use crate::events::{Session, SessionCommand};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A conversation whose turn has ended, with a session that counts the interrupts it is sent.
+    fn at_rest(engine: &Engine) -> (String, std::sync::Arc<AtomicUsize>) {
+        let interrupts = std::sync::Arc::new(AtomicUsize::new(0));
+        let seen = interrupts.clone();
+        let session = Session::from_fn(move |command| {
+            if matches!(command, SessionCommand::Interrupt) {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let conv = super::super::answer::tests::seed(engine, session, &[("r1", &[])]);
+        engine.with_saves(false, |core| {
+            core.convs.get_mut(&conv).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+            core.live.get_mut(&conv).unwrap().turn = None;
+        });
+        (conv, interrupts)
+    }
+
+    fn done() -> EngineEvent {
+        EngineEvent::Done {
+            ok: true,
+            reason: String::new(),
+            cost_total_usd: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_turn_the_cli_began_by_itself_joins_the_conversation() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let (conv, interrupts) = at_rest(&engine);
+        engine.with_saves(false, |core| {
+            let c = core.convs.get_mut(&conv).unwrap();
+            c.keep_going = Some(crate::model::KeepGoing {
+                waiting: Some(crate::model::KeepWait { why: "command".into(), until: 9e12 }),
+                ..Default::default()
+            });
+            c.waiting_on = Some(crate::model::WaitingOn { ids: vec!["member".into()], note: String::new(), since: 1 });
+            let before = c.messages.len();
+
+            core.handle(&conv, 1, EngineEvent::OwnTurn);
+
+            let c = &core.convs[&conv];
+            assert_eq!(c.messages.len(), before + 2, "Faber's line and the reply it opens");
+            let (question, reply) = (&c.messages[before], &c.messages[before + 1]);
+            assert_eq!(question.role, Role::User);
+            assert_eq!(question.wake.as_ref().map(|w| w.why.as_str()), Some("wake.commandDone"), "the person sees who spoke");
+            assert_eq!((reply.role, reply.status, reply.vendor), (Role::Assistant, Some(Status::Streaming), Some(Vendor::Claude)));
+            assert_eq!(core.live[&conv].turn.as_deref(), Some(reply.id.as_str()), "the words that follow have a reply to land in");
+            assert_eq!(c.keep_going.as_ref().unwrap().waiting, None, "the rest that waited for the command is over");
+            assert!(c.waiting_on.is_some(), "its own command ending is not its members' report");
+            assert_eq!(interrupts.load(Ordering::SeqCst), 0);
+
+            core.handle(&conv, 1, EngineEvent::OwnTurn);
+            assert_eq!(core.convs[&conv].messages.len(), before + 2, "a turn already open is not opened twice");
+
+            core.handle(&conv, 1, EngineEvent::Text("The build passed.".into()));
+            core.handle(&conv, 1, done());
+            let reply = &core.convs[&conv].messages[before + 1];
+            assert_eq!(reply.text, "The build passed.", "what the agent said after its command reaches the person");
+            assert_ne!(reply.status, Some(Status::Streaming));
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_turn_the_cli_began_where_none_may_run_is_interrupted() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        type Refuse = fn(&mut Conversation);
+        let cases: [(&str, Refuse); 3] = [
+            ("the person stopped it", |c| c.stopped = true),
+            ("it is archived", |c| c.archived_at = Some(1)),
+            ("it is being compacted", |c| c.compacting = true),
+        ];
+        for (n, (why, refuse)) in cases.into_iter().enumerate() {
+            let (conv, interrupts) = at_rest(&engine);
+            engine.with_saves(false, |core| {
+                refuse(core.convs.get_mut(&conv).unwrap());
+                let before = core.convs[&conv].messages.len();
+                core.handle(&conv, 1, EngineEvent::OwnTurn);
+                assert_eq!(core.convs[&conv].messages.len(), before, "case {n}, {why}: nothing joins the conversation");
+                assert_eq!(core.live[&conv].turn, None, "case {n}, {why}");
+                assert_eq!(interrupts.load(Ordering::SeqCst), 1, "case {n}, {why}: the turn does not work unseen");
+            });
+        }
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn a_child_report_retries_after_a_full_parent_inbox_has_room() {
