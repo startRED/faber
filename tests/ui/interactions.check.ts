@@ -9,7 +9,7 @@ import { check, equal, finished, ok } from './check.ts';
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-check('interaction: the running column uses entrance and exit timing while the thread width moves without a jump', async () => {
+check('interaction: the running column uses entrance and exit timing while the thread settles in one step', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:600px';
   root.dataset.motion = 'full';
@@ -39,28 +39,19 @@ check('interaction: the running column uses entrance and exit timing while the t
     let open = closed;
     let taken = 0;
     for (const opening of [true, false]) {
-      const before = thread.getBoundingClientRect().width;
       toggle(opening);
       await settle(20);
-      const animation = main.getAnimations()[0];
-      ok(animation, 'the actual stage has a FLIP animation');
-      const duration = opening ? 220 : 80;
-      equal(Number(animation.effect!.getComputedTiming().duration), duration, 'the stage uses the entrance or exit token');
+      equal(main.getAnimations().length, 0, 'the stage never animates: it settles in one step');
       equal(shell.getAnimations().length, 0, 'no layout animation on the grid');
-      animation.pause();
-      animation.currentTime = 0;
-      ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'the first frame retains the previous thread width');
-      animation.currentTime = duration / 3;
-      const early = thread.getBoundingClientRect().width;
-      animation.currentTime = duration * 2 / 3;
-      const later = thread.getBoundingClientRect().width;
-      ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames within its duration');
       if (opening) {
         const entrance = column.getAnimations()[0]!;
         entrance.pause();
         entrance.currentTime = 0;
         equal(getComputedStyle(column).opacity, '0');
         ok(new DOMMatrix(getComputedStyle(column).transform).m41 > 0, 'the column slides in from the right');
+      } else {
+        const ghost = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.motion-exit');
+        equal(Number(ghost?.getAnimations()[0]?.effect?.getComputedTiming().duration), 80, 'the column leaves in the exit token');
       }
       await finish();
       if (opening) [open, taken] = [thread.getBoundingClientRect().width, column.getBoundingClientRect().width];
@@ -75,22 +66,6 @@ check('interaction: the running column uses entrance and exit timing while the t
       equal(main.getAnimations().length, 0);
       equal(column.getAnimations().length, 0);
       equal(document.querySelector('.motion-exit'), null);
-    }
-    // An interrupted opening starts its exit at the currently rendered width too.
-    root.dataset.motion = 'full';
-    toggle(true);
-    await settle(20);
-    const entering = main.getAnimations()[0];
-    if (entering) {
-      entering.pause();
-      entering.currentTime = 60;
-      const before = thread.getBoundingClientRect().width;
-      toggle(false);
-      await settle(0);
-      const exiting = main.getAnimations()[0]!;
-      exiting.pause();
-      exiting.currentTime = 0;
-      ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'an interrupted toggle also retains its current width');
     }
     await finish();
   } finally {

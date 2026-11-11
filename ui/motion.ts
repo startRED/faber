@@ -188,11 +188,9 @@ export function animateList(root: HTMLElement, subtree = false): void {
         return;
       }
       const offsets = new Map<HTMLElement, DOMMatrix>();
-      const widths = new Map<HTMLElement, number>();
       for (const el of items) {
         if (el.dataset.exiting === 'true') continue;
         if (!animations.has(el)) continue;
-        if (el.matches('.main')) widths.set(el, el.getBoundingClientRect().width);
         const transform = getComputedStyle(el).transform;
         offsets.set(el, transform === 'none' ? new DOMMatrix() : new DOMMatrix(transform));
         animations.get(el)?.cancel();
@@ -237,23 +235,18 @@ export function animateList(root: HTMLElement, subtree = false): void {
         if (el.dataset.exiting === 'true') continue;
         const previous = before.get(el);
         const rect = next.get(el)!;
-        if (el === side) continue;
+        // The stage never travels or stretches: it settles in one step beside a layer that slides (docs/design/looks.md).
+        if (el === side || el.matches('.main')) continue;
         if (!rect.width || !rect.height || (el.matches('.runcol, .scrim') && level(root) !== 'full')) continue;
         let animation: Animation | undefined;
         if (!previous) {
           const delay = root.matches('.rc-body, .s-main') ? arrivals++ * (parseFloat(getComputedStyle(root).getPropertyValue('--motion-stagger')) || 18) : 0;
           animation = play(el, [{ opacity: 0, transform: offsetOf(el) }, { opacity: 1, transform: 'translate(0)' }], false, delay);
-        } else if (level(root) === 'full' && (Math.abs(previous.x - rect.x) > 0.5 || Math.abs(previous.y - rect.y) > 0.5 || (el.matches('.main') && Math.abs(previous.width - rect.width) > 0.5))) {
+        } else if (level(root) === 'full' && (Math.abs(previous.x - rect.x) > 0.5 || Math.abs(previous.y - rect.y) > 0.5)) {
           const offset = offsets.get(el);
           const y = document.documentElement.dataset.base === 'oficina' ? 0 : previous.y + (offset?.m42 ?? 0) - rect.y;
           const from: Keyframe = { transform: `translate(${previous.x + (offset?.m41 ?? 0) - rect.x}px, ${y}px)` };
           const to: Keyframe = { transform: 'translate(0, 0)' };
-          if (el.matches('.main') && Math.abs(previous.width - rect.width) > 0.5) {
-            from.width = `${widths.get(el) ?? previous.width}px`;
-            to.width = `${rect.width}px`;
-            from.boxShadow = to.boxShadow = 'none';
-            from.borderRadius = to.borderRadius = '0px';
-          }
           animation = play(el, [from, to], closingColumn);
         }
         if (animation) {

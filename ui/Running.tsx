@@ -134,7 +134,7 @@ export function Running(props: {
     return `${turns} · ${t('run.kg.since', { time: t(e.key, { n: e.n }) })}`;
   };
   return (
-    <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
+    <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={(el) => { props.ref(el); animateList(el); }}>
       <Show when={props.details} fallback={<>
       <Show
         when={props.agent}
