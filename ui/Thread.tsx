@@ -246,6 +246,8 @@ function startedChild(tool: ToolUse): string | undefined {
   const conversation = tool.name === 'Conversation' && (!action || action === 'start');
   const command = ['Bash', 'PowerShell', 'commandExecution'].includes(tool.name);
   if (!conversation && !command) return undefined;
+  // A reply reads this for each of its steps whenever it changes: most commands start nothing, and one scan says so.
+  if (command && !tool.output.includes('"conversation_started"')) return undefined;
   try {
     if (conversation) return (JSON.parse(tool.output.trimEnd().split('\n').at(-1) ?? '') as { childId?: string }).childId;
     for (const line of tool.output.split('\n').reverse()) {
@@ -550,7 +552,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // which then replaces the card under each start step. A reply with no helper gets a block of its own (`Crew`) after the
   // steps that hold its first start.
   const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
-  const starts = createMemo(() => tools().flatMap((tool) => { const id = startedChild(tool); return id ? [{ id, tool: tool.id }] : []; }), [], { equals: (a, b) => sameIds(a.map((s) => s.id + s.tool), b.map((s) => s.id + s.tool)) });
+  // Read from the message, not from `tools()`: that list stays the same while a step's output keeps its length, and the
+  // conversation a step started is in what its output says.
+  const starts = createMemo(() => (m().tools ?? []).flatMap((tool) => { const id = startedChild(tool); return id ? [{ id, tool: tool.id }] : []; }), [], { equals: (a, b) => sameIds(a.map((s) => s.id + s.tool), b.map((s) => s.id + s.tool)) });
   const hasTeam = createMemo(() => parts().some((part) => part.kind === 'team'));
   const mine = (id: string) => !!props.conversations?.some((c) => c.id === id && c.startedBy === props.conversationId);
   const crewAt = createMemo(() => {
