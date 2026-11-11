@@ -159,3 +159,4 @@ export async function runChecksOnBoot(): Promise<void> {
 }
 
 import './agent-ask.check.ts';
+import './team.check.ts';

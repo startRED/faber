@@ -45,8 +45,9 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
+import { agentState, agentWord, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
+import { Team } from './Team.tsx';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -478,9 +479,21 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // Its own memo, so a tick that adds only words never parses the thinking again.
   const thinkingText = createMemo(() => m().thinking ?? '');
   const thinking = createMemo(() => thinkingParts(thinkingText()));
-  // A helper always comes from the AI that is not running the reply.
+  // Older helper records have no selected profile; they used the other AI.
   const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const agents = createMemo(() => agentSteps(tools(), helperKind(), undefined, m().review?.rounds, m().acts));
+  const [teamAnnouncement, setTeamAnnouncement] = createSignal('');
+  const announced = new Map<string, string>();
+  createEffect(() => {
+    if (!tools().some((tool) => tool.name === 'Helper')) return;
+    const changed: string[] = [];
+    for (const step of agents()) {
+      const state = agentState(step, working());
+      if (announced.has(step.call.id) && announced.get(step.call.id) !== state) changed.push(`${step.title}: ${t(agentWord(step, working()))}`);
+      announced.set(step.call.id, state);
+    }
+    if (changed.length) setTeamAnnouncement(changed.join('. '));
+  });
   // The agent's own tools, without its subagents' (each subagent's sit in its own row).
   const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
   // The reply as it happened: words, thinking and steps in their order (W1). Each part that did not change keeps its object, so
@@ -668,6 +681,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         {(part, i) => {
           const words = () => { const p = part(); return p.kind === 'text' ? p : undefined; };
           const block = () => { const p = part(); return p.kind === 'steps' ? p.items : []; };
+          const team = () => {
+            const p = part();
+            return p.kind === 'team' ? p.tools.flatMap((tool) => { const member = agentOf(tool.id); return member ? [member] : []; }) : [];
+          };
           const step = createMemo(() => { const p = part(); return p.kind === 'agent' ? agentOf(p.tool.id) : undefined; });
           // The row keeps the last step it showed while its place changes kind, so it never reads an empty one.
           let seen: AgentStep | undefined;
@@ -685,6 +702,9 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
               <Match when={part().kind === 'steps'}>
                 <Steps conversationId={props.conversationId} conversations={props.conversations} running={props.running} onOpenChild={props.onOpenChild} items={block} working={working()} last={i === parts().length - 1} long={longFor()} workingFolder={props.workingFolder} previewId={i === parts().length - 1 ? changing() : undefined} />
               </Match>
+              <Match when={part().kind === 'team'}>
+                <Team members={team()} streaming={working()} lead={m().vendor} leadModel={m().model} conversationId={props.conversationId} messageId={m().id} />
+              </Match>
               <Match when={step()}>
                 <div class="agents" role="list" aria-label={t('agent.label')}>
                   <AgentRow step={shownStep} vendor={m().vendor === 'claude' || m().vendor === 'codex' ? m().vendor as 'claude' | 'codex' : undefined} streaming={working()} conversationId={props.conversationId} messageId={m().id} />
@@ -701,10 +721,11 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
       {/* One polite region for the whole reply, so a screen reader hears each check end and the first failure. */}
-      <Show when={working()}>
-        <div class="tally-live" role="status" aria-live="polite" aria-atomic="true">
-          <Show when={tally().ran}>
-            <p class="tally" classList={{ bad: tally().failed > 0, project: props.area === 'project' }}>
+      <Show when={working() || agents().some((step) => step.helper)}>
+        <div class="tally-live" role="status" aria-live="polite" aria-atomic="false">
+          <span class="sr-only" aria-atomic="true">{teamAnnouncement()}</span>
+          <Show when={working() && tally().ran}>
+            <p class="tally" aria-atomic="true" classList={{ bad: tally().failed > 0, project: props.area === 'project' }}>
               <Show when={!tally().failed}>
                 <Icon name="check" small />
               </Show>

@@ -276,6 +276,10 @@ export interface AgentStep {
   kind: string;
   /** A helper from the other AI, not a subagent of the agent's own CLI. */
   helper: boolean;
+  vendor?: 'claude' | 'codex';
+  model?: string;
+  effort?: string;
+  job?: string;
   /** The whole brief the agent sent it, word for word; empty when the CLI gives none (Codex names its subagents only). */
   brief: string;
   /** What the subagent ran, in order. */
@@ -318,10 +322,10 @@ export function agentState(step: AgentStep, streaming: boolean): AgentState {
   const { ok, declined, sign } = step.call;
   if (ok === undefined) {
     if (step.call.interrupted) return 'stopped';
-    if (!streaming) return step.background ? 'background' : 'stopped';
+    if (!streaming && (!step.call.team || step.call.team.state === 'ended')) return step.background ? 'background' : 'stopped';
     if (step.call.team?.state === 'waitingLead') return 'waitingLead';
     if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
-    return step.background ? 'background' : 'running';
+    return step.background || !streaming ? 'background' : 'running';
   }
   if (declined) return 'declined';
   return ok ? 'done' : 'failed';
@@ -423,6 +427,10 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
       named: namedOf(call),
       kind: call.name === 'Review' ? t('review.kind') : helper ? helperModel : text(input.subagent_type),
       helper,
+      vendor: act?.actor.who === 'ai' ? act.actor.vendor : undefined,
+      model,
+      effort: act?.params?.effort,
+      job: call.team?.job ?? job,
       brief: text(helper ? input.brief : input.prompt).trim(),
       tools: own.get(call.id) ?? [],
       report: agentReport(call.output),
