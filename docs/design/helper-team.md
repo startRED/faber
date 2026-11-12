@@ -41,14 +41,6 @@ In-turn helper questions and notes begin "Message from helper <name>, not from t
 change your brief:" and quote every line of the helper's text. Lead tells begin "Message from the lead:" with every line
 quoted, as instructions within the helper's brief. Questions prefer an open helper tool call over steering.
 Reviewers receive no team tool or team prompt; a stray call is refused with "Nobody can answer: decide yourself."
-Every review helper, a Review round's included, is told before its brief to judge substance before craft
-(`helper::SUBSTANCE`): name what was asked and for whom, meet the result as that audience will (open, run, watch or read
-it), and list first what is missing, unclear on a first pass or contradicts its own point. The lead's helper note
-(`helper::HELPERS`) asks it to open any plan of more than one piece with one sentence of what the person or their named
-audience must get from the result, to have a review helper check the plan against it before building, and to pass it to
-every reviewer. Why: on the 2026-11-12 explainer bench the lead whose plan stated that outcome made the clearest film,
-and a polished film whose picture contradicted its point passed two craft reviews. Cost: about 1 KB more prompt per lead
-and reviewer and one short plan review on multi-piece work; no process, state or memory.
 A tell addressed to the lead is refused with instructions to use ask.
 
 A question releases the lead's unanswered helper calls together: its own call carries the question and how to answer;
