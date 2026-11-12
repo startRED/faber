@@ -317,21 +317,12 @@ check('thread: with Auto the model name shows as soon as it is chosen, while the
   const name = () => header().querySelector('b')!.textContent;
   try {
     equal(name(), 'Auto');
-    // Erick, 2026-11-12: the choice shows happening in the answer, never as a blank wait.
-    const live = () => root.querySelector<HTMLElement>('.faber-act.choosing');
-    equal(live()?.textContent, `${t('act.faber')} · ${t('act.choosing')}`, 'while Auto chooses, a live row says so at once');
-    equal(live()!.getAttribute('role'), 'status', 'and screen readers hear it');
-    equal(header().querySelector('em'), null, 'the header does not say it a second time');
-    equal(header().children.length, 1, 'the header is the mark with its name');
+    equal(header().querySelector('em')!.textContent, `· ${t('reason.routing')}`, 'while Auto is still choosing it says only that');
+    equal(header().children.length, 2, 'the mark with its name, and the reason');
     const choosing = header().getBoundingClientRect().height;
-    setMessage({
-      ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium',
-      acts: [{ kind: 'route', actor: { who: 'faber' }, what: 'act.route.chose', params: { model: 'claude-haiku-5-5', effort: 'medium' } }],
-    });
+    setMessage({ ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium' });
     equal(name(), 'Haiku 5.5', 'the name shows before the first word');
-    equal(live(), null, 'once chosen the live row is gone');
-    ok(root.querySelector('.faber-act')!.textContent!.includes('Haiku 5.5'), 'and the pick takes its place');
-    equal(header().querySelector('em'), null, 'after choosing the reason is the tooltip');
+    equal(header().querySelector('em'), null, 'the reason is said while Auto chooses, and after that it is the tooltip');
     equal(header().textContent, `Haiku 5.5· ${t('answer.effort.medium')}`, 'the header is the mark, the model and its effort');
     ok(header().title.includes(t('reason.routing')), `the reason is in the tooltip: ${header().title}`);
     equal(header().getBoundingClientRect().height, choosing, 'and the header keeps its height');

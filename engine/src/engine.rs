@@ -5609,9 +5609,10 @@ impl Core {
             let only = before.as_ref().map(|p| p.vendor);
             let file_bytes = req.files.iter().map(|f| f.base64.len() / 4 * 3).sum();
             let reading = self.reading(&id, req.text.chars().count(), req.images.len(), file_bytes, before.as_ref());
+            let cold = before.is_none() && area == Area::Project;
             let mut route = match given {
                 Some(verdict) => auto::ready(verdict),
-                None => self.route_for(&id, &req.text, req.images.len() + req.files.len(), only),
+                None => self.route_for(&id, &req.text, req.images.len() + req.files.len(), only, cold),
             };
             if before.is_some() {
                 let verdict = route.try_recv().ok().flatten();
@@ -5626,7 +5627,7 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let result = tokio::time::timeout(auto::FIRST_BUDGET, route).await;
+                let result = tokio::time::timeout(auto::budget(cold), route).await;
                 let failed = !matches!(&result, Ok(Ok(None)) | Ok(Ok(Some((Some(_), _)))));
                 let verdict = result.ok().and_then(|r| r.ok()).flatten().and_then(|(v, actor)| v.map(|v| (v, actor)));
                 if let Some(core) = me.upgrade() {

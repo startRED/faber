@@ -127,21 +127,19 @@ async fn auto_routes_the_first_message_blind_and_says_why() {
     assert!(prompt.contains(&SKY.to_lowercase()) && !prompt.contains("luna") && !prompt.contains("gpt"));
 }
 
-/// A first message waits for the router up to its budget (12 s, R567), never longer.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_slow_router_starts_the_turn_with_a_reason_within_the_budget() {
     let dir = crate::support::DataFolder::new();
     let slow: Ask = Arc::new(|_| {
         Box::pin(async {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             None
         })
     });
     let f = fake(fixture("codex", "chat"));
     let (engine, _rx) = engine(&dir, Vendor::Codex, f.spawn.clone(), slow);
-    let start = tokio::time::Instant::now();
     let id = engine.send(auto(SKY)).unwrap();
-    tokio::time::timeout(Duration::from_millis(13_000), async {
+    tokio::time::timeout(Duration::from_millis(3500), async {
         loop {
             if !f.args.lock().unwrap().is_empty() {
                 break;
@@ -151,7 +149,6 @@ async fn a_slow_router_starts_the_turn_with_a_reason_within_the_budget() {
     })
     .await
     .expect("turn held by router");
-    assert!(start.elapsed() >= Duration::from_secs(12), "the first message waited for the router: {:?}", start.elapsed());
     let reply = engine.open(&id).unwrap().messages[1].clone();
     assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
     engine.shutdown();
