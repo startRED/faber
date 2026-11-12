@@ -17,13 +17,14 @@ the first that applies:
 1. The browser tool this session offers, at a desktop and a phone size.
 2. The project's own screenshot or end-to-end harness.
 3. An installed Chromium browser (Chrome, Edge, Brave) run headless, which opens no window. Find the program, then:
-   `<browser> --headless --disable-gpu --hide-scrollbars --user-data-dir=<temp>/profile --screenshot=<temp>/desktop.png --window-size=1280,900 <file:/// address or local URL>`
+   `<browser> --headless --disable-gpu --hide-scrollbars --user-data-dir=<look>/profile --screenshot=<look>/desktop.png --window-size=1280,900 <file:/// address or local URL>`
    A headless window does not go narrower than about 500px: a smaller `--window-size` crops the picture instead of
    narrowing the page. For the phone, write a temporary wrapper page next to the pictures,
    `<body style="margin:0"><iframe src="<address>" width="390" height="844" style="border:0"></iframe>`, and take its
    picture with `--window-size=390,844`. Raise both heights (such as 2600) to see a long page whole.
-   Keep pictures and profile in the system's temporary folder, never in the project or the person's own browser
-   profile, and delete them when finished.
+   `<look>` is `.faber/verify/look` inside the working folder: a sandboxed agent can write the system's temporary
+   folder yet not open a picture from it, and `.faber/verify` stays out of git (create it with a `.gitignore` holding
+   `*` when missing). Never use the person's own browser profile, and delete `<look>` when finished.
 
 Read both pictures as the person would. Is anything clipped, overlapping or off-screen? Is every text readable on
 the phone, including text inside drawings? Does the wide layout use its width with intent, or is it a phone column
@@ -35,7 +36,10 @@ change, however small.
 
 A picture does not prove behavior. To exercise a page's script with no window, make a temporary copy of the page
 that ends with a short script which clicks and types through the flow and writes what it observed into the page,
-then read it back: `<browser> --headless --disable-gpu --user-data-dir=<temp>/profile --virtual-time-budget=3000 --dump-dom <address>`.
+then read it back: `<browser> --headless --disable-gpu --user-data-dir=<look>/profile --virtual-time-budget=3000 --dump-dom <address>`,
+sending its output to a file in `<look>` and reading the file, since a sandbox can swallow a browser's printed output.
+When a way of looking or exercising fails for a reason outside the page (the sandbox, a tool, a missing program),
+try the next way above before calling anything unverified; a check that could not run is never a finding about the page.
 
 Finish, do not offer. Run every check you can run yourself before the closing message; never end by asking
 whether to run one. Ask the person only for a decision that is theirs. The request is done when it is met, seen

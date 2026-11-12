@@ -512,7 +512,7 @@ Context7 and sequential-thinking are available in Chat with Full access; Playwri
 
 Catalog servers do not inherit Faber secrets or Node preload variables. Claude Code uses `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1` when catalog servers are offered; personal servers must set needed values in their own `env`. Checks: `engine/tests/claude_session.rs` and `engine/tests/codex_session.rs`.
 
-The first-party guide includes `frontend-craft` and `frontend-proof` (see [Frontend craftsmanship](product/frontend.md)). Their instructions cover frontend work, form input metadata, completed slow operations and focus during list updates.
+The first-party guide includes `frontend-craft` and `frontend-proof` (see [Frontend craftsmanship](product/frontend.md)). Their instructions cover frontend work, form input metadata, completed slow operations and focus during list updates; proof pictures and page results stay in the working folder's `.faber/verify/look` so a sandboxed agent can read them back.
 
 Faber repairs its first-party guide and frontend skills at launch. The guide follows the screen language; the frontend skills remain in English.
 

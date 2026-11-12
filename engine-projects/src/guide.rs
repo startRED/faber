@@ -253,6 +253,11 @@ mod tests {
                 && skill("frontend-craft").contains("## Pages that teach")
         );
         assert!(skill("frontend-proof").contains("--headless") && skill("frontend-proof").contains("width=\"390\""));
+        // Bench 2026-11-12 (rainbow page on Codex): pictures and a --dump-dom result kept in the system's temporary folder
+        // could not be read back inside the sandbox, so the agent stopped with the quiz "unverified" on a working page.
+        let proof = skill("frontend-proof");
+        assert!(proof.contains("`<look>` is `.faber/verify/look` inside the working folder") && !proof.contains("<temp>"));
+        assert!(proof.contains("sending its output to a file in `<look>`") && proof.contains("try the next way above"));
         assert!(Guide::Off.note().is_none(), "internal requests receive no skills");
         let fallback = Guide::Text(Language::En).note().unwrap();
         assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));

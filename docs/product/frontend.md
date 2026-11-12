@@ -18,6 +18,10 @@ create no new setting, catalog card, tool, model, timer, process or permission t
 For a new composition or identity, frontend-craft explicitly complements an applicable installed art-direction
 workflow. A local behavior repair keeps the existing identity. The proof workflow checks the actual completion of
 a slow path; an independent instant-success mode cannot establish that the waiting path really finishes.
+Its headless pictures, browser profile and `--dump-dom` results go to `.faber/verify/look` in the working folder and
+are read back from files: on 2026-11-12 a sandboxed agent wrote them to the system's temporary folder, could not read
+them back, and stopped with a working quiz "unverified". A check that cannot run sends the agent to the next way of
+looking, never to a stop.
 
 - Claude Code in Projects discovers them as native skills of the existing private plugin, with only descriptions
   resident until needed. Both files are explicitly allowed for instruction loading, alongside the guide.
