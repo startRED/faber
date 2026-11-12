@@ -87,3 +87,6 @@ Helper rows with a known AI show its actor mark beside its name and state.
 Review rounds reuse the subagent row: each round shows its score and nests its reviewer helpers. Opening a round shows
 five scores, agreed findings and folded single-reviewer notes; the reply keeps a quiet final score and stop reason. The
 round details exist in the page only while their view is open. No timer or new process is added by the screen.
+
+A Codex item that completes with no status of its own, such as `imageView` when the agent looks at a picture, is a
+finished step (`engine-drivers/src/codex.rs`): until 2026-11-12 every picture an agent looked at showed as a failed step.

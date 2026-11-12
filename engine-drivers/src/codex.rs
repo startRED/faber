@@ -622,7 +622,9 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEven
             if NOT_TOOLS.contains(&kind) || kind == "collabAgentToolCall" || kind == "subAgentActivity" {
                 return vec![];
             }
-            let ok = item["status"] == "completed" && item["success"] != false && (item["exitCode"].is_null() || item["exitCode"] == 0);
+            // An item with no status of its own (Codex's `imageView`) ended when it completes: it was shown as a failed step.
+            let finished = item["status"] == "completed" || item["status"].is_null();
+            let ok = finished && item["success"] != false && (item["exitCode"].is_null() || item["exitCode"] == 0);
             let text = if kind == "dynamicToolCall" {
                 item["contentItems"]
                     .as_array()
@@ -3992,5 +3994,28 @@ mod rewind_tests {
         })
         .await
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod image_view_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_picture_the_agent_looked_at_is_a_finished_step_and_a_failed_command_still_fails() {
+        let mut state = CodexTurnState::default();
+        let done = |item: Value, state: &mut CodexTurnState| {
+            parse_codex_notification(&json!({"method":"item/completed","params":{"threadId":"t","item":item}}), state).into_iter().find_map(
+                |e| match e {
+                    EngineEvent::ToolResult { ok, .. } => Some(ok),
+                    _ => None,
+                },
+            )
+        };
+        let view = json!({"id":"v","type":"imageView","path":"look/phone.png","startedAtMs":1,"completedAtMs":2});
+        assert_eq!(done(view, &mut state), Some(true));
+        let failed = json!({"id":"c","type":"commandExecution","command":"x","status":"failed","exitCode":1,"aggregatedOutput":"failed"});
+        assert_eq!(done(failed, &mut state), Some(false));
     }
 }
