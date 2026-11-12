@@ -928,8 +928,10 @@ pub fn remove_follow_up(project: &Path, task: &crate::model::FollowUpTask) -> Re
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let dir = task_directory(project, false)?;
     let name = task_name(task)?;
+    // Opening for removal is refused while another reader holds the file (one listing the tasks, an indexer): wait for it
+    // as the store waits, about a second at most, instead of reporting the task refused.
     #[cfg(windows)]
-    let mut file = match dir.dir.removal_file(name) {
+    let mut file = match crate::store::retry_busy(|| dir.dir.removal_file(name)) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_) => return Err(REFUSED),
