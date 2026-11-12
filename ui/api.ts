@@ -213,7 +213,7 @@ export interface Message {
   /** True once the person said they read the held-back requests: they no longer count as "needs you". */
   parkedSeen?: boolean;
   incomplete?: boolean;
-  pace?: { kind: 'step' | 'fast' | 'low' | 'learned'; vendor: Vendor };
+  pace?: { kind: 'step' | 'fast' | 'low' | 'learned' | 'limit'; vendor: Vendor };
   /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
   mode?: string;
   /** A note under the reply, as an engine key (`note.historyResent`). */

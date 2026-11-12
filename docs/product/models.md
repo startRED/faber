@@ -69,7 +69,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   greeting first) may a later verdict also select a stronger model, inside the same subscription so the CLI keeps the history. Once a message
   needed more, the conversation stays with that model. One usable model/effort profile needs no classifier. Otherwise,
   the native router runs while the person types, with up to 30 s for CLI startup and inference. Sending reuses a finished,
-  still-matching draft verdict or waits up to 2.5 s for one being read; a project's first message asks on send and
+  still-matching draft verdict; a first message with none (pasted, sent at once, a brief nobody typed), in Chat or a project, asks on send and
   waits up to 12 s. With no verdict a first message runs the table's row for its area's usual work (hard code, medium
   chat); a later one keeps its choice. Reusing an easy route preserves its eligibility for later drafts, even
   after an immediate send or a temporary single-profile limit; the displayed explanation is separate from that marker.
@@ -82,7 +82,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   Codex app-server when Luna is available and allowed, otherwise a separate Claude Haiku process for that request.
 - Open hard work gets the expert bar, and open medium work the hard one (the everyday model: Opus or Sol at medium), except
   chat, which stays fast, and easy work, which stays easy: the smaller models are for work whose result one sentence can
-  state. An unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. A verdict never reaches summit directly; spare quota or a learned rung can lift frontier to summit, currently cleared only by Fable high. Nothing steps above summit.
+  state. An unsure verdict or a blind task where quality matters adds one rung, up to frontier (intelligence 56, coding 46). Missing or unknown scope is tight. Projects use the same agent-work floor as code at every level, even for writing or research. The original difficulty still names the visible reason. A verdict reaches summit directly only when the person asks outright for the strongest model, the highest effort or the best quality (the router's `best`, Erick 2026-11-12); otherwise spare quota or a learned rung can lift frontier to summit, currently cleared only by Fable high. When the quota gate leaves out every model that clears the bar, the strongest one left answers and its header says which subscription is near its limit (`reason.pace.limit`): quota brakes, never silently. Nothing steps above summit.
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
