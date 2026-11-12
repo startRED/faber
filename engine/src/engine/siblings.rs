@@ -536,7 +536,9 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return };
         let Some(parent) = c.started_by.clone() else { return };
         let state = state_of(busy, c);
-        if c.keep_going.is_some() || c.compacting || reports_later(busy, c) {
+        // A member waiting for its own background command has not stopped: the command's end continues it.
+        let command = self.live.get(conv).is_some_and(|l| l.command_wait.is_some());
+        if c.keep_going.is_some() || c.compacting || command || reports_later(busy, c) {
             return;
         }
         let reply = c.messages.iter().rev().find(|m| m.role == Role::Assistant);

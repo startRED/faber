@@ -38,8 +38,10 @@ mod auto;
 mod auto_archive;
 mod browse;
 mod by_itself;
+mod carry_on;
 mod changes;
 mod closed;
+mod command_wait;
 mod compact;
 mod copies;
 mod creative_judges;
@@ -318,6 +320,8 @@ struct Live {
     retiring: bool,
     /// Arms the idle timer once per idle period when the running state is refreshed.
     was_idle: bool,
+    /// The turn ended while a background command it started still runs: the reply waits for it, not for the person.
+    command_wait: Option<command_wait::CommandWait>,
     /// The mode the CLI really runs: not `permissions` when the CLI lacks it (Claude Code without `auto`).
     runs: Permissions,
     /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
@@ -3851,6 +3855,8 @@ impl Core {
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
         }
+        // A background command of the turn still runs: the reply waits for it, not for the person.
+        self.arm_command_wait(conv, turn_id.as_deref());
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -3875,7 +3881,10 @@ impl Core {
         if !approving {
             self.keep_going_unless_compacting(conv, keep_going);
         }
-        self.request_conclusion(conv);
+        // A reply that stopped short of the job with no real question for the person goes on by itself (`carry_on.rs`).
+        if !self.carry_on(conv) {
+            self.request_conclusion(conv);
+        }
         self.turn_ended(conv);
         self.try_seal_rewind(conv);
     }
@@ -3886,6 +3895,7 @@ impl Core {
         !self.live.get(conv).is_some_and(|l| l.turn.is_some())
             && !self.background.running_in(conv)
             && !self.helpers_in(conv)
+            && !self.live.get(conv).is_some_and(|l| l.command_wait.is_some())
             && !self.rewind_writing(conv)
             && !self.compacts.contains_key(conv)
             && self.convs.get(conv).is_none_or(|c| {
@@ -5334,6 +5344,7 @@ impl Core {
                 research,
                 retiring: false,
                 was_idle: false,
+                command_wait: None,
                 runs,
                 cwd: cwd_used,
                 visual_root: None,
@@ -6231,7 +6242,8 @@ fn unseen(c: char) -> bool {
 fn reply_needs_you(c: &Conversation, live: Option<&Live>) -> bool {
     running_item(c, live).is_some_and(|item| item.state == RunState::NeedsYou)
         || (c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming) || m.finished_at.is_some())
-            && ended::end_kind(c) == Some(EndKind::NeedsYou))
+            && ended::end_kind(c) == Some(EndKind::NeedsYou)
+            && command_wait::waiting_command(c, live).is_none())
 }
 
 fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
@@ -6251,7 +6263,8 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     // Keep going between two turns (waiting for a reset, an error to pass, a rest) is still at work: the list says until when,
     // and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
-    let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
+    // A reply that ended to wait for its own background command waits like Keep going does (`command_wait.rs`).
+    let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone()).or_else(|| command_wait::waiting_command(c, live));
     // An agent that waits for the conversations it started is not done: the row stays while it waits.
     let waiting_on = c.waiting_on.clone().filter(|_| reply.status != Some(Status::Streaming));
     let approved_work = reply.status == Some(Status::Done)
@@ -6571,6 +6584,7 @@ mod tool_in_tests {
             research: None,
             retiring: false,
             was_idle: false,
+            command_wait: None,
             runs: Permissions::Ask,
             cwd: data.path().to_path_buf(),
             visual_root: None,
@@ -6667,6 +6681,7 @@ mod tool_in_tests {
                         research: None,
                         retiring: false,
                         was_idle: false,
+                        command_wait: None,
                         runs: Permissions::Ask,
                         cwd: data.path().to_path_buf(),
                         visual_root: None,

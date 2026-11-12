@@ -643,6 +643,7 @@ export const de: Messages = {
   'wake.asked': 'Der Agent einer anderen Unterhaltung hat dieser eine Frage gestellt',
   'wake.childDone': "Eine Unterhaltung, die dieser Agent begonnen hat, ist fertig, und Faber hat ihre Antwort weitergegeben",
   'wake.commandDone': "Ein Befehl, den dieser Agent laufen ließ, ist fertig, und er hat von selbst weitergemacht",
+  'wake.carryOn': "Faber hat ihn gebeten, die Arbeit fertigzustellen, statt auf halbem Weg aufzuhören",
   'wake.compacted': 'Faber hat die Unterhaltung verdichtet',
   'wake.compactFailed': 'Faber konnte die Unterhaltung nicht verdichten',
   'wake.cleared': 'Faber hat für die nächste Aufgabe einen frischen Kontext begonnen',

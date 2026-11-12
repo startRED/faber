@@ -60,12 +60,12 @@ const QUICK_MS: u64 = 60_000;
 /// The longest it waits for a background command of the conversation before it looks again; the command's end wakes it sooner.
 const COMMAND_WAIT: f64 = 900.0;
 /// After that command ended, Faber sends the next turn this much later.
-const COMMAND_GRACE: f64 = 2.0;
+pub(super) const COMMAND_GRACE: f64 = 2.0;
 /// The same for Claude Code, which tells its agent itself: that turn joins the conversation (`own_turn`) and takes this wait
 /// off. Faber's own turn is only the net under it, far enough away that the two do not cross in practice: a turn of
 /// Faber's sent while the CLI was starting its own would take the CLI's answer as its reply and then run a second time.
 /// Nothing in the driver rules that out for a CLI that takes longer than this to start.
-const COMMAND_OWN: f64 = 120.0;
+pub(super) const COMMAND_OWN: f64 = 120.0;
 /// Errors that do not mend by waiting: one that comes twice in a row ends it.
 const PERMANENT: [&str; 6] =
     ["error.notConnected", "error.noSubscription", "error.workingFolder", "error.projectGone", "error.conversationGone", "error.keepGoing"];
@@ -849,6 +849,7 @@ impl Core {
     /// The last background command of a conversation ended while it rested to wait for it: the next turn goes out after
     /// a moment, unless the CLI's own turn about it came first (`COMMAND_OWN`).
     pub(super) fn command_ended(&mut self, conv: &str) {
+        self.command_wait_ended(conv);
         if self.background.running_in(conv) {
             return;
         }

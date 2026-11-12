@@ -887,7 +887,8 @@ async fn the_agent_keeps_a_plan_says_what_it_does_now_and_closes_with_a_box() {
     // A wrong call is answered as an error the agent can read, and changes nothing.
     let (said, error) = calls(&mut pipe, "w0", "wrap_up", json!({ "ask": "Ship it?" })).await;
     assert!(error && said.contains("outcome"), "{said}");
-    let box_ = json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The rest is not checked yet.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
+    // A plain question with nothing listed as left: a box with work left would be sent on (`carry_on.rs`).
+    let box_ = json!({ "outcome": "needs_you", "did": "Fixed the login page.", "result": "The login page works.", "ask": "Check the rest now?", "actions": ["Yes", "Later"] });
     let (said, error) = calls(&mut pipe, "w1", "wrap_up", box_).await;
     assert!(!error && said.to_lowercase().contains("end your turn"), "{said}");
     assert!(said.contains("Results: 0 files, 0/0 checks passed, 0 commits, 0 pull requests, 0 artifacts, 0 answers; cost:"), "{said}");

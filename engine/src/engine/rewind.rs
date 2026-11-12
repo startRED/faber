@@ -1476,6 +1476,7 @@ mod tests {
                     research: None,
                     retiring: false,
                     was_idle: false,
+                    command_wait: None,
                     runs: Permissions::Ask,
                     cwd: root.clone(),
                     visual_root: None,

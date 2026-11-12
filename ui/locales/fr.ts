@@ -643,6 +643,7 @@ export const fr: Messages = {
   'wake.asked': 'L’agent d’une autre conversation a posé une question à celle-ci',
   'wake.childDone': "Une conversation lancée par cet agent est terminée, et Faber lui a transmis sa réponse",
   'wake.commandDone': "Une commande que cet agent avait laissée tourner est terminée, et il a continué de lui-même",
+  'wake.carryOn': "Faber lui a demandé de finir le travail au lieu de s’arrêter en chemin",
   'wake.compacted': 'Faber a compacté la conversation',
   'wake.compactFailed': 'Faber n’a pas pu compacter la conversation',
   'wake.cleared': 'Faber a repris un contexte neuf pour la tâche suivante',

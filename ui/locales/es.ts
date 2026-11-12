@@ -804,6 +804,7 @@ export const es: Messages = {
   'wake.asked': 'El agente de otra conversación le preguntó algo a esta',
   'wake.childDone': "Una conversación que este agente empezó terminó, y Faber le pasó su respuesta",
   'wake.commandDone': "Un comando que este agente dejó en marcha terminó, y siguió por su cuenta",
+  'wake.carryOn': "Faber le pidió que terminara el trabajo en vez de parar a medias",
   'wake.compacted': 'Faber compactó la conversación',
   'wake.compactFailed': 'Faber no pudo compactar la conversación',
   'wake.cleared': 'Faber empezó un contexto nuevo para la siguiente tarea',

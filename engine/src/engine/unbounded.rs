@@ -186,6 +186,7 @@ mod tests {
                     research: None,
                     retiring: false,
                     was_idle: false,
+                    command_wait: None,
                     runs: crate::model::Permissions::Ask,
                     served: false,
                     unsaved_session: None,

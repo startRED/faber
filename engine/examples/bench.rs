@@ -408,6 +408,11 @@ async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64, baseli
         let Some(reply) = conversation.messages.last().filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming)) else {
             continue;
         };
+        // A reply that ended to wait for its own background command (a render) is still at work: the command's end continues it.
+        if !capped && engine.state().running.items.iter().any(|i| i.conversation_id == id && i.keep_wait.is_some()) {
+            quiet = None;
+            continue;
+        }
         if capped || reply.needs_you || matches!(reply.status, Some(Status::Error | Status::Stopped)) || !project {
             return (Some(conversation), capped);
         }

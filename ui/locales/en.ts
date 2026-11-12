@@ -804,6 +804,7 @@ export const en = {
   'wake.asked': "Another conversation's agent asked this one something",
   'wake.childDone': "A conversation this agent started finished, and Faber passed on its answer",
   'wake.commandDone': "A command this agent left running finished, and it went on by itself",
+  'wake.carryOn': "Faber asked it to finish the job instead of stopping halfway",
   'wake.compacted': 'Faber compacted the conversation',
   'wake.compactFailed': 'Faber could not compact the conversation',
   'wake.cleared': 'Faber started a fresh context for the next task',

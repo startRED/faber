@@ -145,8 +145,9 @@ impl Core {
         });
     }
 
-    fn can_request_conclusion(&self, conv: &str) -> bool {
-        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+    pub(super) fn can_request_conclusion(&self, conv: &str) -> bool {
+        // A turn that ended to wait for its background command concludes after it, not now.
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some() || l.command_wait.is_some())
             || self.compacts.contains_key(conv)
             || self.compactions.contains_key(conv)
             || self.room_refusal(conv).is_some()

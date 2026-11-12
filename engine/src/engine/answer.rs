@@ -524,6 +524,7 @@ pub(super) mod tests {
                 research: None,
                 retiring: false,
                 was_idle: false,
+                command_wait: None,
                 runs: Permissions::Ask,
                 by_hand: true,
                 approved: false,

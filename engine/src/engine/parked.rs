@@ -303,6 +303,7 @@ mod tests {
                     research: None,
                     retiring: false,
                     was_idle: false,
+                    command_wait: None,
                     runs: Permissions::FullAccess,
                     by_hand: true,
                     approved: false,

@@ -803,6 +803,7 @@ export const ptBR: Messages = {
   'wake.asked': 'O agente de outra conversa perguntou algo a esta',
   'wake.childDone': "Uma conversa que este agente começou terminou, e o Faber repassou a resposta dela",
   'wake.commandDone': "Um comando que este agente deixou rodando terminou, e ele continuou sozinho",
+  'wake.carryOn': "O Faber pediu pra terminar o trabalho em vez de parar no meio",
   'wake.compacted': 'O Faber compactou a conversa',
   'wake.compactFailed': 'O Faber não conseguiu compactar a conversa',
   'wake.cleared': 'O Faber começou um contexto novo para a próxima tarefa',

@@ -7,7 +7,7 @@ use crate::model::Wake;
 
 /// What stands in the conversation for the notice the CLI gave its agent. It is also what goes out again if the turn has to
 /// move to another AI, so it reads as an instruction.
-const OWN_TURN: &str = "A background command you started has ended. Read its result and go on with the task.";
+pub(super) const OWN_TURN: &str = "A background command you started has ended. Read its result and go on with the task.";
 
 impl Core {
     /// The CLI began a turn nobody sent. Claude Code tells its agent itself when a background command ends, and the agent

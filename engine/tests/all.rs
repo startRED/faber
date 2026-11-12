@@ -42,6 +42,8 @@ mod browser_tabs;
 mod budget;
 #[path = "cache_health.rs"]
 mod cache_health;
+#[path = "carry_on.rs"]
+mod carry_on;
 #[path = "changes.rs"]
 mod changes;
 #[path = "claude_session.rs"]
