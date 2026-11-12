@@ -5,8 +5,11 @@
 //!    removed, whether its worktree is alive or gone: sccache makes the rebuild cheap, and an idle cache holds 3 to 30 GB.
 //! 2. In every build profile (`debug`, `release`, nested ones), an artifact in `deps/` or an `incremental/` folder that
 //!    a newer build of the same crate replaced more than two hours ago is removed. A crate's newest build always stays.
-//! 3. If build output is still above the cap (12 GB, so all of Faber's builds on one PC stay under 15 GB), idle caches
-//!    are cleared, the least recently used first. A folder used in the last half hour belongs to a lane at work and stays.
+//!    Inside each crate's incremental folder only the newest finished session stays: rustc keeps the previous one (on
+//!    2026-11-12 half the crates of a cache held two, each as large as the other) and leaves those of killed builds.
+//! 3. If build output is still above the cap (24 GB, R463), idle caches lose their incremental state first, the least
+//!    recently used first, so only the lanes at work keep it; then idle caches are cleared, the least recently used
+//!    first. A folder used in the last half hour belongs to a lane at work and stays.
 //!
 //! A folder is never touched while Cargo holds its lock or one of its programs runs, and the main checkout's own
 //! folders (`debug`, `release`, `faber-test`) are only ever swept, never cleared. Lock files and ownership records stay.
@@ -16,9 +19,9 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// Above this, idle caches are cleared, so all of Faber's builds on one PC stay under 15 GB with `debug` (the owner,
-/// 2026-10-25).
-pub const CAP: u64 = 12 << 30;
+/// Above this, idle caches lose their incremental state, then are cleared (the owner, 2026-11-12, R463): incremental
+/// builds of the workspace crates cost about 8 GB a cache and save most of a lane's compile time.
+pub const CAP: u64 = 24 << 30;
 /// A cache nothing used for this long is cleared, and a replaced build this old leaves its profile.
 const IDLE: Duration = Duration::from_secs(2 * 60 * 60);
 /// How long a replaced build stays, so a build that just moved on can still go back cheaply.
@@ -180,6 +183,16 @@ impl Drop for Lease {
 
 /// Keep Cargo's lock files in place while deleting: replacing an open lock would let another build enter.
 fn remove_cache(dir: &Path) -> u64 {
+    clear_held(dir, false)
+}
+
+/// Removes only the incremental state of every profile in a cache: its dependencies and programs stay, and its next
+/// build compiles the changed workspace crates whole, once.
+fn remove_incremental(dir: &Path) -> u64 {
+    clear_held(dir, true)
+}
+
+fn clear_held(dir: &Path, incremental_only: bool) -> u64 {
     let Some(_lease) = Lease::take(dir) else { return 0 };
     let profiles = profiles(dir);
     let mut held = Vec::new();
@@ -213,7 +226,58 @@ fn remove_cache(dir: &Path) -> u64 {
             })
             .sum()
     }
+    if incremental_only {
+        return profiles.iter().map(|profile| profile.join("incremental")).filter(|dir| dir.is_dir()).map(|dir| remove(&dir)).sum();
+    }
     clear(dir)
+}
+
+fn incremental_size(dir: &Path) -> u64 {
+    profiles(dir).iter().map(|profile| size(&profile.join("incremental"))).sum()
+}
+
+/// rustc's session folders in one crate's incremental folder, each (name, modified, is a folder): every session but the
+/// newest finished one, and the lock files of the sessions that go. Called only with the profile's Cargo locks held, so
+/// no compiler uses any of them; a crate with no finished session keeps everything.
+pub fn stale_sessions(entries: &[(String, SystemTime, bool)]) -> Vec<String> {
+    let sessions = || entries.iter().filter(|(name, _, dir)| *dir && name.starts_with("s-"));
+    let Some((kept, ..)) = sessions().filter(|(name, ..)| !name.ends_with("-working")).max_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0))) else {
+        return Vec::new();
+    };
+    let lock_kept = |name: &str| name.strip_suffix(".lock").is_some_and(|stem| kept.starts_with(&format!("{stem}-")));
+    sessions()
+        .map(|(name, ..)| name)
+        .filter(|name| *name != kept)
+        .chain(entries.iter().filter(|(name, _, dir)| !*dir && name.starts_with("s-") && name.ends_with(".lock")).map(|(name, ..)| name))
+        .filter(|name| !lock_kept(name))
+        .cloned()
+        .collect()
+}
+
+/// Brings `report.after` under `cap`: idle caches lose their incremental state first, then whole idle caches go, the
+/// least recently used first each time. Each candidate is (name under `target` or absolute path, last used, busy).
+fn fit(target: &Path, candidates: Vec<(String, SystemTime, bool)>, report: &mut Report, cap: u64) {
+    let sized = |measure: fn(&Path) -> u64| -> Vec<(String, u64, SystemTime, bool)> {
+        candidates.iter().map(|(name, used, busy)| (name.clone(), measure(&target.join(name)), *used, *busy)).collect()
+    };
+    if report.after > cap {
+        for name in over_budget(sized(incremental_size), report.after, cap) {
+            let freed = remove_incremental(&target.join(&name));
+            report.after -= freed.min(report.after);
+            if freed > 0 {
+                report.removed.push(format!("{name} (incremental)"));
+            }
+        }
+    }
+    if report.after > cap {
+        for name in over_budget(sized(size), report.after, cap) {
+            let freed = remove_cache(&target.join(&name));
+            report.after -= freed.min(report.after);
+            if freed > 0 {
+                report.removed.push(name);
+            }
+        }
+    }
 }
 
 fn last_used(dir: &Path) -> SystemTime {
@@ -268,7 +332,26 @@ pub fn sweep_profile(profile: &Path, cutoff: SystemTime) -> u64 {
     };
     let deps = listed("deps", |name| dep_key(name).map(|(krate, ext)| format!("{krate}.{ext}")));
     let incremental = listed("incremental", |name| Some(name.rsplit_once('-')?.0.to_string()));
-    replaced(&deps, cutoff).iter().chain(&replaced(&incremental, cutoff)).map(|p| remove(p)).sum()
+    let replaced_bytes: u64 = replaced(&deps, cutoff).iter().chain(&replaced(&incremental, cutoff)).map(|p| remove(p)).sum();
+    let sessions: u64 = subdirs(&profile.join("incremental"))
+        .iter()
+        .map(|krate| {
+            let Ok(entries) = fs::read_dir(krate) else { return 0 };
+            let listed: Vec<_> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let kind = e.file_type().ok()?;
+                    (!kind.is_symlink()).then_some((
+                        e.file_name().to_str()?.to_string(),
+                        e.metadata().ok()?.modified().ok()?,
+                        kind.is_dir(),
+                    ))
+                })
+                .collect();
+            stale_sessions(&listed).iter().map(|name| remove(&krate.join(name))).sum::<u64>()
+        })
+        .sum();
+    replaced_bytes + sessions
 }
 
 /// Sweeps the shared `target` of the main checkout. `own` is this run's build folder, never removed whole.
@@ -300,16 +383,10 @@ pub fn sweep(target: &Path, own: &Path, now: SystemTime, cap: u64) -> Report {
             .into_iter()
             .map(|(name, dir)| {
                 let used = last_used(&dir);
-                (name, size(&dir), used, used + ACTIVE > now || busy(&dir))
+                (name, used, used + ACTIVE > now || busy(&dir))
             })
             .collect();
-        for name in over_budget(candidates, report.after, cap) {
-            let freed = remove_cache(&target.join(&name));
-            report.after -= freed.min(report.after);
-            if freed > 0 {
-                report.removed.push(name);
-            }
-        }
+        fit(target, candidates, &mut report, cap);
     }
     report
 }
@@ -320,7 +397,9 @@ pub fn due(target: &Path, now: SystemTime) -> bool {
     if mtime(&stamp) + EVERY > now {
         return false;
     }
-    File::create(stamp).is_ok()
+    // Truncating an empty file leaves its time on Windows, so the stamp is dated by hand: without it every command
+    // swept the whole folder (a stamp of 2026-11-09 still read due on 2026-11-12).
+    File::create(&stamp).and_then(|file| file.set_modified(now)).is_ok()
 }
 
 /// Sweeps Cargo output belonging to all registered checkouts under one budget.
@@ -354,7 +433,7 @@ pub fn sweep_worktrees(target: &Path, own: &Path, worktrees: &[PathBuf], now: Sy
         .map(|dir| {
             let used = last_used(&dir);
             let busy = dir == own || own.starts_with(&dir) || used + ACTIVE > now || busy(&dir);
-            (dir.to_string_lossy().into_owned(), size(&dir), used, busy)
+            (dir.to_string_lossy().into_owned(), used, busy)
         })
         .collect();
     candidates.extend(
@@ -369,16 +448,10 @@ pub fn sweep_worktrees(target: &Path, own: &Path, worktrees: &[PathBuf], now: Sy
             .map(|dir| {
                 let used = last_used(&dir);
                 let busy = used + ACTIVE > now || busy(&dir);
-                (dir.to_string_lossy().into_owned(), size(&dir), used, busy)
+                (dir.to_string_lossy().into_owned(), used, busy)
             }),
     );
-    for name in over_budget(candidates, report.after, cap) {
-        let freed = remove_cache(Path::new(&name));
-        report.after -= freed.min(report.after);
-        if freed > 0 {
-            report.removed.push(name);
-        }
-    }
+    fit(target, candidates, &mut report, cap);
     report
 }
 
@@ -515,6 +588,10 @@ mod tests {
         assert!(due(temp.path(), now));
         assert!(!due(temp.path(), now));
         assert!(due(temp.path(), now + EVERY * 2));
+        // An old, empty stamp: the sweep is due once, then not again within the hour.
+        write(&temp.path().join(STAMP), 0, DAY * 3);
+        assert!(due(temp.path(), now));
+        assert!(!due(temp.path(), now + Duration::from_secs(60)));
     }
 
     #[test]
@@ -608,5 +685,64 @@ mod tests {
         cargo.lock().unwrap();
         sweep_worktrees(&main.join("target"), &main.join("target"), &worktrees, later, 0);
         assert!(target.join("debug/keep").exists(), "Cargo owns this cache");
+    }
+
+    #[test]
+    fn only_the_newest_finished_incremental_session_stays_with_its_lock() {
+        let at = |secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs);
+        let entries = [
+            ("s-aaa-1-svh".to_string(), at(10), true),
+            ("s-aaa-1.lock".to_string(), at(10), false),
+            ("s-bbb-2-svh".to_string(), at(20), true),
+            ("s-bbb-2.lock".to_string(), at(20), false),
+            ("s-ccc-3-working".to_string(), at(30), true),
+            ("s-ccc-3.lock".to_string(), at(30), false),
+            ("other".to_string(), at(5), true),
+        ];
+        let mut stale = stale_sessions(&entries);
+        stale.sort();
+        assert_eq!(stale, ["s-aaa-1-svh", "s-aaa-1.lock", "s-ccc-3-working", "s-ccc-3.lock"]);
+        assert!(stale_sessions(&[("s-ccc-3-working".to_string(), at(30), true)]).is_empty(), "nothing finished, nothing goes");
+    }
+
+    #[test]
+    fn a_profile_sweep_keeps_only_the_newest_session_of_each_crate() {
+        let temp = fixture();
+        let profile = temp.path().join("target/debug");
+        write(&profile.join(".fingerprint/x"), 0, Duration::ZERO);
+        let krate = profile.join("incremental/faber-abc");
+        write(&krate.join("s-old-1-svh/work.bin"), 30, Duration::ZERO);
+        write(&krate.join("s-old-1.lock"), 0, Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(50));
+        write(&krate.join("s-new-2-svh/work.bin"), 30, Duration::ZERO);
+        write(&krate.join("s-new-2.lock"), 0, Duration::ZERO);
+        assert_eq!(sweep_profile(&profile, SystemTime::now() - DAY), 30);
+        assert!(!krate.join("s-old-1-svh").exists() && !krate.join("s-old-1.lock").exists());
+        assert!(krate.join("s-new-2-svh/work.bin").exists() && krate.join("s-new-2.lock").exists());
+    }
+
+    #[test]
+    fn over_the_cap_an_idle_cache_loses_its_incremental_state_before_any_cache_is_cleared() {
+        let temp = fixture();
+        let target = temp.path().join("target");
+        for slot in ["build-1", "build-2"] {
+            let cache = target.join(slot);
+            write(&cache.join("CACHEDIR.TAG"), 0, Duration::ZERO);
+            write(&cache.join("debug/.fingerprint/x"), 0, Duration::ZERO);
+            write(&cache.join("debug/deps/liba-0000000000000001.rlib"), 100, Duration::ZERO);
+            write(&cache.join("debug/incremental/a-1/s-x-1-svh/work.bin"), 80, Duration::ZERO);
+        }
+        // An hour later: both idle (not cleared before two hours), neither at work.
+        let report = sweep(&target, &target.join("build-9"), SystemTime::now() + Duration::from_secs(60 * 60), 300);
+        assert_eq!((report.before, report.after), (360, 280));
+        let stripped = ["build-1", "build-2"].iter().filter(|slot| !target.join(slot).join("debug/incremental").exists()).count();
+        assert_eq!(stripped, 1, "{report:?}");
+        for slot in ["build-1", "build-2"] {
+            assert!(target.join(slot).join("debug/deps/liba-0000000000000001.rlib").exists());
+        }
+        // A tighter cap clears a cache only after both lost their incremental state.
+        let report = sweep(&target, &target.join("build-9"), SystemTime::now() + Duration::from_secs(60 * 60), 150);
+        assert!(report.after <= 150, "{report:?}");
+        assert!(report.removed.iter().any(|name| name.ends_with("(incremental)")), "{report:?}");
     }
 }

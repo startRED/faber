@@ -397,7 +397,7 @@ Chat groups organize chats in expandable sidebar rows, with instructions and kno
 
 Changes extend existing checks; new features add checks. Engine tests are listed in `engine/tests/all.rs`, screen checks in `tests/ui/index.ts`, and real-app scenarios in `testkit/src/screen/mod.rs`.
 
-Lighter builds on one PC (`builds/`, `faber-builds`): one processor budget every Cargo and rustc can share as a jobserver, and a ledger of proofs that passed, keyed by content, command, toolchain and variables. Faber's own lanes use the same parts through `scripts/cargo.mjs`; the app's conversations and checks are wired to it after the engine split. Checks: `builds/src/lib.rs`, `scripts/cargo.test.mjs`. See [build folders](dev/build-folders.md#the-build-coordinator).
+Lighter builds on one PC (`builds/`, `faber-builds`): one processor budget every Cargo and rustc can share as a jobserver, and a ledger of proofs that passed, keyed by content, command, toolchain and variables. Faber's own lanes use the same parts through `scripts/cargo.mjs`, and their caches share a 24 GB disk budget (R566) in which idle caches drop their incremental state first; the app's conversations and checks are wired to it after the engine split. Checks: `builds/src/lib.rs`, `scripts/cargo.test.mjs`. See [build folders](dev/build-folders.md#the-build-coordinator).
 
 `engine/tests/first_word_cost.rs` checks Faber's warm send path with a fake CLI, using `first_word_cost_caps_the_warm_public_send_path`. Live-model latency still needs manual measurement.
 
