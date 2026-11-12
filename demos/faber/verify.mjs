@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ensureDirectory, sourcePin, verifiedSource, writeGenerated } from '../../scripts/stageshow.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const pin = sourcePin(JSON.parse(await readFile(path.join(root, 'engine-core/src/tools.json'), 'utf8')));
+const pin = sourcePin(JSON.parse(await readFile(path.join(root, 'engine-projects/src/tools.json'), 'utf8')));
 const upstream = await verifiedSource(pin);
 const audit = path.join(upstream, 'audit');
 await ensureDirectory(audit);

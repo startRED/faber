@@ -289,7 +289,7 @@ pub fn is_source(path: &str) -> bool {
 /// Whether a call checked the work, and how it ended: a command this reader knows, or Faber's own verify when it ran its
 /// checks. A declined check never ran, so it neither failed nor verified anything.
 fn checked(tool: &ToolUse) -> Option<bool> {
-    if is_check(tool) { (!tool.declined).then_some(tool.ok != Some(false)) } else { crate::verify::judged(tool) }
+    if is_check(tool) { (!tool.declined).then_some(tool.ok != Some(false)) } else { judged(tool) }
 }
 
 /// What a finished turn offers, if anything, and only when it ended done. A rung needs a model the table knows with a
@@ -318,6 +318,20 @@ pub fn of(m: &Message, area: Area, allowed: &[Profile], before: Before) -> Optio
     let now = Pick { vendor: m.vendor?, model: m.model.clone(), effort: m.effort.clone()?, reason: String::new(), pace: None };
     let next = next_rung(&now, allowed)?;
     Some(Offer::Rung(Nudge { reason: reason.into(), vendor: next.vendor, model: next.model?, effort: next.effort }))
+}
+
+/// The name both drivers give the call, whatever the CLI calls it, so the screen and the engine know one name.
+pub const TOOL: &str = "Verify";
+
+/// How the text of a verify that ran its checks begins (`verify::Outcome::text`), which is how a saved call is told from one
+/// that ran nothing.
+pub const RAN: &str = "Faber ran the ";
+
+/// What a finished verify call says about the work, read from the call an answer keeps: whether its checks passed, or
+/// None when none ran (no checks declared, nothing changed, refused, stopped) or the call was declined or never ended.
+pub fn judged(tool: &crate::model::ToolUse) -> Option<bool> {
+    let ran = tool.name == TOOL && !tool.declined && tool.output.as_deref().is_some_and(|text| text.starts_with(RAN));
+    tool.ok.filter(|_| ran)
 }
 
 #[cfg(test)]
@@ -479,7 +493,7 @@ mod tests {
 
     /// Faber's own verify as an answer keeps it: its result and the text the agent read.
     fn verify(ok: bool, text: &str) -> ToolUse {
-        ToolUse { output: Some(text.into()), ..tool(crate::verify::TOOL, json!({ "level": "fast" }), Some(ok)) }
+        ToolUse { output: Some(text.into()), ..tool(TOOL, json!({ "level": "fast" }), Some(ok)) }
     }
 
     #[test]

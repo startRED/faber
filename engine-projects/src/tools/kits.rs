@@ -1,10 +1,11 @@
 //! One verified catalog snapshot; each session selects its own bounded kit in memory.
 
 mod matching;
-pub use matching::known_stack;
+pub use crate::project_rules::known_stack;
 use matching::{item_capability, labels, matches_task, stack_labels};
 
 use super::{Delivery, Item, Launch, Store, digest, lock, manifest_bytes, retry_busy, small_file};
+pub use crate::model::KitReport as Report;
 use crate::model::{Area, Permissions, Vendor};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -111,17 +112,6 @@ impl ReadyCache {
         roots.insert(key, Arc::downgrade(&cache));
         cache
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Report {
-    pub ids: Vec<String>,
-    pub jobs: Vec<String>,
-    pub suggested: Option<String>,
-    pub method: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 /// Catalog controls use the same persisted switches; uninstalling remains a separate operation.

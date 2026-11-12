@@ -6,7 +6,7 @@ After edits, checks or a plan, both drivers read the conclusion from a hidden JS
 
 ## Projects
 
-The engine types live in `engine-core/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
+The engine types live in `engine-projects/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
 
 ### Screens
 
@@ -111,7 +111,7 @@ final check, or a previously opened writer on Unix, remains the accepted normal 
 Copies and registered projects share the [portable Git workflow](../product/git-workflow.md): idle, rate-limited
 housekeeping and safe retirement at startup and turn boundaries, with no extra screen, timer or permanent process.
 
-A project conversation works in a separate copy of the repository (R201, `engine-core/src/project/copy.rs`): a git
+A project conversation works in a separate copy of the repository (R201, `engine-projects/src/project/copy.rs`): a git
 worktree in `<data>/copies/<conversation id>` on the branch `faber/<a few words>-<4 characters of the id>`, made with the
 git runner of `project/git.rs` (fixed argv, no shell, hooks and filters off) from the head the person has checked out, before
 the first message reaches the CLI. The agent starts in the same place of the copy as the project folder is in the

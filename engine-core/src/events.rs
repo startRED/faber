@@ -70,6 +70,13 @@ fn unseen(word: &str) -> bool {
     true
 }
 
+/// A project server as a CLI reports it (`mcp_servers` reads the rows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reported {
+    pub name: String,
+    pub status: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +107,7 @@ mod tests {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
-    McpServers(Vec<crate::mcp_servers::Reported>),
+    McpServers(Vec<Reported>),
     Background(crate::background::Update),
     /// This session has ended; true means every process it owns was confirmed stopped.
     WriterExit {
@@ -177,7 +184,7 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
-    /// The agent called Faber's checks (`crate::verify`). The engine answers with `Session::helper_reply` once they ended.
+    /// The agent called Faber's checks (`verify`). The engine answers with `Session::helper_reply` once they ended.
     VerifyCall {
         id: String,
         input: Value,
@@ -187,7 +194,7 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
-    /// The agent called `quota` or `catalog` (`crate::toolbox`; `tool` is the name both drivers give it). The engine answers at
+    /// The agent called `quota` or `catalog` (`toolbox`; `tool` is the name both drivers give it). The engine answers at
     /// once with `Session::helper_reply`.
     ToolboxCall {
         id: String,
@@ -343,7 +350,7 @@ pub enum Delivery {
 #[derive(Debug)]
 pub enum SessionCommand {
     McpStatus {
-        reply: tokio::sync::oneshot::Sender<Option<Vec<crate::mcp_servers::Reported>>>,
+        reply: tokio::sync::oneshot::Sender<Option<Vec<Reported>>>,
     },
     StopBackground {
         id: String,
@@ -398,7 +405,7 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-    pub fn mcp_status(&self) -> tokio::sync::oneshot::Receiver<Option<Vec<crate::mcp_servers::Reported>>> {
+    pub fn mcp_status(&self) -> tokio::sync::oneshot::Receiver<Option<Vec<Reported>>> {
         let (reply, receive) = tokio::sync::oneshot::channel();
         (self.send)(SessionCommand::McpStatus { reply });
         receive

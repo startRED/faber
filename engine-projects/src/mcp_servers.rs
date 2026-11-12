@@ -1,17 +1,12 @@
 //! The catalog's project server list. CLI reports supply names and status; project files supply names only.
 
+pub use crate::events::Reported;
 use crate::model::Vendor;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reported {
-    pub name: String,
-    pub status: Option<String>,
-}
 
 pub fn reported(rows: &[Value], status: &str) -> Vec<Reported> {
     rows.iter()

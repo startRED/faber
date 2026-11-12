@@ -90,7 +90,7 @@ const VITE_INPUTS: [&str; 16] = [
     "tests/fixtures/conversation-changes.json",
     "tests/fixtures/background-live.json",
     "src-tauri/src/themes.json",
-    "engine-core/src/tools.json",
+    "engine-projects/src/tools.json",
     "src-tauri/src/pane/act.js",
     "host/src/pane/act.js",
     "bench/browse",

@@ -392,7 +392,7 @@ pub struct Message {
     pub text: String,
     /// Bounded visual outputs captured when this turn's editing tools completed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub visual_files: Vec<crate::visual::VisualFile>,
+    pub visual_files: Vec<VisualFile>,
     /// Screen-only invalidation signal; snapshots themselves never enter the message store in the screen.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub visual_file_count: Option<usize>,
@@ -433,7 +433,7 @@ pub struct Message {
     pub review: Option<crate::review::History>,
     /// Catalog items chosen when this reply's CLI session started; unchanged while that session runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_kit: Option<crate::tools::kits::Report>,
+    pub tool_kit: Option<KitReport>,
     /// Successful git commit calls, recognised by the engine's command parser; ids refer to this reply's tools.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commits: Vec<String>,
@@ -490,10 +490,10 @@ pub struct Message {
     pub note: Option<String>,
     /// Coverage of the file baseline immediately before this user message; unavailable history never blocks a turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rewind: Option<crate::rewind::PointInfo>,
+    pub rewind: Option<crate::points::PointInfo>,
     /// The CLI's exact native boundary for a later branch or retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_point: Option<crate::rewind::NativePoint>,
+    pub native_point: Option<crate::points::NativePoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -532,7 +532,7 @@ pub struct Message {
     pub conclusion_error: Option<String>,
     /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fold_kept: Vec<crate::project::memory::KeptDecision>,
+    pub fold_kept: Vec<crate::project_memory::KeptDecision>,
     /// A fold lost a kept decision; the next admitted input consumes this plain notice.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fold_lost: bool,
@@ -1236,7 +1236,7 @@ pub struct Conversation {
     pub project_start_pending: bool,
     /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub copy: Option<crate::project::copy::WorkCopy>,
+    pub copy: Option<WorkCopy>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
@@ -1354,9 +1354,9 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewind_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rewind_native: Option<crate::rewind::NativeRewind>,
+    pub rewind_native: Option<crate::points::NativeRewind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_fork: Option<crate::rewind::NativeFork>,
+    pub native_fork: Option<crate::points::NativeFork>,
     /// What its CLI last reported, each on its own (a report may name only one): the prompt's size and the model's window,
     /// before the point where Faber's CLI flags make it compact. Never saved.
     #[serde(skip)]
@@ -1416,7 +1416,7 @@ pub struct Project {
     pub disabled_mcp_servers: std::collections::BTreeSet<String>,
     /// Fields written by a newer Faber, kept as they were so this version never drops them.
     #[serde(flatten)]
-    pub extra: crate::project::Extra,
+    pub extra: Extra,
 }
 
 fn separate_by_default() -> bool {
@@ -1976,6 +1976,106 @@ impl Conversation {
     pub fn forget_session(&mut self, vendor: Vendor) {
         self.sessions.remove(&vendor);
         self.tentative.remove(&vendor);
+    }
+}
+
+/// The catalog items a CLI session started with (`tools::kits` builds it; a reply keeps it).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KitReport {
+    pub ids: Vec<String>,
+    pub jobs: Vec<String>,
+    pub suggested: Option<String>,
+    pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VisualKind {
+    Html,
+    Svg,
+    Mermaid,
+}
+
+/// Saved only after a successful editing tool, never reconstructed from the project on opening history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisualFile {
+    pub path: String,
+    pub kind: VisualKind,
+    pub source: std::sync::Arc<str>,
+}
+
+/// Fields a newer Faber wrote that this build does not know, kept as they were.
+pub type Extra = BTreeMap<String, Value>;
+
+/// Whether `id` can name a record file: 1 to 64 ASCII letters, digits, `-` or `_`.
+pub fn valid_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// A process by its id and the moment it started: the start time tells a reused id from the original.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessId {
+    pub pid: u32,
+    pub started_at: u64,
+}
+
+/// Where a conversation's copy lives and which branch it is on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkCopy {
+    /// The copy's folder: `<data>/copies/<conversation id>`.
+    pub path: String,
+    /// Its branch, `faber/<slug>`, never the person's.
+    pub branch: String,
+    /// The repository's main checkout, where git is asked about the copy.
+    pub root: String,
+    /// Where the project folder sits inside the repository (`app/` or empty at its top): the agent starts in the same
+    /// place of the copy.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sub: String,
+    /// The person's branch when the copy was made (`refs/heads/main`), which "merged" is measured against. None when the
+    /// checkout was on no branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
+impl WorkCopy {
+    /// The folder the agent starts in.
+    pub fn folder(&self) -> std::path::PathBuf {
+        let mut dir = std::path::PathBuf::from(&self.path);
+        dir.extend(self.sub.split('/').filter(|part| !part.is_empty()));
+        dir
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderState {
+    #[default]
+    Present,
+    Missing,
+    Disconnected,
+}
+
+impl FolderState {
+    pub fn is_present(self) -> bool {
+        self == Self::Present
+    }
+}
+
+impl Project {
+    pub fn state(&self) -> FolderState {
+        self.extra.get("state").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(FolderState::Present)
+    }
+
+    pub fn set_state(&mut self, state: FolderState) {
+        if let Ok(val) = serde_json::to_value(state) {
+            self.extra.insert("state".into(), val);
+        }
     }
 }
 

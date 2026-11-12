@@ -10,8 +10,8 @@ The rules and numbers live in `docs/design/looks.md` ("One structure, many looks
 docs win.
 
 Before implementing an interaction, read Faber's original
-[frontend-craft](../../../engine-core/src/frontend-skills/frontend-craft/SKILL.md); before delivering it, use
-[frontend-proof](../../../engine-core/src/frontend-skills/frontend-proof/SKILL.md). Load the parts relevant to the change.
+[frontend-craft](../../../engine-projects/src/frontend-skills/frontend-craft/SKILL.md); before delivering it, use
+[frontend-proof](../../../engine-projects/src/frontend-skills/frontend-proof/SKILL.md). Load the parts relevant to the change.
 Those skills complement this one; they do not replace Faber's tokens, taste cards or visual critique rubric.
 
 ## Interaction before polish

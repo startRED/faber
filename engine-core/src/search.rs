@@ -50,7 +50,7 @@ pub struct Hit {
     pub message_index: usize,
     pub snippet: String,
     pub highlights: Vec<Highlight>,
-    // What a project's agent is told of a hit (`crate::memory_search`); the screen's payload stays as it was.
+    // What a project's agent is told of a hit (`memory_search`); the screen's payload stays as it was.
     #[serde(skip)]
     pub updated_at: u64,
     #[serde(skip)]

@@ -1,14 +1,14 @@
 //! Visual answers are derived from reply text; the conversation already keeps their history.
 
 use crate::model::{Message, Role, WebSearch};
+pub use crate::model::{VisualFile, VisualKind};
 use faber_winproc::rewind::Root;
 use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind};
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::Arc;
 
 /// Cached search belongs to the CLI; only the person's live-web choice grants a page network access.
 pub fn network(web: Option<WebSearch>) -> bool {
@@ -55,22 +55,6 @@ pub fn public_https(url: &reqwest::Url) -> bool {
         && !["localhost", "local", "internal", "lan", "home", "tauri.localhost", "ipc.localhost"]
             .iter()
             .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum VisualKind {
-    Html,
-    Svg,
-    Mermaid,
-}
-
-/// Saved only after a successful editing tool, never reconstructed from the project on opening history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VisualFile {
-    pub path: String,
-    pub kind: VisualKind,
-    pub source: Arc<str>,
 }
 
 pub const FILE_BYTES: usize = 256 * 1024;

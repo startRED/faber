@@ -1,6 +1,6 @@
 //! `faber-test`: reads what changed, checks the lane's claim, picks the suites and runs them. The screen gets the
 //! failures, the measurements and a summary; every line goes to the run's log (R154). Cargo's output is read by the same
-//! functions that read a mission's checks (`engine-core/src/project/proof/output.rs`, R155).
+//! functions that read a mission's checks (`engine-projects/src/project/proof/output.rs`, R155).
 
 use crate::app::{Paths, emergency_cleanup};
 use crate::base;

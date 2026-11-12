@@ -2,8 +2,8 @@
 //!
 //! Older versions kept a mission's grants and spending in the same record. They are left in the file exactly as they were
 //! written (`extra`), never read and never dropped.
-use super::Extra;
 use crate::ledger::Ledger;
+use crate::model::Extra;
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

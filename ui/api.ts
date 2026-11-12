@@ -504,7 +504,7 @@ export interface ProofView {
   setup?: string[];
 }
 
-/** One standing goal as the screen shows it (engine-core/src/project/goals.rs). */
+/** One standing goal as the screen shows it (engine-projects/src/project/goals.rs). */
 export interface GoalRow {
   id: string;
   words: string;

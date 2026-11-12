@@ -12,6 +12,7 @@ autotests = false
 # Every layer below the Engine; re-exported whole, so callers keep `faber_engine::model` and the like.
 faber-engine-core = { path = "../engine-core" }
 faber-engine-drivers = { path = "../engine-drivers" }
+faber-engine-projects = { path = "../engine-projects" }
 faber-winproc = { path = "../winproc" }
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"
@@ -31,6 +32,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 faber-engine-core = { path = "../engine-core", features = ["test-support"] }
 faber-engine-drivers = { path = "../engine-drivers", features = ["test-support"] }
+faber-engine-projects = { path = "../engine-projects", features = ["test-support"] }
 # The tests parse exported Markdown as the export does.
 pulldown-cmark = { version = "0.13", default-features = false }
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.

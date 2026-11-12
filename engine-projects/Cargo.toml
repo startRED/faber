@@ -1,0 +1,46 @@
+[package]
+name = "faber-engine-projects"
+description = "Faber's engine for project work: projects and their copies, the tool catalog, checks, rewind and file views."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+faber-engine-core = { path = "../engine-core" }
+faber-winproc = { path = "../winproc" }
+# The free memory a Cargo build of the verifier is admitted against.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
+base64 = "0.23"
+pulldown-cmark = { version = "0.13", default-features = false }
+html5ever = "0.40"
+flate2 = "1"
+crc32fast = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.11"
+tar = "0.4"
+toml = "1.1"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+win32job = "2"
+
+[dev-dependencies]
+faber-engine-core = { path = "../engine-core", features = ["test-support"] }
+tokio = { version = "1", features = ["test-util"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+junction = "2"
+
+[features]
+# Test fixtures the upper crates' tests share; never in a shipped build.
+test-support = ["faber-engine-core/test-support"]
+
+[lints]
+workspace = true

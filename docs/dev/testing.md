@@ -169,7 +169,7 @@ Cargo calls the runner as `CC` and `AR` and the runner hands the call to zig. It
 `rustup target add aarch64-apple-darwin`; without zig the proof is skipped and says so. The shell is left out, since its
 Objective-C needs Apple's SDK; CI's Mac still checks everything.
 
-A mission reads its checks the same way (R155, `engine-core/src/project/proof/output.rs`, which `cargo t` also uses for
+A mission reads its checks the same way (R155, `engine-projects/src/project/proof/output.rs`, which `cargo t` also uses for
 Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
 most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,
 rustc and Clippy, `cargo test`, `cargo fmt --check`, tsc and oxlint; any other format gives its last 20 lines when the

@@ -14,37 +14,8 @@
 
 use super::git::{Executor, Invocation, native_path, valid_oid};
 use super::lease::real_path;
-use serde::{Deserialize, Serialize};
+pub use crate::model::WorkCopy;
 use std::path::{Path, PathBuf};
-
-/// Where a conversation's copy lives and which branch it is on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkCopy {
-    /// The copy's folder: `<data>/copies/<conversation id>`.
-    pub path: String,
-    /// Its branch, `faber/<slug>`, never the person's.
-    pub branch: String,
-    /// The repository's main checkout, where git is asked about the copy.
-    pub root: String,
-    /// Where the project folder sits inside the repository (`app/` or empty at its top): the agent starts in the same
-    /// place of the copy.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sub: String,
-    /// The person's branch when the copy was made (`refs/heads/main`), which "merged" is measured against. None when the
-    /// checkout was on no branch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base: Option<String>,
-}
-
-impl WorkCopy {
-    /// The folder the agent starts in.
-    pub fn folder(&self) -> PathBuf {
-        let mut dir = PathBuf::from(&self.path);
-        dir.extend(self.sub.split('/').filter(|part| !part.is_empty()));
-        dir
-    }
-}
 
 /// The folder that holds every conversation's copy.
 pub fn home(data: &Path) -> PathBuf {

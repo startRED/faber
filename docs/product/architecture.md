@@ -23,14 +23,16 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
  └─ Live manifest: compatibility matrix, provider policy switch, driver descriptors
 ```
 
-- **The engine is three crates, in layers, so a build redoes little.** `engine-core/` (`faber-engine-core`, ~47,000
-  lines): the conversation model, storage, processes, routing, tools, projects and checks. `engine-drivers/`
-  (`faber-engine-drivers`, ~10,000): the Claude Code and Codex drivers, the persona, the helper, the agent's own tools
-  and the account readings. `engine/` (`faber-engine`, ~37,000): the `Engine` itself and a facade that re-exports the
-  two below whole, so every caller keeps `faber_engine::model` and the like. Cargo rebuilds a crate and everything above it,
-  so the crates most edited sit highest; a type both layers need lives in the lower one and the upper re-exports it under
-  its old path (`sibling::State` is `conversation_state::State`). `cargo t` tests only the packages a change touches and
-  those built on them; test fixtures the upper crates' tests share sit behind the `test-support` feature, never in a
+- **The engine is four crates, in layers, so a build redoes little.** `engine-core/` (`faber-engine-core`, ~28,000
+  lines): the conversation model, storage, processes, routing, permissions and the records a project keeps (memory, rules,
+  budget). `engine-projects/` (`faber-engine-projects`, ~24,000): projects and their copies, the tool catalog, checks
+  (`verify`), rewind and file views. `engine-drivers/` (`faber-engine-drivers`, ~10,000): the Claude Code and Codex
+  drivers, the persona, the helper, the agent's own tools and the account readings. `engine/` (`faber-engine`, ~37,000):
+  the `Engine` itself and a facade that re-exports the three below whole, so every caller keeps `faber_engine::model` and
+  the like. Cargo rebuilds a crate and everything above it, so the crates most edited sit highest; a type two layers
+  need lives in the lower one and the upper re-exports it under its old path (`sibling::State` is
+  `conversation_state::State`, `project::memory` is `project_memory`). `cargo t` tests only the packages a change touches
+  and those built on them; test fixtures the upper crates' tests share sit behind the `test-support` feature, never in a
   shipped build.
 - **Rust, Tauri 2 and SolidJS.** Chosen on 2026-10-10, while the app was still small, for weight and memory: Tauri
   uses the system webview (WebView2 on Windows) instead of shipping Chromium, and the engine is native code with no
@@ -150,7 +152,7 @@ plugin resources reuse the kit selector. Native definitions add only task instru
 A Codex role is a Faber-written file holding only instructions (Codex documents no inline role instructions) and is compared
 byte for byte at launch; Codex reads it again when a subagent spawns, so a rewrite after the thread started by something
 with write access to the shared kit folder is the same integrity limit as for skills Codex reads lazily.
-The implementation is `engine-core/src/tools/plugins.rs` and `engine-core/src/tools/plugin_delivery.rs`; local-fixture lifecycle
+The implementation is `engine-projects/src/tools/plugins.rs` and `engine-projects/src/tools/plugin_delivery.rs`; local-fixture lifecycle
 and delivery checks are `engine/tests/plugins.rs` and `tests/ui/plugins.check.ts`. No extra process or idle work is added;
 native full-app memory and processor measurements remain the lead's validation.
 

@@ -67,6 +67,7 @@ fn every_english_text_is_shown_somewhere() {
     code.extend(sources("engine/src", &["rs"], ""));
     code.extend(sources("engine-core/src", &["rs"], ""));
     code.extend(sources("engine-drivers/src", &["rs"], ""));
+    code.extend(sources("engine-projects/src", &["rs"], ""));
     code.extend(sources("src-tauri/src", &["rs"], ""));
     code.extend(sources("host/src", &["rs"], ""));
     code.extend(sources("channel/src", &["rs"], ""));
@@ -107,7 +108,7 @@ fn the_check_finds_keys_quoted_either_way_and_starts_built_at_run_time() {
 
 #[test]
 fn every_shipped_catalog_item_has_one_display_name_in_every_locale() {
-    let catalog: serde_json::Value = serde_json::from_str(include_str!("../../engine-core/src/tools.json")).unwrap();
+    let catalog: serde_json::Value = serde_json::from_str(include_str!("../../engine-projects/src/tools.json")).unwrap();
     let items: Vec<_> = ["skills", "servers", "plugins"]
         .into_iter()
         .flat_map(|kind| catalog.get(kind).and_then(|list| list.as_array()).into_iter().flatten())

@@ -1,7 +1,6 @@
 use crate::{
-    model::{Vendor, Wake},
+    model::{KitReport as Report, Vendor, Wake},
     router::Pick,
-    tools::kits::Report,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

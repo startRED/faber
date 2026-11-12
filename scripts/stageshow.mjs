@@ -164,7 +164,7 @@ export async function verifiedSource(pin, run = command) {
 }
 
 export async function prepareDemo(settings, run = command) {
-  const pin = sourcePin(JSON.parse(await readFile(path.join(root, 'engine-core/src/tools.json'), 'utf8')));
+  const pin = sourcePin(JSON.parse(await readFile(path.join(root, 'engine-projects/src/tools.json'), 'utf8')));
   const upstream = await verifiedSource(pin, run);
   const npm = await npmCli();
   // Recheck the lockfile on every run, then let npm enforce its integrity pins.

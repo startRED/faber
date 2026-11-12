@@ -7,7 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
-use crate::project::memory::{AdoptedKind, KeptDecision, LearningKind, LearningRecords};
+use crate::project_memory::{AdoptedKind, KeptDecision, LearningKind, LearningRecords};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -112,7 +112,7 @@ pub fn replace_with(disk: &dyn Disk, path: &Path, bytes: &[u8], patient: bool) -
     let tmp = path.with_file_name(name);
     // Windows lets an antivirus or indexer hold a file it has just seen for a few ms: a busy rename tries again before it
     // counts as a failed save.
-    let rename = || if patient { crate::tools::retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
+    let rename = || if patient { retry_busy(|| disk.rename(&tmp, path)) } else { disk.rename(&tmp, path) };
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     disk.write(&tmp, bytes).and_then(|()| rename()).and_then(|()| disk.flush(parent)).map_err(|e| {
         drop(fs::remove_file(&tmp));
@@ -607,7 +607,7 @@ impl Store {
     /// The original stays untouched. Dismissal lasts until this file changes or Faber restarts.
     pub fn remove_damaged_conversation(&self, id: &str) -> Result<(), Fault> {
         let copy = self.damaged_file(id).ok_or(Fault::Write)?;
-        match crate::tools::retry_busy(|| fs::remove_file(&copy)) {
+        match retry_busy(|| fs::remove_file(&copy)) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(Fault::of_write(&e)),
@@ -859,7 +859,7 @@ impl Store {
             }
             self.save_side_chat::<()>(id, &[])?;
         }
-        match crate::tools::retry_busy(|| fs::remove_file(self.file(id))) {
+        match retry_busy(|| fs::remove_file(self.file(id))) {
             Ok(()) => self.search.removed(id),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(Fault::of_write(&e)),
@@ -886,7 +886,7 @@ impl Store {
     pub fn save_side_chat<T: Serialize>(&self, id: &str, turns: &[T]) -> Result<(), Fault> {
         let Some(path) = self.side_file(id) else { return Ok(()) };
         if turns.is_empty() {
-            return match crate::tools::retry_busy(|| fs::remove_file(&path)) {
+            return match retry_busy(|| fs::remove_file(&path)) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => Err(Fault::of_write(&e)),
                 _ => Ok(()),
             };
@@ -1141,7 +1141,7 @@ impl Store {
     fn read_ledger(&self) -> Result<Ledger, Fault> {
         let checked = read_checked::<Ledger>(&self.budget).and_then(|found| {
             let ledger = found.unwrap_or_default();
-            if crate::project::budget::Budget::load(&ledger).is_err()
+            if crate::project_budget::Budget::load(&ledger).is_err()
                 || crate::model::Vendor::ALL.iter().any(|v| ledger.of(*v).own_spend.values().any(|cost| !cost.is_finite() || *cost < 0.0))
             {
                 return Err(Fault::Corrupt);
@@ -1172,9 +1172,9 @@ impl Store {
     }
 
     /// Called under the engine lock. Damaged derived records rebuild without touching approval records.
-    pub fn refresh_rules(&self, project: &str, folder: &Path) -> Result<crate::project::rules::Facts, &'static str> {
-        let mut all: BTreeMap<String, crate::project::rules::Record> = read(&self.rules_sources).unwrap_or_default();
-        let (record, facts) = crate::project::rules::refresh_cached(folder, all.get(project))?;
+    pub fn refresh_rules(&self, project: &str, folder: &Path) -> Result<crate::project_rules::Facts, &'static str> {
+        let mut all: BTreeMap<String, crate::project_rules::Record> = read(&self.rules_sources).unwrap_or_default();
+        let (record, facts) = crate::project_rules::refresh_cached(folder, all.get(project))?;
         if all.get(project) != Some(&record) {
             all.insert(project.into(), record);
             self.write(&self.rules_sources, &all).map_err(|e| e.key())?;
@@ -1185,7 +1185,7 @@ impl Store {
     fn adoptions_checked(&self) -> Result<Adoptions, Fault> {
         let all: Adoptions = read_checked(&self.adoptions)?.unwrap_or_default();
         if all.iter().any(|(id, kinds)| {
-            !crate::project::valid_id(id) || kinds.values().any(|record| record.version != 1 || !record.root.is_absolute())
+            !crate::model::valid_id(id) || kinds.values().any(|record| record.version != 1 || !record.root.is_absolute())
         }) {
             return Err(Fault::Corrupt);
         }
@@ -1194,19 +1194,19 @@ impl Store {
 
     /// Person-only approval, called under the engine lock; never exposed as an agent tool. No project file is written.
     pub fn approve_adopted_file(&self, project: &str, root: &Path, kind: AdoptedKind, target: &str) -> Result<(), &'static str> {
-        if kind == AdoptedKind::Tasks || !crate::project::valid_id(project) || !root.is_absolute() {
+        if kind == AdoptedKind::Tasks || !crate::model::valid_id(project) || !root.is_absolute() {
             return Err("error.memory.refused");
         }
-        crate::project::memory::read_adopted_source(root, target)?;
+        crate::project_memory::read_adopted_source(root, target)?;
         self.save_adoption(project, root, kind, target)
     }
 
     /// Person-only location approval; repository content grants no authority over the folder's words.
     pub fn approve_adopted_tasks(&self, project: &str, root: &Path, target: &str) -> Result<(), &'static str> {
-        if !crate::project::valid_id(project) || !root.is_absolute() {
+        if !crate::model::valid_id(project) || !root.is_absolute() {
             return Err("error.memory.refused");
         }
-        crate::project::memory::read_adopted_tasks(root, target)?;
+        crate::project_memory::read_adopted_tasks(root, target)?;
         self.save_adoption(project, root, AdoptedKind::Tasks, target)
     }
 
@@ -1227,17 +1227,17 @@ impl Store {
         if record.root != root {
             return Err("error.memory.refused");
         }
-        crate::project::memory::read_adopted_source(root, &record.target).map(Some)
+        crate::project_memory::read_adopted_source(root, &record.target).map(Some)
     }
 
     /// Revalidate the approved task folder and every opened file on each read.
-    pub fn read_adopted_tasks(&self, project: &str, root: &Path) -> Result<Option<crate::project::memory::AdoptedTasks>, &'static str> {
+    pub fn read_adopted_tasks(&self, project: &str, root: &Path) -> Result<Option<crate::project_memory::AdoptedTasks>, &'static str> {
         let all = self.adoptions_checked().map_err(Fault::key)?;
         let Some(record) = all.get(project).and_then(|kinds| kinds.get(&AdoptedKind::Tasks)) else { return Ok(None) };
         if record.root != root {
             return Err("error.memory.refused");
         }
-        crate::project::memory::read_adopted_tasks(root, &record.target).map(Some)
+        crate::project_memory::read_adopted_tasks(root, &record.target).map(Some)
     }
 
     /// The decisions the person kept (R16), as item identities and content hashes, or legacy body-only hashes. They live here and
@@ -1372,6 +1372,34 @@ impl Store {
     pub fn log_cache_health(&self, line: &serde_json::Value) {
         append_bounded(&self.cache_health, CACHE_HEALTH_MAX, line);
     }
+}
+
+/// Windows lets an antivirus or indexer hold a file it has just seen for a few milliseconds, and a rename or delete of its
+/// folder then fails with access denied or a sharing violation. Waits for the next try: `None` for any other error, system or
+/// attempt past the bound (about 0.9 s in all).
+fn busy_delay(windows: bool, error: &io::Error, attempt: u32) -> Option<std::time::Duration> {
+    let busy = error.kind() == io::ErrorKind::PermissionDenied || matches!(error.raw_os_error(), Some(5 | 32));
+    (windows && busy && attempt < 8).then(|| std::time::Duration::from_millis(25 * u64::from(attempt + 1)))
+}
+
+fn retry_with<T>(windows: bool, sleep: impl Fn(std::time::Duration), mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match op() {
+            Err(error) if let Some(wait) = busy_delay(windows, &error, attempt) => {
+                sleep(wait);
+                attempt += 1;
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Runs a file operation of the store again while Windows reports the file busy; the last error is never hidden. Blocks the
+/// thread for up to about 0.9 s, and only while Windows reports the file busy: on a blocking worker, or for a conversation's
+/// save and removal on the engine thread under its lock (`store::replace`).
+pub fn retry_busy<T>(op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    retry_with(cfg!(windows), std::thread::sleep, op)
 }
 
 #[cfg(test)]
@@ -1621,6 +1649,7 @@ mod tests {
         assert_eq!(fs::read(other.path().join("rules.md")).unwrap(), generated);
         assert_eq!(fs::read(&store.decisions_kept).unwrap(), b"approval bytes must stay untouched");
     }
+
     #[test]
     fn rules_registry_failed_save_keeps_previous_record_and_approvals() {
         struct NoReplace;
@@ -1831,7 +1860,7 @@ mod tests {
 
     #[test]
     fn adopted_files_need_external_approval_and_recheck_the_selected_project() {
-        use crate::project::memory::AdoptedKind;
+        use crate::project_memory::AdoptedKind;
         let data = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
@@ -1858,7 +1887,7 @@ mod tests {
 
     #[test]
     fn adopted_files_preserve_other_approvals_and_refuse_damaged_records() {
-        use crate::project::memory::AdoptedKind;
+        use crate::project_memory::AdoptedKind;
         let data = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         let store = Store::new(data.path());
@@ -1967,7 +1996,7 @@ mod tests {
 
     #[test]
     fn kept_item_records_upgrade_without_losing_concurrent_or_other_project_approvals() {
-        use crate::project::memory::{self, KeptDecision};
+        use crate::project_memory::{self as memory, KeptDecision};
         let dir = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         fs::create_dir(project.path().join(".faber")).unwrap();
@@ -2024,7 +2053,7 @@ mod tests {
 
     #[test]
     fn kept_item_records_refuse_unknown_records_and_preserve_failed_migrations() {
-        use crate::project::memory::KeptDecision;
+        use crate::project_memory::KeptDecision;
         struct NoReplace;
         impl Disk for NoReplace {
             fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -2103,4 +2132,39 @@ pub struct GroupFile {
     pub name: String,
     pub size: usize,
     pub mime: String,
+}
+
+#[cfg(test)]
+mod busy_retry {
+    use super::*;
+
+    #[test]
+    fn a_busy_file_is_retried_a_bounded_number_of_times_and_only_on_windows() {
+        let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let (calls, waited) = (std::cell::Cell::new(0), std::cell::Cell::new(std::time::Duration::ZERO));
+        let sleep = |wait| waited.set(waited.get() + wait);
+        let flaky = retry_with(true, sleep, || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 { Err(denied()) } else { Ok(calls.get()) }
+        });
+        assert_eq!(flaky.unwrap(), 3, "two denials, then the operation goes through");
+        calls.set(0);
+        let stuck = retry_with(true, sleep, || -> io::Result<()> {
+            calls.set(calls.get() + 1);
+            Err(denied())
+        });
+        assert_eq!(stuck.unwrap_err().kind(), io::ErrorKind::PermissionDenied, "the last error is returned, never hidden");
+        assert_eq!(calls.get(), 9, "one try plus eight retries");
+        assert!(waited.get() < std::time::Duration::from_millis(1100), "the wait stays about a second");
+        for (windows, error, retried) in [
+            (true, io::Error::from_raw_os_error(5), true),
+            (true, io::Error::from_raw_os_error(32), true),
+            (true, io::Error::from(io::ErrorKind::NotFound), false),
+            (true, io::Error::other("digest mismatch"), false),
+            (false, denied(), false),
+        ] {
+            assert_eq!(busy_delay(windows, &error, 0).is_some(), retried, "{error:?} on windows={windows}");
+        }
+        assert!(busy_delay(true, &denied(), 8).is_none());
+    }
 }

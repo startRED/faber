@@ -1,7 +1,7 @@
 # Recover moved projects and their linked copies without unsafe Git repair
 
 Area: Recovery after a crash or a moved folder; Separate copies
-Files: engine/src/engine.rs, engine-core/src/project/copy.rs, engine/tests/project_paths.rs, docs/product-map.md, docs/design/conversation.md
+Files: engine/src/engine.rs, engine-projects/src/project/copy.rs, engine/tests/project_paths.rs, docs/product-map.md, docs/design/conversation.md
 Depends: none
 Size: one focused pull request, about 400 to 800 changed lines
 

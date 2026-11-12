@@ -37,10 +37,11 @@ before changing what a person sees, sets or calls follow [docs/product-rules.md]
   base comes first ([red base](docs/dev/workflow.md#red-base)). A `feat`, `fix` or `perf` commit that touches what ships
   becomes a patch release once green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 
-Stack: `engine/` (Rust: the `Engine`) on `engine-drivers/` (the CLI drivers) on `engine-core/` (JSON files, no windows);
-`host/` (the one command table every front end calls, R459) with `sidecar/`, `channel/`, `cli/`; `electron/` (the shell;
-`src-tauri/` ships until the release switch); `winproc/` (unsafe process calls); `ui/` (SolidJS + TypeScript); `tests/`
-(screen checks); `testkit/` (`cargo t`). [Memory and processes](docs/product/architecture.md#architecture).
+Stack: `engine/` (Rust: the `Engine`) on `engine-drivers/` (the CLI drivers) on `engine-projects/` (projects, tools,
+checks) on `engine-core/` (JSON files, no windows); `host/` (the one command table every front end calls, R459) with
+`sidecar/`, `channel/`, `cli/`; `electron/` (the shell; `src-tauri/` ships until the release switch); `winproc/` (unsafe
+process calls); `ui/` (SolidJS + TypeScript); `tests/` (screen checks); `testkit/` (`cargo t`). [Memory and
+processes](docs/product/architecture.md#architecture).
 
 ## Proof commands
 

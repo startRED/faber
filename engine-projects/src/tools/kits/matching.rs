@@ -1,4 +1,5 @@
 use super::Item;
+use crate::project_rules::STACKS;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -257,35 +258,6 @@ fn request_text(request: &str) -> String {
         })
         .collect::<String>()
         .replace('ß', "ss")
-}
-
-const STACKS: &[(&str, &str)] = &[
-    ("swift", "swift swiftui"),
-    ("flutter", "flutter dart"),
-    ("expo", "expo"),
-    ("react-native", "react-native"),
-    ("compose", "compose jetpack"),
-    ("prisma", "prisma"),
-    ("firestore", "firestore firebase"),
-    ("postgres", "postgres postgresql supabase sql"),
-    ("stripe", "stripe"),
-    ("cloudflare", "cloudflare wrangler"),
-    ("auth0", "auth0"),
-    ("android", "android jetpack"),
-    ("godot", "godot gdscript"),
-    ("unity", "unity"),
-    ("roblox", "roblox luau"),
-    ("minecraft", "minecraft neoforge fabric"),
-    ("unreal", "unreal ue5"),
-    ("bevy", "bevy"),
-    ("love2d", "love2d love2d-core"),
-    ("phaser", "phaser"),
-    ("pixijs", "pixijs"),
-    ("threejs", "threejs three.js"),
-];
-
-pub fn known_stack(name: &str) -> Option<&'static str> {
-    STACKS.iter().find_map(|(stack, _)| (*stack == name).then_some(*stack))
 }
 
 pub(super) fn stack_labels(request: &str, cwd: Option<&Path>) -> BTreeSet<&'static str> {

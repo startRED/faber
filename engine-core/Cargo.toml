@@ -1,6 +1,6 @@
 [package]
 name = "faber-engine-core"
-description = "The layers of Faber's engine below the Engine: model, storage, CLI drivers, routing, tools, projects, checks."
+description = "The bottom layer of Faber's engine: model, storage, routing, processes, permissions and project records."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

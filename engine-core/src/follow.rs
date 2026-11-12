@@ -8,7 +8,6 @@
 //! and when to look again. `engine/pr_watch.rs` runs it.
 
 use crate::model::{Follow, FollowState};
-use crate::project::remote::{CiState, Look, PrState};
 use std::time::Duration;
 
 /// The first look after a pull request is bound or changes: CI takes minutes, so sooner would only find it pending.
@@ -378,10 +377,57 @@ pub fn delay(previous: Duration, changed: bool) -> Duration {
     if changed { FIRST } else { (previous + previous / 2).min(LONGEST) }
 }
 
+// What GitHub says of a pull request (`project::remote` reads it)
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiState {
+    /// The PR has no checks.
+    None,
+    Pending,
+    Passing,
+    Failing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ci {
+    pub state: CiState,
+    /// The commit these results are for.
+    pub head: String,
+    pub failed: Vec<String>,
+    pub total: usize,
+}
+
+/// A pull request as a project conversation follows it (this module): any repository the person's gh can read, and
+/// only read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Look {
+    pub state: PrState,
+    pub head: String,
+    pub ci: Ci,
+    /// GitHub found a merge conflict with the base branch.
+    pub conflict: bool,
+    /// Each failed check, with the link and the short words GitHub gave it.
+    pub failures: Vec<Failure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub name: String,
+    pub link: Option<String>,
+    pub said: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::remote::{Ci, Failure};
+    use super::{Ci, Failure};
 
     const URL: &str = "https://github.com/acme/app/pull/93";
 
@@ -568,42 +614,6 @@ mod tests {
         step(&mut f, &look(PrState::Open, CiState::Pending, "aaa"), 1);
         assert_eq!(step(&mut f, &look(PrState::Open, CiState::Pending, "aaa"), 1 + QUIET_MS).0, Next::End);
         assert_eq!((f.state, f.problem.as_deref()), (FollowState::Stopped, Some("follow.quiet")));
-    }
-
-    struct Gh(Vec<crate::project::remote::Call>, String);
-
-    impl crate::project::remote::Runner for Gh {
-        fn run(&mut self, call: &crate::project::remote::Call) -> Result<crate::project::remote::Reply, crate::project::remote::Lost> {
-            self.0.push(call.clone());
-            Ok(crate::project::remote::Reply { code: 0, stdout: self.1.clone() })
-        }
-        fn neutral(&self) -> std::path::PathBuf {
-            "/faber/neutral".into()
-        }
-    }
-
-    #[test]
-    fn gh_is_asked_from_faber_s_own_folder_and_its_checks_are_read() {
-        let head = "a".repeat(40);
-        let view = serde_json::json!({ "number": 93, "url": URL, "isDraft": false, "state": "OPEN", "headRefName": "fix",
-            "headRefOid": head, "baseRefName": "main", "isCrossRepository": false, "mergeable": "CONFLICTING",
-            "statusCheckRollup": [
-                { "__typename": "CheckRun", "name": "gate", "status": "COMPLETED", "conclusion": "FAILURE",
-                  "detailsUrl": "https://github.com/acme/app/actions/runs/7/job/8" },
-                { "__typename": "StatusContext", "context": "queue", "state": "FAILURE", "description": "rust failed\non\twindows",
-                  "targetUrl": "javascript:alert(1)" },
-                { "__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": null } ] });
-        let mut gh = Gh(vec![], view.to_string());
-        let look = crate::project::remote::look(&mut gh, "acme/app", 93).unwrap();
-        assert_eq!(gh.0[0].cwd, std::path::PathBuf::from("/faber/neutral"), "never inside the person's repository");
-        assert_eq!(gh.0[0].args[..5], ["pr", "view", "93", "--repo", "acme/app"]);
-        assert!(look.conflict && look.ci.state == CiState::Failing && look.state == PrState::Open);
-        assert_eq!(look.failures[0].link.as_deref(), Some("https://github.com/acme/app/actions/runs/7/job/8"));
-        assert_eq!(
-            (look.failures[1].name.as_str(), look.failures[1].said.as_deref(), &look.failures[1].link),
-            ("queue", Some("rust failed on windows"), &None)
-        );
-        assert!(crate::project::remote::look(&mut gh, "acme/app --web", 93).is_err(), "a repository is only owner/name");
     }
 
     #[test]

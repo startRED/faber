@@ -1690,8 +1690,8 @@ mod tests {
         assert_eq!(ready_follow_ups(project.path(), &[first.clone(), second.clone()]).unwrap().len(), 1);
         // Memory lists task files since #648 (it marks one over its 6 KB target); the start card below still leaves them out.
         assert!(list_faber(project.path()).unwrap().files.iter().any(|f| f.path.contains("tasks/")));
-        let facts = crate::project::rules::facts(project.path()).unwrap();
-        assert!(!crate::project::rules::card(&facts, &[], &[]).contains("Export opens correctly"));
+        let facts = crate::project_rules::facts(project.path()).unwrap();
+        assert!(!crate::project_rules::card(&facts, &[], &[]).contains("Export opens correctly"));
         remove_follow_up(project.path(), &first).unwrap();
         assert_eq!(ready_follow_ups(project.path(), std::slice::from_ref(&second)).unwrap().len(), 1);
         task.done = "é".repeat(3000);

@@ -19,6 +19,8 @@ mod journal;
 mod run;
 mod select;
 
+use crate::nudge::RAN;
+pub use crate::nudge::{TOOL, judged};
 pub use changes::{Changed, changed, own_log};
 pub use journal::{Entry, Journal, Known};
 pub use run::{GAME_CPU, GUARD_EVERY, Guard, KEPT_LOGS, Real, Runner, Spec, Started};
@@ -33,23 +35,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The name both drivers give the call, whatever the CLI calls it, so the screen and the engine know one name.
-pub const TOOL: &str = "Verify";
 /// The tool as Codex knows it, and as Faber's MCP server lists it to Claude Code.
 pub const NAME: &str = "verify";
 /// The tool as Claude Code names it: `mcp__<server>__<tool>`.
 pub const CLAUDE_NAME: &str = "mcp__faber__verify";
-/// How the text of a verify that ran its checks begins (`Outcome::text`), which is how a saved call is told from one
-/// that ran nothing.
-const RAN: &str = "Faber ran the ";
-
-/// What a finished verify call says about the work, read from the call an answer keeps: whether its checks passed, or
-/// None when none ran (no checks declared, nothing changed, refused, stopped) or the call was declined or never ended.
-pub fn judged(tool: &crate::model::ToolUse) -> Option<bool> {
-    let ran = tool.name == TOOL && !tool.declined && tool.output.as_deref().is_some_and(|text| text.starts_with(RAN));
-    tool.ok.filter(|_| ran)
-}
-
 /// How long one check may run before it is ended: a cold Cargo build of a large workspace fits.
 pub const DEADLINE: Duration = Duration::from_secs(15 * 60);
 

@@ -1,4 +1,4 @@
-//! Pins a tool for `engine-core/src/tools.json`: downloads `<owner/repo>` at `<commit>` from GitHub and prints the digest of
+//! Pins a tool for `engine-projects/src/tools.json`: downloads `<owner/repo>` at `<commit>` from GitHub and prints the digest of
 //! `<path>`, or downloads an npm package at a version and prints the digest of the whole package, the way Faber checks it
 //! when it installs. `cargo run -p faber-engine --example tools_pin -- <repo> <commit> <path>` or `-- npm <package> <version>`
 

@@ -202,7 +202,7 @@ fn push_unique(list: &mut Vec<String>, items: impl IntoIterator<Item = String>) 
 
 fn dependency_stack(manifest: &str, name: &str) -> Option<&'static str> {
     match (manifest, name) {
-        ("pyproject.toml", name) => crate::tools::kits::known_stack(name),
+        ("pyproject.toml", name) => known_stack(name),
         ("Cargo.toml", "bevy") => Some("bevy"),
         ("package.json", "expo" | "expo-router") => Some("expo"),
         ("package.json", "react-native") => Some("react-native"),
@@ -583,7 +583,7 @@ fn manifest_facts(files: &[(String, String)]) -> (Facts, Vec<String>) {
 
 /// Selection needs manifest identities, not instruction prose or workflow bodies.
 pub fn kit_facts(project: &Path) -> Result<Facts, &'static str> {
-    let files = super::memory::read_sources(project, &["package.json", "Cargo.toml", "pyproject.toml"], "", &|_| false, 0)?;
+    let files = crate::project_memory::read_sources(project, &["package.json", "Cargo.toml", "pyproject.toml"], "", &|_| false, 0)?;
     Ok(manifest_facts(&files).0)
 }
 
@@ -595,7 +595,7 @@ pub fn facts(project: &Path) -> Result<Facts, &'static str> {
 fn sources(project: &Path) -> Result<Vec<(String, String)>, &'static str> {
     let names: Vec<&str> = MANIFESTS.iter().map(|(m, _)| *m).chain(INSTRUCTIONS).chain(["tsconfig.json"]).collect();
     let workflow = |name: &str| name.ends_with(".yml") || name.ends_with(".yaml");
-    super::memory::read_sources(project, &names, ".github/workflows", &workflow, 16)
+    crate::project_memory::read_sources(project, &names, ".github/workflows", &workflow, 16)
 }
 
 fn facts_from_sources(files: &[(String, String)]) -> Facts {
@@ -734,7 +734,7 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
 /// Builds `rules.md` for a project folder and writes it when it differs. Returns the facts it was built from.
 pub fn refresh(project: &Path) -> Result<Facts, &'static str> {
     let facts = facts(project)?;
-    super::memory::write_faber_file(project, "rules.md", render(&facts).as_bytes())?;
+    crate::project_memory::write_faber_file(project, "rules.md", render(&facts).as_bytes())?;
     Ok(facts)
 }
 
@@ -758,13 +758,42 @@ pub fn refresh_cached(project: &Path, previous: Option<&Record>) -> Result<(Reco
     let facts = facts_from_sources(&files);
     let sources = files.iter().map(|(name, text)| (name.clone(), hash(text.as_bytes()))).collect();
     if let Some(record) = previous.filter(|r| r.version == RULES_VERSION && r.sources == sources)
-        && super::memory::faber_file_hash(project, "rules.md").is_ok_and(|current| current == record.hash)
+        && crate::project_memory::faber_file_hash(project, "rules.md").is_ok_and(|current| current == record.hash)
     {
         return Ok((record.clone(), facts));
     }
     let text = render(&facts);
-    super::memory::write_faber_file(project, "rules.md", text.as_bytes())?;
+    crate::project_memory::write_faber_file(project, "rules.md", text.as_bytes())?;
     Ok((Record { version: RULES_VERSION, sources, hash: hash(text.as_bytes()) }, facts))
+}
+
+pub const STACKS: &[(&str, &str)] = &[
+    ("swift", "swift swiftui"),
+    ("flutter", "flutter dart"),
+    ("expo", "expo"),
+    ("react-native", "react-native"),
+    ("compose", "compose jetpack"),
+    ("prisma", "prisma"),
+    ("firestore", "firestore firebase"),
+    ("postgres", "postgres postgresql supabase sql"),
+    ("stripe", "stripe"),
+    ("cloudflare", "cloudflare wrangler"),
+    ("auth0", "auth0"),
+    ("android", "android jetpack"),
+    ("godot", "godot gdscript"),
+    ("unity", "unity"),
+    ("roblox", "roblox luau"),
+    ("minecraft", "minecraft neoforge fabric"),
+    ("unreal", "unreal ue5"),
+    ("bevy", "bevy"),
+    ("love2d", "love2d love2d-core"),
+    ("phaser", "phaser"),
+    ("pixijs", "pixijs"),
+    ("threejs", "threejs three.js"),
+];
+
+pub fn known_stack(name: &str) -> Option<&'static str> {
+    STACKS.iter().find_map(|(stack, _)| (*stack == name).then_some(*stack))
 }
 
 #[cfg(test)]

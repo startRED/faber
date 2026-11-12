@@ -7,6 +7,7 @@
 //! repository, in a folder of Faber's own (see [`Runner::neutral`]), and names the repository it reads.
 
 use super::git::valid_oid;
+pub use crate::follow::{Ci, CiState, Failure, Look, PrState};
 use serde_json::Value;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -90,13 +91,6 @@ fn ask(runner: &mut impl Runner, call: &Call) -> Result<Reply, RemoteError> {
 
 // Pull requests
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrState {
-    Open,
-    Merged,
-    Closed,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pr {
     number: u64,
@@ -128,24 +122,6 @@ fn json(reply: &Reply) -> Result<Value, RemoteError> {
 }
 
 // Checks
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CiState {
-    /// The PR has no checks.
-    None,
-    Pending,
-    Passing,
-    Failing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Ci {
-    pub state: CiState,
-    /// The commit these results are for.
-    pub head: String,
-    pub failed: Vec<String>,
-    pub total: usize,
-}
 
 fn classify(check: &Value) -> (CiState, String) {
     let name = check["name"].as_str().or(check["context"].as_str()).unwrap_or("check").to_string();
@@ -181,26 +157,6 @@ fn summarize(checks: &[Value], head: &str) -> Ci {
 }
 
 // Following a pull request
-
-/// A pull request as a project conversation follows it (`crate::follow`): any repository the person's gh can read, and
-/// only read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Look {
-    pub state: PrState,
-    pub head: String,
-    pub ci: Ci,
-    /// GitHub found a merge conflict with the base branch.
-    pub conflict: bool,
-    /// Each failed check, with the link and the short words GitHub gave it.
-    pub failures: Vec<Failure>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Failure {
-    pub name: String,
-    pub link: Option<String>,
-    pub said: Option<String>,
-}
 
 const LOOK_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName,isCrossRepository,statusCheckRollup,mergeable";
 
@@ -471,6 +427,42 @@ impl Runner for Process {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    struct Gh(Vec<Call>, String);
+
+    impl Runner for Gh {
+        fn run(&mut self, call: &Call) -> Result<Reply, Lost> {
+            self.0.push(call.clone());
+            Ok(Reply { code: 0, stdout: self.1.clone() })
+        }
+        fn neutral(&self) -> std::path::PathBuf {
+            "/faber/neutral".into()
+        }
+    }
+
+    #[test]
+    fn gh_is_asked_from_faber_s_own_folder_and_its_checks_are_read() {
+        let head = "a".repeat(40);
+        let view = serde_json::json!({ "number": 93, "url": "https://github.com/acme/app/pull/93", "isDraft": false, "state": "OPEN", "headRefName": "fix",
+            "headRefOid": head, "baseRefName": "main", "isCrossRepository": false, "mergeable": "CONFLICTING",
+            "statusCheckRollup": [
+                { "__typename": "CheckRun", "name": "gate", "status": "COMPLETED", "conclusion": "FAILURE",
+                  "detailsUrl": "https://github.com/acme/app/actions/runs/7/job/8" },
+                { "__typename": "StatusContext", "context": "queue", "state": "FAILURE", "description": "rust failed\non\twindows",
+                  "targetUrl": "javascript:alert(1)" },
+                { "__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": null } ] });
+        let mut gh = Gh(vec![], view.to_string());
+        let look = super::look(&mut gh, "acme/app", 93).unwrap();
+        assert_eq!(gh.0[0].cwd, std::path::PathBuf::from("/faber/neutral"), "never inside the person's repository");
+        assert_eq!(gh.0[0].args[..5], ["pr", "view", "93", "--repo", "acme/app"]);
+        assert!(look.conflict && look.ci.state == CiState::Failing && look.state == PrState::Open);
+        assert_eq!(look.failures[0].link.as_deref(), Some("https://github.com/acme/app/actions/runs/7/job/8"));
+        assert_eq!(
+            (look.failures[1].name.as_str(), look.failures[1].said.as_deref(), &look.failures[1].link),
+            ("queue", Some("rust failed on windows"), &None)
+        );
+        assert!(super::look(&mut gh, "acme/app --web", 93).is_err(), "a repository is only owner/name");
+    }
 
     fn envs_of(call: &Call) -> BTreeMap<String, Option<String>> {
         let process = Process::at("C:/tools/gh.exe".into(), "C:/faber/remote".into());

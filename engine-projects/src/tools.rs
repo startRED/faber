@@ -12,6 +12,7 @@ use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
 mod npm;
+pub use crate::store::retry_busy;
 pub use npm::Package;
 mod plugin_delivery;
 pub mod replacement;
@@ -902,34 +903,6 @@ fn entries(dir: &Path) -> Option<Vec<std::fs::DirEntry>> {
     }
 }
 
-/// Windows lets an antivirus or indexer hold a file it has just seen for a few milliseconds, and a rename or delete of its
-/// folder then fails with access denied or a sharing violation. Waits for the next try: `None` for any other error, system or
-/// attempt past the bound (about 0.9 s in all).
-fn busy_delay(windows: bool, error: &io::Error, attempt: u32) -> Option<std::time::Duration> {
-    let busy = error.kind() == io::ErrorKind::PermissionDenied || matches!(error.raw_os_error(), Some(5 | 32));
-    (windows && busy && attempt < 8).then(|| std::time::Duration::from_millis(25 * u64::from(attempt + 1)))
-}
-
-fn retry_with<T>(windows: bool, sleep: impl Fn(std::time::Duration), mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    let mut attempt = 0;
-    loop {
-        match op() {
-            Err(error) if let Some(wait) = busy_delay(windows, &error, attempt) => {
-                sleep(wait);
-                attempt += 1;
-            }
-            done => return done,
-        }
-    }
-}
-
-/// Runs a file operation of the store again while Windows reports the file busy; the last error is never hidden. Blocks the
-/// thread for up to about 0.9 s, and only while Windows reports the file busy: on a blocking worker, or for a conversation's
-/// save and removal on the engine thread under its lock (`store::replace`).
-pub fn retry_busy<T>(op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    retry_with(cfg!(windows), std::thread::sleep, op)
-}
-
 /// The store changes under one lock for the whole process: two switches flipped together never share a folder or a ledger.
 pub fn lock() -> std::sync::MutexGuard<'static, ()> {
     static STORE: Mutex<()> = Mutex::new(());
@@ -1510,36 +1483,6 @@ pub async fn install_for_agent(store: &Store, item: &Item, source: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_busy_file_is_retried_a_bounded_number_of_times_and_only_on_windows() {
-        let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
-        let (calls, waited) = (std::cell::Cell::new(0), std::cell::Cell::new(std::time::Duration::ZERO));
-        let sleep = |wait| waited.set(waited.get() + wait);
-        let flaky = retry_with(true, sleep, || {
-            calls.set(calls.get() + 1);
-            if calls.get() < 3 { Err(denied()) } else { Ok(calls.get()) }
-        });
-        assert_eq!(flaky.unwrap(), 3, "two denials, then the operation goes through");
-        calls.set(0);
-        let stuck = retry_with(true, sleep, || -> io::Result<()> {
-            calls.set(calls.get() + 1);
-            Err(denied())
-        });
-        assert_eq!(stuck.unwrap_err().kind(), io::ErrorKind::PermissionDenied, "the last error is returned, never hidden");
-        assert_eq!(calls.get(), 9, "one try plus eight retries");
-        assert!(waited.get() < std::time::Duration::from_millis(1100), "the wait stays about a second");
-        for (windows, error, retried) in [
-            (true, io::Error::from_raw_os_error(5), true),
-            (true, io::Error::from_raw_os_error(32), true),
-            (true, io::Error::from(io::ErrorKind::NotFound), false),
-            (true, io::Error::other("digest mismatch"), false),
-            (false, denied(), false),
-        ] {
-            assert_eq!(busy_delay(windows, &error, 0).is_some(), retried, "{error:?} on windows={windows}");
-        }
-        assert!(busy_delay(true, &denied(), 8).is_none());
-    }
 
     /// A GitHub-shaped archive: everything under `repo-commit/`.
     fn archive(dir: &Path, files: &[(&str, &[u8])]) -> PathBuf {

@@ -5,53 +5,21 @@
 //! The records keep the fields a newer Faber wrote in `extra`, so an older build can read and rewrite them without dropping
 //! anything.
 
-pub mod budget;
+pub use faber_engine_core::project_budget as budget;
 pub mod checks;
 pub mod copy;
 pub mod git;
 pub mod goals;
 pub mod lease;
 pub mod maintenance;
-pub mod memory;
+pub use faber_engine_core::project_memory as memory;
 pub mod proof;
 pub mod remote;
-pub mod rules;
+pub use faber_engine_core::project_rules as rules;
 
 use crate::model::Project;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::BTreeMap;
+pub use crate::model::{Extra, FolderState, ProcessId, valid_id};
 use std::path::{Component, Path, PathBuf};
-
-/// Fields a newer Faber wrote that this build does not know, kept as they were.
-pub type Extra = BTreeMap<String, Value>;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FolderState {
-    #[default]
-    Present,
-    Missing,
-    Disconnected,
-}
-
-impl FolderState {
-    pub fn is_present(self) -> bool {
-        self == Self::Present
-    }
-}
-
-impl Project {
-    pub fn state(&self) -> FolderState {
-        self.extra.get("state").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(FolderState::Present)
-    }
-
-    pub fn set_state(&mut self, state: FolderState) {
-        if let Ok(val) = serde_json::to_value(state) {
-            self.extra.insert("state".into(), val);
-        }
-    }
-}
 
 /// Checks a project folder with one metadata call, plus one for the volume root only when missing on a mounted-volume path.
 /// Reads no directory contents or files.
@@ -130,19 +98,6 @@ fn volume_root(path: &Path) -> Option<PathBuf> {
         return Some(Path::new("/").join(mount).join(volume));
     }
     None
-}
-
-/// Whether `id` can name a record file: 1 to 64 ASCII letters, digits, `-` or `_`.
-pub fn valid_id(id: &str) -> bool {
-    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
-
-/// A process by its id and the moment it started: the start time tells a reused id from the original.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProcessId {
-    pub pid: u32,
-    pub started_at: u64,
 }
 
 #[cfg(test)]

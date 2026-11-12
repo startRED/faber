@@ -6,6 +6,7 @@
 
 pub use faber_engine_core::*;
 pub use faber_engine_drivers::*;
+pub use faber_engine_projects::*;
 
 pub mod engine;
 

@@ -1147,6 +1147,7 @@ dependencies = [
  "chrono",
  "faber-engine-core",
  "faber-engine-drivers",
+ "faber-engine-projects",
  "faber-winproc",
  "flate2",
  "junction",
@@ -1202,11 +1203,39 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "faber-engine-core",
+ "faber-engine-projects",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "faber-engine-projects"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "crc32fast",
+ "faber-engine-core",
+ "faber-winproc",
+ "flate2",
+ "html5ever 0.40.1",
+ "junction",
+ "pulldown-cmark",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sysinfo",
+ "tar",
+ "tempfile",
+ "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "uuid",
+ "win32job",
+ "winreg",
+ "zip 9.0.5",
 ]
 
 [[package]]

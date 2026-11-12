@@ -1,7 +1,7 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import catalog from '../../engine-core/src/tools.json';
+import catalog from '../../engine-projects/src/tools.json';
 import { api, type AppEvent, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';

@@ -103,7 +103,7 @@ impl TranscriptStore {
         let temp = path.with_file_name(format!("{name}.{}.{}.tmp", std::process::id(), TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)));
         reject_symlink(&temp)?;
         // Disk::write syncs the temp file before rename, as Store::save_checked does for the record.
-        self.disk.write(&temp, &bytes).and_then(|()| crate::tools::retry_busy(|| self.disk.rename(&temp, &path))).map_err(|e| {
+        self.disk.write(&temp, &bytes).and_then(|()| crate::store::retry_busy(|| self.disk.rename(&temp, &path))).map_err(|e| {
             drop(fs::remove_file(&temp));
             Fault::of_write(&e)
         })?;

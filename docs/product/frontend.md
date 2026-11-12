@@ -9,8 +9,8 @@ Faber supplies two original instruction skills beside its own guide in the exist
 
 | Skill | When it applies | Source |
 | :--- | :--- | :--- |
-| frontend-craft | Before writing anything a person sees in a browser: a site, an app screen, a form or an explainer, even one HTML file | [Instructions](../../engine-core/src/frontend-skills/frontend-craft/SKILL.md) |
-| frontend-proof | Before saying a page or screen is done, or an explicitly requested audit | [Instructions](../../engine-core/src/frontend-skills/frontend-proof/SKILL.md) |
+| frontend-craft | Before writing anything a person sees in a browser: a site, an app screen, a form or an explainer, even one HTML file | [Instructions](../../engine-projects/src/frontend-skills/frontend-craft/SKILL.md) |
+| frontend-proof | Before saying a page or screen is done, or an explicitly requested audit | [Instructions](../../engine-projects/src/frontend-skills/frontend-proof/SKILL.md) |
 
 These are first-party instructions, not copies or bundled versions of catalog skills. Existing design, motion and
 framework skills remain useful; these supply the project-aware interaction and proof workflow between them. They
@@ -74,7 +74,7 @@ The first-party craft/proof instructions distinguish this task from an operation
 narrow composition and reduced-motion still, and require a before/during/after rehearsal with trustworthy coverage.
 An empty, gapped or unfinished capture cannot establish a pass, including when a third-party tool prints one.
 
-The delivery checks live inside `engine-core/src/guide.rs` and `engine/src/engine/kits.rs`: file creation/repair, lazy
+The delivery checks live inside `engine-projects/src/guide.rs` and `engine/src/engine/kits.rs`: file creation/repair, lazy
 discovery, both vendors and areas, isolated requests, guarded modes, unchanged/resumed sessions and directory safety.
 The existing guide checks still cover its words and screen language. These checks establish delivery, not a measured
 improvement in generated design quality. That needs paired task runs and independent visual judgment.

@@ -361,7 +361,7 @@ pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
 }
 
 thread_local! {
-    /// Set while a project check (`crate::verify`) is being started: the process is created at below-normal priority.
+    /// Set while a project check (`verify`) is being started: the process is created at below-normal priority.
     static CHECK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -495,7 +495,7 @@ struct TreeState {
     pgid: u32,
     #[cfg(unix)]
     external: Mutex<faber_winproc::process_tree::ExternalDescendants>,
-    identity: crate::project::ProcessId,
+    identity: crate::model::ProcessId,
     root: Option<ProcessIdentity>,
     confirmed: AtomicBool,
     #[cfg(any(test, feature = "test-support"))]
@@ -626,7 +626,7 @@ impl Containment {
     }
 
     /// What caps the processor share of the job's processes (`Some(percent)`) or lifts the cap (`None`): the game guard of
-    /// a check (`crate::verify`), saying whether Windows took it. Nothing elsewhere than Windows, which has no job.
+    /// a check (`verify`), saying whether Windows took it. Nothing elsewhere than Windows, which has no job.
     pub fn cpu_cap(&self) -> Box<dyn Fn(Option<u32>) -> bool + Send + Sync> {
         #[cfg(windows)]
         {
@@ -646,7 +646,7 @@ impl Containment {
     }
 
     /// The most memory the job's processes held together so far, in bytes: what a check's RAM admission learns from
-    /// (`crate::verify`). None elsewhere than Windows, or when Windows does not say.
+    /// (`verify`). None elsewhere than Windows, or when Windows does not say.
     pub fn peak_memory(&self) -> Option<u64> {
         #[cfg(windows)]
         {
@@ -679,7 +679,7 @@ impl Containment {
                 pgid: 0,
                 #[cfg(unix)]
                 external: Mutex::default(),
-                identity: crate::project::ProcessId { pid: 42, started_at: 1 },
+                identity: crate::model::ProcessId { pid: 42, started_at: 1 },
                 root: Some(ProcessIdentity { pid: 42, created: 1 }),
                 confirmed: AtomicBool::new(false),
                 probe: Some(LifecycleProbe {
@@ -746,11 +746,11 @@ impl std::fmt::Debug for OwnedTree {
 /// Proof that an owned tree is gone. Only `OwnedTree::retire` makes one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Retired {
-    identity: crate::project::ProcessId,
+    identity: crate::model::ProcessId,
 }
 
 impl Retired {
-    pub fn identity(&self) -> crate::project::ProcessId {
+    pub fn identity(&self) -> crate::model::ProcessId {
         self.identity
     }
 }
@@ -797,7 +797,7 @@ impl OwnedTree {
     }
 
     /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
-    pub fn identity(&self) -> crate::project::ProcessId {
+    pub fn identity(&self) -> crate::model::ProcessId {
         self.tree.identity
     }
 
@@ -846,7 +846,7 @@ fn join_job(child: &tokio::process::Child) -> io::Result<Containment> {
 #[cfg(windows)]
 fn owned_job(pid: u32, job: win32job::Job) -> io::Result<Containment> {
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
-    let identity = crate::project::ProcessId { pid, started_at };
+    let identity = crate::model::ProcessId { pid, started_at };
     let root = faber_winproc::process_tree::job_process_identity(job.handle(), identity.pid)?;
     let tree = Arc::new(TreeState {
         job: Mutex::new(Some(job)),
@@ -870,7 +870,7 @@ fn join_job(child: &Child) -> io::Result<Containment> {
         tree: Arc::new(TreeState {
             pgid: pid,
             external: Mutex::default(),
-            identity: crate::project::ProcessId { pid, started_at },
+            identity: crate::model::ProcessId { pid, started_at },
             root,
             confirmed: AtomicBool::new(false),
             #[cfg(any(test, feature = "test-support"))]
@@ -960,7 +960,7 @@ mod lifecycle_tests {
         let handle = job.handle();
         let tree = Arc::new(TreeState {
             job: Mutex::new(Some(job)),
-            identity: crate::project::ProcessId { pid: 1, started_at: 1 },
+            identity: crate::model::ProcessId { pid: 1, started_at: 1 },
             root: None,
             confirmed: AtomicBool::new(false),
             probe: None,
