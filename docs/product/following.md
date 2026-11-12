@@ -84,7 +84,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    with arguments that each language writes by hand. The status line that already shows the newest step becomes this
    living sentence.
 2. **Subagents as rows inside the step (R161 step 2).** Claude's stream marks every event of a subagent with
-   `parent_tool_use_id`, which `engine-core/src/claude.rs` drops today, and the Task/Agent call already carries the whole
+   `parent_tool_use_id`, which `engine-drivers/src/claude.rs` drops today, and the Task/Agent call already carries the whole
    brief in its input. The engine keeps that mark on `Tool`, `Text` and `ToolResult`; the screen groups a child's
    events under its Task step, which opens into one row per child: the short name the agent gave it, its living
    sentence and its time. Past three rows the rest fold into "+2 more", and while nothing is stuck the whole split

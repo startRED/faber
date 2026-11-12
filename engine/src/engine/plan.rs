@@ -834,7 +834,8 @@ mod tests {
         })
         .unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while !std::fs::read_to_string(&note).unwrap().contains(" (stale?)") {
+            // The refresh replaces the note in place; on Windows a read can land between the two steps and find no file.
+            while !std::fs::read_to_string(&note).unwrap_or_default().contains(" (stale?)") {
                 tokio::task::yield_now().await;
             }
         })

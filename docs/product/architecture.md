@@ -23,12 +23,15 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
  └─ Live manifest: compatibility matrix, provider policy switch, driver descriptors
 ```
 
-- **The engine is two crates, so a build redoes little.** `engine-core/` (`faber-engine-core`) holds every layer below the
-  `Engine`: the conversation model, storage, the CLI drivers, routing, tools, projects and checks. `engine/` (`faber-engine`)
-  holds the `Engine` itself (`engine/src/engine/`, where most edits land) and re-exports the core whole, so every caller keeps
-  `faber_engine::model` and the like. Cargo rebuilds a crate and everything above it, so an edit to the `Engine` leaves the
-  core's 57,000 lines and their tests untouched, and `cargo t` tests only the packages a change touches and those built on
-  them. Test fixtures the `Engine`'s tests share sit behind the core's `test-support` feature, never in a shipped build.
+- **The engine is three crates, in layers, so a build redoes little.** `engine-core/` (`faber-engine-core`, ~47,000
+  lines): the conversation model, storage, processes, routing, tools, projects and checks. `engine-drivers/`
+  (`faber-engine-drivers`, ~10,000): the Claude Code and Codex drivers, the persona, the helper, the agent's own tools
+  and the account readings. `engine/` (`faber-engine`, ~37,000): the `Engine` itself and a facade that re-exports the
+  two below whole, so every caller keeps `faber_engine::model` and the like. Cargo rebuilds a crate and everything above it,
+  so the crates most edited sit highest; a type both layers need lives in the lower one and the upper re-exports it under
+  its old path (`sibling::State` is `conversation_state::State`). `cargo t` tests only the packages a change touches and
+  those built on them; test fixtures the upper crates' tests share sit behind the `test-support` feature, never in a
+  shipped build.
 - **Rust, Tauri 2 and SolidJS.** Chosen on 2026-10-10, while the app was still small, for weight and memory: Tauri
   uses the system webview (WebView2 on Windows) instead of shipping Chromium, and the engine is native code with no
   Node runtime. SolidJS updates only what changed, which suits answers streaming in. C++ only where a library leaves

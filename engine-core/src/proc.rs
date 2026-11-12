@@ -711,7 +711,7 @@ impl Containment {
         container
     }
 
-    #[cfg(all(test, unix))]
+    #[cfg(all(any(test, feature = "test-support"), unix))]
     pub fn scripted_external_descendants(
         root: ProcessIdentity,
         members: impl Fn() -> io::Result<Vec<ProcessIdentity>> + Send + Sync + 'static,

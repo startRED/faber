@@ -1,0 +1,28 @@
+[package]
+name = "faber-engine-drivers"
+description = "The CLI drivers of Faber's engine: Claude Code and Codex sessions, the persona, the helper and the agent's own tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+faber-engine-core = { path = "../engine-core" }
+base64 = "0.23"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+faber-engine-core = { path = "../engine-core", features = ["test-support"] }
+tempfile = "3"
+# The paused clock of the tests that wait out an answer's acknowledgement.
+tokio = { version = "1", features = ["test-util"] }
+
+[lints]
+workspace = true
+
+[features]
+# Test fixtures the engine's own tests share; never in a shipped build.
+test-support = ["faber-engine-core/test-support"]

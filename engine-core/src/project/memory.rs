@@ -862,7 +862,7 @@ fn task_directory(project: &Path, create: bool) -> Result<Directory, &'static st
 }
 
 /// Creates one bounded task through pinned no-follow handles; a second worker never replaces the first one's task.
-pub fn write_follow_up(project: &Path, task: &crate::progress::FollowUp) -> Result<crate::model::FollowUpTask, String> {
+pub fn write_follow_up(project: &Path, task: &FollowUp) -> Result<crate::model::FollowUpTask, String> {
     let text = task.task_file()?;
     let _write = WRITES.lock().map_err(|_| "error.memory.write")?;
     let dir = task_directory(project, true)?;
@@ -916,7 +916,7 @@ pub fn ready_follow_ups(project: &Path, tasks: &[crate::model::FollowUpTask]) ->
         let mut text = String::new();
         let Ok(file) = dir.file(task_name(task)?) else { continue };
         file.take(6001).read_to_string(&mut text).map_err(|_| READ)?;
-        if text.len() <= 6000 && revision(text.as_bytes()) == task.revision && crate::progress::follow_up_ready(&text, &names) {
+        if text.len() <= 6000 && revision(text.as_bytes()) == task.revision && follow_up_ready(&text, &names) {
             ready.push(crate::model::FollowUpTask { ready: true, ..task.clone() });
         }
     }
@@ -1645,7 +1645,7 @@ mod tests {
     #[test]
     fn project_memory_stale_paths_leave_follow_up_task_files_unchanged() {
         let project = folder();
-        let task: crate::progress::FollowUp = serde_json::from_value(serde_json::json!({
+        let task: FollowUp = serde_json::from_value(serde_json::json!({
             "title": "Create export", "files": "`src/new.rs`", "done": "`src/new.rs` exists"
         }))
         .unwrap();
@@ -1674,7 +1674,7 @@ mod tests {
     #[test]
     fn follow_up_files_are_bounded_ready_and_excluded_from_memory_and_start_sources() {
         let project = folder();
-        let mut task = crate::progress::FollowUp {
+        let mut task = FollowUp {
             title: "Fix export".into(),
             area: "Projects".into(),
             files: "ui/Export.tsx".into(),
@@ -1713,7 +1713,7 @@ mod tests {
         junction::create(outside.path(), project.path().join(".faber/tasks")).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), project.path().join(".faber/tasks")).unwrap();
-        let task: crate::progress::FollowUp = serde_json::from_value(serde_json::json!({"title":"Fix it", "done":"Test passes"})).unwrap();
+        let task: FollowUp = serde_json::from_value(serde_json::json!({"title":"Fix it", "done":"Test passes"})).unwrap();
         assert!(write_follow_up(project.path(), &task).is_err());
         assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
         #[cfg(windows)]
@@ -2601,4 +2601,66 @@ mod tests {
         std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\r\n- Second [by AI]\r\n- Third\r\n").unwrap();
         assert_eq!(keep(project.path(), &file, 1), Err(CHANGED), "the person never keeps words they did not see");
     }
+}
+
+/// A task found while closing a project conversation. Its complete text is kept, never shortened.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct FollowUp {
+    pub title: String,
+    #[serde(default)]
+    pub area: String,
+    #[serde(default)]
+    pub files: String,
+    #[serde(default)]
+    pub depends: Vec<String>,
+    #[serde(default)]
+    pub size: String,
+    pub done: String,
+}
+
+impl FollowUp {
+    /// Render one complete task brief, rejecting oversized or ambiguous fields.
+    pub fn task_file(&self) -> Result<String, &'static str> {
+        let line = |s: &str| !s.trim().is_empty() && !s.contains(['\r', '\n']);
+        if !line(&self.title)
+            || self.done.trim().is_empty()
+            || [&self.area, &self.files, &self.size].iter().any(|s| !s.is_empty() && !line(s))
+            || self.depends.iter().any(|s| !line(s) || s.contains(','))
+        {
+            return Err("A follow-up needs a title and what done looks like; its fields must each fit on one line.");
+        }
+        let mut text = format!("# {}\n\n", self.title.trim());
+        for (name, value) in [("Area", &self.area), ("Files", &self.files)] {
+            if !value.trim().is_empty() {
+                text.push_str(&format!("{name}: {}\n", value.trim()));
+            }
+        }
+        text.push_str(&format!(
+            "Depends: {}\n",
+            if self.depends.is_empty() { "none".into() } else { self.depends.iter().map(|s| s.trim()).collect::<Vec<_>>().join(", ") }
+        ));
+        if !self.size.trim().is_empty() {
+            text.push_str(&format!("Size: {}\n", self.size.trim()));
+        }
+        text.push_str(&format!("\n{}\n", self.done.trim()));
+        if text.len() > 6000 {
+            return Err("The follow-up is over 6,000 bytes. Shorten it and try again; nothing was cut.");
+        }
+        Ok(text)
+    }
+}
+
+/// A dependency remains unmet while its named task file is still in the folder.
+pub fn follow_up_ready(text: &str, files: &[String]) -> bool {
+    let depends = text.lines().find_map(|line| line.strip_prefix("Depends:")).unwrap_or("");
+    !depends.split(',').map(str::trim).filter(|name| !name.is_empty() && *name != "none").any(|name| {
+        files.iter().any(|file| {
+            file.strip_suffix(".md").is_some_and(|stem| {
+                stem == name.trim_end_matches(".md")
+                    || stem.split_once('-').is_some_and(|(order, task)| {
+                        !order.is_empty() && order.bytes().all(|b| b.is_ascii_digit()) && (task == name || order == name)
+                    })
+            })
+        })
+    })
 }

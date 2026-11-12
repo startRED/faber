@@ -3,7 +3,7 @@
 //! rows below the engine.
 
 use crate::model::{Area, Conversation, EndKind, Message, Outcome, Plan, Role, Status, StepState, WrapUp};
-use crate::sibling::State;
+use serde::{Deserialize, Serialize};
 
 /// The truth about how the last turn ended, whether or not the conversation was archived or queued. A turn whose process
 /// exited without an error is not a conclusion: the end is `Done` only when the agent concluded it (a plain answer in a chat
@@ -98,7 +98,7 @@ pub fn asks(w: &WrapUp) -> bool {
 pub fn progress_line(messages: &[Message]) -> Option<String> {
     let text = messages.iter().rev().filter(|m| m.role == Role::Assistant).take(3).find_map(|m| {
         if let Some(box_) = &m.wrap_up {
-            return Some(crate::progress::first_sentence(&box_.recap));
+            return Some(first_sentence(&box_.recap));
         }
         // Only while the reply works: once it ended, "Fixing the login page" would read as still at it.
         if m.status == Some(Status::Streaming)
@@ -156,4 +156,47 @@ pub fn child_state(c: &Conversation) -> String {
 
 pub fn child_line(c: &Conversation) -> Option<String> {
     progress_line(&c.messages)
+}
+
+/// Where a conversation stands: the one set of states the sidebar, the running list, a read by another agent and the command
+/// line all use (`ended::run_state`). Stored in the list as `working`, `waiting`, `concluded`, `unconcluded`, `stuck`,
+/// `interrupted`, `stopped` and `failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum State {
+    Working,
+    /// Waiting for the person: a question, a permission, or a conclusion that is blocked or needs them.
+    Waiting,
+    /// The agent concluded it (a closing call with the outcome done), or answered a plain question.
+    Concluded,
+    /// The turn ended and the agent never concluded.
+    Unconcluded,
+    /// It spends time or quota and shows no new result (`Conversation::stuck`).
+    Stuck,
+    Failed,
+    /// The person stopped it.
+    Stopped,
+    /// Its turn was cut off by Faber closing or crashing (`Message::closed`).
+    Interrupted,
+}
+
+/// The first sentence of a recap, for a running row, a done card and the tray: up to its first full stop, question or
+/// exclamation mark followed by a space, or the whole recap.
+pub fn first_sentence(recap: &str) -> String {
+    let text = recap.trim();
+    let end = text
+        .char_indices()
+        .find(|(i, c)| matches!(c, '.' | '!' | '?' | '。') && text[i + c.len_utf8()..].starts_with(char::is_whitespace))
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(text.len());
+    line(&text[..end], 160)
+}
+
+/// `text` on one line, trimmed, cut to `most` characters with an ellipsis.
+pub fn line(text: &str, most: usize) -> String {
+    let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match one.char_indices().nth(most) {
+        Some((at, _)) => format!("{}…", one[..at].trim_end()),
+        None => one,
+    }
 }
