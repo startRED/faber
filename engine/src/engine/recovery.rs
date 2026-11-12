@@ -2,7 +2,7 @@
 use super::*;
 use crate::budget::{QUEUE_SECS, Wait};
 use crate::handover::{self, Partial, Plan};
-use crate::route::{Asked, BEST, CHECKS, KINDS, LEVELS, ROUTER};
+use crate::route::{Asked, CHECKS, KINDS, LEVELS, ROUTER};
 
 #[derive(Clone)]
 pub(super) struct Transfer {
@@ -201,7 +201,7 @@ impl Core {
                 retried: saved.retried,
                 moving: false,
                 check: CHECKS.into_iter().find(|c| *c == saved.check).unwrap_or("glance"),
-                scope: ["open", BEST].into_iter().find(|s| *s == saved.scope).unwrap_or("tight"),
+                scope: if saved.scope == "open" { "open" } else { "tight" },
                 confidence: saved.confidence,
             },
         );

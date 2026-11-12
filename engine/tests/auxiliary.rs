@@ -60,20 +60,20 @@ fn send(engine: &Engine) -> String {
         .unwrap()
 }
 
-/// A pasted request, sent before any draft route, ran on the everyday model unread (2026-11-11): a first send nobody routed
-/// while typing now asks the router on send and waits for it, never past the budget (R567).
-#[tokio::test]
-async fn router_cold_send_asks_the_router_on_send_and_uses_its_verdict() {
+#[tokio::test(start_paused = true)]
+async fn router_cold_send_starts_at_once_without_an_auxiliary_request() {
     let dir = support::DataFolder::new();
-    let router = fake(verdict_after(1200));
-    let engine = routed_engine(&dir, &router);
+    let f = fake(fixture("codex", "chat"));
+    let engine = engine(&dir, f.spawn.clone(), Vendor::Codex);
+    let start = Instant::now();
     let id = send(&engine);
     engine.rename(&id, "Router test");
-    support::until("the send never started", || engine.open(&id).unwrap().messages[1].model.is_some()).await;
-    assert_eq!(router.wire.lines_with("turn/start"), 1, "the router read the sent text");
+    support::until("the default never started", || engine.open(&id).unwrap().messages[1].model.is_some()).await;
+    assert!(start.elapsed() < Duration::from_millis(500), "a cold router must not hold the first send: {:?}", start.elapsed());
     let reply = engine.open(&id).unwrap().messages[1].clone();
-    assert_eq!(reply.reason.as_deref(), Some("reason.route.chat.easy"), "the send waited for the verdict, not the everyday model");
-    assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
+    assert_eq!(reply.acts[0].why.as_deref(), Some("reason.autoImmediate"));
+    assert!(!f.wire.messages().iter().any(|m| m["params"]["baseInstructions"].as_str().is_some_and(|s| s.contains("You classify"))));
+    assert!(engine.ledger().codex.unmetered.is_empty());
     engine.shutdown();
 }
 
@@ -83,7 +83,7 @@ async fn router_cold_send_asks_the_router_on_send_and_uses_its_verdict() {
 async fn router_pending_draft_holds_a_first_send_only_for_its_budget() {
     let dir = support::DataFolder::new();
     let mut recording = fixture("codex", "chat");
-    recording.insert(0, support::Entry { input: false, msg: serde_json::json!({"faber_hold": 13_000}) });
+    recording.insert(0, support::Entry { input: false, msg: serde_json::json!({"faber_hold": 3200}) });
     let f = fake(recording);
     let engine = engine(&dir, f.spawn.clone(), Vendor::Codex);
     engine.route_draft(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice() }, QUESTION.into());
@@ -92,7 +92,7 @@ async fn router_pending_draft_holds_a_first_send_only_for_its_budget() {
     engine.rename(&id, "Router test");
     support::until("the pending draft held the send", || engine.open(&id).unwrap().messages[1].model.is_some()).await;
     let waited = start.elapsed();
-    assert!(waited >= Duration::from_secs(12) && waited < Duration::from_secs(13), "{waited:?}");
+    assert!(waited >= Duration::from_millis(2500) && waited < Duration::from_millis(3200), "{waited:?}");
     let reply = engine.open(&id).unwrap().messages[1].clone();
     assert_eq!(reply.reason.as_deref(), Some("reason.autoImmediate"));
     assert_eq!(reply.acts[0].why.as_deref(), Some("act.why.routerTimeout"));
