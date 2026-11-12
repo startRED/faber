@@ -66,6 +66,7 @@ fn every_english_text_is_shown_somewhere() {
     let mut code = sources("ui", &["ts", "tsx"], "locales");
     code.extend(sources("engine/src", &["rs"], ""));
     code.extend(sources("engine-core/src", &["rs"], ""));
+    code.extend(sources("engine-drivers/src", &["rs"], ""));
     code.extend(sources("src-tauri/src", &["rs"], ""));
     code.extend(sources("host/src", &["rs"], ""));
     code.extend(sources("channel/src", &["rs"], ""));

@@ -1,14 +1,14 @@
 # Connecting Gemini: Faber finds Antigravity's CLI and shows whether it is signed in
 
 Area: Accounts
-Files: engine-core/src/cli.rs, engine-core/src/account.rs, engine/src/engine.rs, src-tauri/src/setup.rs, ui/FirstRun.tsx, ui/Accounts.tsx, ui/locales/, tests/ui/, docs/product-map.md
+Files: engine-core/src/cli.rs, engine-drivers/src/account.rs, engine/src/engine.rs, src-tauri/src/setup.rs, ui/FirstRun.tsx, ui/Accounts.tsx, ui/locales/, tests/ui/, docs/product-map.md
 Depends: gemini-vendor-variant, agy-recorded-runs
 Size: about 380 changed lines
 
 Why: until Faber finds `agy` and knows its sign-in state, Gemini cannot be "connected", so nothing routes to it. How the other two
 are handled: `Cli::find_in` / `find_cli` (`engine-core/src/cli.rs`) look on PATH and in the official installers' folders (here `agy`
 sits in `%LOCALAPPDATA%\agy\bin`, which an app started from the desktop may not have on PATH); `account::login_args` and
-`status_args` (`engine-core/src/account.rs`) hold each CLI's own sign-in commands, run in a terminal the person sees; the first-run
+`status_args` (`engine-drivers/src/account.rs`) hold each CLI's own sign-in commands, run in a terminal the person sees; the first-run
 step "First run: accounts" and the later "Manage accounts" cards (`ui/FirstRun.tsx`, `ui/Accounts.tsx`, product map "Accounts" and
 "Account cards, later") offer Claude, Codex and "None for now"; `src-tauri/src/setup.rs` detects and installs. AGENTS.md: users sign
 in through each CLI's own flow, Faber never reads or stores credentials, and nothing third-party is bundled (downloads come from the

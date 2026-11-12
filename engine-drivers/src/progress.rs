@@ -3,70 +3,11 @@
 //! `done` also ends Keep going. Each call only writes down what it says: the engine stores it on the conversation or the
 //! reply, the screen draws it, and the call answers at once. Both CLIs call them like the other tools of Faber's server.
 
+pub use crate::conversation_state::first_sentence;
+use crate::conversation_state::line;
 use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanSize, PlanStep, StepState, WrapUp};
+pub use crate::project::memory::{FollowUp, follow_up_ready};
 use serde_json::{Value, json};
-
-/// A task found while closing a project conversation. Its complete text is kept, never shortened.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct FollowUp {
-    pub title: String,
-    #[serde(default)]
-    pub area: String,
-    #[serde(default)]
-    pub files: String,
-    #[serde(default)]
-    pub depends: Vec<String>,
-    #[serde(default)]
-    pub size: String,
-    pub done: String,
-}
-
-impl FollowUp {
-    /// Render one complete task brief, rejecting oversized or ambiguous fields.
-    pub fn task_file(&self) -> Result<String, &'static str> {
-        let line = |s: &str| !s.trim().is_empty() && !s.contains(['\r', '\n']);
-        if !line(&self.title)
-            || self.done.trim().is_empty()
-            || [&self.area, &self.files, &self.size].iter().any(|s| !s.is_empty() && !line(s))
-            || self.depends.iter().any(|s| !line(s) || s.contains(','))
-        {
-            return Err("A follow-up needs a title and what done looks like; its fields must each fit on one line.");
-        }
-        let mut text = format!("# {}\n\n", self.title.trim());
-        for (name, value) in [("Area", &self.area), ("Files", &self.files)] {
-            if !value.trim().is_empty() {
-                text.push_str(&format!("{name}: {}\n", value.trim()));
-            }
-        }
-        text.push_str(&format!(
-            "Depends: {}\n",
-            if self.depends.is_empty() { "none".into() } else { self.depends.iter().map(|s| s.trim()).collect::<Vec<_>>().join(", ") }
-        ));
-        if !self.size.trim().is_empty() {
-            text.push_str(&format!("Size: {}\n", self.size.trim()));
-        }
-        text.push_str(&format!("\n{}\n", self.done.trim()));
-        if text.len() > 6000 {
-            return Err("The follow-up is over 6,000 bytes. Shorten it and try again; nothing was cut.");
-        }
-        Ok(text)
-    }
-}
-
-/// A dependency remains unmet while its named task file is still in the folder.
-pub fn follow_up_ready(text: &str, files: &[String]) -> bool {
-    let depends = text.lines().find_map(|line| line.strip_prefix("Depends:")).unwrap_or("");
-    !depends.split(',').map(str::trim).filter(|name| !name.is_empty() && *name != "none").any(|name| {
-        files.iter().any(|file| {
-            file.strip_suffix(".md").is_some_and(|stem| {
-                stem == name.trim_end_matches(".md")
-                    || stem.split_once('-').is_some_and(|(order, task)| {
-                        !order.is_empty() && order.bytes().all(|b| b.is_ascii_digit()) && (task == name || order == name)
-                    })
-            })
-        })
-    })
-}
 
 /// The names both drivers give the calls, whatever the CLI calls them.
 pub const PLAN_TOOL: &str = "Plan";
@@ -287,15 +228,6 @@ pub fn claude_tool(name: &str) -> Option<&'static str> {
         CLAUDE_STATUS => Some(STATUS_TOOL),
         CLAUDE_WRAP_UP => Some(WRAP_UP_TOOL),
         _ => None,
-    }
-}
-
-/// `text` on one line, trimmed, cut to `most` characters with an ellipsis.
-fn line(text: &str, most: usize) -> String {
-    let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    match one.char_indices().nth(most) {
-        Some((at, _)) => format!("{}…", one[..at].trim_end()),
-        None => one,
     }
 }
 
@@ -689,18 +621,6 @@ pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
         false => format!("{}. Not done: {}", summary.result.trim_end_matches('.'), summary.not_done),
     };
     Ok(WrapUp { recap, ask, actions, done: outcome == Outcome::Done, outcome: Some(outcome), summary: Some(summary), answered: None })
-}
-
-/// The first sentence of a recap, for a running row, a done card and the tray: up to its first full stop, question or
-/// exclamation mark followed by a space, or the whole recap.
-pub fn first_sentence(recap: &str) -> String {
-    let text = recap.trim();
-    let end = text
-        .char_indices()
-        .find(|(i, c)| matches!(c, '.' | '!' | '?' | '。') && text[i + c.len_utf8()..].starts_with(char::is_whitespace))
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(text.len());
-    line(&text[..end], 160)
 }
 
 #[cfg(test)]

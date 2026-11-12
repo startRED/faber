@@ -2,7 +2,6 @@
 //! tools, projects and checks. `faber-engine` builds the `Engine` on top and re-exports every module here, so callers keep
 //! one path (`faber_engine::model`). Nothing here knows about windows or screens.
 
-pub mod account;
 pub mod act;
 pub mod auto_learned;
 pub mod background;
@@ -11,13 +10,10 @@ pub mod budget;
 pub mod cadence;
 pub mod change;
 pub mod changes;
-pub mod claude;
 pub mod claude_sessions;
 pub mod cli;
-pub mod codex;
 pub mod conversation_state;
 pub mod crash;
-pub mod creative;
 pub mod events;
 pub mod export;
 pub mod facts;
@@ -26,7 +22,6 @@ pub mod fileview;
 pub mod follow;
 pub mod guide;
 pub mod handover;
-pub mod helper;
 pub mod install;
 pub mod learn;
 pub mod ledger;
@@ -40,10 +35,8 @@ pub mod method_log;
 pub mod model;
 pub mod nudge;
 pub mod permissions;
-pub mod persona;
 pub mod pieces;
 pub mod proc;
-pub mod progress;
 pub mod project;
 mod prompt_history;
 pub mod recents;
@@ -54,7 +47,6 @@ pub mod route;
 pub mod router;
 pub mod screens;
 pub mod search;
-pub mod sibling;
 pub mod signals;
 pub mod startup;
 pub mod store;
@@ -69,8 +61,6 @@ pub mod verify;
 pub mod visual;
 pub mod worker_memory;
 pub mod workspace;
-
-pub use account::AccountStatus;
 
 /// Lowercase hex of a digest or any bytes, the form every stored and compared hash uses.
 pub fn hex(bytes: &[u8]) -> String {

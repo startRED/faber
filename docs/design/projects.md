@@ -2,7 +2,7 @@
 
 The published contract of the Projects area: screens, separate copies, stored records and how checks run.
 
-After edits, checks or a plan, both drivers read the conclusion from a hidden JSON block at the end of the agent’s closing message. The engine validates and records the same closing box as a legacy `wrap_up` call, without showing the block while it streams. Successful checks are reused while their inputs and environment are unchanged; done still requires evidence. If the card lists no checks, the agent checks the result directly instead of calling verify. The bounded missing-conclusion request remains as recovery (R509). Token savings need a live comparison (`engine-core/src/progress.rs`, `new_tools_omit_wrap_up_but_legacy_calls_are_recognized`).
+After edits, checks or a plan, both drivers read the conclusion from a hidden JSON block at the end of the agent’s closing message. The engine validates and records the same closing box as a legacy `wrap_up` call, without showing the block while it streams. Successful checks are reused while their inputs and environment are unchanged; done still requires evidence. If the card lists no checks, the agent checks the result directly instead of calling verify. The bounded missing-conclusion request remains as recovery (R509). Token savings need a live comparison (`engine-drivers/src/progress.rs`, `new_tools_omit_wrap_up_but_legacy_calls_are_recognized`).
 
 ## Projects
 

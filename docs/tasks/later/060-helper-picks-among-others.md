@@ -1,12 +1,12 @@
 # A helper or reviewer comes from whichever other AI has the most room
 
 Area: Helper from the other AI
-Files: engine-core/src/helper.rs, engine/src/engine/helpers.rs, engine/src/engine/recovery.rs, engine/src/engine/creative_judges.rs, engine/tests/, docs/product-map.md
+Files: engine-drivers/src/helper.rs, engine/src/engine/helpers.rs, engine/src/engine/recovery.rs, engine/src/engine/creative_judges.rs, engine/tests/, docs/product-map.md
 Depends: gemini-vendor-variant
 Size: about 220 changed lines
 
 Why: the owner wants reviews by "the other vendor" and quota balanced over Claude, Codex and Gemini. The helper tool is built on
-exactly two AIs: `helper::other(vendor)` (`engine-core/src/helper.rs`) returns the single other one, `offers_helper`
+exactly two AIs: `helper::other(vendor)` (`engine-drivers/src/helper.rs`) returns the single other one, `offers_helper`
 (`engine/src/engine/helpers.rs`) offers the tool when that one is connected, `recovery.rs` finds "the other" with
 `Vendor::ALL.into_iter().find(|v| *v != t.pick.vendor)`, and the creative judges iterate `Vendor::ALL` for spare capacity. With
 a third AI, "the other" is a choice: it must be a connected AI that did not write the work, with quota to spare (the gate of

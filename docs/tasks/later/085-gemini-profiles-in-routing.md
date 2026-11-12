@@ -1,7 +1,7 @@
 # Auto and the team can pick Gemini models for project work
 
 Area: Auto
-Files: engine-core/src/route.rs, engine-core/src/router.rs, engine-core/src/nudge.rs, engine-core/src/sibling.rs, engine/src/engine/siblings.rs, engine/src/engine/auto.rs, engine/tests/, docs/product/models.md, docs/product-map.md
+Files: engine-core/src/route.rs, engine-core/src/router.rs, engine-core/src/nudge.rs, engine-drivers/src/sibling.rs, engine/src/engine/siblings.rs, engine/src/engine/auto.rs, engine/tests/, docs/product/models.md, docs/product-map.md
 Depends: agy-turn-session, agy-quota-reading, team-start-options
 Size: about 300 changed lines
 

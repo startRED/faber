@@ -1,7 +1,7 @@
 # Codex starts the team it plans for a big request
 
 Area: Agent's plan and closing box
-Files: engine-core/src/persona.rs, engine-core/src/codex.rs, engine/examples/leader_eval.rs
+Files: engine-drivers/src/persona.rs, engine-drivers/src/codex.rs, engine/examples/leader_eval.rs
 Depends: leader-size-rule
 Size: about 60 changed lines
 
@@ -21,7 +21,7 @@ skill" (a user plugin).
 Build: first read one cut run's tool calls (keep the trial's folder for one request, as task 020 did) to see whether Codex
 starts the team after reading or builds the first step itself. Then tighten the Codex side only: either an order in the
 words ("once the plan is sent, start the conversations before reading further") or the conversation tool's description
-in `engine-core/src/codex.rs`, whichever the read shows. If Codex needs more than 150 s to reach its first start on every big
+in `engine-drivers/src/codex.rs`, whichever the read shows. If Codex needs more than 150 s to reach its first start on every big
 request, say so instead of raising `RUN_LIMIT` silently.
 
 Done: `FABER_EVAL_TMP=<folder outside any repository> node scripts/cargo.mjs run -p faber-engine --example leader_eval --

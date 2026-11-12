@@ -1,7 +1,7 @@
 # A project shows one derived line of progress, and each plan step its state
 
 Area: Agent's plan and closing box
-Files: engine-core/src/progress.rs, engine/src/engine/plan.rs, ui/Plan.tsx, ui/Projects.tsx, ui/running.ts, ui/locales/, tests/ui/, docs/product-map.md, docs/design/
+Files: engine-drivers/src/progress.rs, engine/src/engine/plan.rs, ui/Plan.tsx, ui/Projects.tsx, ui/running.ts, ui/locales/, tests/ui/, docs/product-map.md, docs/design/
 Depends: plan-steps-files-and-waits
 Size: about 300 changed lines
 

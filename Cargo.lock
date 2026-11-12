@@ -1146,6 +1146,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "faber-engine-core",
+ "faber-engine-drivers",
  "faber-winproc",
  "flate2",
  "junction",
@@ -1193,6 +1194,19 @@ dependencies = [
  "win32job",
  "winreg",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "faber-engine-drivers"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "faber-engine-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
