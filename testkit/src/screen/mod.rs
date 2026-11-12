@@ -305,13 +305,19 @@ pub fn run_all(
 
 fn run_one(paths: &Paths, scenario: &Scenario) -> Outcome {
     crate::timing::scenario_begins();
-    let outcome = if scenario.name == "sentinel: panels move through frames, and reduced motion moves nothing" {
+    let outcome = if retries_infrastructure(scenario.name) {
         retry_motion_infrastructure(|| run_timed(paths, scenario))
     } else {
         run_timed(paths, scenario)
     };
     crate::timing::scenario_ends(scenario.name, outcome.time.unwrap_or_default());
     outcome
+}
+
+/// Every motion sentinel whose runner lost frames (`infrastructure:`) runs once more; twice is quarantined, never passed.
+/// Only the panels sentinel did until the catalog one reverted an unrelated landing on a frame gap (2026-11-12).
+fn retries_infrastructure(name: &str) -> bool {
+    name.starts_with("sentinel:")
 }
 
 fn retry_motion_infrastructure(mut run: impl FnMut() -> Outcome) -> Outcome {
@@ -347,7 +353,7 @@ fn run_timed(paths: &Paths, scenario: &Scenario) -> Outcome {
         (Ok(()), Ok(())) => Outcome::pass_with(Suite::Screen, scenario.name, time, &ctx.notes.join(", ")),
         (Err(e), Ok(())) => Outcome::fail(Suite::Screen, scenario.name, time, &e),
         (Ok(()), Err(a)) => Outcome::fail(Suite::Screen, scenario.name, time, &format!("audit: {a}")),
-        (Err(e), Err(a)) if scenario.name == "sentinel: panels move through frames, and reduced motion moves nothing" => {
+        (Err(e), Err(a)) if retries_infrastructure(scenario.name) => {
             Outcome::fail(Suite::Screen, scenario.name, time, &format!("audit: {a}\nscenario: {e}"))
         }
         (Err(e), Err(a)) => Outcome::fail(Suite::Screen, scenario.name, time, &format!("{e}\naudit: {a}")),
@@ -697,6 +703,9 @@ mod motion_infrastructure_tests {
 
     #[test]
     fn retries_only_infrastructure_and_quarantines_two_incomplete_attempts() {
+        assert!(retries_infrastructure("sentinel: catalog card controls fade on hover and keyboard focus"));
+        assert!(retries_infrastructure("sentinel: panels move through frames, and reduced motion moves nothing"));
+        assert!(!retries_infrastructure("a chat streams an answer with the model and the reason, and lands in the sidebar"));
         let (passed, calls) = run(&["infrastructure: incomplete sampling", ""]);
         assert_eq!((passed.status, calls), (Status::Pass, 2));
         let (incomplete, calls) = run(&["infrastructure: first", "infrastructure: second"]);

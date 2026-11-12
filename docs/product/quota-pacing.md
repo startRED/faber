@@ -9,7 +9,7 @@ using rounded intelligence and coding sub-index, seconds per task and US$ per ta
 are in [models.md](models.md#auto-a-blind-router). Spare quota buys one rung within 600 seconds per task, or 1,200
 for hard-or-higher code, non-easy math and expert-or-higher work where quality matters (code, math, research).
 Frontier can step to summit (60/50), currently Fable high, only through spare quota or the existing learned rung;
-no verdict lands there directly and nothing steps above it. Multipliers, gates and learned adjustments keep their rules.
+no verdict lands there directly and nothing steps above it. Visual work (pages, interfaces, animations, videos made with code) stops at hard and takes no spare-quota step or learned rung (R568). Multipliers, gates and learned adjustments keep their rules.
 The strongest sufficient row within 15% of the cheapest factored price wins if neither score falls and one improves,
 within the task's time cap. Easy/medium chat permits slower quality upgrades within its eligible 300 s pool.
 Ties favor lower price then shorter time. This includes token-read cost and learned weights.

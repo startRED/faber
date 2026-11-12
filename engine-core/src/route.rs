@@ -60,15 +60,30 @@ pub const PROFILES: [Profile; 24] = [
 /// The router itself: the fastest cheap model of each vendor.
 pub const ROUTER: [(Vendor, &str, &str); 2] = [(Vendor::Codex, "gpt-6-luna", "medium"), (Vendor::Claude, "claude-haiku-5-5", "medium")];
 
-pub const KINDS: [&str; 7] = ["chat", "writing", "code", "math", "research", "image", "other"];
+pub const KINDS: [&str; 8] = ["chat", "writing", "code", "visual", "math", "research", "image", "other"];
 pub const LEVELS: [&str; 3] = ["easy", "medium", "hard"];
 pub const SCOPES: [&str; 2] = ["tight", "open"];
 pub const CHECKS: [&str; 3] = ["machine", "glance", "blind"];
+/// The scopes of a request whose person asked outright for the best quality (the router's `best`): the same scope, and one
+/// more effort inside the model that fits the work (`raised`), never a stronger model (Erick, 2026-11-12: wording in a
+/// request does not force the model).
+pub const BEST_SCOPES: [&str; 2] = ["tight best", "open best"];
+
+/// The router's scope without the ask for the best.
+fn plain(scope: &str) -> &str {
+    scope.strip_suffix(" best").unwrap_or(scope)
+}
+
+/// Whether the person asked outright for the best quality.
+pub fn asks_best(scope: &str) -> bool {
+    scope.ends_with(" best")
+}
 
 pub const INSTRUCTIONS: &str = "You classify a user's request for a router. Never answer the request itself.
 kind: chat (casual talk, greetings, short facts), writing (texts, emails, documents, slides, spreadsheets, translation, stories, plans), code (programs, \
-debugging, code review, changes to software), math (calculations, equations, proofs), research (analysis, comparisons, \
-explanations, advice), image (making or editing pictures), other.
+debugging, code review, changes to software), visual (building something people look at and judge by eye: a web page or \
+interface design, an animation, a video or explainer film made with code, a designed slide deck), math (calculations, \
+equations, proofs), research (analysis, comparisons, explanations, advice), image (making or editing pictures), other.
 difficulty: judge what the work is, not how long the message is. When two levels fit, choose the harder one.
 easy: a greeting or short fact; sorting, tagging, extracting or summarising text already given; finding a file or reading a log; a one-line rewrite or rename; simple arithmetic.
 medium: an everyday document, email, slide or spreadsheet; a translation; well-scoped code (a named bug, one function or file, a change from a clear spec, a small script); a routine investigation, review or explanation.
@@ -77,9 +92,11 @@ scope: tight (the finished result can be stated in one sentence: a named bug or 
 check: machine (a test, exit code, schema or number the work can recount proves it), glance (the person sees at once \
 whether it is right), blind (the person cannot easily tell a wrong answer from a right one: facts, advice, analysis, \
 subtle code).
+best: true only when the person explicitly asks for the strongest or best model, the highest effort or the highest \
+quality; otherwise false.
 Reply with one line of JSON only: \
-{\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"check\":\"machine|glance|blind\",\
-\"scope\":\"tight|open\",\"confidence\":<0..1>}";
+{\"kind\":\"chat|writing|code|visual|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"check\":\"machine|glance|blind\",\
+\"scope\":\"tight|open\",\"best\":true|false,\"confidence\":<0..1>}";
 
 /// The profiles this user can run: a connected CLI and, for Codex, a model the account lists.
 pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile> {
@@ -154,6 +171,8 @@ struct Answer {
     scope: serde_json::Value,
     #[serde(default)]
     confidence: f64,
+    #[serde(default)]
+    best: bool,
 }
 
 /// What the small model said about a request: the only thing kept from the router while the user types. The table runs
@@ -175,7 +194,8 @@ pub fn asked(answer: &str) -> Option<Asked> {
     let kind = KINDS.into_iter().find(|k| *k == a.kind).unwrap_or("other");
     let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty)?;
     let check = CHECKS.into_iter().find(|c| *c == a.check).unwrap_or("glance");
-    let scope = SCOPES.into_iter().find(|c| Some(*c) == a.scope.as_str()).unwrap_or("tight");
+    let scope = SCOPES.into_iter().position(|c| Some(c) == a.scope.as_str()).unwrap_or(0);
+    let scope = if a.best { BEST_SCOPES[scope] } else { SCOPES[scope] };
     Some(Asked { kind, difficulty, check, scope, confidence: a.confidence.clamp(0.0, 1.0) })
 }
 
@@ -185,9 +205,15 @@ pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
     choose_scoped(a.kind, a.difficulty, a.check, a.scope, a.confidence, false, candidates)
 }
 
+/// Visual work is built like code (several files, tools, a result to run) and judged by eye: it has code's bars and time
+/// caps, and its own level rule (`level_of`): no spare-quota step (`matters`) or learned rung (`lifted`) lifts it.
+fn bars_of(kind: &str) -> &str {
+    if kind == "visual" { "code" } else { kind }
+}
+
 /// The bar a task must clear: (general intelligence, agentic work). Projects always have an agent bar.
 pub fn bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
-    let (iq, agent): (u8, u8) = match (level, kind) {
+    let (iq, agent): (u8, u8) = match (level, bars_of(kind)) {
         ("easy", "code") => (24, 15),
         ("easy", _) => (24, 0),
         ("medium", "code") => (24, 32),
@@ -231,6 +257,7 @@ fn next_bar(kind: &str, level: &str, project: bool) -> (u8, u8) {
 
 /// Seconds per task a step up may take: deep quality work gets room for the strongest measured effort.
 fn cap_secs(kind: &str, level: &str) -> f32 {
+    let kind = bars_of(kind);
     if (kind == "code" && matches!(level, "hard" | "expert" | "frontier" | "summit"))
         || (kind == "math" && level != "easy")
         || (matters(kind, level) && matches!(level, "expert" | "frontier" | "summit"))
@@ -241,17 +268,17 @@ fn cap_secs(kind: &str, level: &str) -> f32 {
     }
 }
 
-/// Spare quota only buys quality where quality matters.
+/// Spare quota only buys quality where quality matters and the scores measure it: not visual work (`level_of`).
 fn matters(kind: &str, level: &str) -> bool {
     matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard" | "expert" | "frontier" | "summit")
 }
 
 /// The level a task's scope gives it. The makers keep the smaller, faster models for well-defined work and start the
 /// rest on the everyday model, so open medium work gets the hard bar and open hard work the expert one. Easy work stays
-/// easy, and chat keeps its level: a reply a person waits on stays fast.
+/// easy, and chat keeps its level: a reply a person waits on stays fast. Visual work stops at hard (`level_of`).
 pub fn scoped(kind: &str, difficulty: &'static str, scope: &str) -> &'static str {
-    match (difficulty, scope) {
-        ("hard", "open") => "expert",
+    match (difficulty, plain(scope)) {
+        ("hard", "open") if kind != "visual" => "expert",
         ("medium", "open") if kind != "chat" => "hard",
         _ => difficulty,
     }
@@ -259,12 +286,30 @@ pub fn scoped(kind: &str, difficulty: &'static str, scope: &str) -> &'static str
 
 /// An unsure verdict gets the next level's bar, and so does a `blind` one where quality matters: self-checking pays most
 /// where the person cannot verify the answer quickly, as with math's early hard bar (`bar`). The two are one step, never
-/// two, and a `machine` check lowers nothing: this is raise-only.
+/// two, and a `machine` check lowers nothing: this is raise-only. Visual work never passes hard: the scores the table is
+/// built on do not measure work judged by eye, so nothing shows the stronger models' price buys a better result there; at
+/// hard it starts on the everyday model (Opus or Sol at medium; Erick, 2026-11-12, after a 30-second explainer film ran
+/// 55 minutes and US$21 of quota on Fable high without finishing).
 fn level_of(kind: &str, difficulty: &'static str, check: &str, scope: &str, confidence: f64) -> &'static str {
     let level = scoped(kind, difficulty, scope);
     let step = confidence < 0.5 || (check == "blind" && matters(kind, level));
     let at = LADDER.iter().position(|l| *l == level).unwrap_or(2);
-    LADDER[if step { (at + 1).min(LADDER.len() - 1) } else { at }]
+    let at = if step { (at + 1).min(LADDER.len() - 1) } else { at };
+    LADDER[if kind == "visual" { at.min(2) } else { at }]
+}
+
+/// An ask for the best quality buys one more effort inside the model the work fits, from `candidates` (what the account
+/// can run and the quota admits), never a stronger model: the makers raise effort before changing model.
+fn raised(profile: Profile, scope: &str, candidates: &[Profile]) -> Profile {
+    if !asks_best(scope) {
+        return profile;
+    }
+    candidates
+        .iter()
+        .filter(|p| p.vendor == profile.vendor && p.model == profile.model && (p.iq, p.agent) > (profile.iq, profile.agent))
+        .min_by_key(|p| (p.iq, p.agent))
+        .copied()
+        .unwrap_or(profile)
 }
 
 /// What the quota says about one profile's price.
@@ -442,6 +487,8 @@ fn choose_reading(
             (p, p.cost as f64 + read(&p))
         }
     };
+    let up = raised(profile, scope, candidates);
+    let (profile, price) = if up == profile { (profile, price) } else { (up, up.cost as f64 + read(&up)) };
     Some(Routed { profile, kind, difficulty, check, scope, project, confidence, price, pace: None, wanted_effort: None })
 }
 
@@ -476,6 +523,8 @@ pub fn choose_paced_scoped(
     let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true, project) else {
         return Some(usual);
     };
+    let up = raised(profile, scope, candidates);
+    let (profile, price) = if up == profile { (profile, price) } else { (up, price * (up.cost / profile.cost) as f64) };
     let pace = if profile == usual.profile {
         None
     } else if step && (profile.iq, profile.agent) > (usual.profile.iq, usual.profile.agent) {
@@ -497,7 +546,7 @@ pub fn choose_paced_scoped(
 /// account can run and the gate admits. When no such candidate exists, or the quota already spoke (`pace` is a `step`, `fast` or `low`),
 /// the table's pick stands: the total is one rung over the table, never two, and a shown change always says it is learned.
 pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) -> Factor) -> Routed {
-    if base.pace.is_some() {
+    if base.pace.is_some() || base.kind == "visual" {
         return base;
     }
     let level = level_of(base.kind, base.difficulty, base.check, base.scope, base.confidence);
@@ -515,6 +564,19 @@ pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) ->
     Routed { profile, price, pace: Some(PaceNote { kind: "learned".into(), vendor: profile.vendor }), ..base }
 }
 
+/// Quota is a brake, never a silent downgrade (Erick, 2026-11-12): when the quota gate left out every model this account
+/// has that clears the task's bar, the pick is the strongest one left and the answer says which subscription is near its
+/// limit (`limit`). `account` is what the account can run before the quota gate. A note the quota or learning already
+/// wrote stands.
+pub fn limit_note(routed: &Routed, account: &[Profile]) -> Option<PaceNote> {
+    if routed.pace.is_some() || routed.clears_bar() {
+        return None;
+    }
+    let need = bar(routed.kind, level_of(routed.kind, routed.difficulty, routed.check, routed.scope, routed.confidence), routed.project);
+    let held = account.iter().filter(|p| clears(p, need)).min_by(|a, b| a.cost.total_cmp(&b.cost))?;
+    Some(PaceNote { kind: "limit".into(), vendor: held.vendor })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,7 +588,8 @@ mod tests {
         let mut unchanged = 0;
         for vendors in [&[Vendor::Claude][..], &[Vendor::Codex][..], &[Vendor::Claude, Vendor::Codex][..]] {
             let pool = candidates(vendors, &models);
-            for kind in KINDS {
+            // Visual work has its own ladder (`a_visual_build_asking_for_the_best_runs_on_opus_high_never_on_the_top_model`).
+            for kind in KINDS.into_iter().filter(|k| *k != "visual") {
                 for level in &LADDER[..5] {
                     for project in [false, true] {
                         let floor = bar(kind, level, project);
@@ -621,7 +684,7 @@ mod tests {
             assert_eq!(next_bar(kind, "frontier", false), (60, 50));
             assert_eq!(next_bar(kind, "summit", true), (60, 50));
             for difficulty in LEVELS {
-                for scope in SCOPES {
+                for scope in SCOPES.into_iter().chain(BEST_SCOPES) {
                     for check in CHECKS {
                         for confidence in [0.2, 0.9] {
                             assert_ne!(level_of(kind, difficulty, check, scope, confidence), "summit");
@@ -635,5 +698,53 @@ mod tests {
             assert_eq!(cap_secs("research", level), 1200.0);
             assert_eq!(cap_secs("writing", level), 600.0);
         }
+    }
+
+    /// 2026-11-12: a 30-second explainer film whose request said "use the strongest model and the highest effort" ran on
+    /// Fable high for 55 minutes and US$21 of quota without finishing. Erick: the work picks the model; the wording does not.
+    #[test]
+    fn a_visual_build_asking_for_the_best_runs_on_opus_high_never_on_the_top_model() {
+        let line = r#"{"kind":"visual","difficulty":"hard","check":"glance","scope":"open","best":true,"confidence":0.9}"#;
+        let best = asked(line).unwrap();
+        assert_eq!((best.kind, best.scope), ("visual", "open best"));
+        assert_eq!(asked(&line.replace("true", "false")).unwrap().scope, "open");
+        assert_eq!(asked(&line.replace(r#""best":true,"#, "")).unwrap().scope, "open", "an older router line still reads");
+        let claude = candidates(&[Vendor::Claude], &[]);
+        let pick = |a: &Asked, project| {
+            let r =
+                choose_paced_scoped(a.kind, a.difficulty, a.check, a.scope, a.confidence, project, &claude, &|_| Factor::NEUTRAL).unwrap();
+            (r.profile.model, r.profile.effort)
+        };
+        for project in [false, true] {
+            assert_eq!(pick(&best, project), ("claude-opus-5-5", "high"), "the ask raises the fitting model's effort");
+            let plain = asked(&line.replace("true", "false")).unwrap();
+            assert_eq!(pick(&plain, project), ("claude-opus-5-5", "medium"), "visual work starts on the everyday model");
+            for confidence in [0.2, 0.9] {
+                for check in CHECKS {
+                    let unsure = Asked { confidence, check, ..best };
+                    assert_ne!(pick(&unsure, project).0, "claude-fable-5-2", "visual work never reaches the top model");
+                }
+            }
+        }
+        // Code keeps its own ladder: open hard code is expert work, and the ask only raises the effort of what fits it.
+        let code = Asked { kind: "code", scope: "open", ..best };
+        assert_eq!(pick(&code, true), ("claude-fable-5-2", "medium"));
+        assert_eq!(pick(&Asked { scope: "open best", ..code }, true), ("claude-fable-5-2", "high"));
+        // Everyday writing asked for the best gets one more effort on its own model, not a bigger model.
+        let writing = Asked { kind: "writing", difficulty: "medium", scope: "tight", ..best };
+        assert_eq!(pick(&writing, false), ("claude-sonnet-5-5", "high"));
+        assert_eq!(pick(&Asked { scope: "tight best", ..writing }, false), ("claude-sonnet-5-5", "xhigh"));
+    }
+
+    #[test]
+    fn quota_that_leaves_out_every_model_clearing_the_bar_is_said_and_a_plan_without_them_is_not() {
+        let claude = candidates(&[Vendor::Claude], &[]);
+        let haiku: Vec<_> = claude.iter().filter(|p| p.model == "claude-haiku-5-5").copied().collect();
+        let r = choose_scoped("code", "hard", "glance", "tight", 0.9, true, &haiku).unwrap();
+        assert_eq!((r.profile.model, r.profile.effort), ("claude-haiku-5-5", "xhigh"), "the strongest model left answers");
+        assert_eq!(limit_note(&r, &claude).map(|n| (n.kind, n.vendor)), Some(("limit".to_string(), Vendor::Claude)));
+        assert_eq!(limit_note(&r, &haiku), None, "a plan that never had the model is not a quota brake");
+        let fits = choose_scoped("code", "hard", "glance", "tight", 0.9, true, &claude).unwrap();
+        assert_eq!(limit_note(&fits, &claude), None);
     }
 }

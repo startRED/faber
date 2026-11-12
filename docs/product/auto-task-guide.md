@@ -6,7 +6,9 @@ both follow (read 2026-11-11). The bars, the table and the rules of a conversati
 ## Levels
 
 Difficulty follows the work, not message length; ties use the harder level. The router sees no model or maker names.
-Writing includes documents, slides and spreadsheets.
+Writing includes documents, slides and spreadsheets. Visual work is building something judged by eye (a page or
+interface design, an animation, a video or explainer film made with code, a designed deck): code's bars, never past
+hard, so it starts on the everyday model (R568).
 
 - Easy: greetings and short facts; sorting, tagging, extracting and summarising supplied text; finding files and reading
   logs; one-line rewrites or renames; simple arithmetic.

@@ -33,7 +33,7 @@ rest. The design is in `docs/history/superpowers/specs/2026-10-12-ux-sentinel-de
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
   file is a ratchet: it lists what is known, and a fix removes its line. Findings go to
   `target/faber-test/ux/<scenario>.json` and all raw frame traces to `target/faber-test/shots/rehearsal/traces/`,
-  including incomplete interactions without photographs. The panel-motion scenario retries an infrastructure result once in a fresh sandbox; two incomplete attempts are reported as a named quarantined failure, while completed motion failures still block. CI uploads traces in its screenshot artifact. Nothing records the
+  including incomplete interactions without photographs. Every motion sentinel retries an infrastructure result (lost frames, a frame clock the runner did not give) once in a fresh sandbox; two incomplete attempts are reported as a named quarantined failure, while completed motion failures still block. CI uploads traces in its screenshot artifact. Nothing records the
   person's screen.
 
 ## Interaction rehearsal

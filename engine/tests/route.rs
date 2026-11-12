@@ -23,7 +23,8 @@ fn measured_picks_for_every_kind_level_and_connected_vendor() {
         ("gpt-6.1-sol", "high"),
         ("gpt-6.1-sol", "xhigh"),
     ];
-    for kind in KINDS {
+    // Visual work stops at hard; its picks are pinned in engine-core (`a_visual_build_asking_for_the_best_...`).
+    for kind in KINDS.into_iter().filter(|k| *k != "visual") {
         for (i, level) in levels.into_iter().enumerate() {
             let at = if kind == "math" && level == "medium" { 2 } else { i };
             let both = if at == 4 { claude[at] } else { codex[at] };

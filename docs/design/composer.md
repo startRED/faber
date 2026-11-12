@@ -29,8 +29,11 @@ cheapest within a 15% factored price premium and its time cap. Easy/medium chat 
 a premium row may be slower within that pool. At neutral factors, medium Chat uses Sonnet medium, Terra medium
 when available, otherwise Sol low. Medium work with an open scope starts on the everyday model (Opus or Sol at medium),
 not the smaller one; inside a conversation a smaller model does it at high at most and the answer offers the stronger
-model once, with the existing row. Only spare quota or learning lifts frontier
-to summit (60/50, Fable high). Below high, a stronger answer raises effort first; from high it compares one more
+model once, with the existing row. Only spare quota or learning lifts frontier to summit (60/50,
+Fable high); visual work stops at hard (Opus or Sol at medium), and an ask for the best raises one effort inside the model
+that fits (R568); when quota keeps that model out, the answer says so under its header (`reason.pace.limit`). While Auto
+chooses, the answer shows a live Faber row (“choosing the model for this task…”) that the pick's row replaces; the header
+names only Auto meanwhile. Below high, a stronger answer raises effort first; from high it compares one more
 effort with the next stronger model's lowest sufficient effort, cheaper then faster. The [task guide and sources](../product/auto-task-guide.md)
 record both makers' recommendations, read 2026-11-11: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/),
 [cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),

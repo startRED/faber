@@ -352,7 +352,8 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
-    // A cold send starts with the default immediately; no classifier was asked or timed out.
+    // A first send nobody routed while typing asks the router (R567); this fake router gives no verdict, so the everyday
+    // row answers and both the header and the Faber row say why.
     let reason = page.text_of("reason.autoImmediate")?;
     let tips = page.eval("(() => ({ header: document.querySelector('article.ai .model')?.title, cost: document.querySelector('article.ai .actions .cost')?.title }))()")?;
     ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
@@ -361,9 +362,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(tips["cost"].as_str().is_some_and(|t| t.contains("in API value")), || {
         format!("the cost's tooltip should show the price note: {tips}")
     })?;
-    ensure(text.contains(&reason), || format!("the Faber row should explain the immediate choice: {text}"))?;
     let timeout = page.text_of("act.why.routerTimeout")?;
-    ensure(!text.contains(&timeout), || format!("a cold send must not claim the router timed out: {text}"))?;
+    ensure(text.contains(&timeout), || format!("the Faber row should say the router gave no verdict: {text}"))?;
+    let choosing = page.text_of("act.choosing")?;
+    ensure(!text.contains(&choosing), || format!("the live choosing row is gone once the model is chosen: {text}"))?;
     ensure(!text.contains("in API value"), || format!("the price note stays in the cost's tooltip: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
@@ -380,7 +382,7 @@ fn names_the_codex_model_while_streaming(ctx: &mut Ctx) -> Result {
     names_while_streaming(ctx, "codex", "", "GPT-6 Luna")
 }
 
-/// With Auto: a cold send starts immediately and names the model before the first word,
+/// With Auto: a cold send asks the router, then names the model before the first word,
 /// keeps the name and the height to the end, and reads the same when the conversation is opened again. The recording
 /// stops after the first words of the answer until the scenario lets it go on.
 fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &str) -> Result {
