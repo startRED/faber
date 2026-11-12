@@ -9,11 +9,13 @@
 //! Guards against loops and spend: Keep going has its own answers (`keep_going.rs`) and is left alone; never while a turn,
 //! a compaction, a queue, a wait for members or for a background command (`command_wait.rs`) is in place, nor after Stop
 //! or archive, nor where no AI has room or the goal is out of money (`send_by_itself`); an agent's own question card,
-//! failing checks, a plan to approve and a `blocked` box are the person's. At most `MAX_CARRY_ON` per message of the person,
+//! failing checks and a plan to approve are the person's. A `blocked` box is sent on too: on the rainbow-page bench of
+//! 2026-11-12 an agent called itself blocked over work it could do ("make the labels larger", "verify the quiz"), and one
+//! that is really blocked ends again with the same box and no change, which stops it. At most `MAX_CARRY_ON` per message of the person,
 //! and none after a carry-on turn that changed no file: an agent that answered it with the same box meant it.
 
 use super::*;
-use crate::model::{Outcome, Wake};
+use crate::model::Wake;
 
 /// Carry-on turns at most between two messages of the person.
 pub(super) const MAX_CARRY_ON: usize = 3;
@@ -45,9 +47,7 @@ pub(super) fn left_undone(c: &Conversation) -> Option<String> {
         return None;
     }
     let wrap = reply.wrap_up.as_ref().filter(|w| w.answered.is_none())?;
-    if !matches!(wrap.outcome(), Some(Outcome::NeedsYou | Outcome::Done)) {
-        return None;
-    }
+    wrap.outcome()?;
     let left = wrap.summary.as_ref().map(|s| s.not_done.trim()).filter(|s| !s.is_empty())?;
     // Since the person's last message: how many carry-on turns went out, and whether the newest changed anything.
     let since: Vec<&Message> = c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some()).collect();
@@ -82,7 +82,7 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ConclusionSummary, WrapUp};
+    use crate::model::{ConclusionSummary, Outcome, WrapUp};
 
     fn person(text: &str) -> Message {
         Message::new(new_id(), Role::User, text.into(), 1)
@@ -126,7 +126,9 @@ mod tests {
         let left = "the final render";
         assert!(left_undone(&project(vec![person("go"), reply(Outcome::NeedsYou, left, true)])).is_some());
         assert!(left_undone(&project(vec![person("go"), reply(Outcome::Done, left, false)])).is_some(), "done while work is left");
-        assert!(left_undone(&project(vec![person("go"), reply(Outcome::Blocked, left, true)])).is_none(), "blocked is the person's");
+        assert!(left_undone(&project(vec![person("go"), reply(Outcome::Blocked, left, true)])).is_some(), "blocked over its own work");
+        let really = project(vec![person("go"), reply(Outcome::Blocked, left, true), sent_on(), reply(Outcome::Blocked, left, false)]);
+        assert!(left_undone(&really).is_none(), "really blocked: the same box with no change stops it");
         assert!(left_undone(&project(vec![person("go"), reply(Outcome::NeedsYou, " ", true)])).is_none(), "a pure decision");
         let same = project(vec![person("go"), reply(Outcome::NeedsYou, left, true), sent_on(), reply(Outcome::NeedsYou, left, false)]);
         assert!(left_undone(&same).is_none(), "the same box again after changing nothing: it meant it");

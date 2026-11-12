@@ -1609,7 +1609,9 @@ async fn a_message_after_a_done_closing_box_is_counted_as_a_correction_and_a_fir
         panic!("the count is {:?}, not {want:?}", count());
     };
     // A box that is not done is no close, and the message after it is no correction.
-    calls(&mut pipe, "w0", "wrap_up", json!({ "outcome": "blocked", "did": "Fixed the login page.", "result": "The login page works.", "not_done": "The rest is not done." })).await;
+    // No work is left in it: a box with work left is sent on by Faber (`carry_on.rs`), which this check is not about.
+    calls(&mut pipe, "w0", "wrap_up", json!({ "outcome": "blocked", "did": "Fixed the login page.", "result": "The login page works." }))
+        .await;
     answers(&mut pipe, "Login fixed.", true).await;
     until(&engine, &id, idle).await;
     let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };

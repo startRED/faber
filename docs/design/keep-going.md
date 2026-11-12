@@ -44,6 +44,6 @@ closing box is not done or blocked has not handed the work back: its row stays i
 command to finish", and no "needs you" dot, done card or lead report comes while it waits. When the command ends the agent
 goes on in a reply under Faber's quiet line; a command still running after half an hour lets the reply end as its box said.
 A closing box that stops short of the job with nothing only the person can give ("Should I continue?", or done with work
-left) is not a question for them either: the next reply starts with Faber's quiet line "Faber asked it to finish the job
+left, or blocked over work it can still do, such as "make the labels larger") is not a question for them either: the next reply starts with Faber's quiet line "Faber asked it to finish the job
 instead of stopping halfway", and the box's buttons stay unanswered on the reply before it. An agent that asks the same
 again without changing anything meant it, and the person gets the question.
