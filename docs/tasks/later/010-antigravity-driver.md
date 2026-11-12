@@ -22,7 +22,7 @@ bypasses remain unproven. ACP 1.4.1 initializes with client name `faber`, but `s
 `Authentication required`. The person must complete ACP's own sign-in; never copy the CLI's token. See the dated
 research follow-up and local receipts. While sign-in waits, tasks 030 onward are independent and can proceed.
 
-Engine: `Vendor::Antigravity`, a driver for the chosen path (no shell; `engine-core/src/cli.rs` resolves the binary), mapping
+Engine: `Vendor::Antigravity`, a driver for the chosen path (no shell; `engine-store/src/cli.rs` resolves the binary), mapping
 to the existing events, permission and question cards reused, environment scrub for inherited credentials, no token
 file ever read, lenient on lines it does not know. Testkit: a replay agent and one recorded run per path.
 Done: questions can be answered in every enabled mode and supported credential-folder blocks demonstrably prevent forbidden actions before execution; if the direct mode cannot enforce both,

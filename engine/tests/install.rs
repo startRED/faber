@@ -283,7 +283,7 @@ impl Rig {
         let result = Cli::install_windows(&self.request, fetch, download, &register, spawn, &progress).await;
         assert!(
             !matches!(&result, Err(error) if error.is_null()),
-            "S2 installer API is missing: implement engine-core/src/install.rs and connect the Cli::install_windows test boundary"
+            "S2 installer API is missing: implement engine-store/src/install.rs and connect the Cli::install_windows test boundary"
         );
         result
     }

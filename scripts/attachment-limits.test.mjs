@@ -11,7 +11,7 @@ const limit = (path, name) => {
 
 test('attachment budget agrees across the screen and engine and fits the smallest transport', () => {
   const bytes = limit('ui/Composer.tsx', 'MAX_ATTACHMENTS_BYTES');
-  assert.equal(bytes, limit('engine-core/src/workspace.rs', 'MAX_ATTACHMENTS_BYTES'));
+  assert.equal(bytes, limit('engine-store/src/workspace.rs', 'MAX_ATTACHMENTS_BYTES'));
   const wire = Math.min(limit('electron/sidecar.ts', 'MAX_LINE'), limit('host/src/wire.rs', 'MAX_LINE'));
   const frame = JSON.stringify({ id: 1, cmd: 'send', args: { req: {
     area: 'chat', text: 'A message with an attachment.', choice: { vendor: 'auto' }, images: [],

@@ -1,7 +1,7 @@
 # Faber reads Gemini's limits the way it reads the other two, or says it cannot
 
 Area: Quota window, pace, plan
-Files: engine-core/src/ledger.rs, engine-core/src/cadence.rs, engine/src/engine/quota_watch.rs, engine-core/src/budget.rs, engine-core/src/usage.rs, engine-projects/src/toolbox.rs, ui/Settings.tsx, ui/locales/, docs/product/quota-pacing.md, docs/product-map.md
+Files: engine-store/src/ledger.rs, engine-core/src/cadence.rs, engine/src/engine/quota_watch.rs, engine-core/src/budget.rs, engine-core/src/usage.rs, engine-projects/src/toolbox.rs, ui/Settings.tsx, ui/locales/, docs/product/quota-pacing.md, docs/product-map.md
 Depends: gemini-vendor-variant, agy-recorded-runs
 Size: about 380 changed lines
 

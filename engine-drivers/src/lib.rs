@@ -5,6 +5,7 @@
 // The core's modules under their own names, so `crate::model` reads as it did before the split.
 pub(crate) use faber_engine_core::*;
 pub(crate) use faber_engine_projects::*;
+pub(crate) use faber_engine_store::*;
 
 pub mod account;
 pub mod claude;

@@ -68,6 +68,7 @@ fn every_english_text_is_shown_somewhere() {
     code.extend(sources("engine-core/src", &["rs"], ""));
     code.extend(sources("engine-drivers/src", &["rs"], ""));
     code.extend(sources("engine-projects/src", &["rs"], ""));
+    code.extend(sources("engine-store/src", &["rs"], ""));
     code.extend(sources("src-tauri/src", &["rs"], ""));
     code.extend(sources("host/src", &["rs"], ""));
     code.extend(sources("channel/src", &["rs"], ""));

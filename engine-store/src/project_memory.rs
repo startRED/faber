@@ -1,7 +1,7 @@
 //! Project-local instruction entries. No CLI profile, import, or link inside a project is followed.
+pub use crate::model::{KeptDecision, revision};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::ops::Range;
@@ -54,38 +54,6 @@ impl LearningKind {
             ".faber/taste.md" => Some(Self::Taste),
             ".faber/lessons.md" => Some(Self::Lessons),
             _ => None,
-        }
-    }
-}
-
-/// Authority lives outside the repository; body-only records from older versions remain readable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum KeptDecision {
-    Item {
-        id: String,
-        hash: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        files: Vec<String>,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        stale: bool,
-    },
-    Legacy(String),
-}
-
-impl KeptDecision {
-    pub fn of(body: &str) -> Self {
-        let line = body.lines().next().unwrap_or_default().trim();
-        let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")).unwrap_or(line);
-        let normal = line.split_whitespace().collect::<Vec<_>>().join(" ");
-        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()), files: vec![], stale: false }
-    }
-
-    pub fn matches(&self, record: &Self) -> bool {
-        match (self, record) {
-            (Self::Legacy(old), Self::Item { hash, .. }) => hash.get(..32) == Some(old.as_str()),
-            (Self::Item { id, hash, .. }, Self::Item { id: other_id, hash: other_hash, .. }) => id == other_id && hash == other_hash,
-            _ => self == record,
         }
     }
 }
@@ -949,10 +917,6 @@ pub fn remove_follow_up(project: &Path, task: &crate::model::FollowUpTask) -> Re
     }
     // shortcut: Unix rename-over can race unlink; quarantine before supporting concurrent task replacement.
     dir.discard(&file, name).map_err(|_| "error.memory.write")
-}
-
-pub fn revision(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Upgrade only legacy approvals whose exact body is still present; absent approved words are never discarded.

@@ -48,7 +48,7 @@ credentials, nested .git/.env deletes, hard links, Glob below **, lock cost and 
 
 Project plans carry small, normal or risky size, default small. Size never decreases when the plan is rewritten,
 advanced or cleared. A contract records the size it covered when supplied and needs an extension/new reason and proof.
-The pure classifier in engine-core/src/permissions.rs classifies literal paths, supported read/delete argv, publishing
+The pure classifier in engine-store/src/permissions.rs classifies literal paths, supported read/delete argv, publishing
 and shared-history commands. Local reads, writes and ordinary file deletes inside a separate copy keep the current size;
 deleting the copy root or `.git` demands risky.
 Codex file-change arrays use the same path rules, including delete kinds. Unknown shapes, tools, scripts, wrappers,

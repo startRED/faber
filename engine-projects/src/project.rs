@@ -5,17 +5,17 @@
 //! The records keep the fields a newer Faber wrote in `extra`, so an older build can read and rewrite them without dropping
 //! anything.
 
-pub use faber_engine_core::project_budget as budget;
+pub use faber_engine_store::project_budget as budget;
 pub mod checks;
 pub mod copy;
 pub mod git;
 pub mod goals;
 pub mod lease;
 pub mod maintenance;
-pub use faber_engine_core::project_memory as memory;
+pub use faber_engine_store::project_memory as memory;
 pub mod proof;
 pub mod remote;
-pub use faber_engine_core::project_rules as rules;
+pub use faber_engine_store::project_rules as rules;
 
 use crate::model::Project;
 pub use crate::model::{Extra, FolderState, ProcessId, valid_id};

@@ -23,17 +23,18 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
  └─ Live manifest: compatibility matrix, provider policy switch, driver descriptors
 ```
 
-- **The engine is four crates, in layers, so a build redoes little.** `engine-core/` (`faber-engine-core`, ~28,000
-  lines): the conversation model, storage, processes, routing, permissions and the records a project keeps (memory, rules,
-  budget). `engine-projects/` (`faber-engine-projects`, ~24,000): projects and their copies, the tool catalog, checks
-  (`verify`), rewind and file views. `engine-drivers/` (`faber-engine-drivers`, ~10,000): the Claude Code and Codex
-  drivers, the persona, the helper, the agent's own tools and the account readings. `engine/` (`faber-engine`, ~37,000):
-  the `Engine` itself and a facade that re-exports the three below whole, so every caller keeps `faber_engine::model` and
-  the like. Cargo rebuilds a crate and everything above it, so the crates most edited sit highest; a type two layers
-  need lives in the lower one and the upper re-exports it under its old path (`sibling::State` is
-  `conversation_state::State`, `project::memory` is `project_memory`). `cargo t` tests only the packages a change touches
-  and those built on them; test fixtures the upper crates' tests share sit behind the `test-support` feature, never in a
-  shipped build.
+- **The engine is five crates, in layers, so a build redoes little.** `engine-core/` (`faber-engine-core`, ~14,000
+  lines): the conversation model and the types it names, processes, routing and events. `engine-store/`
+  (`faber-engine-store`, ~14,000): storage, permissions, a project's memory, rules and budget records, search,
+  transcripts and the CLI installs. `engine-projects/` (`faber-engine-projects`, ~24,000): projects and their copies, the
+  tool catalog, checks (`verify`), rewind and file views. `engine-drivers/` (`faber-engine-drivers`, ~10,000): the Claude
+  Code and Codex drivers, the persona, the helper, the agent's own tools and the account readings. `engine/`
+  (`faber-engine`, ~37,000): the `Engine` itself and a facade that re-exports the four below whole, so every caller keeps
+  `faber_engine::model` and the like. Cargo rebuilds a crate and everything above it, so the crates most edited sit
+  highest; a type two layers need lives in the lower one and the upper re-exports it under its old path
+  (`sibling::State` is `conversation_state::State`, `project::memory` is `project_memory`). `cargo t` tests only the
+  packages a change touches and those built on them; test fixtures the upper crates' tests share sit behind the
+  `test-support` feature, never in a shipped build.
 - **Rust, Tauri 2 and SolidJS.** Chosen on 2026-10-10, while the app was still small, for weight and memory: Tauri
   uses the system webview (WebView2 on Windows) instead of shipping Chromium, and the engine is native code with no
   Node runtime. SolidJS updates only what changed, which suits answers streaming in. C++ only where a library leaves

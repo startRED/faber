@@ -532,7 +532,7 @@ pub struct Message {
     pub conclusion_error: Option<String>,
     /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fold_kept: Vec<crate::project_memory::KeptDecision>,
+    pub fold_kept: Vec<KeptDecision>,
     /// A fold lost a kept decision; the next admitted input consumes this plain notice.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fold_lost: bool,
@@ -2077,6 +2077,42 @@ impl Project {
             self.extra.insert("state".into(), val);
         }
     }
+}
+
+/// Authority lives outside the repository; body-only records from older versions remain readable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum KeptDecision {
+    Item {
+        id: String,
+        hash: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stale: bool,
+    },
+    Legacy(String),
+}
+
+impl KeptDecision {
+    pub fn of(body: &str) -> Self {
+        let line = body.lines().next().unwrap_or_default().trim();
+        let line = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ ")).unwrap_or(line);
+        let normal = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        Self::Item { id: revision(normal.as_bytes()), hash: revision(body.trim().as_bytes()), files: vec![], stale: false }
+    }
+
+    pub fn matches(&self, record: &Self) -> bool {
+        match (self, record) {
+            (Self::Legacy(old), Self::Item { hash, .. }) => hash.get(..32) == Some(old.as_str()),
+            (Self::Item { id, hash, .. }, Self::Item { id: other_id, hash: other_hash, .. }) => id == other_id && hash == other_hash,
+            _ => self == record,
+        }
+    }
+}
+
+pub fn revision(bytes: &[u8]) -> String {
+    <sha2::Sha256 as sha2::Digest>::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

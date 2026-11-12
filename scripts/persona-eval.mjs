@@ -318,7 +318,7 @@ function option(args, name, otherwise) {
 }
 
 /** A program on the PATH as `[executable, ...arguments]`: npm's `.cmd` shims need a shell, and nothing here starts one, so
- * a shim gives way to what it points to, a native `.exe` or `node script.js` (as `engine-core/src/cli.rs` does). */
+ * a shim gives way to what it points to, a native `.exe` or `node script.js` (as `engine-store/src/cli.rs` does). */
 function program(name) {
   const windows = process.platform === 'win32';
   for (const dir of (process.env.PATH || '').split(delimiter).filter(Boolean)) {

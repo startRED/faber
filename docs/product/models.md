@@ -105,7 +105,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   their screen row appears only on an effort change or a stronger-model offer; the first answer keeps its row. Technical
   details retain kind, difficulty, scope and check. A bar beyond the held model offers the existing stronger retry in a new
   branch once per conversation, taken or ignored; later requests still use the held model's strongest row.
-- **The table learns from what the person retries and keeps** (done, `engine-core/src/auto_learned.rs`; the owner said yes, with a
+- **The table learns from what the person retries and keeps** (done, `engine-store/src/auto_learned.rs`; the owner said yes, with a
   notice). Only two things count, and only for a conversation's first answer, the one Auto itself picked (later answers keep
   its model): a retry of a finished Auto answer (the same request asked again) says the pick was not good enough, and
   counts twice when it takes the step up above; the next message of that conversation says the answer was kept. An edited request is a new request, a stopped answer may only have been slow, and a failed check is Faber's own

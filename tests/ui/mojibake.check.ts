@@ -35,6 +35,7 @@ check('T1 mojibake: no source file holds garbled text', async () => {
     ...import.meta.glob('../../engine-core/src/**/*.rs', { query: '?raw', import: 'default' }),
     ...import.meta.glob('../../engine-drivers/src/**/*.rs', { query: '?raw', import: 'default' }),
     ...import.meta.glob('../../engine-projects/src/**/*.rs', { query: '?raw', import: 'default' }),
+    ...import.meta.glob('../../engine-store/src/**/*.rs', { query: '?raw', import: 'default' }),
     ...import.meta.glob('../../src-tauri/src/**/*.{rs,json}', { query: '?raw', import: 'default' }),
   } as Record<string, () => Promise<string>>;
   const found: string[] = [];

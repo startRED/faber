@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 faber-engine-core = { path = "../engine-core" }
+faber-engine-store = { path = "../engine-store" }
 faber-engine-projects = { path = "../engine-projects" }
 base64 = "0.23"
 serde = { version = "1", features = ["derive", "rc"] }
@@ -17,6 +18,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 faber-engine-core = { path = "../engine-core", features = ["test-support"] }
+faber-engine-store = { path = "../engine-store", features = ["test-support"] }
 faber-engine-projects = { path = "../engine-projects", features = ["test-support"] }
 tempfile = "3"
 # The paused clock of the tests that wait out an answer's acknowledgement.
@@ -27,4 +29,4 @@ workspace = true
 
 [features]
 # Test fixtures the engine's own tests share; never in a shipped build.
-test-support = ["faber-engine-core/test-support", "faber-engine-projects/test-support"]
+test-support = ["faber-engine-core/test-support", "faber-engine-store/test-support", "faber-engine-projects/test-support"]

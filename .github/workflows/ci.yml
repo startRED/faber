@@ -522,7 +522,7 @@ jobs:
         if: needs.changes.outputs.lints == 'true' && github.event_name != 'pull_request'
       - name: Linux engine and runner compile guard
         if: needs.changes.outputs.lints == 'true' && github.event_name != 'pull_request'
-        run: cargo check -p faber-engine-core -p faber-engine-projects -p faber-engine-drivers -p faber-engine -p faber-testkit --all-targets
+        run: cargo check -p faber-engine-core -p faber-engine-store -p faber-engine-projects -p faber-engine-drivers -p faber-engine -p faber-testkit --all-targets
 
   # One check that is green only when CI is (R174): phase-1-base requires it, so a pull request set to merge by itself
   # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means

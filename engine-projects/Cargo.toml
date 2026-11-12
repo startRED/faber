@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 faber-engine-core = { path = "../engine-core" }
+faber-engine-store = { path = "../engine-store" }
 faber-winproc = { path = "../winproc" }
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
@@ -33,6 +34,7 @@ win32job = "2"
 
 [dev-dependencies]
 faber-engine-core = { path = "../engine-core", features = ["test-support"] }
+faber-engine-store = { path = "../engine-store", features = ["test-support"] }
 tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(windows)'.dev-dependencies]
@@ -40,7 +42,7 @@ junction = "2"
 
 [features]
 # Test fixtures the upper crates' tests share; never in a shipped build.
-test-support = ["faber-engine-core/test-support"]
+test-support = ["faber-engine-core/test-support", "faber-engine-store/test-support"]
 
 [lints]
 workspace = true
