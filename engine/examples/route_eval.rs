@@ -145,6 +145,7 @@ impl Router {
                 let (_, server) = self.codex.as_ref()?;
                 server.open(
                     CodexThread {
+                        subagents: None,
                         temporary: false,
                         title: None,
                         helper: Default::default(),
@@ -171,6 +172,7 @@ impl Router {
             Vendor::Claude => {
                 let cli = self.claude.as_ref()?;
                 let launch = ClaudeLaunch {
+                    subagents: None,
                     temporary: false,
                     helper: Default::default(),
                     browse: false,

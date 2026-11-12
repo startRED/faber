@@ -831,6 +831,8 @@ pub struct CodexThread {
     pub verify: bool,
     /// The plan, the status and the closing box, as for `ClaudeLaunch::progress`.
     pub progress: bool,
+    /// The models of Codex's own subagents, as for `ClaudeLaunch::subagents`.
+    pub subagents: Option<crate::helper::Subagents>,
 }
 
 enum ServerCommand {
@@ -1199,6 +1201,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             if matches!(t.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
                 words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
             }
+            if t.helper == crate::helper::Helper::Offers {
+                words.push_str(crate::helper::HELPERS);
+            }
             if t.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
             }
@@ -1268,6 +1273,16 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.remove("sandbox");
         let config = params.entry("config").or_insert_with(|| json!({})).as_object_mut().unwrap();
         config.extend(crate::permissions::data_sandbox_config(&t.cwd, t.permissions != Permissions::Plan));
+    }
+    // Codex's own subagents (`helper::Subagents`): its documented defaults for every agent it spawns without naming a model.
+    if let Some(team) =
+        t.subagents.as_ref().filter(|_| area == Area::Project && t.helper == crate::helper::Helper::Offers && t.instructions.is_none())
+    {
+        let config = params.entry("config").or_insert_with(|| json!({}));
+        config["agents.default_subagent_model"] = team.build.model.clone().into();
+        if let Some(effort) = &team.build.effort {
+            config["agents.default_subagent_reasoning_effort"] = effort.clone().into();
+        }
     }
     if (t.permissions != Permissions::FullAccess || t.instructions.is_some()) && t.cwd.is_absolute() {
         params.insert("runtimeWorkspaceRoots".into(), json!([t.cwd]));
@@ -3285,6 +3300,7 @@ mod rewind_tests {
             identity: None,
             unsubscribed: false,
             params: CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 cwd: PathBuf::new(),

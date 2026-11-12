@@ -258,6 +258,7 @@ async fn r160_plan_collaboration_uses_the_model_returned_by_the_thread() {
     });
     let session = server.open(
         CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -310,6 +311,7 @@ async fn r160_ordinary_default_turn_omits_collaboration_mode() {
     });
     let session = server.open(
         CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -359,6 +361,7 @@ async fn r160_resumed_plan_sends_default_once_then_omits_collaboration_mode() {
     });
     let session = server.open(
         CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -648,6 +651,7 @@ async fn contained_server(wire: &mut ContainedWire) -> CodexServer {
 async fn contained_thread(server: &CodexServer, wire: &mut ContainedWire, id: &str, sink: faber_engine::claude::EventSink) -> Session {
     let session = server.open(
         CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -1130,6 +1134,7 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = server.open(
             CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 helper: Default::default(),
@@ -1254,6 +1259,7 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
     });
     let session = server.open(
         CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -1316,6 +1322,7 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
         let tx = tx.clone();
         server.open(
             CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 helper: Default::default(),
@@ -1372,6 +1379,7 @@ async fn run(
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -1728,6 +1736,7 @@ async fn r161_a_codex_subagent_approval_outside_its_turn_is_refused() {
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let thread = CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -1795,6 +1804,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -1850,6 +1860,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -1992,6 +2003,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
             });
             let session = server.open(
                 CodexThread {
+                    subagents: None,
                     temporary: false,
                     title: None,
                     helper: Default::default(),
@@ -2083,6 +2095,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let open = |name: &'static str| {
         let tx = tx.clone();
         let thread = CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -2129,6 +2142,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 #[test]
 fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_and_is_not_saved() {
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -2162,6 +2176,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
         for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
             for resume in [None, Some("thread-id".into())] {
                 let t = CodexThread {
+                    subagents: None,
                     temporary: false,
                     title: None,
                     helper: Default::default(),
@@ -2235,6 +2250,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
             });
             let session = server.open(
                 CodexThread {
+                    subagents: None,
                     temporary: false,
                     title: None,
                     helper: Default::default(),
@@ -2305,6 +2321,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                 });
                 server.open(
                     CodexThread {
+                        subagents: None,
                         temporary: false,
                         title: None,
                         helper: Default::default(),
@@ -2340,6 +2357,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
 #[test]
 fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_never_gets() {
     let thread = |resume: Option<&str>, instructions: Option<&str>, name: Option<&str>| CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -2378,6 +2396,23 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     let lead = CodexThread { progress: true, leads: true, ..thread(None, None, None) };
     assert!(thread_params(Area::Project, &lead).1["developerInstructions"].as_str().unwrap().ends_with(faber_engine::persona::LEADS));
     assert!(!thread_params(Area::Chat, &lead).1["developerInstructions"].as_str().unwrap().contains(faber_engine::persona::LEADS));
+    // Bench v11 (2026-11-12): spawned agents inherited the lead's model. The agent that offers the helper tool sets Codex's
+    // documented default for them and is steered to its helpers; a helper itself and Chat set nothing.
+    use faber_engine::helper::{HELPERS, Helper, Subagents};
+    let run = faber_engine::model::RunsOn { model: "gpt-6.1-terra".into(), effort: Some("high".into()) };
+    let team = Some(Subagents { read: run.clone(), build: run });
+    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Isolated] {
+        let offers = CodexThread { helper: Helper::Offers, subagents: team.clone(), permissions, ..thread(None, None, None) };
+        let (_, params) = thread_params(Area::Project, &offers);
+        assert_eq!(params["config"]["agents.default_subagent_model"], "gpt-6.1-terra", "{permissions:?}");
+        assert_eq!(params["config"]["agents.default_subagent_reasoning_effort"], "high");
+        assert!(params["developerInstructions"].as_str().unwrap().contains(HELPERS));
+        for (area, helper) in [(Area::Project, Helper::Is), (Area::Chat, Helper::Offers)] {
+            let (_, other) = thread_params(area, &CodexThread { helper, ..offers.clone() });
+            assert!(other["config"].get("agents.default_subagent_model").is_none(), "{area:?} {helper:?}");
+            assert!(!other["developerInstructions"].as_str().unwrap_or_default().contains(HELPERS), "{area:?} {helper:?}");
+        }
+    }
     assert!(!start["developerInstructions"].as_str().unwrap().contains("offer_bigger"));
     let (_, none) = thread_params(Area::Chat, &thread(None, None, None));
     assert!(none["developerInstructions"].as_str().unwrap().contains("State the underlying model truthfully"));
@@ -2434,6 +2469,7 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let f = fake(entries);
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),
@@ -2534,6 +2570,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
         });
         let session = server.open(
             CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 helper: Default::default(),
@@ -2618,6 +2655,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
     for area in [Area::Chat, Area::Project] {
         for resume in [None, Some("thread".into())] {
             let t = CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 helper: Default::default(),
@@ -2653,6 +2691,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
 fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
     for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Isolated] {
         let t = CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             helper: Default::default(),
@@ -2724,6 +2763,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
         });
         let session = server.open(
             CodexThread {
+                subagents: None,
                 temporary: false,
                 title: None,
                 helper: Default::default(),
@@ -2788,6 +2828,7 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                 });
                 server.open(
                     CodexThread {
+                        subagents: None,
                         temporary: false,
                         title: None,
                         helper: Default::default(),
@@ -2846,6 +2887,7 @@ fn codex_work_log_items_from_a_recorded_turn_keep_their_raw_shape_for_the_screen
 
 fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) -> CodexThread {
     CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Default::default(),

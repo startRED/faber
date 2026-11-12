@@ -54,6 +54,7 @@ fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
 
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
+        subagents: None,
         temporary: false,
         helper: Default::default(),
         browse: false,
@@ -1193,7 +1194,7 @@ fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
 
 // ---- no blocking prompts in full access, cache warmth, autocompact windows (checked on Claude Code 2.1.296) ----
 
-const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false };
+const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true, plugin_dir: false, agents: false };
 
 fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
     claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags, ..launch(area) })
@@ -1226,7 +1227,8 @@ fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_sign
 #[test]
 fn full_access_starts_the_same_with_or_without_the_newer_flags() {
     for area in [Area::Chat, Area::Project] {
-        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false });
+        let args =
+            full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false, agents: false });
         assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         assert!(!args.contains(&"--permission-prompts".into()));
         assert_eq!(args, full(area, ClaudeFlags::default()));
@@ -1294,10 +1296,12 @@ fn the_flags_are_read_from_the_help_text_word_by_word() {
     let help = "  --autocompact <auto|tokens>           Auto-compact window size\n  --permission-prompt-tool <tool>  MCP tool\n";
     assert_eq!(
         ClaudeFlags::from_help(help),
-        ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false }
+        ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false, plugin_dir: false, agents: false }
     );
     let both = format!("{help}  --permission-prompts <target>         Who answers permission prompts\n");
     assert_eq!(ClaudeFlags::from_help(&both), ClaudeFlags { auto_mode: false, ..NEWER });
+    assert!(ClaudeFlags::from_help("  --agents <json>          JSON object defining custom agents\n").agents, "session agents");
+    assert!(!ClaudeFlags::from_help("define agents with --agents").agents);
     // A mention in a description is not the flag.
     assert_eq!(ClaudeFlags::from_help("use autocompact and --permission-prompts-x"), ClaudeFlags::default());
     assert_eq!(ClaudeFlags::from_help(""), ClaudeFlags::default());
@@ -2030,4 +2034,42 @@ async fn team_reviewer_mcp_call_is_refused_without_offering_the_channel() {
     assert!(!args[0].iter().any(|a| a == faber_engine::helper::CLAUDE_MCP_CONFIG));
     assert!(args[0].iter().any(|a| a == "--no-session-persistence"));
     assert!(f.wire.messages().iter().any(|msg| msg.to_string().contains("Nobody can answer: decide yourself.")));
+}
+
+/// Bench v11 (2026-11-12): the lead's Agent subagents inherited its Opus. A project lead that has the helper tool sets the
+/// documented default subagent model, replaces the reading subagent with one on the reading model where the CLI takes
+/// `--agents`, and is told to give building and review to the helper tool. Every other session is left as it was.
+#[test]
+fn a_project_lead_sets_its_own_subagents_models_by_role() {
+    use faber_engine::helper::{Helper, READER, Subagents};
+    use faber_engine::model::RunsOn;
+    let run = |model: &str, effort: &str| RunsOn { model: model.into(), effort: Some(effort.into()) };
+    let team = Subagents { read: run("claude-haiku-5-5", "medium"), build: run("claude-sonnet-5-5", "high") };
+    let agents_flag = ClaudeFlags { agents: true, ..NEWER };
+    let args = |area: Area, helper: Helper, permissions: Permissions, flags: ClaudeFlags| {
+        claude_args(&ClaudeLaunch { helper, permissions, flags, subagents: Some(team.clone()), ..launch(area) })
+    };
+    let settings = |args: &[String]| -> serde_json::Value {
+        args.windows(2).find(|a| a[0] == "--settings").map(|a| serde_json::from_str(&a[1]).unwrap()).unwrap_or_default()
+    };
+    let agents = |args: &[String]| -> Option<serde_json::Value> {
+        args.windows(2).find(|a| a[0] == "--agents").map(|a| serde_json::from_str(&a[1]).unwrap())
+    };
+    let prompt = |args: &[String]| args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1].clone();
+    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Auto, Permissions::Isolated] {
+        let lead = args(Area::Project, Helper::Offers, permissions, agents_flag);
+        assert_eq!(settings(&lead)["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], "claude-sonnet-5-5", "{permissions:?}");
+        let reader = &agents(&lead).expect("the reading subagent is replaced")[READER];
+        assert_eq!((reader["model"].as_str(), reader["effort"].as_str()), (Some("claude-haiku-5-5"), Some("medium")));
+        assert!(prompt(&lead).contains(faber_engine::helper::HELPERS), "the lead is steered to its helpers");
+        let older = args(Area::Project, Helper::Offers, permissions, NEWER);
+        assert_eq!(agents(&older), None, "a CLI that does not list --agents starts as before");
+        assert_eq!(settings(&older)["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], "claude-sonnet-5-5");
+        for (area, helper) in [(Area::Project, Helper::Is), (Area::Project, Helper::Reviewer), (Area::Chat, Helper::Off)] {
+            let other = args(area, helper, permissions, agents_flag);
+            assert_eq!(agents(&other), None, "{area:?} {helper:?}");
+            assert!(settings(&other)["env"].get("CLAUDE_CODE_SUBAGENT_MODEL").is_none(), "{area:?} {helper:?}");
+            assert!(!prompt(&other).contains(faber_engine::helper::HELPERS), "{area:?} {helper:?}");
+        }
+    }
 }

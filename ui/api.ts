@@ -84,6 +84,8 @@ export interface ToolUse {
   /** On a helper's call: what the person wrote to it while it worked (R161 step 5); `taken` is absent while on its way. */
   told?: { id: string; text: string; taken?: boolean }[];
   team?: HelperTeam;
+  /** On a call that starts one of the CLI's own subagents: the model (and effort) Faber set for its role. */
+  runsOn?: { model: string; effort?: string };
   /** On a subagent's call: how many characters it wrote between its steps (R161 step 3). The words are read with `childWords` while its view is open. */
   wordsChars?: number;
   /** On a subagent's call: more of its words were left out than the engine keeps, so its view says later ones are not kept. */

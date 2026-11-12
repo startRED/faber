@@ -257,6 +257,14 @@ check('team block: CLI-only nested rows stay rows and known CLI members join the
     equal(root.querySelectorAll('.agents .agent').length, 0);
   } finally { dispose(); root.remove(); }
 });
+check('team block: a CLI subagent names the model Faber set for its role', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const cli: ToolUse = { id: 'cli', name: 'Agent', input: { description: 'Read tests', subagent_type: 'Explore' }, runsOn: { model: 'claude-haiku-5-5', effort: 'medium' } };
+  const dispose = render(() => createComponent(Thread, { messages: [{ ...teamFixture(), tools: [cli, teamFixture().tools![0]!] }], from: 0, conversationId: 'team', options: [], onBranch: () => {} }), root);
+  try {
+    equal(root.querySelector('[data-call=cli] .team-model')!.textContent, 'Haiku 5.5 · Medium');
+  } finally { dispose(); root.remove(); }
+});
 check('team block: second and third ink contrast on darkest and lightest card surfaces', async () => {
   const luminance = (color: string) => {
     const channels = color.match(/[\d.]+/g)!.map(Number);

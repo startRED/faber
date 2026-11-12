@@ -384,6 +384,7 @@ fn a_side_question_lists_neither_tool_in_either_cli() {
     use faber_engine::codex::{CodexThread, thread_params};
     use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         helper: Helper::Aside,
@@ -406,6 +407,7 @@ fn a_side_question_lists_neither_tool_in_either_cli() {
     };
     assert!(thread_params(Area::Project, &thread).1.get("dynamicTools").is_none());
     let launch = ClaudeLaunch {
+        subagents: None,
         temporary: false,
         helper: Helper::Aside,
         browse: false,

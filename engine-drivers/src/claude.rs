@@ -53,6 +53,8 @@ pub struct ClaudeLaunch {
     pub progress: bool,
     /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
     pub tools: crate::tools::Delivery,
+    /// The models of the CLI's own subagents (`helper::Subagents`): a project's own agent that offers the helper tool.
+    pub subagents: Option<crate::helper::Subagents>,
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
@@ -67,6 +69,11 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         map: launch.verify,
         progress: launch.progress,
     }
+}
+
+/// The subagents' models of a project's own agent; no other session sets them.
+fn subagents_of(launch: &ClaudeLaunch) -> Option<&crate::helper::Subagents> {
+    launch.subagents.as_ref().filter(|_| launch.area == Area::Project && launch.helper == crate::helper::Helper::Offers)
 }
 
 /// Catalog instructions reach user sessions in both areas; Isolated keeps customizations off.
@@ -436,6 +443,11 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         if hooks_off {
             settings["disableAllHooks"] = true.into();
         }
+        // The documented default model of every subagent the session starts without naming one (general-purpose and the
+        // person's own agents); the reading one is replaced below. Not forced: a model the agent names on its call still wins.
+        if let Some(team) = subagents_of(launch) {
+            settings["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] = team.build.model.clone().into();
+        }
         if settings.as_object().is_some_and(|s| !s.is_empty()) {
             args.push("--settings".into());
             args.push(settings.to_string());
@@ -452,6 +464,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             if let Some(card) = &tools.start_card {
                 words.push_str("\n\n");
                 words.push_str(card);
+            }
+            if launch.helper == crate::helper::Helper::Offers {
+                words.push_str(crate::helper::HELPERS);
             }
             if launch.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
@@ -492,6 +507,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             && guide_plugin_loaded(launch)
         {
             args.extend(["--plugin-dir".into(), dir.to_string_lossy().into_owned()]);
+        }
+        // The reading subagent on the reading model (`helper::claude_agents`), where the CLI takes session agents.
+        if let Some(team) = subagents_of(launch).filter(|_| launch.flags.agents) {
+            args.extend(["--agents".into(), crate::helper::claude_agents(team).to_string()]);
         }
         // The CLI echoes each line it is given when it takes it in, so a line the person wrote while it works is known to be
         // read, and by which turn. A helper keeps no history.
@@ -1376,6 +1395,7 @@ mod allow_tests {
         })));
         let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
         let launch = ClaudeLaunch {
+            subagents: None,
             temporary: false,
             area: Area::Project,
             model: None,

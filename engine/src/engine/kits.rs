@@ -748,6 +748,7 @@ mod tests {
             let delivery = crate::tools::Delivery { start_card: Some(CARD.into()), ..Default::default() };
             let instructions = aside.then(|| "Internal question only".to_string());
             let launch = ClaudeLaunch {
+                subagents: None,
                 temporary: false,
                 helper: Default::default(),
                 browse: false,
@@ -775,6 +776,7 @@ mod tests {
                 let cli = core.opts.clis[&Vendor::Codex].clone();
                 core.codex_server(Area::Project, false, Permissions::Isolated, &cli).open_with_tools(
                     CodexThread {
+                        subagents: None,
                         temporary: false,
                         title: None,
                         helper: Default::default(),
@@ -3806,6 +3808,50 @@ mod tests {
                     "{job}/{difficulty}: {:?}",
                     act.actor
                 );
+            });
+            engine.shutdown();
+        }
+    }
+
+    /// Bench v11 (2026-11-12): an Opus lead's two Agent subagents both ran on Opus. A project lead's own subagents now run on
+    /// the models Faber picks for their role, and their calls carry that model for the team rows.
+    #[tokio::test]
+    async fn a_project_leads_own_subagents_run_on_role_models_never_the_leads() {
+        for (vendor, lead) in [(Vendor::Claude, "claude-opus-5-5"), (Vendor::Codex, "gpt-6.1-sol")] {
+            let dir = crate::workspace::TestRoot::new();
+            let folder = dir.path().canonicalize().unwrap();
+            let (spawn, args, _) = fake();
+            let engine = engine(&dir, spawn);
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+            engine.with(|core| {
+                conversation(core, Area::Project, Some(&project.id), &folder, "A task");
+                core.codex_models = crate::route::PROFILES.iter().filter(|p| p.vendor == Vendor::Codex).map(|p| p.model.into()).collect();
+                let pick = Pick { model: Some(lead.into()), effort: "high".into(), ..pick(vendor) };
+                core.launch("kit", &pick).unwrap();
+                let (_, team) = core.subagents["kit"].clone();
+                assert_ne!(team.build.model, lead, "{vendor:?}: a builder is not the lead's model");
+                let profile = |run: &crate::model::RunsOn| {
+                    crate::route::PROFILES
+                        .into_iter()
+                        .find(|p| p.model == run.model && run.effort.as_deref().is_none_or(|e| e == p.effort))
+                        .unwrap()
+                };
+                let top = crate::route::PROFILES.into_iter().filter(|p| p.model == lead).map(|p| p.iq).max().unwrap();
+                assert!(profile(&team.build).iq <= top && profile(&team.read).cost <= profile(&team.build).cost, "{team:?}");
+                if vendor == Vendor::Claude {
+                    assert!(team.read.model.contains("haiku"), "{team:?}");
+                    let argv = args.lock().unwrap().last().unwrap().1.join("\n");
+                    assert!(argv.contains(&format!("\"CLAUDE_CODE_SUBAGENT_MODEL\":\"{}\"", team.build.model)), "{argv}");
+                }
+                let sid = core.live["kit"].sid;
+                core.live.get_mut("kit").unwrap().turn = Some("reply".into());
+                let input = json!({"description":"Read tests", "subagent_type":"Explore", "prompt":"Find the tests"});
+                core.handle("kit", sid, EngineEvent::Tool { id: "a1".into(), name: "Agent".into(), input, parent: None });
+                let input = json!({"description":"Fix it", "prompt":"Fix the bug"});
+                core.handle("kit", sid, EngineEvent::Tool { id: "a2".into(), name: "Agent".into(), input, parent: None });
+                let tools = core.convs["kit"].messages.last().unwrap().tools.clone().unwrap();
+                assert_eq!(tools[0].runs_on.as_ref(), Some(&team.read), "the reading subagent");
+                assert_eq!(tools[1].runs_on.as_ref(), Some(&team.build), "any other subagent");
             });
             engine.shutdown();
         }

@@ -176,6 +176,7 @@ mod tests {
             facts: None,
             told: vec![],
             team: None,
+            runs_on: None,
             words: vec![],
             words_cut: false,
             words_chars: None,

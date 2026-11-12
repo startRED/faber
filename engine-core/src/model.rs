@@ -189,6 +189,10 @@ pub struct ToolUse {
     /// Bounded team exchanges, preserved by screen updates, saves and branching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<HelperTeam>,
+    /// On a call that starts one of the CLI's own subagents: the model and effort Faber set for it (`helper::Subagents`), so
+    /// its team row names them as a helper's does.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "runsOn")]
+    pub runs_on: Option<RunsOn>,
     /// On a subagent's call: what the subagent itself wrote between its steps, oldest first (R161 step 3). Each entry sits after
     /// the first `at` steps it ran under this call, so the side chat draws it in order with them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -272,6 +276,14 @@ pub const WORDS_LIMIT: usize = 16_000;
 pub struct Words {
     pub at: usize,
     pub text: String,
+}
+
+/// The model, and the effort where Faber set one, a CLI subagent runs on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunsOn {
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2268,6 +2280,9 @@ pub struct ClaudeFlags {
     pub auto_mode: bool,
     /// `--plugin-dir <path>`: a plugin loaded from a folder for this session only (2.1.302), how the catalog's skills arrive.
     pub plugin_dir: bool,
+    /// `--agents <json>`: subagents defined for this session only, how Faber sets the model the CLI's own Explore subagent
+    /// runs on (code.claude.com/docs/en/sub-agents).
+    pub agents: bool,
 }
 
 impl ClaudeFlags {
@@ -2299,6 +2314,7 @@ impl ClaudeFlags {
             permission_prompts: declares("--permission-prompts"),
             auto_mode: modes.contains("\"auto\""),
             plugin_dir: declares("--plugin-dir"),
+            agents: declares("--agents"),
         }
     }
 }

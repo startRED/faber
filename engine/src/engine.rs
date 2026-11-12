@@ -634,6 +634,8 @@ struct Core {
     /// started or failed to start, so a message after their end is refused rather than kept.
     helper_early: HashMap<String, Vec<(String, String)>>,
     helper_seen: HashSet<String>,
+    /// The models a project agent's own subagents run on, with the process (`sid`) they were set for (`helpers::subagent_models`).
+    subagents: HashMap<String, (u64, crate::helper::Subagents)>,
     reviews: HashMap<String, review::Run>,
     /// The quick questions on the side (R250), by conversation, and the ones still asking, by question.
     asides: HashMap<String, Vec<aside::Aside>>,
@@ -820,6 +822,7 @@ impl Engine {
                 helpers: HashMap::new(),
                 helper_early: HashMap::new(),
                 helper_seen: HashSet::new(),
+                subagents: HashMap::new(),
                 reviews: HashMap::new(),
                 asides: HashMap::new(),
                 asking: HashMap::new(),
@@ -3228,6 +3231,16 @@ impl Core {
                 }
                 let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 let change = crate::change::of(&name, &input);
+                // The agent's own subagent starts on the model Faber set for its role, which its team row names.
+                let runs_on = self
+                    .subagents
+                    .get(conv)
+                    .filter(|(set_for, _)| {
+                        parent.is_none()
+                            && matches!(name.as_str(), "Agent" | "Task")
+                            && Some(*set_for) == self.live.get(conv).map(|l| l.sid)
+                    })
+                    .and_then(|(_, team)| team.of_call(&input));
                 let mut input = input;
                 let detail = self.store.transcripts.keep_input(conv, &id, &name, &mut input);
                 let mut step = false;
@@ -3249,6 +3262,7 @@ impl Core {
                         facts: None,
                         told: vec![],
                         team: None,
+                        runs_on,
                         words: vec![],
                         words_cut: false,
                         words_chars: None,
@@ -5186,6 +5200,7 @@ impl Core {
         }
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
+        let subagents = self.subagent_models(conv, helper, pick.vendor, model.as_deref());
         // Codex keeps dynamic tools with its thread; register project capabilities once and gate calls by the live mode.
         let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
         let browse = self.offers_browser(area, tool_mode);
@@ -5225,6 +5240,7 @@ impl Core {
                         flags,
                         tuning: tuning.clone(),
                         tools: project_tools,
+                        subagents: subagents.clone(),
                     },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
@@ -5264,6 +5280,7 @@ impl Core {
                         permissions,
                         leave_plan,
                         tuning: tuning.clone(),
+                        subagents: subagents.clone(),
                     },
                     sink,
                     project_tools,
@@ -5274,6 +5291,10 @@ impl Core {
             }
         };
         self.worker_memory.registry.register(session.owned_tree());
+        match subagents {
+            Some(team) => self.subagents.insert(conv.to_string(), (sid, team)),
+            None => self.subagents.remove(conv),
+        };
         self.live.insert(
             conv.to_string(),
             Live {
@@ -6387,6 +6408,7 @@ mod tool_in_tests {
             Err(std::io::Error::other("test"))
         });
         let launch = ClaudeLaunch {
+            subagents: None,
             temporary: false,
             area: Area::Chat,
             model: None,

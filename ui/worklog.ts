@@ -415,7 +415,8 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     const helper = call.name === 'Helper';
     const parent = parentOf(call);
     const act = acts.find((a) => a.kind === 'helper' && a.params?.call === call.id);
-    const model = act?.actor.who === 'ai' ? act.actor.model : undefined;
+    // A helper's model is in its act; a CLI subagent's is the one Faber set for its role.
+    const model = act?.actor.who === 'ai' ? act.actor.model : call.runsOn?.model;
     const job = act?.params?.job;
     const jobWord = job === 'read' ? t('tool.read') : job === 'build' ? t('tool.write') : job === 'review' ? t('review.kind') : job === 'advise' ? t('team.job.advise') : '';
     const helperModel = model ? [jobWord, prettyModel(model), act?.params?.effort ? t(`answer.effort.${act.params.effort as 'low' | 'medium' | 'high' | 'xhigh'}`) : ''].filter(Boolean).join(' · ') : helperKind;
@@ -429,7 +430,7 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
       helper,
       vendor: act?.actor.who === 'ai' ? act.actor.vendor : undefined,
       model,
-      effort: act?.params?.effort,
+      effort: act ? act.params?.effort : call.runsOn?.effort,
       job: call.team?.job ?? job,
       brief: text(helper ? input.brief : input.prompt).trim(),
       tools: own.get(call.id) ?? [],

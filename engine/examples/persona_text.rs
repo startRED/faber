@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 fn words(language: Option<&str>) -> Value {
     let tuning = Tuning { language: language.map(String::from), ..Default::default() };
     let launch = ClaudeLaunch {
+        subagents: None,
         temporary: false,
         area: Area::Chat,
         model: None,
@@ -37,6 +38,7 @@ fn words(language: Option<&str>) -> Value {
     let args = claude_args(&launch);
     let claude = args[args.iter().position(|a| a == "--append-system-prompt").expect("the persona is appended") + 1].clone();
     let thread = CodexThread {
+        subagents: None,
         temporary: false,
         title: None,
         cwd: ".".into(),

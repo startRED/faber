@@ -75,6 +75,34 @@ impl Core {
         names.sort();
         names
     }
+    /// The quota factors a helper's model is priced with, as Auto prices it.
+    fn helper_factor(&self, p: &crate::route::Profile, now: f64) -> crate::route::Factor {
+        let snap = self.snap(p.vendor, now);
+        let ledger = self.ledger.of(p.vendor);
+        crate::route::Factor {
+            m: snap.profile_m(family_of(p.model), &ledger.shape(), self.utc_offset, now),
+            w: ledger.weights.w.get(p.model).copied().unwrap_or(1.0),
+            step_ok: snap.step_ok(now),
+            read: 0.0,
+        }
+    }
+
+    /// The models a project agent's own subagents run on (`helper::Subagents`), chosen when it starts as its helpers are
+    /// chosen, among its own CLI's models that may run now. None when the agent offers no helper tool.
+    pub(super) fn subagent_models(&self, conv: &str, helper: Helper, vendor: Vendor, model: Option<&str>) -> Option<helper::Subagents> {
+        if helper != Helper::Offers {
+            return None;
+        }
+        let lead =
+            crate::route::PROFILES.into_iter().filter(|p| p.vendor == vendor && Some(p.model) == model).max_by_key(|p| (p.iq, p.agent));
+        let candidates: Vec<_> = crate::route::candidates(&[vendor], &self.codex_models)
+            .into_iter()
+            .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+            .collect();
+        let now = self.secs();
+        helper::subagents(lead, vendor, &candidates, &|p| self.helper_factor(p, now), self.economy(conv))
+    }
+
     /// Whether a project conversation on `vendor` offers the helper tool.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
         if area == Area::Project && self.opts.clis.contains_key(&vendor) { Helper::Offers } else { Helper::Off }
@@ -215,16 +243,7 @@ impl Core {
             })
             .collect();
         let now = self.secs();
-        let factor = |p: &crate::route::Profile| {
-            let snap = self.snap(p.vendor, now);
-            let ledger = self.ledger.of(p.vendor);
-            crate::route::Factor {
-                m: snap.profile_m(family_of(p.model), &ledger.shape(), self.utc_offset, now),
-                w: ledger.weights.w.get(p.model).copied().unwrap_or(1.0),
-                step_ok: snap.step_ok(now),
-                read: 0.0,
-            }
-        };
+        let factor = |p: &crate::route::Profile| self.helper_factor(p, now);
         let selected = if let Some(vendor) = review {
             helper::profile(&candidates, vendor, economy)
         } else {
@@ -288,6 +307,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        subagents: None,
                         temporary: false,
                         area: Area::Project,
                         model: model.clone(),
@@ -316,6 +336,7 @@ impl Core {
             ),
             Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
                 CodexThread {
+                    subagents: None,
                     temporary: false,
                     title: None,
                     leave_plan: false,

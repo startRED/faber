@@ -813,6 +813,7 @@ mod tests {
         use crate::helper::Helper;
         use crate::model::{Area, Permissions};
         let launch = crate::claude::ClaudeLaunch {
+            subagents: None,
             temporary: false,
             area: Area::Project,
             model: None,
@@ -837,6 +838,7 @@ mod tests {
         let args = crate::claude::claude_args(&launch);
         assert!(args.iter().any(|arg| arg.contains("As a helper, return an ordinary report without a faber-wrap-up block.")));
         let thread = crate::codex::CodexThread {
+            subagents: None,
             temporary: false,
             title: None,
             leave_plan: false,

@@ -338,6 +338,82 @@ pub fn select(
     }
 }
 
+/// The models the CLI's own subagents run on (Claude Code's Agent tool, Codex's spawned agents), set when a project's agent
+/// starts: they run on the agent's own CLI, so they mix models but never vendors. Without this, every subagent inherited the
+/// lead's model (bench v11, 2026-11-12: two Opus subagents under an Opus lead).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subagents {
+    /// A reading subagent (Claude Code's Explore): the cheapest model that clears the reading bar, as a `read` helper.
+    pub read: crate::model::RunsOn,
+    /// Every other subagent: a `build` helper of medium difficulty and tight scope, no stronger than the lead.
+    pub build: crate::model::RunsOn,
+}
+
+impl Subagents {
+    /// What a subagent call starts on: a model the agent named on the call wins (both CLIs take it first), then the
+    /// reading subagent's, then the builder's for the built-in kinds. A person's own agent may name a model in its definition,
+    /// which Faber does not read, so its call claims none.
+    pub fn of_call(&self, input: &Value) -> Option<crate::model::RunsOn> {
+        if let Some(model) = input["model"].as_str().filter(|m| !m.is_empty() && *m != "inherit") {
+            return Some(crate::model::RunsOn { model: model.to_string(), effort: None });
+        }
+        let kind = input["subagent_type"].as_str().or_else(|| input["agent_type"].as_str()).unwrap_or_default().to_ascii_lowercase();
+        match kind.as_str() {
+            "explore" | "explorer" => Some(self.read.clone()),
+            "" | "general-purpose" | "default" | "worker" => Some(self.build.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// The name of Claude Code's built-in reading subagent, which a session agent of the same name replaces.
+pub const READER: &str = "Explore";
+
+/// The subagents' models for a lead on `vendor`, chosen as helpers are (`select`), from that vendor's models only.
+pub fn subagents(
+    lead: Option<Profile>,
+    vendor: Vendor,
+    candidates: &[Profile],
+    factor: &dyn Fn(&Profile) -> crate::route::Factor,
+    economy: bool,
+) -> Option<Subagents> {
+    let own: Vec<Profile> = candidates.iter().copied().filter(|p| p.vendor == vendor).collect();
+    let pick = |job: &'static str, difficulty: &'static str| {
+        let piece = Piece { job, kind: "code", difficulty, scope: "tight" };
+        select(piece, lead, vendor, &own, &[vendor], factor, economy)
+            .map(|p| crate::model::RunsOn { model: p.model.to_string(), effort: Some(p.effort.to_string()) })
+    };
+    let mut build = pick("build", "medium")?;
+    // Claude Code's default subagent model carries no effort (only a definition or a call names one), so none is claimed.
+    if vendor == Vendor::Claude {
+        build.effort = None;
+    }
+    // Codex takes one default for every agent it spawns (`agents.default_subagent_model`); a reading role of its own would
+    // need a file in the project's `.codex/agents`, which Faber does not write.
+    let read = if vendor == Vendor::Codex { build.clone() } else { pick("read", "easy")? };
+    Some(Subagents { read, build })
+}
+
+/// Claude Code's reading subagent replaced for this session (`--agents`), so it keeps reading only and runs on the reading
+/// model. The built-in one runs on the lead's model whatever `CLAUDE_CODE_SUBAGENT_MODEL` says.
+pub fn claude_agents(team: &Subagents) -> Value {
+    let mut reader = json!({
+        "description": "Fast read-only agent for searching and reading a codebase: finds files by pattern, searches code for keywords, reads files and answers questions about them. Use it for wide searches and reading many files.",
+        "prompt": "You are a read-only search agent. Find and read what the task asks for with Glob, Grep and Read, then report what you found: the files and lines that matter and short excerpts, never whole files. Never create, change or delete a file.",
+        "tools": ["Read", "Grep", "Glob"],
+        "disallowedTools": ["Bash", "PowerShell", "Edit", "Write", "NotebookEdit"],
+        "model": team.read.model,
+    });
+    if let Some(effort) = &team.read.effort {
+        reader["effort"] = effort.clone().into();
+    }
+    json!({ READER: reader })
+}
+
+/// What a project's agent is told of its helpers when it has the helper tool: its own subagents would otherwise take every
+/// piece, on its own CLI and a model Faber chose only for reading or building.
+pub const HELPERS: &str = " Hand a piece that changes files, a review of finished work and a second opinion to the helper tool, not to your own subagents: Faber gives each piece the right model, and a review the other AI when it is connected. Keep your own subagents for quick read-only searches.";
+
 /// What the helper's session is asked: the agent's own title and brief, with a bounded team channel.
 pub fn prompt(input: &Value) -> Option<String> {
     worker_prompt(input, true)
@@ -997,5 +1073,47 @@ mod schema_tests {
             }
         }
         assert!(codex_tool()["inputSchema"].get("required").is_none());
+    }
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+    use crate::route::{Factor, PROFILES};
+
+    fn opus_high() -> Profile {
+        PROFILES.into_iter().find(|p| p.model == "claude-opus-5-5" && p.effort == "high").unwrap()
+    }
+
+    #[test]
+    fn an_opus_leads_subagents_read_on_haiku_and_build_below_it() {
+        let team = subagents(Some(opus_high()), Vendor::Claude, &PROFILES, &|_| Factor::NEUTRAL, false).unwrap();
+        assert!(team.read.model.contains("haiku"), "{team:?}");
+        let build =
+            PROFILES.into_iter().find(|p| p.model == team.build.model && p.iq <= opus_high().iq && p.agent <= opus_high().agent).unwrap();
+        assert_eq!(team.build.effort, None, "Claude Code takes no effort for its default subagent model");
+        assert!(build.iq <= opus_high().iq && build.agent <= opus_high().agent, "{team:?}");
+        assert!(PROFILES.iter().all(|p| p.vendor == Vendor::Claude || p.model != team.build.model), "never the other vendor");
+        // Codex has one default for every spawned agent.
+        let codex = subagents(None, Vendor::Codex, &PROFILES, &|_| Factor::NEUTRAL, false).unwrap();
+        assert_eq!(codex.read, codex.build);
+        assert!(codex.build.model.starts_with("gpt-"));
+        assert_eq!(subagents(None, Vendor::Codex, &PROFILES[..14], &|_| Factor::NEUTRAL, false), None, "no model of that CLI");
+    }
+
+    #[test]
+    fn a_call_starts_on_the_model_it_names_else_its_roles() {
+        let run = |model: &str| crate::model::RunsOn { model: model.into(), effort: Some("low".into()) };
+        let team = Subagents { read: run("claude-haiku-5-5"), build: run("claude-sonnet-5-5") };
+        assert_eq!(team.of_call(&json!({"subagent_type":"Explore"})), Some(team.read.clone()));
+        assert_eq!(team.of_call(&json!({"agent_type":"explorer"})), Some(team.read.clone()));
+        assert_eq!(team.of_call(&json!({"subagent_type":"general-purpose"})), Some(team.build.clone()));
+        assert_eq!(team.of_call(&json!({"model":"inherit"})), Some(team.build.clone()));
+        assert_eq!(team.of_call(&json!({"model":"opus"})), Some(crate::model::RunsOn { model: "opus".into(), effort: None }));
+        assert_eq!(team.of_call(&json!({"subagent_type":"my-reviewer"})), None, "a person's own agent may name its model");
+        let agents = claude_agents(&team);
+        assert_eq!(agents[READER]["model"], "claude-haiku-5-5");
+        assert_eq!(agents[READER]["effort"], "low");
+        assert!(agents[READER]["disallowedTools"].as_array().unwrap().contains(&json!("Edit")), "reading only");
     }
 }
