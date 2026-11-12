@@ -15,7 +15,7 @@ faber-engine-store = { path = "../engine-store" }
 faber-engine-drivers = { path = "../engine-drivers" }
 faber-engine-projects = { path = "../engine-projects" }
 faber-winproc = { path = "../winproc" }
-sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
+sysinfo = { version = "0.40.1", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"
 chrono = "0.4"
 flate2 = "1"
@@ -38,7 +38,7 @@ faber-engine-projects = { path = "../engine-projects", features = ["test-support
 # The tests parse exported Markdown as the export does.
 pulldown-cmark = { version = "0.13", default-features = false }
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 # The paused clock of the tests that wait out the router (2.5 s) and an answer's acknowledgement (5 s).
 tokio = { version = "1", features = ["test-util"] }
 
