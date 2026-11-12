@@ -6,16 +6,17 @@ use crate::auto_learned::{self, Signal};
 use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
 use crate::route::{
     Asked, Factor, INSTRUCTIONS, PROFILES, Profile, ROUTER, Reading, Routed, asked, candidates, choose_effort, choose_paced_scoped, lifted,
-    question, read_cost,
+    limit_note, question, read_cost,
 };
 use crate::router::pinned;
 use tokio::sync::oneshot;
 
 /// How long a sent message may wait before the last choice or the usual model of its area answers.
 pub(super) const ROUTE_BUDGET: Duration = Duration::from_millis(2500);
-/// How long the first message of a project conversation may wait: its model stays for the whole conversation and its
-/// turn runs for minutes. The router's measured median is 2.7 s to 3.3 s and its slow answers 9 s and more (2026-11-10).
-pub(super) const PROJECT_BUDGET: Duration = Duration::from_secs(12);
+/// How long the first message of a conversation may wait for the router to read it: its model stays for the whole
+/// conversation and its answer runs for minutes, so the choice takes the time it needs (Erick, 2026-11-12). The router's
+/// measured median, its start-up included, is 2.7 s to 3.3 s and its slow answers 9 s and more (2026-11-10).
+pub(super) const FIRST_BUDGET: Duration = Duration::from_secs(12);
 /// Draft work includes CLI startup and inference (recorded medians exceed the send budget).
 const ASK_LIMIT: Duration = Duration::from_secs(30);
 
@@ -31,17 +32,12 @@ pub(super) fn ready(verdict: Asked) -> oneshot::Receiver<RouteAnswer> {
     rx
 }
 
-/// Whether a sent message waits for the classifier (the caller bounds it, `budget`) instead of starting at once. A route
-/// finished while typing is always used. Otherwise only a conversation's first message may wait: for a classifier already
-/// reading this text, for an injected one (no CLI startup), or, `cold`, to start one for the first message of a project
-/// conversation, whose model stays for the whole conversation and whose brief nobody typed.
-fn waits(finished: bool, reading: bool, later: bool, injected: bool, cold: bool) -> bool {
-    finished || (!later && (injected || reading || cold))
-}
-
-/// The longest a sent message waits for its route.
-pub(super) fn budget(first_in_project: bool) -> Duration {
-    if first_in_project { PROJECT_BUDGET } else { ROUTE_BUDGET }
+/// Whether a sent message waits for the classifier (the caller bounds it, `FIRST_BUDGET`) instead of starting at once. A
+/// route finished while typing is always used. A conversation's first message always waits, in Chat as in a project:
+/// pasted text, a fast sender and a brief nobody typed have no draft route, and on 2026-11-11 a pasted request for the
+/// strongest model started on the everyday one because nobody read it. A later message keeps its model and never waits.
+fn waits(finished: bool, later: bool) -> bool {
+    finished || !later
 }
 
 /// Only the verdict ready at Send belongs to this queued message; later drafts must not replace it.
@@ -246,17 +242,21 @@ impl Core {
     ) -> Option<Routed> {
         let now = self.secs();
         let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
-        let usable: Vec<Profile> = candidates(&vendors, &self.codex_models)
+        let gated: Vec<(Profile, Result<(), Why>)> = candidates(&vendors, &self.codex_models)
             .into_iter()
-            .filter(|p| {
+            .filter(|p| eligible(p))
+            .map(|p| {
                 let allowed = if mission {
                     self.quota_allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false)
                 } else {
                     self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false)
                 };
-                allowed.is_ok() && eligible(p)
+                (p, allowed)
             })
             .collect();
+        let usable: Vec<Profile> = gated.iter().filter(|(_, allowed)| allowed.is_ok()).map(|(p, _)| *p).collect();
+        // What only the quota keeps out; a subscription whose billing is unconfirmed is not a quota brake.
+        let account: Vec<Profile> = gated.iter().filter(|(_, allowed)| !matches!(allowed, Err(Why::Billing))).map(|(p, _)| *p).collect();
         let known: BTreeMap<Vendor, (Snap, Shape)> =
             vendors.iter().map(|v| (*v, (self.snap(*v, now), self.ledger.of(*v).shape()))).collect();
         let factor = |p: &Profile| {
@@ -278,7 +278,11 @@ impl Core {
             &usable,
             &factor,
         )?;
-        Some(if learned && self.learned.lifted(routed.kind, now as u64) { lifted(routed, &usable, &factor) } else { routed })
+        let mut routed = if learned && self.learned.lifted(routed.kind, now as u64) { lifted(routed, &usable, &factor) } else { routed };
+        if routed.pace.is_none() {
+            routed.pace = limit_note(&routed, &account);
+        }
+        Some(routed)
     }
 
     /// What a redone or kept answer says about the pick that made it. Rare events, written at once; a failed write only
@@ -391,18 +395,10 @@ impl Core {
         self.guess.as_ref().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)).and_then(|g| g.result.clone())
     }
 
-    /// A sent message uses a finished draft route, or waits (the caller bounds it, `budget`) for a classifier already
-    /// reading this text. Only `cold`, the first message of a project conversation, starts one on send: pasted text, a
-    /// fast sender and a brief no person typed have no draft, and that model stays for the whole conversation. A later
-    /// message never waits.
-    pub(super) fn route_for(
-        &mut self,
-        id: &str,
-        request: &str,
-        attached: usize,
-        only: Option<Vendor>,
-        cold: bool,
-    ) -> oneshot::Receiver<RouteAnswer> {
+    /// A sent message uses a finished draft route. A conversation's first message otherwise waits (the caller bounds it,
+    /// `FIRST_BUDGET`) for a classifier already reading this text, or starts one on send (`waits`). A later message never
+    /// waits.
+    pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
         self.sent_draft(id);
         let (tx, rx) = oneshot::channel();
         if self.route_profiles(only).len() <= 1 {
@@ -410,9 +406,8 @@ impl Core {
             return rx;
         }
         let finished = self.finished_draft(request, attached, only).is_some();
-        let reading = self.guess.as_ref().is_some_and(|g| attached == 0 && g.only == only && covers(&g.request, request));
         let later = self.convs.get(id).is_some_and(|c| c.messages.len() > 2);
-        if !waits(finished, reading, later, self.opts.ask.is_some(), cold) {
+        if !waits(finished, later) {
             let _ = tx.send(None);
             return rx;
         }
@@ -1458,34 +1453,49 @@ mod tests {
         let (engine, _) = super::super::answer::tests::engine(&dir);
         engine.with(|c| {
             c.next_draft = Some(Draft { request: "queued".into(), warm: "sent".into(), only: None });
-            drop(c.route_for("sent", "queued", 0, None, false));
+            drop(c.route_for("sent", "queued", 0, None));
             assert!(c.next_draft.is_none(), "sending must not start another classifier later for already-sent text");
             c.next_draft = Some(Draft { request: "other".into(), warm: "other-conversation".into(), only: None });
-            drop(c.route_for("sent", "queued", 0, None, false));
+            drop(c.route_for("sent", "queued", 0, None));
             assert!(c.next_draft.is_some(), "another conversation still owns its draft");
         });
         engine.shutdown();
     }
 
     #[tokio::test]
-    async fn only_a_first_project_message_starts_a_classifier_and_a_pending_one_is_waited_for() {
+    async fn a_first_message_nobody_routed_while_typing_asks_the_router_on_send_and_a_pending_one_is_waited_for() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
-        engine.with(|c| {
+        let asked_router = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (verdict_tx, answer) = oneshot::channel();
+        let mut cold = engine.with(|c| {
             c.opts.clis.insert(Vendor::Claude, Cli { command: "fake".into(), prefix: vec![] });
             c.ledger.claude.billing = Billing::Subscription;
             assert!(c.opts.ask.is_none());
             assert!(c.route_profiles(None).len() > 1);
-            let mut cold = c.route_for("sent", "question", 0, None, false);
-            assert_eq!(cold.try_recv().unwrap(), None, "a chat send nobody judged is ready before any task or timer runs");
-            assert!(c.guess.is_none(), "a chat send must not start a classifier");
-            // (finished, reading, later, injected, cold): ten of eleven real starts skipped the judgement, and the two
-            // conversations a lead started could never have one (the owner's projects, 2026-11-05 to 2026-11-11).
-            assert!(waits(false, false, false, false, true), "the first message of a project conversation asks");
-            assert!(waits(false, true, false, false, false), "a classifier already reading the text is waited for");
-            assert!(!waits(false, true, true, false, true), "a later message never waits");
-            assert!(waits(true, false, true, false, false), "a finished route is always used");
-            assert!(!waits(false, false, false, false, false));
+            let seen = asked_router.clone();
+            let session = Session::from_fn(move |command| {
+                if let crate::events::SessionCommand::Send(turn) = command {
+                    seen.lock().unwrap().push(turn.text);
+                }
+            });
+            c.spare =
+                Some(Spare { session, answer, id: 0, vendor: Vendor::Claude, asked: Default::default(), model_name: "claude-haiku-5-5" });
+            // A pasted request in Chat, sent before any draft route: 2026-11-11 it started on the everyday model unread.
+            let mut cold = c.route_for("sent", "Use the strongest model and the highest effort for this video.", 0, None);
+            assert!(cold.try_recv().is_err(), "the send waits for the router instead of starting the everyday model");
+            assert!(c.guess.as_ref().is_some_and(|g| g.waiters.len() == 1), "the send subscribes to the router it started");
+            cold
+        });
+        assert_eq!(asked_router.lock().unwrap().len(), 1, "the router reads the sent text");
+        assert!(asked_router.lock().unwrap()[0].contains("strongest model"));
+        let line = r#"{"kind":"writing","difficulty":"hard","check":"glance","scope":"open","best":true,"confidence":0.9}"#;
+        verdict_tx.send(Some(line.to_string())).unwrap();
+        let (verdict, _) = tokio::time::timeout(FIRST_BUDGET, &mut cold).await.unwrap().unwrap().unwrap();
+        assert_eq!(verdict.unwrap().scope, crate::route::BEST);
+        engine.with(|c| {
+            assert!(waits(true, true), "a finished route is always used");
+            assert!(!waits(false, true), "a later message keeps its model and never waits");
             c.guess = Some(Guess {
                 request: "question".into(),
                 result: None,
@@ -1495,7 +1505,7 @@ mod tests {
                 only: None,
                 stop: None,
             });
-            let mut pending = c.route_for("sent", "question", 0, None, false);
+            let mut pending = c.route_for("sent", "question", 0, None);
             assert!(pending.try_recv().is_err(), "the send waits for the classifier that is reading its text");
             assert_eq!(c.guess.as_ref().unwrap().waiters.len(), 1, "the send subscribes to the pending answer");
         });
@@ -1532,7 +1542,7 @@ mod tests {
         );
         let mut answer = engine.with(|c| {
             assert!(c.route_profiles(None).is_empty());
-            c.route_for("sent", "test", 0, None, true)
+            c.route_for("sent", "test", 0, None)
         });
         assert_eq!(answer.try_recv().unwrap(), None, "no task, timeout or model request is needed");
         assert!(engine.ledger().codex.unmetered.is_empty());
