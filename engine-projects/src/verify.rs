@@ -4,7 +4,8 @@
 //! - **The checks** are the project's "Checks" (R137): the commands under "Proof commands" in AGENTS.md or CLAUDE.md, or a
 //!   detected default, as the person confirmed them in Settings > Projects when they did (`crate::project::checks::view`).
 //! - **Fast** runs only the checks a change can affect, found from each command (`select`): a check whose files did not
-//!   change is left out, and one that passed on exactly the same content is not run again (a content hash, never a time).
+//!   change is left out, and one that passed on exactly the same content is not run again (a content hash, never a time),
+//!   whichever copy of the project ran it and across restarts (`faber_builds::Ledger` in the data folder).
 //!   **Full** runs every check.
 //! - **Each check** is a process with no shell and no window, in its own kill-on-close job, below normal priority. A new
 //!   verify of the same folder stops the running one, and one Cargo build runs at a time across every folder. Its output
@@ -355,6 +356,9 @@ pub struct Verifier {
     guard: Option<Guard>,
     /// Past results: failed first, cheapest first, flaky told (`journal`).
     journal: Journal,
+    /// Checks that passed, by project, command and content, on disk: a copy of the project, or the engine after a
+    /// restart, does not run again what passed on the same content.
+    ledger: Option<faber_builds::Ledger>,
 }
 
 struct Running {
@@ -403,12 +407,38 @@ impl Verifier {
             clock: now_millis,
             guard: None,
             journal: Journal::new(None),
+            ledger: None,
         }
+    }
+
+    /// The same verifier with its ledger of passed checks in `dir`.
+    pub fn with_ledger(self, dir: PathBuf) -> Verifier {
+        Verifier { ledger: Some(faber_builds::Ledger::new(dir)), ..self }
     }
 
     /// The real verifier the shell gives the engine, with its game guard and its journal (a file in the data folder).
     pub fn real(guard: Option<Guard>, journal: Option<PathBuf>) -> Arc<Verifier> {
-        Arc::new(Verifier { guard, journal: Journal::new(journal), free: Arc::new(admit::free_memory), ..Verifier::new(Arc::new(Real)) })
+        let ledger = journal.as_deref().and_then(Path::parent).map(|dir| faber_builds::Ledger::new(dir.join("passes")));
+        Arc::new(Verifier {
+            guard,
+            journal: Journal::new(journal),
+            ledger,
+            free: Arc::new(admit::free_memory),
+            ..Verifier::new(Arc::new(Real))
+        })
+    }
+
+    /// The ledger key of a check on `content` in `project`.
+    fn proof(project: &str, check: &Planned, local: &Local, content: &str) -> String {
+        let mut variables: Vec<(String, String)> = std::env::vars().filter(|(name, _)| result_variable(name)).collect();
+        variables.push(("project".to_string(), project.to_string()));
+        let toolchain = toolchain(&check.tokens[0], &local.vars());
+        faber_builds::Proof { content, command: std::slice::from_ref(&check.command), toolchain: &toolchain, variables: &variables }.key()
+    }
+
+    /// Whether the ledger holds a pass of this check on this content, from any copy of the project.
+    fn passed_before(&self, project: &str, check: &Planned, local: &Local, key: Option<&str>) -> bool {
+        self.ledger.as_ref().zip(key).is_some_and(|(ledger, key)| ledger.find(&Self::proof(project, check, local, key)).is_some())
     }
 
     /// The same verifier with a game guard (tests).
@@ -605,7 +635,7 @@ impl Verifier {
                 }
                 let before =
                     self.passed.lock().unwrap_or_else(|e| e.into_inner()).0.get(&(folder_key.clone(), check.command.clone())).cloned();
-                if key.is_some() && before == key {
+                if key.is_some() && (before == key || self.passed_before(&project, check, &request.local, key.as_deref())) {
                     results.push(CheckResult {
                         command: check.command.clone(),
                         verdict: Verdict::Unchanged,
@@ -661,6 +691,17 @@ impl Verifier {
                     break turn;
                 }
             };
+            // Another copy may have passed the same check on the same content while this one waited for its turn.
+            if level == Level::Fast && self.passed_before(&project, check, &request.local, key.as_deref()) {
+                results.push(CheckResult {
+                    command: check.command.clone(),
+                    verdict: Verdict::Unchanged,
+                    millis: 0,
+                    failures: vec![],
+                    summary: String::new(),
+                });
+                continue;
+            }
             log.line(&format!("== {} ==", check.command));
             let memory = admit::cap(known[&check.command].peak, (self.free)());
             let spec = Spec {
@@ -723,12 +764,22 @@ impl Verifier {
             if out.verdict == Verdict::Passed
                 && let Some(key) = key
             {
+                if let Some(ledger) = &self.ledger {
+                    // A pass not recorded only costs a later rerun.
+                    drop(ledger.record(&Self::proof(&project, check, &request.local, &key), ""));
+                }
                 let mut passed = self.passed.lock().unwrap_or_else(|e| e.into_inner());
                 if passed.0.len() >= MAX_REMEMBERED {
                     passed.0.clear();
                 }
                 passed.0.insert((folder_key.clone(), check.command.clone()), key);
             } else {
+                // A failure, full verify or not, takes back what passed on this content before.
+                if out.verdict == Verdict::Failed
+                    && let Some((ledger, key)) = self.ledger.as_ref().zip(key.as_deref())
+                {
+                    drop(ledger.forget(&Self::proof(&project, check, &request.local, key)));
+                }
                 self.passed.lock().unwrap_or_else(|e| e.into_inner()).0.remove(&(folder_key.clone(), check.command.clone()));
             }
             results.push(out);
@@ -759,6 +810,46 @@ fn rust_checks(manifests: Vec<(String, bool)>, declared: &[String]) -> Vec<Plann
         .map(|tokens| Planned { command: tokens.join(" "), tokens, watch: Watch::All, heavy: true })
         .filter(|check| !declared.contains(&check.command))
         .collect()
+}
+
+/// The engine's variables that change what a build or test does; a check's own (`Local`) are in its content key.
+fn result_variable(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    let cargo_own = ["CARGO_HOME", "CARGO_TARGET_DIR", "CARGO_MAKEFLAGS", "CARGO_INCREMENTAL"].contains(&name.as_str())
+        || name.starts_with("CARGO_TERM_");
+    (name.starts_with("CARGO_") && !cargo_own)
+        || name.starts_with("RUSTC")
+        || ["RUSTFLAGS", "RUSTDOCFLAGS", "RUSTUP_TOOLCHAIN", "NODE_OPTIONS", "NODE_ENV", "PATH"].contains(&name.as_str())
+}
+
+/// What names the tools a check runs: the program it finds on the PATH with its size and time, and for a Rust tool the
+/// times rustup writes when a toolchain is installed or updated. An upgrade changes it, so a pass on the old tools does
+/// not count for the new ones. A few file reads, no process.
+fn toolchain(program: &str, vars: &[(String, String)]) -> String {
+    let var = |name: &str| {
+        vars.iter().rev().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone()).or_else(|| std::env::var(name).ok())
+    };
+    let stamp = |path: &Path| std::fs::metadata(path).ok().map(|m| format!("{}:{}:{:?}", path.display(), m.len(), m.modified().ok()));
+    let path = var("PATH").or_else(|| var("Path")).unwrap_or_default();
+    let found = std::env::split_paths(&path)
+        .flat_map(|dir| ["", ".exe", ".cmd"].map(|ext| dir.join(format!("{program}{ext}"))))
+        .find(|candidate| candidate.is_file());
+    let mut text = found.as_deref().and_then(stamp).unwrap_or_else(|| format!("{program}: not found"));
+    if ["cargo", "rustc", "rustup", "rustfmt", "cargo-clippy"].contains(&program.trim_end_matches(".exe")) {
+        let home = var("RUSTUP_HOME")
+            .map(PathBuf::from)
+            .or_else(|| var("USERPROFILE").or_else(|| var("HOME")).map(|h| Path::new(&h).join(".rustup")));
+        if let Some(home) = home {
+            for dir in ["toolchains", "update-hashes"] {
+                let entries = std::fs::read_dir(home.join(dir)).into_iter().flatten().flatten();
+                let mut stamps: Vec<String> = entries.filter_map(|e| stamp(&e.path())).collect();
+                stamps.sort();
+                text.push('\n');
+                text.push_str(&stamps.join("\n"));
+            }
+        }
+    }
+    text
 }
 
 /// Whether a check may run on Node, so it needs the folder's `node_modules`: any program but the ones known not to.
@@ -1082,6 +1173,67 @@ mod tests {
         request.commands = vec!["npm run docs".into()];
         assert!(!rt().block_on(v.verify(request)).ok());
         assert_eq!(runner.started.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pass_on_the_same_content_serves_another_copy_of_the_project_and_a_restarted_engine() {
+        let ledger = tempfile::tempdir().unwrap();
+        let (copy, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let project = PathBuf::from("projects/app");
+        let rt = rt();
+        let ask = |dir: &Path, project: &Path, hash: &str| Request {
+            project: Some(project.to_path_buf()),
+            ..request(dir, Level::Fast, &[("docs/a.md", hash)])
+        };
+        let first = Arc::new(Verifier::new(Arc::new(passing())).with_ledger(ledger.path().to_path_buf()));
+        rt.block_on(first.verify(ask(copy.path(), &project, "h1")));
+        // Another engine (a restart) and another folder of the same project, on the same content: nothing runs.
+        let runner = Arc::new(passing());
+        let second = Arc::new(Verifier::new(runner.clone()).with_ledger(ledger.path().to_path_buf()));
+        let out = rt.block_on(second.verify(ask(other.path(), &project, "h1")));
+        assert!(out.checks.iter().any(|c| c.command == "npm run docs" && c.verdict == Verdict::Unchanged), "{out:?}");
+        assert!(!runner.started.lock().unwrap().contains(&"npm run docs".to_string()));
+        // Other content, or another project, runs.
+        rt.block_on(second.verify(ask(other.path(), &project, "h2")));
+        rt.block_on(second.verify(ask(other.path(), Path::new("projects/else"), "h1")));
+        assert_eq!(runner.started.lock().unwrap().iter().filter(|c| *c == "npm run docs").count(), 2);
+        // A full verify runs every check, whatever passed before.
+        let full = rt.block_on(second.verify(Request { level: Some(Level::Full), ..ask(other.path(), &project, "h1") }));
+        assert!(full.checks.iter().all(|c| c.verdict != Verdict::Unchanged), "{full:?}");
+    }
+
+    #[test]
+    fn a_failing_check_is_never_recorded_and_takes_back_what_passed_on_the_same_content() {
+        let ledger = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let docs = |dir: &Path| std::fs::read_dir(dir).map_or(0, |entries| entries.count());
+        let failing =
+            Arc::new(Verifier::new(Arc::new(fake(&[("npm run docs", "broken", Some(1))]))).with_ledger(ledger.path().to_path_buf()));
+        rt().block_on(failing.verify(request(dir.path(), Level::Fast, &[("docs/a.md", "h1")])));
+        assert_eq!(docs(ledger.path()), 0);
+        let good = Arc::new(Verifier::new(Arc::new(passing())).with_ledger(ledger.path().to_path_buf()));
+        rt().block_on(good.verify(request(dir.path(), Level::Fast, &[("docs/a.md", "h1")])));
+        assert!(docs(ledger.path()) > 0);
+        // A full verify that fails on the same content takes the pass back: the next fast verify runs the check again.
+        rt().block_on(failing.verify(request(dir.path(), Level::Full, &[("docs/a.md", "h1")])));
+        let runner = Arc::new(passing());
+        let fresh = Arc::new(Verifier::new(runner.clone()).with_ledger(ledger.path().to_path_buf()));
+        rt().block_on(fresh.verify(request(dir.path(), Level::Fast, &[("docs/a.md", "h1")])));
+        assert!(runner.started.lock().unwrap().contains(&"npm run docs".to_string()));
+    }
+
+    #[test]
+    fn a_tool_s_upgrade_changes_what_names_it() {
+        let bin = tempfile::tempdir().unwrap();
+        let tool = bin.path().join(if cfg!(windows) { "tool.exe" } else { "tool" });
+        std::fs::write(&tool, b"v1").unwrap();
+        let vars = [("PATH".to_string(), bin.path().display().to_string())];
+        let before = toolchain("tool", &vars);
+        std::fs::write(&tool, b"v2 longer").unwrap();
+        assert_ne!(toolchain("tool", &vars), before);
+        assert!(toolchain("missing-tool", &vars).ends_with("not found"));
+        assert!(result_variable("RUSTFLAGS") && result_variable("CARGO_BUILD_TARGET") && result_variable("Path"));
+        assert!(!result_variable("CARGO_HOME") && !result_variable("CARGO_MAKEFLAGS") && !result_variable("HOME"));
     }
 
     #[test]

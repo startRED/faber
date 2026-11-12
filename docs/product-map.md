@@ -326,6 +326,7 @@ Message search keeps a word index in memory and finds matching conversations new
 | Project instruction and learning files | Memory reads and edits project instructions and learning; Faber generates `.faber/rules.md` and records lasting decisions in `.faber/decisions.md`. | `project_memory`, `edit_project_memory`; `engine-store/src/project_memory.rs`, `engine/tests/project_security.rs` |
 | Internal start-card formatter | Formats checked project facts, kept decisions and approved taste for a session's start card. | `engine-store/src/project_rules.rs`, `engine/src/engine/kits.rs` |
 | `<folder>/.faber/verify/` | Output from Faber's checks in the folder. | The engine |
+| `verify/journal.jsonl`, `verify/passes/` | Past check results, and the checks that passed by project, command and content (300 newest, three days). | `engine-projects/src/verify.rs`, `builds/src/lib.rs` |
 | `<project>/.faber/verify.local.json` | This PC's local environment and path additions for checks. | The person, by hand |
 | Browser storage `faber.place` | The last area, project, group, conversation and Catalog view. | `ui/App.tsx`, `ui/shell.ts`, `electron/main.ts`; `projects recovery: a hard kill` |
 | Browser storage `faber.layout` | Sidebar and column widths, plus open projects and chat groups. | `ui/App.tsx`, `ui/Sidebar.tsx` |
@@ -397,7 +398,7 @@ Chat groups organize chats in expandable sidebar rows, with instructions and kno
 
 Changes extend existing checks; new features add checks. Engine tests are listed in `engine/tests/all.rs`, screen checks in `tests/ui/index.ts`, and real-app scenarios in `testkit/src/screen/mod.rs`.
 
-Lighter builds on one PC (`builds/`, `faber-builds`): one processor budget every Cargo and rustc can share as a jobserver, and a ledger of proofs that passed, keyed by content, command, toolchain and variables. Faber's own lanes use the same parts through `scripts/cargo.mjs`, and their caches share a 24 GB disk budget (R566) in which idle caches drop their incremental state first; the app's conversations and checks are wired to it after the engine split. Checks: `builds/src/lib.rs`, `scripts/cargo.test.mjs`. See [build folders](dev/build-folders.md#the-build-coordinator).
+Lighter builds on one PC (`builds/`, `faber-builds`): one processor budget every Cargo and rustc can share as a jobserver, and a ledger of proofs that passed, keyed by content, command, toolchain and variables. Faber's own lanes use the same parts through `scripts/cargo.mjs`, and their caches share a 24 GB disk budget (R566) in which idle caches drop their incremental state first. In the app, every CLI a conversation starts and every check Faber runs gets the same budget (`CARGO_MAKEFLAGS`, `engine-core/src/proc.rs`), and a check that passed on the same content in another copy of the project, or before a restart, is not run again (`verify/passes/` in the data folder). Checks: `builds/src/lib.rs`, `scripts/cargo.test.mjs`, `engine-core/src/proc.rs`, `engine-projects/src/verify.rs`. See [build folders](dev/build-folders.md#the-build-coordinator).
 
 `engine/tests/first_word_cost.rs` checks Faber's warm send path with a fake CLI, using `first_word_cost_caps_the_warm_public_send_path`. Live-model latency still needs manual measurement.
 

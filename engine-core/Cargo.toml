@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 faber-winproc = { path = "../winproc" }
+# The PC's one build budget, which every CLI and check the engine starts gets (proc::build_budget).
+faber-builds = { path = "../builds" }
 # The existing workspace dependency supplies a safe native disk-space reading at build admission.
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }

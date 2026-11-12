@@ -1183,6 +1183,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "crc32fast",
+ "faber-builds",
  "faber-winproc",
  "flate2",
  "html5ever 0.40.1",
@@ -1228,6 +1229,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "crc32fast",
+ "faber-builds",
  "faber-engine-core",
  "faber-engine-store",
  "faber-winproc",

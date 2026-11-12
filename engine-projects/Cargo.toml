@@ -10,6 +10,8 @@ repository.workspace = true
 faber-engine-core = { path = "../engine-core" }
 faber-engine-store = { path = "../engine-store" }
 faber-winproc = { path = "../winproc" }
+# The ledger of passed checks the verifier shares across copies and restarts.
+faber-builds = { path = "../builds" }
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"

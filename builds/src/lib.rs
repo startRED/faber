@@ -151,6 +151,15 @@ impl Ledger {
         self.prune(KEEP, KEEP_FOR)
     }
 
+    /// Takes back a pass: the same proof failed since.
+    pub fn forget(&self, key: &str) -> io::Result<()> {
+        let file = self.file(key).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not a ledger key"))?;
+        match fs::remove_file(file) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        }
+    }
+
     pub fn prune(&self, keep: usize, keep_for: Duration) -> io::Result<()> {
         let mut passes: Vec<(SystemTime, PathBuf)> = fs::read_dir(&self.dir)?
             .flatten()
@@ -243,6 +252,10 @@ mod tests {
         assert_eq!(pass.output, "Finished\n");
         assert!(now() - pass.at < 60);
         assert!(ledger.record("../escape", "x").is_err());
+        ledger.forget(&key).unwrap();
+        assert!(ledger.find(&key).is_none());
+        ledger.forget(&key).unwrap();
+        assert!(ledger.forget("../escape").is_err());
         assert_eq!(ledger.find("../escape"), None);
         for i in 0..5 {
             ledger.record(&format!("{i:040x}"), "ok").unwrap();

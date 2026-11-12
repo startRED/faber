@@ -238,6 +238,39 @@ static CLI: OnceLock<PathBuf> = OnceLock::new();
 pub type TokenMinter = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 static TOKEN_MINTER: OnceLock<TokenMinter> = OnceLock::new();
+
+/// The PC's one build budget (`faber-builds`, R566's coordinator), held by the process trees the engine started (each
+/// child's `TreeState`), so every Cargo an agent or a check runs takes its jobs from the same tokens as every other build
+/// on the PC. When none runs and no other build holds it, Windows drops it, and the next one makes it whole again: tokens
+/// a killed Cargo held come back then, instead of being lost for the engine's whole life. One kernel object; no process,
+/// thread or timer.
+static BUDGET: Mutex<std::sync::Weak<faber_builds::Budget>> = Mutex::new(std::sync::Weak::new());
+
+/// The open budget, opened again if no child holds it; none on CI, under another jobserver, or where there is none.
+fn held_budget() -> Option<Arc<faber_builds::Budget>> {
+    if !faber_builds::wants_budget(|name| std::env::var(name).ok()) {
+        return None;
+    }
+    let mut held = BUDGET.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(budget) = held.upgrade() {
+        return Some(budget);
+    }
+    let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let budget = Arc::new(faber_builds::Budget::open(logical, std::env::var("FABER_BUILD_BUDGET").ok().as_deref())?);
+    *held = Arc::downgrade(&budget);
+    Some(budget)
+}
+
+/// The variable that puts a child's Cargo builds on the PC's one budget: none on CI, under another jobserver, or where
+/// there is no budget (other systems, or Windows refused it), so Cargo keeps its own job count there.
+pub fn build_budget() -> Vec<(&'static str, String)> {
+    budget_env(held_budget().as_deref())
+}
+
+/// What a child gets from an open budget, or nothing.
+pub fn budget_env(budget: Option<&faber_builds::Budget>) -> Vec<(&'static str, String)> {
+    budget.map(|budget| budget.env().to_vec()).unwrap_or_default()
+}
 type TokenRevoker = Arc<dyn Fn(&str) + Send + Sync>;
 static TOKEN_REVOKER: OnceLock<TokenRevoker> = OnceLock::new();
 
@@ -332,7 +365,9 @@ pub fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
         .env(AGENT_MARK, "1")
         .env_remove("FABER_AGENT_TOKEN")
         .env_remove("FABER_AGENT_AUTH")
-        .env_remove("FABER_CONVERSATION");
+        .env_remove("FABER_CONVERSATION")
+        // A build an agent runs shares the PC's processor budget with every other build.
+        .envs(build_budget());
     IDENTITY.with(|current| {
         if let Some(identity) = current.borrow().as_ref()
             && let Some(token) = &identity.token
@@ -498,6 +533,8 @@ struct TreeState {
     identity: crate::model::ProcessId,
     root: Option<ProcessIdentity>,
     confirmed: AtomicBool,
+    /// The PC's build budget, held while this tree lives (`held_budget`).
+    _budget: Option<Arc<faber_builds::Budget>>,
     #[cfg(any(test, feature = "test-support"))]
     probe: Option<LifecycleProbe>,
 }
@@ -682,6 +719,7 @@ impl Containment {
                 identity: crate::model::ProcessId { pid: 42, started_at: 1 },
                 root: Some(ProcessIdentity { pid: 42, created: 1 }),
                 confirmed: AtomicBool::new(false),
+                _budget: None,
                 probe: Some(LifecycleProbe {
                     empty: Arc::new(empty),
                     terminate: Arc::new(terminate),
@@ -853,6 +891,7 @@ fn owned_job(pid: u32, job: win32job::Job) -> io::Result<Containment> {
         identity,
         root: Some(root),
         confirmed: AtomicBool::new(false),
+        _budget: held_budget(),
         #[cfg(any(test, feature = "test-support"))]
         probe: None,
     });
@@ -873,6 +912,7 @@ fn join_job(child: &Child) -> io::Result<Containment> {
             identity: crate::model::ProcessId { pid, started_at },
             root,
             confirmed: AtomicBool::new(false),
+            _budget: None,
             #[cfg(any(test, feature = "test-support"))]
             probe: None,
         }),
@@ -963,6 +1003,7 @@ mod lifecycle_tests {
             identity: crate::model::ProcessId { pid: 1, started_at: 1 },
             root: None,
             confirmed: AtomicBool::new(false),
+            _budget: None,
             probe: None,
         });
         known(&tree);
@@ -1008,6 +1049,23 @@ mod lifecycle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_agent_and_check_shares_the_pc_s_build_budget() {
+        let env = budget_env(faber_builds::Budget::open(16, None).as_ref());
+        if cfg!(windows) {
+            assert_eq!(env, [("CARGO_MAKEFLAGS", format!("-j --jobserver-auth={}", faber_builds::BUDGET_NAME))]);
+        } else {
+            assert!(env.is_empty());
+        }
+        assert!(budget_env(None).is_empty());
+        let cmd = marked("x", &[], Path::new("."));
+        let set: Vec<(String, String)> =
+            cmd.as_std().get_envs().filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string()))).collect();
+        for (name, value) in build_budget() {
+            assert!(set.contains(&(name.to_string(), value)), "{set:?}");
+        }
+    }
 
     #[cfg(windows)]
     #[tokio::test]

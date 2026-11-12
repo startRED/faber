@@ -76,7 +76,12 @@ impl Runner for Real {
             return Err(io::Error::other("a check never runs a shell"));
         }
         let mut cmd = tokio::process::Command::new(&cli.command);
-        cmd.args(&cli.prefix).args(&spec.args).current_dir(&spec.cwd).envs(spec.env.iter().map(|(k, v)| (k, v)));
+        // The PC's build budget first, so a project's own variables can still set another.
+        cmd.args(&cli.prefix)
+            .args(&spec.args)
+            .current_dir(&spec.cwd)
+            .envs(crate::proc::build_budget())
+            .envs(spec.env.iter().map(|(k, v)| (k, v)));
         let p = crate::proc::spawn_check(cmd, spec.memory)?;
         // Nothing is ever typed into a check.
         drop(p.stdin);

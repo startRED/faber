@@ -102,9 +102,12 @@ stays running: each part works at the start or end of a command, or is a kernel 
 - **One compile per change.** The landing proof is Clippy (`ship.mjs`), which covers the check it replaced, so the lane's
   own Clippy on the same tree is reused instead of compiled again.
 
-The same budget and ledger are in `builds/` (`faber-builds`) for the builds agents run in a person's projects: the
-app opens the budget while a conversation's CLI runs and gives it `CARGO_MAKEFLAGS`, and Faber's checks keep their
-passes in the ledger across copies. That wiring lands after the engine is split into crates.
+The same budget and ledger are in `builds/` (`faber-builds`) for the builds agents run in a person's projects: each CLI
+and check the engine starts gets `CARGO_MAKEFLAGS` (`proc::build_budget`) and holds the budget while its process tree
+lives, so an agent's own `cargo` shares the processor with every other build on the PC (none on CI or under another
+jobserver). With nothing running Windows drops the semaphore, which gives back tokens a killed Cargo held. A fast verify
+skips a check that passed on the same content, tools and build variables in another copy of the project or before a
+restart (`verify/passes/` in the data folder); a full verify runs everything, and a failure takes the pass back.
 
 Measured on 2026-11-11 (i7-10700K, 16 threads, a game running, agents pinned to four cores), processor seconds of
 every process a step started, compilers included, for one changed line in `engine-core/src/lib.rs`:
