@@ -1,13 +1,13 @@
 # Offer a taste line or a lesson on the closing box
 
 Area: Agent's plan and closing box
-Files: engine-drivers/src/progress.rs, engine-core/src/model.rs, engine/src/engine/plan.rs, ui/Thread.tsx, ui/Plan.tsx, ui/api.ts, ui/locales/, docs/design/
+Files: engine-core/src/progress.rs, engine-core/src/model.rs, engine/src/engine/plan.rs, ui/Thread.tsx, ui/Plan.tsx, ui/api.ts, ui/locales/, docs/design/
 Depends: taste-lesson-records
 Size: about 400 changed lines
 
 Why: slice 3 of `docs/history/superpowers/specs/2026-10-22-own-work-method.md`. The agent proposes a taste line when the person
 corrects the same kind of thing a second time, or once with "always" or "never"; it proposes a lesson at close. Both
-show on the closing box (`WrapUp` in `engine-core/src/model.rs`, the `wrap_up` tool in `engine-drivers/src/progress.rs`), and the
+show on the closing box (`WrapUp` in `engine-core/src/model.rs`, the `wrap_up` tool in `engine-core/src/progress.rs`), and the
 person's yes makes the engine write them (task taste-lesson-records).
 
 Build:

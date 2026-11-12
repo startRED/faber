@@ -5,7 +5,6 @@
 //! here under the same names, so an edit to the `Engine` rebuilds only this crate and the ones above it.
 
 pub use faber_engine_core::*;
-pub use faber_engine_drivers::*;
 
 pub mod engine;
 

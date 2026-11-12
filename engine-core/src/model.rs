@@ -1476,7 +1476,7 @@ pub struct Summary {
     /// Where the conversation stands now, whether or not anyone has opened it (`ended::run_state`): the sidebar and the
     /// running list read it, so they agree. Absent in a list from before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<crate::conversation_state::State>,
+    pub state: Option<crate::sibling::State>,
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
@@ -1831,7 +1831,7 @@ impl Permissions {
 
     /// The mode Claude Code really runs. A CLI that does not list `auto` in its `--permission-mode` choices gets the nearest
     /// safer one, accept edits.
-    pub fn for_claude(self, flags: ClaudeFlags) -> Permissions {
+    pub fn for_claude(self, flags: crate::claude::ClaudeFlags) -> Permissions {
         match self {
             Permissions::Auto if !flags.auto_mode => Permissions::AcceptEdits,
             other => other,
@@ -2117,52 +2117,5 @@ mod tests {
             assert_eq!(serde_json::from_str::<Parked>(json).unwrap().kind, "other", "{json}");
         }
         assert_eq!(serde_json::from_str::<Parked>(r#"{"toolUseId":"t","tool":"Bash","kind":"command"}"#).unwrap().kind, "command");
-    }
-}
-
-/// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
-/// passed, so an older CLI starts exactly as before: the default (nothing known) is the safe one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ClaudeFlags {
-    /// `--autocompact <auto|tokens>`: where the CLI compacts a long conversation (checked on 2.1.296).
-    pub autocompact: bool,
-    /// `--permission-prompts none`: a request that would prompt is denied at once instead of waiting for an answer (2.1.296).
-    pub permission_prompts: bool,
-    /// `auto` among the `--permission-mode` choices: the CLI's own reviewer approves the safe actions (R140).
-    pub auto_mode: bool,
-    /// `--plugin-dir <path>`: a plugin loaded from a folder for this session only (2.1.302), how the catalog's skills arrive.
-    pub plugin_dir: bool,
-}
-
-impl ClaudeFlags {
-    /// Only an option line counts: indented, starting with the flag (after an optional short alias) and followed by its value
-    /// placeholder or the gap before its description. The flag named in a sentence, an error or a description is no support.
-    pub fn from_help(help: &str) -> Self {
-        let declaring = |line: &str, flag: &str| {
-            if !line.starts_with([' ', '\t']) {
-                return false;
-            }
-            let mut rest = line.trim_start();
-            if rest.starts_with('-') && !rest.starts_with("--") {
-                rest = rest.split_once(", ").map_or(rest, |(_, after)| after.trim_start());
-            }
-            rest.strip_prefix(flag).is_some_and(|tail| {
-                tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t') || tail.trim_start().starts_with(['<', '['])
-            })
-        };
-        let declares = |flag: &str| help.lines().any(|line| declaring(line, flag));
-        // The choices of `--permission-mode` are quoted words on the option's own lines, up to the next option.
-        let mut block = help.lines().skip_while(|line| !declaring(line, "--permission-mode"));
-        let mut modes = block.next().unwrap_or_default().to_string();
-        for line in block.take_while(|line| !line.trim_start().starts_with('-')) {
-            modes.push(' ');
-            modes.push_str(line);
-        }
-        ClaudeFlags {
-            autocompact: declares("--autocompact"),
-            permission_prompts: declares("--permission-prompts"),
-            auto_mode: modes.contains("\"auto\""),
-            plugin_dir: declares("--plugin-dir"),
-        }
     }
 }

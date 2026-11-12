@@ -45,7 +45,7 @@ const RAN: &str = "Faber ran the ";
 
 /// What a finished verify call says about the work, read from the call an answer keeps: whether its checks passed, or
 /// None when none ran (no checks declared, nothing changed, refused, stopped) or the call was declined or never ended.
-pub fn judged(tool: &crate::model::ToolUse) -> Option<bool> {
+pub(crate) fn judged(tool: &crate::model::ToolUse) -> Option<bool> {
     let ran = tool.name == TOOL && !tool.declined && tool.output.as_deref().is_some_and(|text| text.starts_with(RAN));
     tool.ok.filter(|_| ran)
 }

@@ -5,8 +5,8 @@
 //! project's other conversations, asks one of them something (a file changed that it did not change, work that may
 //! overlap), and archives its own conversation once the person's request is done.
 
-pub use crate::conversation_state::State;
 use crate::model::Vendor;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// The name both drivers give the call, whatever the CLI calls it.
@@ -251,6 +251,28 @@ pub fn failed(title: &str, id: &str) -> String {
     format!(
         "The conversation \"{title}\" (id {id}) was made but could not start; its reply shows why. Do the work yourself or try again later."
     )
+}
+
+/// Where a conversation stands: the one set of states the sidebar, the running list, a read by another agent and the command
+/// line all use (`ended::run_state`). Stored in the list as `working`, `waiting`, `concluded`, `unconcluded`, `stuck`,
+/// `interrupted`, `stopped` and `failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum State {
+    Working,
+    /// Waiting for the person: a question, a permission, or a conclusion that is blocked or needs them.
+    Waiting,
+    /// The agent concluded it (a closing call with the outcome done), or answered a plain question.
+    Concluded,
+    /// The turn ended and the agent never concluded.
+    Unconcluded,
+    /// It spends time or quota and shows no new result (`Conversation::stuck`).
+    Stuck,
+    Failed,
+    /// The person stopped it.
+    Stopped,
+    /// Its turn was cut off by Faber closing or crashing (`Message::closed`).
+    Interrupted,
 }
 
 fn said(state: State) -> &'static str {

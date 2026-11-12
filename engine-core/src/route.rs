@@ -249,7 +249,7 @@ fn matters(kind: &str, level: &str) -> bool {
 /// The level a task's scope gives it. The makers keep the smaller, faster models for well-defined work and start the
 /// rest on the everyday model, so open medium work gets the hard bar and open hard work the expert one. Easy work stays
 /// easy, and chat keeps its level: a reply a person waits on stays fast.
-pub fn scoped(kind: &str, difficulty: &'static str, scope: &str) -> &'static str {
+pub(crate) fn scoped(kind: &str, difficulty: &'static str, scope: &str) -> &'static str {
     match (difficulty, scope) {
         ("hard", "open") => "expert",
         ("medium", "open") if kind != "chat" => "hard",

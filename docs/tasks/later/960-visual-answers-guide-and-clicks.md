@@ -1,7 +1,7 @@
 # Visual answers that look designed and answer a click
 
 Area: Visual answers
-Files: engine-drivers/src/persona.rs, engine-core/src/visual.rs, ui/VisualAnswer.tsx, ui/visual-mermaid.ts, ui/locales/, docs/design/visual-answers.md
+Files: engine-core/src/persona.rs, engine-core/src/visual.rs, ui/VisualAnswer.tsx, ui/visual-mermaid.ts, ui/locales/, docs/design/visual-answers.md
 Depends: release-1-0-gate
 Size: about 400 changed lines
 
