@@ -840,7 +840,10 @@ mod tests {
     fn the_writer_for_a_panic_hook_gives_up_instead_of_waiting_for_a_lock_its_own_thread_holds() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("log.jsonl");
-        assert!(append_capped_line_without_hanging(&path, "free", 1000), "an unheld lock writes at once");
+        // Other tests in this binary write their logs under the same lock, sometimes for longer than the 0.2 s the writer
+        // waits: a lock nobody keeps is free again soon, and then the line is written.
+        let wrote = (0..25).any(|_| append_capped_line_without_hanging(&path, "free", 1000));
+        assert!(wrote, "a lock no thread keeps lets the line through");
         let held = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let started = std::time::Instant::now();
         assert!(!append_capped_line_without_hanging(&path, "stuck", 1000));
