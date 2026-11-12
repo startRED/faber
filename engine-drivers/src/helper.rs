@@ -412,7 +412,13 @@ pub fn claude_agents(team: &Subagents) -> Value {
 
 /// What a project's agent is told of its helpers when it has the helper tool: its own subagents would otherwise take every
 /// piece, on its own CLI and a model Faber chose only for reading or building.
-pub const HELPERS: &str = " Hand a piece that changes files, a review of finished work and a second opinion to the helper tool, not to your own subagents: Faber gives each piece the right model, and a review the other AI when it is connected. Keep your own subagents for quick read-only searches.";
+/// The goal sentence and the plan check (bench 2026-11-12): a lead whose plan named what a 12-year-old must be able to say
+/// after one viewing made the clearest film (v11, 8.8); one whose plan named only a look built a polished film whose picture
+/// contradicted its point (v12, 8.2), and neither review caught it, since both judged the build and not the point.
+pub const HELPERS: &str = " Hand a piece that changes files, a review of finished work and a second opinion to the helper tool, not to your own subagents: Faber gives each piece the right model, and a review the other AI when it is connected. Keep your own subagents for quick read-only searches. Before you plan work that takes more than one piece, write in one sentence what the person, or the audience they named, must get from the result (what they can do, say or find after it), and put it first in the plan; have a review helper check the plan against that sentence before anything is built, and give the sentence to every reviewer of the finished work.";
+
+/// What every review helper is told before its brief: the point before the polish, whatever the work is.
+pub const SUBSTANCE: &str = "Judge substance before craft. First say in one sentence what was asked and for whom (the person, or the audience the request names), then meet the result the way they will: open, run, watch or read it, not only its source. List first anything that leaves out what was asked, would not be clear to them on a first pass, or contradicts its own point (a picture, example, number or wording that says otherwise), even when everything else is polished; then craft. A fine finish never makes up for a missed point.";
 
 /// What the helper's session is asked: the agent's own title and brief, with a bounded team channel.
 pub fn prompt(input: &Value) -> Option<String> {
@@ -427,14 +433,16 @@ pub fn worker_prompt(input: &Value, team: bool) -> Option<String> {
     } else {
         "Decide yourself and state any assumptions in your report."
     };
-    let report = if Piece::of(input).job == "advise" {
+    let job = Piece::of(input).job;
+    let substance = if job == "review" { format!("{SUBSTANCE} ") } else { String::new() };
+    let report = if job == "advise" {
         "Finish with a report of about 1,200 characters at most. Give advice only; change no file. Report the approach you recommend, the main risk, and what to check."
     } else {
         "Finish with a report of about 1,200 characters at most, in this order: the outcome in one or two sentences; files changed; checks run and their results; anything you could not do or assumed."
     };
     Some(format!(
         "You are a helper. Another AI agent working in this folder handed you the piece of work below. You cannot see its \
-         conversation. {decisions} {report}\n\nTask: {title}\n\n{brief}"
+         conversation. {substance}{decisions} {report}\n\nTask: {title}\n\n{brief}"
     ))
 }
 
@@ -1053,6 +1061,23 @@ mod team_tests {
         );
         assert_eq!(brief_files(",engine/a.rs; ;Makefile `..` ../ ./"), ["engine/a.rs", "Makefile"]);
         assert!(brief_files("Review the changes and report.").is_empty());
+    }
+
+    #[test]
+    fn reviewers_judge_the_point_before_the_polish_and_builders_are_not_told_to() {
+        for (input, team) in [(json!({"brief":"Check the film."}), true), (json!({"brief":"Check the film.","job":"review"}), false)] {
+            let prompt = worker_prompt(&input, team).unwrap();
+            let (at, brief) = (prompt.find(SUBSTANCE), prompt.find("Check the film"));
+            assert!(at.is_some() && at < brief, "{prompt}");
+        }
+        for job in ["read", "build", "advise"] {
+            assert!(!worker_prompt(&json!({"brief":"Do it.","job":job}), true).unwrap().contains(SUBSTANCE), "{job}");
+        }
+        assert!(
+            HELPERS.contains("must get from the result")
+                && HELPERS.contains("check the plan against that sentence before anything is built")
+        );
+        assert!(HELPERS.contains("give the sentence to every reviewer"));
     }
 }
 
