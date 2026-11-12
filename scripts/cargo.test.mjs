@@ -739,3 +739,192 @@ test('a build whose compiler cache server died is run once more without it', asy
   assert.equal(await readFile(other, 'utf8'), 'x');
   assert.ok(!existsSync(path.join(root, 'target', 'build-1', '.faber-lease')));
 });
+
+test('a copy takes the cache it built in last, then one whose copy is gone, then the least recently used', () => {
+  const slots = [
+    { target: 'a', index: 0, copy: '/lane-x', at: 10, gone: false },
+    { target: 'b', index: 1, copy: '/lane-y', at: 30, gone: false },
+    { target: 'c', index: 2, copy: '/old', at: 20, gone: true },
+  ];
+  const order = (prefer) => launcher.slotOrder(slots, prefer).map((s) => s.target);
+  assert.deepEqual(order(['/lane-y']), ['b', 'c', 'a']);
+  assert.deepEqual(order(['/new']), ['c', 'a', 'b']);
+  // A landing's fresh copy prefers the cache of the lane it lands for.
+  assert.deepEqual(order(['/ship-1', '/lane-x']), ['a', 'c', 'b']);
+  assert.deepEqual(order([]), ['c', 'a', 'b']);
+  assert.deepEqual(launcher.slotOrder([{ target: 'n', index: 0, copy: null, at: 0, gone: true }, slots[0]], ['/lane-x']).map((s) => s.target), ['a', 'n']);
+});
+
+test('a lane keeps its cache across runs while another lane holds a different one', async (t) => {
+  const root = await fixture(t);
+  const lane = await mkdtemp(path.join(root, 'lane-'));
+  await writeFile(path.join(lane, 'Cargo.toml'), '[workspace]\nmembers = ["a"]\n');
+  await mkdir(path.join(lane, 'a'));
+  await writeFile(path.join(lane, 'a', 'Cargo.toml'), '[package]\nname = "a"\n');
+  const first = await launcher.acquireTarget(root, {}, undefined, [lane]);
+  await launcher.adoptTarget(first.target, lane);
+  await first.release();
+  const other = await launcher.acquireTarget(root, {}, undefined, ['/elsewhere']);
+  assert.notEqual(other.target, first.target, 'a copy with no cache of its own takes a free one, not the lane\'s');
+  const again = await launcher.acquireTarget(root, {}, undefined, [lane]);
+  assert.equal(again.target, first.target);
+  await again.release();
+  await other.release();
+});
+
+test('every copy builds in a cache through one link that follows the copy leasing it', async (t) => {
+  const root = await fixture(t);
+  const target = path.join(root, 'target', 'build-1');
+  await mkdir(target, { recursive: true });
+  const [one, two] = [await mkdtemp(path.join(root, 'copy-')), await mkdtemp(path.join(root, 'copy-'))];
+  await mkdir(path.join(one, 'engine'));
+  await writeFile(path.join(one, 'engine', 'mark'), 'one');
+  await writeFile(path.join(two, 'mark'), 'two');
+  const inside = await launcher.linkCopy(root, target, one, path.join(one, 'engine'));
+  assert.equal(inside, path.join(launcher.copyLinkPath(root, target), 'engine'));
+  assert.equal(await readFile(path.join(inside, 'mark'), 'utf8'), 'one');
+  const top = await launcher.linkCopy(root, target, two, two);
+  assert.equal(top, launcher.copyLinkPath(root, target));
+  assert.equal(await readFile(path.join(top, 'mark'), 'utf8'), 'two');
+  // Moving the link never touches the copy it pointed at.
+  assert.equal(await readFile(path.join(one, 'engine', 'mark'), 'utf8'), 'one');
+  // A folder outside the copy keeps its own path, and a real folder where the link goes is refused.
+  assert.equal(await launcher.linkCopy(root, target, two, root), root);
+  const other = path.join(root, 'target', 'build-2');
+  await mkdir(launcher.copyLinkPath(root, other), { recursive: true });
+  await assert.rejects(launcher.linkCopy(root, other, two, two), /not a link/);
+});
+
+test('only proofs are kept in the results ledger, and a check is covered by Clippy on the same files', () => {
+  for (const args of [['check'], ['clippy', '--workspace', '--', '-D', 'warnings'], ['test', '-p', 'x'], ['fmt', '--all', '--check']]) {
+    assert.ok(launcher.proofCommand(args), args.join(' '));
+  }
+  for (const args of [['build'], ['run'], ['t', '--claims'], ['test', '--no-run'], ['fmt', '--all'], ['--version'], ['+nightly', 'check'], ['-v', 'check']]) {
+    assert.equal(launcher.proofCommand(args), null, args.join(' '));
+  }
+  assert.deepEqual(launcher.ledgerQueries(['check', '--workspace', '--all-targets']), [
+    ['check', '--workspace', '--all-targets'],
+    ['clippy', '--workspace', '--all-targets', '--', '-D', 'warnings'],
+  ]);
+  assert.deepEqual(launcher.ledgerQueries(['clippy', '--workspace']), [['clippy', '--workspace']]);
+  assert.deepEqual(launcher.ledgerQueries(['check', '--', '-Z', 'x']), [['check', '--', '-Z', 'x']]);
+});
+
+test('a ledger key follows the files, command, toolchain and result variables, never the launcher\'s own', () => {
+  const base = { tree: 't1', toolchain: 'rustc 1', args: ['check'], env: { PATH: 'a', RUSTFLAGS: '-D warnings', FABER_TEST_SHELL: 'electron' } };
+  const key = launcher.ledgerKey(base);
+  assert.equal(launcher.ledgerKey({ ...base, env: { ...base.env, PATH: 'b', FABER_JOBSERVER: 'x:1', FABER_JOB_STATS: 'f', FABER_CARGO_AFFINITY: 'c', FABER_FRESH: '0', FABER_INCREMENTAL: '0', FABER_COPY_LINK: '0', CARGO_TARGET_DIR: 'd', CARGO_HOME: 'h', CARGO_TERM_COLOR: 'never', CARGO_MAKEFLAGS: '-j' } }), key);
+  const changes = [{ tree: 't2' }, { toolchain: 'rustc 2' }, { args: ['clippy'] }, { dir: 'engine' }, { env: { ...base.env, RUSTFLAGS: '' } },
+    { env: { ...base.env, FABER_TEST_SHELL: 'tauri' } }, { env: { ...base.env, CI: 'true' } }, { env: { ...base.env, RUSTC: 'other' } },
+    { env: { ...base.env, RUSTC_WORKSPACE_WRAPPER: 'w' } }, { env: { ...base.env, CARGO_BUILD_RUSTFLAGS: '-C x' } }, { env: { ...base.env, RUSTUP_TOOLCHAIN: 'nightly' } }];
+  for (const change of changes) {
+    assert.notEqual(launcher.ledgerKey({ ...base, ...change }), key, JSON.stringify(change));
+  }
+});
+
+test('a passing proof is recorded with its output, found again, and old entries go', async (t) => {
+  const root = await fixture(t);
+  assert.equal(await launcher.ledgerFind(root, ['k1']), null);
+  const capture = { stdout: [Buffer.from('out')], stderr: [Buffer.from('err')], bytes: 6 };
+  assert.ok(await launcher.ledgerRecord(root, 'k1', { code: 0, args: ['check'], tree: 't' }, capture));
+  const found = await launcher.ledgerFind(root, ['missing', 'k1']);
+  assert.equal(found.key, 'k1');
+  assert.equal(String(found.stdout), 'out');
+  assert.equal(String(found.stderr), 'err');
+  // Past its three days an entry no longer serves, even before a later record prunes it.
+  assert.equal(await launcher.ledgerFind(root, ['k1'], Date.now() + 4 * 24 * 3600 * 1000), null);
+  assert.equal(await launcher.ledgerRecord(root, 'big', { code: 0 }, { stdout: [], stderr: [], bytes: 64 << 20 }), false);
+  const folder = path.join(root, 'target', '.faber-ledger');
+  await writeFile(path.join(folder, 'old.json'), JSON.stringify({ code: 0 }));
+  await utimes(path.join(folder, 'old.json'), new Date(0), new Date(0));
+  await launcher.ledgerRecord(root, 'k2', { code: 0 }, capture);
+  assert.ok(!existsSync(path.join(folder, 'old.json')));
+  assert.ok(existsSync(path.join(folder, 'k1.json')));
+});
+
+test('one lane runs a proof per key; the next waits, and a dead owner\'s lock is taken over', async (t) => {
+  const root = await fixture(t);
+  const first = await launcher.ledgerLock(root, 'k');
+  assert.equal(first.waited, false);
+  let said = 0;
+  let second;
+  const waiting = launcher.ledgerLock(root, 'k', undefined, () => { said++; }).then((lock) => { second = lock; });
+  await new Promise((done) => setTimeout(done, 300));
+  assert.equal(second, undefined);
+  await first.release();
+  await waiting;
+  assert.equal(second.waited, true);
+  assert.equal(said, 1);
+  await second.release();
+  const lock = path.join(root, 'target', '.faber-ledger', 'k.lock');
+  await mkdir(lock);
+  await writeFile(path.join(lock, 'owner'), '999999999');
+  const taken = await launcher.ledgerLock(root, 'k');
+  assert.equal(taken.waited, false);
+  await taken.release();
+  // Two waiters that both find the dead owner: one takes over, the other waits for it instead of deleting its lock.
+  await mkdir(lock);
+  await writeFile(path.join(lock, 'owner'), '999999999');
+  let holders = 0;
+  let most = 0;
+  await Promise.all([0, 1, 2].map(async () => {
+    const held = await launcher.ledgerLock(root, 'k');
+    most = Math.max(most, ++holders);
+    await new Promise((done) => setTimeout(done, 1500));
+    holders--;
+    await held.release();
+  }));
+  assert.equal(most, 1);
+  assert.deepEqual((await readdir(path.join(root, 'target', '.faber-ledger'))).filter((name) => name.includes('.lock')), []);
+});
+
+test('the shared build budget is about half the processor and stays out of other jobservers and CI', () => {
+  assert.equal(launcher.budgetTokens(16), 6);
+  assert.equal(launcher.budgetTokens(4), 1);
+  assert.equal(launcher.budgetTokens(16, '3'), 3);
+  assert.equal(launcher.budgetTokens(16, 'x'), 6);
+  const env = launcher.budgetEnv({ PATH: 'p' }, 16);
+  if (process.platform !== 'win32') { assert.deepEqual(env, { PATH: 'p' }); return; }
+  assert.equal(env.FABER_JOBSERVER, 'faber-build-jobs:6');
+  assert.equal(env.CARGO_MAKEFLAGS, '-j --jobserver-auth=faber-build-jobs');
+  assert.equal(env.FABER_BUILD_PRIORITY, 'below');
+  assert.equal(env.MAKEFLAGS, undefined);
+  for (const kept of [{ CI: 'true' }, { CARGO_MAKEFLAGS: '-j' }, { MAKEFLAGS: '-j4' }]) assert.deepEqual(launcher.budgetEnv(kept, 16), kept);
+});
+
+test('a reaper lock left by a killed launcher stops holding the cache after a minute', async (t) => {
+  const root = await fixture(t);
+  const target = path.join(root, 'target', 'build-1');
+  await mkdir(path.join(target, '.faber-reap'), { recursive: true });
+  await utimes(path.join(target, '.faber-reap'), new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+  // A dead launcher's lease, which only a reaper may clear.
+  await mkdir(path.join(target, '.faber-lease'));
+  await writeFile(path.join(target, '.faber-lease', 'owner.json'), JSON.stringify({ pid: 999999999, childPid: 999999998, createdAt: 0, tempName: 'run-x', contained: process.platform === 'win32' ? 'job' : 'group' }));
+  const lease = await launcher.acquireTarget(root, { CARGO_TARGET_DIR: target });
+  assert.ok(!existsSync(path.join(target, '.faber-reap')));
+  await lease.release();
+});
+
+test('a paused live reaper keeps its lock however old it is', async (t) => {
+  const root = await fixture(t);
+  const target = path.join(root, 'target', 'build-1');
+  const lock = path.join(target, '.faber-reap');
+  await mkdir(lock, { recursive: true });
+  await writeFile(path.join(lock, 'owner'), String(process.pid));
+  await utimes(lock, new Date(Date.now() - 600000), new Date(Date.now() - 600000));
+  await mkdir(path.join(target, '.faber-lease'));
+  await writeFile(path.join(target, '.faber-lease', 'owner.json'), JSON.stringify({ pid: 999999999, childPid: 999999998, createdAt: 0, tempName: 'run-x', contained: process.platform === 'win32' ? 'job' : 'group' }));
+  const lease = await launcher.acquireTarget(root, {});
+  assert.ok(existsSync(lock));
+  assert.notEqual(path.basename(lease.target), 'build-1');
+  await lease.release();
+});
+
+test('the workspace crates compile incrementally unless the caller or FABER_INCREMENTAL=0 says otherwise', async (t) => {
+  const root = await fixture(t);
+  for (const [env, expected] of [[{}, undefined], [{ FABER_INCREMENTAL: '0' }, '0'], [{ FABER_INCREMENTAL: '0', CARGO_INCREMENTAL: '1' }, '1']]) {
+    const lease = await launcher.acquireTarget(root, env);
+    assert.equal(lease.env.CARGO_INCREMENTAL, expected, JSON.stringify(env));
+    await lease.release();
+  }
+});

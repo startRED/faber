@@ -20,7 +20,9 @@ export function proofsFor(files, locale = false) {
     ['npm', 'run', 'build'], ['cargo', 'fmt', '--all', '--check']];
   if (files.some((f) => f.startsWith('scripts/'))) proofs.push(['npm', 'run', 'test:scripts']);
   if (files.some((f) => /(^|\/)(Cargo\.toml|Cargo\.lock)$|\.rs$/.test(f)))
-    proofs.push(['node', 'scripts/cargo.mjs', 'check', '--workspace', '--all-targets']);
+    // Clippy is the check pass: one compile proves both, it is the line CI reverts on, and a lane's own Clippy on the
+    // same files is reused from the results ledger instead of compiled again.
+    proofs.push(['node', 'scripts/cargo.mjs', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']);
   if (locale) proofs.push(['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-engine', '--test', 'engine', 'every_english_text_is_shown_somewhere']);
   return proofs;
 }
@@ -128,6 +130,8 @@ export function main(args) {
     workspace = temporaryWorktree(original);
     const { dir, git: g } = workspace;
     const proofEnv = proofEnvironment(dir);
+    // The fresh copy builds in the cache the lane itself used last, whose compiler state is closest to this tree.
+    proofEnv.FABER_CARGO_AFFINITY ??= git('rev-parse', '--show-toplevel');
     if (existsSync('node_modules')) symlinkSync(resolve('node_modules'), join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     for (let attempt = 1; attempt <= 3; attempt++) {
       g('fetch', '--no-tags', '--no-write-fetch-head', remote, '+refs/heads/phase-1-base:refs/worktree/faber-ship-base');

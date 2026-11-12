@@ -1,6 +1,6 @@
 // Share a bounded cache pool across checkouts, while keeping each invocation's temp private.
 import { spawn, execFile, execFileSync } from 'node:child_process';
-import { mkdir, lstat, readFile, writeFile, rename, rm, rmdir, realpath, readdir } from 'node:fs/promises';
+import { mkdir, lstat, readFile, writeFile, rename, rm, rmdir, realpath, readdir, readlink, symlink, unlink, utimes } from 'node:fs/promises';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import os from 'node:os';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const DAY = 86400000;
+const REAP_STALE = 60000;
 // The native call, like fs/promises realpath, expands Windows 8.3 names (RUNNER~1), so recorded paths compare equal.
 const systemTemp = realpathSync.native(os.tmpdir());
 const tempNamespace = path.join(systemTemp, tempNamespaceName(process.platform, process.getuid?.()));
@@ -89,7 +90,17 @@ async function removeTemp(parent, name) {
 async function reap(target) {
   const lease = path.join(target, '.faber-lease');
   const lock = path.join(target, '.faber-reap');
-  try { await mkdir(lock); } catch (error) {
+  try {
+    await mkdir(lock);
+    await writeFile(path.join(lock, 'owner'), String(process.pid));
+  } catch (error) {
+    // A reaper killed mid-way left its lock, which held the cache forever (a lane waited 3.5 hours on 2026-11-11). A
+    // lock whose owner is dead, or that never got an owner within a minute, is abandoned; a live, paused reaper keeps
+    // it. The lease it guards is still checked as before.
+    if (error.code === 'EEXIST' && await abandoned(lock, REAP_STALE)) {
+      await takeOver(lock);
+      return false;
+    }
     // An inaccessible reaper lock never authorizes touching an occupied cache.
     if (['EEXIST', 'EPERM', 'EACCES', 'EBUSY'].includes(error.code)) return false;
     throw error;
@@ -201,7 +212,12 @@ export async function adoptTarget(target, copy) {
   const stamp = path.join(target, '.faber-copy');
   const existing = await lstat(stamp).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
   if (existing && !existing.isFile()) throw new Error(`Refusing a linked or unusual cache stamp: ${stamp}`);
-  if (existing && await readFile(stamp, 'utf8') === copy) return false;
+  if (existing && await readFile(stamp, 'utf8') === copy) {
+    // The stamp's time is the cache's last use, which orders the caches a copy may take (`slotOrder`).
+    const now = new Date();
+    await utimes(stamp, now, now);
+    return false;
+  }
   const names = await workspaceCrates(copy);
   const own = (entry) => names.some((name) => entry.startsWith(`${name}-`) && /^[0-9a-f]{16}$/.test(entry.slice(name.length + 1)));
   for (const folder of await fingerprintFolders(target)) {
@@ -213,7 +229,33 @@ export async function adoptTarget(target, copy) {
   return true;
 }
 
-export async function acquireTarget(root, env, signal) {
+// A cache whose workspace crates were last built from one of the preferred copies (this one, or the lane a landing
+// verifies for) has the least to compile again; a cache stamped by a copy that is gone is the next best; the rest go
+// least recently adopted first. Before, every lane took the first free cache, so the three bounced between copies.
+export function slotOrder(slots, prefer = []) {
+  const same = (a, b) => typeof a === 'string' && typeof b === 'string' && (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const rank = (slot) => {
+    const at = prefer.findIndex((copy) => same(slot.copy, copy));
+    return at >= 0 ? at : prefer.length + (slot.gone ? 0 : 1);
+  };
+  return [...slots].sort((a, b) => rank(a) - rank(b) || a.at - b.at || a.index - b.index);
+}
+
+async function bySlotAffinity(targets, prefer) {
+  if (targets.length < 2 || prefer.length === 0) return targets;
+  const slots = await Promise.all(targets.map(async (target, index) => {
+    const stamp = path.join(target, '.faber-copy');
+    try {
+      const stat = await lstat(stamp);
+      const copy = stat.isFile() ? await readFile(stamp, 'utf8') : null;
+      const gone = copy === null || await lstat(copy).then(() => false, () => true);
+      return { target, index, copy, at: stat.mtimeMs, gone };
+    } catch { return { target, index, copy: null, at: 0, gone: true }; }
+  }));
+  return slotOrder(slots, prefer).map((slot) => slot.target);
+}
+
+export async function acquireTarget(root, env, signal, prefer = []) {
   let ancestor = systemTemp;
   for (;;) {
     try { await lstat(path.join(ancestor, '.git')); throw new Error(`Temporary directory is inside a Git working tree: ${systemTemp}`); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -226,7 +268,7 @@ export async function acquireTarget(root, env, signal) {
     ? [path.resolve(root, env.CARGO_TARGET_DIR)]
     : [1, 2, 3].map((slot) => path.join(root, 'target', `build-${slot}`));
   for (const target of targets) await directory(target);
-  targets = await Promise.all(targets.map((target) => realpath(target)));
+  targets = await bySlotAffinity(await Promise.all(targets.map((target) => realpath(target))), prefer);
   for (;;) {
     signal?.throwIfAborted();
     for (const target of targets) {
@@ -264,7 +306,11 @@ export async function acquireTarget(root, env, signal) {
       }
       return {
         target,
-        env: { ...env, CARGO_TARGET_DIR: target, CARGO_INCREMENTAL: env.CARGO_INCREMENTAL ?? '0', TEMP: temp, TMP: temp, TMPDIR: temp },
+        // No CARGO_INCREMENTAL unless the caller set one: Cargo's dev profile then compiles only the workspace's own crates
+        // incrementally (a one-line change no longer recompiles a whole crate), which sccache passes through, while sccache
+        // refuses every compile when the variable says 1. The cost is disk: a cache grew from about 5 to 13 GB on
+        // 2026-11-11. `FABER_INCREMENTAL=0` turns it off.
+        env: { ...env, CARGO_TARGET_DIR: target, ...(env.FABER_INCREMENTAL === '0' && env.CARGO_INCREMENTAL === undefined ? { CARGO_INCREMENTAL: '0' } : {}), TEMP: temp, TMP: temp, TMPDIR: temp },
         async child(pid, contained) { owner.childPid = pid; owner.contained = contained; await save(); },
         async interrupt() { owner.childPid = null; delete owner.contained; await save(); },
         async release() {
@@ -336,23 +382,225 @@ function forwardSignals(controller, getChild, getLease, getReceipt) {
   };
 }
 
+// The results ledger: a proof that passed on a tree is not run again on the same tree. A command is a proof when its
+// only product is what it prints and its exit code (check, clippy, test without --no-run, fmt --check); its key is the
+// tree's Git hash with uncommitted and untracked files, the arguments, the toolchain and the variables that change
+// what the compiler or the tests do. Only passes are kept: a failure is run again, since the next try may differ.
+const LEDGER_OUTPUT = 16 << 20;
+const LEDGER_KEEP = { entries: 300, age: 3 * DAY };
+
+export function proofCommand(args) {
+  const split = args.indexOf('--');
+  const own = split < 0 ? args : args.slice(0, split);
+  const sub = own.find((arg) => !arg.startsWith('-'));
+  if (!sub || sub !== own[0]) return null;
+  if (sub === 'check' || sub === 'clippy') return sub;
+  if (sub === 'test' && !own.includes('--no-run')) return sub;
+  if (sub === 'fmt' && args.includes('--check')) return sub;
+  return null;
+}
+
+// What passing `check` proves, Clippy with warnings denied proves too: a lane's Clippy covers a later check of the tree.
+export function ledgerQueries(args) {
+  const queries = [args];
+  if (proofCommand(args) === 'check') {
+    const split = args.indexOf('--');
+    const own = split < 0 ? args : args.slice(0, split);
+    const after = split < 0 ? [] : args.slice(split + 1);
+    if (!after.length) queries.push(['clippy', ...own.slice(1), '--', '-D', 'warnings']);
+  }
+  return queries;
+}
+
+// Variables that change the result of a proof. The launcher's own (budget, priority, statistics, slot choice) do not.
+// Every Cargo setting counts except where its files go and its terminal; RUSTC* picks the compiler. Files Git ignores and
+// other variables a test might read are not part of the key: a proof that depends on them runs with FABER_FRESH=1.
+const RESULT_VARIABLES = /^((?!CARGO_(HOME|TARGET_DIR|MAKEFLAGS|INCREMENTAL|TERM_.*)$)CARGO_.*|RUST(C|DOC)?(_.*)?|RUSTFLAGS|RUSTDOCFLAGS|RUSTUP_TOOLCHAIN|CI|FABER_(?!JOBSERVER$|JOB_STATS$|BUILD_PRIORITY$|BUILD_BUDGET$|CARGO_AFFINITY$|FRESH$|INCREMENTAL$|COPY_LINK$).*)$/;
+
+export function ledgerKey({ tree, toolchain, args, env, dir = '' }) {
+  const variables = Object.keys(env).filter((name) => RESULT_VARIABLES.test(name)).sort().map((name) => [name, env[name]]);
+  return createHash('sha256').update(JSON.stringify({ v: 2, tree, toolchain, dir, args, variables })).digest('hex').slice(0, 40);
+}
+
+// The Git hash of the copy as it is now, uncommitted and untracked files included (ignored ones are not part of it).
+export async function treeHash(copy, run = execute) {
+  const git = (args, env) => run('git', args, { cwd: copy, windowsHide: true, maxBuffer: 64 << 20, env: env ?? process.env }).then((r) => r.stdout.trim());
+  if (!await git(['status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'])) return git(['rev-parse', 'HEAD^{tree}']);
+  // A private index, seeded from the copy's own so unchanged files are not hashed again; the copy's index is untouched.
+  const index = path.join(tempNamespace, `index-${randomUUID()}`);
+  try {
+    const own = await git(['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+    await writeFile(index, await readFile(own).catch(() => Buffer.alloc(0)));
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    await git(['add', '--all', '--', '.'], env);
+    return await git(['write-tree'], env);
+  } finally { await rm(index, { force: true }); }
+}
+
+function ledgerFolder(root) { return path.join(root, 'target', '.faber-ledger'); }
+
+export async function ledgerFind(root, keys, now = Date.now()) {
+  for (const key of keys) {
+    const file = path.join(ledgerFolder(root), `${key}.json`);
+    try {
+      const entry = JSON.parse(await readFile(file, 'utf8'));
+      if (entry.code !== 0 || !(now - entry.at < LEDGER_KEEP.age)) continue;
+      const out = await readFile(path.join(ledgerFolder(root), `${key}.out`)).catch(() => Buffer.alloc(0));
+      const err = await readFile(path.join(ledgerFolder(root), `${key}.err`)).catch(() => Buffer.alloc(0));
+      return { ...entry, key, stdout: out, stderr: err };
+    } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
+  }
+  return null;
+}
+
+export async function ledgerRecord(root, key, entry, capture, now = Date.now()) {
+  if (!capture || capture.bytes > LEDGER_OUTPUT) return false;
+  const folder = ledgerFolder(root);
+  await directory(folder);
+  const temp = (name) => path.join(folder, `${name}.${process.pid}.new`);
+  await writeFile(temp(`${key}.out`), Buffer.concat(capture.stdout));
+  await writeFile(temp(`${key}.err`), Buffer.concat(capture.stderr));
+  await rename(temp(`${key}.out`), path.join(folder, `${key}.out`));
+  await rename(temp(`${key}.err`), path.join(folder, `${key}.err`));
+  // The entry goes last: a reader that finds it finds its output too.
+  await writeFile(temp(`${key}.json`), JSON.stringify({ ...entry, at: now }));
+  await rename(temp(`${key}.json`), path.join(folder, `${key}.json`));
+  await ledgerPrune(folder, now);
+  return true;
+}
+
+async function ledgerPrune(folder, now) {
+  const entries = [];
+  for (const name of await readdir(folder)) {
+    if (!name.endsWith('.json')) continue;
+    const stat = await lstat(path.join(folder, name)).catch(() => null);
+    if (stat) entries.push({ key: name.slice(0, -5), at: stat.mtimeMs });
+  }
+  entries.sort((a, b) => b.at - a.at);
+  for (const [i, entry] of entries.entries()) {
+    if (i < LEDGER_KEEP.entries && now - entry.at < LEDGER_KEEP.age) continue;
+    for (const ext of ['.json', '.out', '.err']) await rm(path.join(folder, entry.key + ext), { force: true });
+  }
+}
+
+// A lock directory's owner died, or it never got one within `grace` milliseconds.
+async function abandoned(lock, grace) {
+  const owner = Number(await readFile(path.join(lock, 'owner'), 'utf8').catch(() => ''));
+  if (owner) return dead(owner);
+  return lstat(lock).then((s) => Date.now() - s.mtimeMs > grace, () => false);
+}
+
+// Moves an abandoned lock aside before deleting it: a rename succeeds for one waiter only, so two waiters that saw the
+// same dead owner cannot both take over, and the second never deletes the lock the first one just made. When the
+// moved lock turns out to be a live one (it was replaced between the check and the rename), it goes back.
+async function takeOver(lock) {
+  const aside = `${lock}.stale-${randomUUID()}`;
+  try { await rename(lock, aside); } catch (error) { if (['ENOENT', 'EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) return; throw error; }
+  if (!await abandoned(aside, 0)) {
+    try { await rename(aside, lock); return; } catch { /* someone holds the lock again; the moved one is released */ }
+  }
+  await rm(aside, { recursive: true, force: true });
+}
+
+// One lane runs a proof at a time per key; a lane asking for the same proof on the same tree waits for its result
+// instead of compiling the same thing next to it. A lock whose owner died is taken over.
+export async function ledgerLock(root, key, signal, said = () => {}) {
+  const folder = ledgerFolder(root);
+  await directory(folder);
+  const lock = path.join(folder, `${key}.lock`);
+  let waited = false;
+  for (;;) {
+    signal?.throwIfAborted();
+    try {
+      await mkdir(lock);
+      await writeFile(path.join(lock, 'owner'), String(process.pid));
+      return { waited, release: () => rm(lock, { recursive: true, force: true }) };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      // A lock without an owner yet is a moment old; one whose owner is gone is free.
+      if (await abandoned(lock, 60000)) { await takeOver(lock); continue; }
+      if (!waited) said();
+      waited = true;
+      await setTimeout(1000, undefined, { signal });
+    }
+  }
+}
+
+// The PC's one build budget (Windows): a named semaphore all lanes' Cargo and rustc take tokens from, instead of each
+// lane's own `jobs`. Each Cargo also keeps its one implicit token, so a lane alone keeps its speed and three lanes
+// together stop at about half the processor. `FABER_BUILD_BUDGET` sets the shared tokens; CI keeps Cargo's own count.
+export const BUDGET_NAME = 'faber-build-jobs';
+export function budgetTokens(logical, configured) {
+  const set = Number.parseInt(configured ?? '', 10);
+  if (Number.isSafeInteger(set) && set > 0) return Math.min(set, 256);
+  return Math.max(1, Math.floor(logical / 2) - 2);
+}
+
+export function budgetEnv(env, logical = os.cpus().length) {
+  if (process.platform !== 'win32' || env.CI === 'true' || env.CARGO_MAKEFLAGS || env.MAKEFLAGS) return env;
+  return {
+    ...env,
+    FABER_JOBSERVER: `${BUDGET_NAME}:${budgetTokens(logical, env.FABER_BUILD_BUDGET)}`,
+    CARGO_MAKEFLAGS: `-j --jobserver-auth=${BUDGET_NAME}`,
+    FABER_BUILD_PRIORITY: env.FABER_BUILD_PRIORITY ?? 'below',
+  };
+}
+
 // The compiler cache server (sccache) can die mid-build; the build then fails before any test ran.
 export const CACHE_SERVER_DIED = /sccache[^\n]*(?:10054|connection|server)/i;
 
-export async function runChild(root, command, args, env, cwd = root, copy = null, jobRunner = null) {
+// Every copy builds in a cache through one path, a link named after the cache that points at the copy leasing it. The
+// workspace crates then keep one identity per cache whichever copy builds: Cargo's units, the compiler's incremental
+// state and the compile cache's keys stay valid when another copy takes the cache, so only what differs is compiled
+// again. Before, each copy's own path made them other crates, and a landing's fresh copy compiled the workspace whole.
+export function copyLinkPath(root, target) {
+  const id = createHash('sha256').update(process.platform === 'win32' ? target.toLowerCase() : target).digest('hex').slice(0, 12);
+  return path.join(root, 'target', '.faber-copies', `${path.basename(target)}-${id}`);
+}
+
+export async function linkCopy(root, target, copy, cwd) {
+  const inside = path.relative(copy, cwd);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) return cwd;
+  const link = copyLinkPath(root, target);
+  await directory(path.dirname(link));
+  let current = null;
+  try {
+    const stat = await lstat(link);
+    if (!stat.isSymbolicLink()) throw new Error(`Refusing a build copy path that is not a link: ${link}`);
+    current = path.resolve(await readlink(link));
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const same = current !== null && (process.platform === 'win32' ? current.toLowerCase() === copy.toLowerCase() : current === copy);
+  if (!same) {
+    // Only the link goes: unlink never follows it into the copy it pointed at.
+    if (current !== null) await unlink(link);
+    await symlink(copy, link, process.platform === 'win32' ? 'junction' : 'dir');
+  }
+  return path.join(link, inside);
+}
+
+export async function runChild(root, command, args, env, cwd = root, copy = null, jobRunner = null, options = {}) {
   const controller = new AbortController();
   let child;
   let lease;
   let receiptSaved = Promise.resolve();
   const signals = forwardSignals(controller, () => child, () => lease, () => receiptSaved);
   let finished = false;
-  // Stderr is read to spot a dead cache server and passed through unchanged; stdout and stdin stay the caller's.
+  const capture = options.capture;
+  // Stderr is read to spot a dead cache server and passed through unchanged; stdout and stdin stay the caller's, unless
+  // the result is recorded for other lanes (`capture`), when stdout is passed through and kept as well.
   const attempt = async (childEnv) => {
     finished = false;
-    child = spawn(jobRunner ?? command, jobRunner ? [command, ...args] : args, { cwd, env: childEnv, stdio: ['inherit', 'inherit', 'pipe'], shell: false, windowsHide: true, detached: process.platform !== 'win32' });
+    if (capture) Object.assign(capture, { stdout: [], stderr: [], bytes: 0 });
+    const keep = (stream, chunk) => {
+      if (!capture || capture.bytes > LEDGER_OUTPUT) return;
+      capture.bytes += chunk.length;
+      capture[stream].push(chunk);
+    };
+    child = spawn(jobRunner ?? command, jobRunner ? [command, ...args] : args, { cwd, env: childEnv, stdio: ['inherit', capture ? 'pipe' : 'inherit', 'pipe'], shell: false, windowsHide: true, detached: process.platform !== 'win32' });
     child.contained = jobRunner ? 'job' : process.platform === 'win32' ? undefined : 'group';
     let tail = '';
-    child.stderr.on('data', (chunk) => { process.stderr.write(chunk); tail = (tail + chunk).slice(-16384); });
+    child.stdout?.on('data', (chunk) => { process.stdout.write(chunk); keep('stdout', chunk); });
+    child.stderr.on('data', (chunk) => { process.stderr.write(chunk); keep('stderr', chunk); tail = (tail + chunk).slice(-16384); });
     const result = new Promise((resolve, reject) => {
       child.once('error', (error) => { finished = true; reject(error); });
       // A background server the build started can keep the pipe open, so the last output is only given a moment.
@@ -371,8 +619,9 @@ export async function runChild(root, command, args, env, cwd = root, copy = null
     return outcome;
   };
   try {
-    lease = await acquireTarget(root, env, controller.signal);
+    lease = await acquireTarget(root, env, controller.signal, options.prefer ?? (copy ? [copy] : []));
     if (copy) await adoptTarget(lease.target, copy);
+    if (copy && options.link) cwd = await linkCopy(root, lease.target, copy, cwd);
     controller.signal.throwIfAborted();
     let { code, tail } = await attempt(lease.env);
     if (code !== 0 && !signals.interrupted && lease.env.RUSTC_WRAPPER !== '' && CACHE_SERVER_DIED.test(tail)) {
@@ -475,12 +724,51 @@ async function main() {
   if (tauri) args.shift();
   if (args.length === 0) throw new Error('Usage: node scripts/cargo.mjs [--tauri] <arguments>');
   validateCargoArgs(args, tauri);
-  const env = { ...process.env };
+  let env = { ...process.env };
   if (env.CARGO_TARGET_DIR) env.CARGO_TARGET_DIR = path.resolve(cwd, env.CARGO_TARGET_DIR);
+  // The landing's fresh copy prefers the cache of the lane it lands for, whose compiler state is closest to its tree.
+  const prefer = [copy, ...(env.FABER_CARGO_AFFINITY ? [await realpath(env.FABER_CARGO_AFFINITY).catch(() => env.FABER_CARGO_AFFINITY)] : [])];
+  const proof = tauri ? null : proofCommand(args);
+  let key = null;
+  if (proof && env.FABER_FRESH !== '1') {
+    // The folder counts: `cargo test` in a package folder proves that package only.
+    const dir = path.relative(copy, await realpath(cwd)).split(path.sep).join('/');
+    const [tree, toolchain] = await Promise.all([treeHash(copy), execute(env.RUSTC || 'rustc', ['-vV'], { cwd, windowsHide: true }).then((r) => r.stdout.trim())]);
+    const keys = ledgerQueries(args).map((query) => ledgerKey({ tree, toolchain, args: query, env, dir }));
+    key = keys[0];
+    const said = () => console.error('Waiting: another lane runs this proof on the same files; its result serves both.');
+    const lock = await ledgerLock(root, key, undefined, said);
+    try {
+      const found = await ledgerFind(root, keys);
+      if (found) {
+        process.stdout.write(found.stdout);
+        process.stderr.write(found.stderr);
+        const when = new Date(found.at).toISOString().slice(0, 16).replace('T', ' ');
+        console.error(`Passed already on these exact files (${when} UTC, \`${found.args.join(' ')}\`); nothing compiled. FABER_FRESH=1 runs it again.`);
+        process.exitCode = 0;
+        return;
+      }
+      process.exitCode = await build(root, args, tauri, env, cwd, copy, prefer, key, tree);
+    } finally { await lock.release(); }
+    return;
+  }
+  process.exitCode = await build(root, args, tauri, env, cwd, copy, prefer, null, null);
+}
+
+async function build(root, args, tauri, env, cwd, copy, prefer, key, tree) {
   await maintainStorage(root, env.CARGO_TARGET_DIR ?? path.join(root, 'target'));
   // Windows has no process groups, so the build runs inside a kill-on-close job: a dead launcher then proves no compiler survives.
   const jobRunner = process.platform === 'win32' ? await compiledTool(root, 'job-run', path.join(sourceRoot, 'scripts', 'job-run.rs')) : null;
-  process.exitCode = await runChild(root, tauri ? process.execPath : 'cargo', tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args, env, cwd, copy, jobRunner);
+  if (jobRunner) env = budgetEnv(env);
+  const capture = key ? {} : undefined;
+  const command = tauri ? process.execPath : 'cargo';
+  const commandArgs = tauri ? [path.join(cwd, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), ...args] : args;
+  const code = await runChild(root, command, commandArgs, env, cwd, copy, jobRunner, { prefer, link: !tauri && env.FABER_COPY_LINK !== '0', capture });
+  // Files edited while the proof ran make it a proof of neither tree, so nothing is recorded.
+  if (key && code === 0 && await treeHash(copy).then((now) => now === tree, () => false)) {
+    try { await ledgerRecord(root, key, { code, args, tree }, capture); } catch (error) { console.error(`The passing result could not be recorded: ${error.message}`); }
+  }
+  return code;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

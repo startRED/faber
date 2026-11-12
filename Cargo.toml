@@ -1,5 +1,5 @@
 [workspace]
-members = ["channel", "cli", "engine", "engine-core", "engine-drivers", "engine-projects", "host", "sidecar", "src-tauri", "testkit", "update", "winproc"]
+members = ["builds", "channel", "cli", "engine", "engine-core", "engine-drivers", "engine-projects", "host", "sidecar", "src-tauri", "testkit", "update", "winproc"]
 resolver = "3"
 
 [workspace.package]

@@ -37,6 +37,10 @@ pub struct JobAccounting {
     pub written_bytes: u64,
 }
 
+#[cfg(windows)]
+mod budget;
+#[cfg(windows)]
+pub use budget::BuildBudget;
 mod files;
 #[cfg(windows)]
 mod locale;

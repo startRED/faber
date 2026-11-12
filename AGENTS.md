@@ -40,8 +40,8 @@ before changing what a person sees, sets or calls follow [docs/product-rules.md]
 Stack: `engine/` (Rust: the `Engine`) on `engine-drivers/` (the CLI drivers) on `engine-projects/` (projects, tools,
 checks) on `engine-core/` (JSON files, no windows); `host/` (the one command table every front end calls, R459) with
 `sidecar/`, `channel/`, `cli/`; `electron/` (the shell; `src-tauri/` ships until the release switch); `winproc/` (unsafe
-process calls); `ui/` (SolidJS + TypeScript); `tests/` (screen checks); `testkit/` (`cargo t`). [Memory and
-processes](docs/product/architecture.md#architecture).
+process calls); `builds/` (one build budget, a ledger of passed proofs); `ui/` (SolidJS + TypeScript); `tests/` (screen
+checks); `testkit/` (`cargo t`). [Memory and processes](docs/product/architecture.md#architecture).
 
 ## Proof commands
 

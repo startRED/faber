@@ -1,7 +1,9 @@
 [alias]
 # `cargo t` runs Faber's own test runner (testkit/). Without arguments it runs what the changed files need.
-# Short messages: a broken build of the runner itself prints one line per error (R154).
-t = "run --quiet --message-format=short --package faber-testkit --bin faber-test --"
+# Short messages: a broken build of the runner itself prints one line per error (R154). No `--package`: picking one
+# package resolved its dependencies with other features than `--workspace`, so `cargo t` and `cargo test --workspace`
+# rebuilt each other's shared crates (46 CPU-seconds for a no-op `cargo t --claims`, 2026-11-11).
+t = "run --quiet --message-format=short --bin faber-test --"
 
 [build]
 # Cap the bootstrap build while preserving Cargo's CARGO_BUILD_JOBS override.

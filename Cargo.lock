@@ -1111,6 +1111,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-builds"
+version = "0.1.0"
+dependencies = [
+ "faber-winproc",
+ "sha2 0.11.1",
+ "tempfile",
+]
+
+[[package]]
 name = "faber-channel"
 version = "0.1.0"
 dependencies = [

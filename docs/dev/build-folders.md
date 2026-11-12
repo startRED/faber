@@ -11,8 +11,8 @@ direct Cargo workflow in the legacy temporary build root described below.
 The launcher locates the main checkout through Git and leases one of three reusable caches, `target/build-1` through
 `target/build-3`, for the entire command, including tests. Concurrent lanes never share an occupied cache; a busy pool
 waits rather than making another. `CARGO_TARGET_DIR` explicitly selects another cache, still leased; a relative value
-is resolved from the calling checkout. Incremental output is disabled unless the caller explicitly enables it, trading
-some rebuild speed for lower disk use. Dependencies remain reusable.
+is resolved from the calling checkout. Dependencies remain reusable. How the lanes share the caches, the processor and
+their results is in [The build coordinator](#the-build-coordinator).
 
 A cache moves between copies, and Cargo judges the workspace's own crates by the file times of their sources, named
 relative to each copy: a copy whose sources are older than another copy's last build would get that build, the test
@@ -56,6 +56,68 @@ artifacts into memory. No desktop-app process or idle timer is added. Rust maint
 `testkit/src/sweep.rs`; launcher checks run with `npm run test:scripts`.
 
 The legacy `%TEMP%\faber-target` root remains covered by the same hourly sweep and its own separate 12 GB cap.
+
+## The build coordinator
+
+`scripts/cargo.mjs` is the one door every local Cargo command goes through, so it also coordinates the lanes. Nothing
+stays running: each part works at the start or end of a command, or is a kernel object that lives while a build runs.
+
+- **Each lane keeps its cache.** A copy takes the cache it built in last, then one whose copy is gone, then the least
+  recently used (`slotOrder`); before, every lane took the first free one and the three bounced between copies. A
+  landing's fresh copy (`ship.mjs`) prefers the cache of the lane it lands for (`FABER_CARGO_AFFINITY`).
+- **One path per cache.** Cargo runs in the copy through a link named after its cache,
+  `target/.faber-copies/build-<n>-<id>`, which points at the copy that leases the cache. The workspace crates keep one
+  identity in a cache whichever copy builds there, so Cargo's units, the compiler's incremental state and the compile
+  cache's keys stay valid when another copy takes it. `FABER_COPY_LINK=0` builds from the copy's own path.
+- **Incremental workspace crates.** The launcher no longer sets `CARGO_INCREMENTAL=0`, so Cargo's dev profile compiles
+  the workspace's own crates incrementally: a one-line change recompiles what changed, not the crate. sccache passes
+  those compiles through instead of caching them, so the workspace's big outputs, which never hit across copies, stop
+  evicting dependencies from its 5 GB (it refuses every compile when the variable is `1`, so it stays unset). The
+  cost is disk: one cache grew from about 5 to 13 GB, above the 12 GB budget of R463 with three caches, and that
+  trade is the owner's to confirm. `FABER_INCREMENTAL=0` turns it off.
+- **One feature set.** `cargo t` runs the runner with `--bin faber-test`, not `--package faber-testkit`: one package
+  resolved the dependencies' features differently from `--workspace`, so `cargo t` and `cargo test --workspace`
+  rebuilt each other's shared crates every time.
+- **One build budget.** On Windows the build's job holds a named semaphore, `faber-build-jobs`, that every lane's Cargo
+  and rustc take tokens from as a jobserver (`CARGO_MAKEFLAGS`). It has half the logical processors less two (6 on 16);
+  each Cargo also keeps one token of its own, so a lane alone keeps its speed and three lanes stop near half the
+  processor instead of 3 x 4 jobs each. `FABER_BUILD_BUDGET` sets another count; CI and a build already under a
+  jobserver keep their own. Builds run below normal priority, which every compiler they start inherits. A token held
+  by a Cargo that is killed is lost until no build holds the semaphore, when Windows drops it and the next build makes
+  it full again.
+- **A results ledger.** A proof (check, Clippy, a test run without `--no-run`, `fmt --check`) that passed on the same
+  files, folder, arguments, toolchain (`RUSTC` or `rustc`) and result variables (Cargo's settings, `RUST*` flags,
+  `CI`, `FABER_*`) is not run again: its output is replayed with one line saying so.
+  The key is the copy's Git tree with uncommitted and untracked files (`treeHash`). A check is covered by Clippy with
+  warnings denied on the same files. A lane asking for a proof another lane is running on the same files waits for that
+  result instead of compiling next to it. Only passes are kept, in `target/.faber-ledger` (300 newest, three days).
+  A pass is recorded only if the files did not change while it ran. Ignored files and other variables are not in the
+  key: `FABER_FRESH=1` runs the proof anyway.
+- **No lock held forever.** A reaper or ledger lock whose owner process is dead (or that never got an
+  owner within a minute) is moved aside and removed, by one waiter only; one left by a killed launcher held its cache until someone deleted it by hand (a lane waited 3.5 hours on 2026-11-11).
+- **One compile per change.** The landing proof is Clippy (`ship.mjs`), which covers the check it replaced, so the lane's
+  own Clippy on the same tree is reused instead of compiled again.
+
+The same budget and ledger are in `builds/` (`faber-builds`) for the builds agents run in a person's projects: the
+app opens the budget while a conversation's CLI runs and gives it `CARGO_MAKEFLAGS`, and Faber's checks keep their
+passes in the ledger across copies. That wiring lands after the engine is split into crates.
+
+Measured on 2026-11-11 (i7-10700K, 16 threads, a game running, agents pinned to four cores), processor seconds of
+every process a step started, compilers included, for one changed line in `engine-core/src/lib.rs`:
+
+| Step | Before | After |
+|---|---|---|
+| `cargo t --claims` | 94 | 21 |
+| `cargo test --workspace` (about 500 of it runs the tests) | 1,001 | 655 |
+| Clippy | 120 | 62 |
+| `check --workspace --all-targets` | 106 | 0.5 (Clippy's pass) |
+| Landing proof in a fresh copy | 90 | 0.8 (same files) or 58 (base moved) |
+| The lane's next proof after the landing | 91 | 0.6 or 68 |
+| Compile proofs together | 501 | 85 or 210 |
+
+A no-op `cargo t --claims` went from 46 to 6 processor seconds and a no-op `cargo test --workspace` from 948 to 503,
+its peak memory from 7.0 to 1.2 GB. Three lanes at once: two on the same files compiled once (the second waited and
+replayed), the third built in another cache at the same time, and each took its own cache back afterwards.
 
 Build folders are disposable, including a benchmark's executable after its run. Before calling an artifact frozen,
 copy the exact executable and any required runtime files to an evidence folder outside both `target` and

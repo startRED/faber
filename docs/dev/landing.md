@@ -6,7 +6,8 @@ New work lands directly on `phase-1-base` and is checked after (R556). `node scr
 refuses a dirty tree or a red base (`FABER_PUSH_ON_RED=1` ships the fix), squashes every commit ahead of
 `origin/phase-1-base` into one on its newest tip without touching the branch, numbers it (`numbers.mjs assign --amend`),
 runs the quick proofs that tree needs (lint, typecheck, docs, build, formatting; the script tests when `scripts/`
-changed; `cargo check --workspace --all-targets` when Rust changed; the docs check alone for words) and pushes it. When
+changed; Clippy with warnings denied when Rust changed, which a lane's own Clippy on the same files serves from the
+[results ledger](build-folders.md#the-build-coordinator); the docs check alone for words) and pushes it. When
 the base moved meanwhile, it squashes, numbers and proves again on the new tip (at most three tries), since a change in
 another file can still break this one. A branch with an open pull request gets a `Pull-request: #<n>` trailer, a comment with
 the landed commit and the pull request closed. `--dry-run` stops before the push.

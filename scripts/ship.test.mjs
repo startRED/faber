@@ -9,7 +9,7 @@ test('proofs follow the changed files', () => {
   assert.deepEqual(proofsFor(['docs/a.json', 'README.md']), [['npm', 'run', 'docs']]);
   const all = proofsFor(['ui/a.ts', 'scripts/a.mjs', 'engine/a.rs']);
   assert.equal(all.length, 7);
-  assert.deepEqual(all.at(-1), ['node', 'scripts/cargo.mjs', 'check', '--workspace', '--all-targets']);
+  assert.deepEqual(all.at(-1), ['node', 'scripts/cargo.mjs', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']);
   assert.equal(proofsFor(['Cargo.lock']).length, 6);
   assert.equal(proofsFor(['ui/a.ts']).length, 5);
 });
