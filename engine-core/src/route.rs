@@ -416,6 +416,19 @@ fn strongest(candidates: &[Profile]) -> Option<Profile> {
     candidates.iter().max_by_key(|p| (p.iq, p.agent)).copied()
 }
 
+/// Work judged by eye is led by Claude where the account has a Claude row that clears the bar: on one 30-second narrated
+/// explainer film Opus reached the top craft score (8.8) and Sol, though far cheaper per task in the table, stayed at 8.2 to
+/// 8.6 with plainer illustration (R569). The table's prices measure work checked by machine, not by eye, so here they do
+/// not decide the vendor. None when there is nothing to narrow: no Claude row clears the bar, or every row is Claude's.
+fn visual_lead(kind: &str, level: &str, project: bool, candidates: &[Profile]) -> Option<Vec<Profile>> {
+    if kind != "visual" || candidates.iter().all(|p| p.vendor == Vendor::Claude) {
+        return None;
+    }
+    let own = bar(kind, level, project);
+    let lead: Vec<Profile> = candidates.iter().filter(|p| p.vendor == Vendor::Claude).copied().collect();
+    lead.iter().any(|p| clears(p, own)).then_some(lead)
+}
+
 /// The cheapest candidate that clears the bar (the faster on a tie), or the strongest when none does. An unsure verdict
 /// gets the next level's bar, as does a blind one (`level_of`). This is the table with no quota information.
 pub fn choose(
@@ -480,6 +493,8 @@ fn choose_reading(
     read: &dyn Fn(&Profile) -> f64,
 ) -> Option<Routed> {
     let level = level_of(kind, difficulty, check, scope, confidence);
+    let lead = visual_lead(kind, level, project, candidates);
+    let candidates = lead.as_deref().unwrap_or(candidates);
     let (profile, price) = match cheapest(kind, level, candidates, &|p| Factor { read: read(p), ..Factor::NEUTRAL }, false, project) {
         Some((p, price, _)) => (p, price),
         None => {
@@ -519,6 +534,23 @@ pub fn choose_paced_scoped(
     factor: &dyn Fn(&Profile) -> Factor,
 ) -> Option<Routed> {
     let level = level_of(kind, difficulty, check, scope, confidence);
+    if let Some(lead) = visual_lead(kind, level, project, candidates) {
+        // Claude leads while its quota has room (`lifted`'s test); near its limit or running fast, the other vendor answers
+        // and the note says why, unless only Claude clears the bar.
+        let led = choose_paced_scoped(kind, difficulty, check, scope, confidence, project, &lead, factor)?;
+        let f = factor(&led.profile);
+        if f.step_ok && f.m < LOW_M {
+            return Some(led);
+        }
+        let rest: Vec<Profile> = candidates.iter().filter(|p| p.vendor != Vendor::Claude).copied().collect();
+        let own = bar(kind, level, project);
+        if !rest.iter().any(|p| clears(p, own)) {
+            return Some(led);
+        }
+        let mut other = choose_paced_scoped(kind, difficulty, check, scope, confidence, project, &rest, factor)?;
+        other.pace.get_or_insert(PaceNote { kind: if f.step_ok { "fast" } else { "low" }.into(), vendor: Vendor::Claude });
+        return Some(other);
+    }
     let usual = choose_reading(kind, difficulty, check, scope, confidence, project, candidates, &|p| factor(p).read)?;
     let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true, project) else {
         return Some(usual);
@@ -569,10 +601,20 @@ pub fn lifted(base: Routed, candidates: &[Profile], factor: &dyn Fn(&Profile) ->
 /// limit (`limit`). `account` is what the account can run before the quota gate. A note the quota or learning already
 /// wrote stands.
 pub fn limit_note(routed: &Routed, account: &[Profile]) -> Option<PaceNote> {
-    if routed.pace.is_some() || routed.clears_bar() {
+    if routed.pace.is_some() {
         return None;
     }
     let need = bar(routed.kind, level_of(routed.kind, routed.difficulty, routed.check, routed.scope, routed.confidence), routed.project);
+    // The quota gate kept Claude out of visual work it would have led (`visual_lead`): the other vendor answering says so.
+    if routed.kind == "visual"
+        && routed.profile.vendor != Vendor::Claude
+        && account.iter().any(|p| p.vendor == Vendor::Claude && clears(p, need))
+    {
+        return Some(PaceNote { kind: "low".into(), vendor: Vendor::Claude });
+    }
+    if routed.clears_bar() {
+        return None;
+    }
     let held = account.iter().filter(|p| clears(p, need)).min_by(|a, b| a.cost.total_cmp(&b.cost))?;
     Some(PaceNote { kind: "limit".into(), vendor: held.vendor })
 }
@@ -734,6 +776,41 @@ mod tests {
         let writing = Asked { kind: "writing", difficulty: "medium", scope: "tight", ..best };
         assert_eq!(pick(&writing, false), ("claude-sonnet-5-5", "high"));
         assert_eq!(pick(&Asked { scope: "tight best", ..writing }, false), ("claude-sonnet-5-5", "xhigh"));
+    }
+
+    /// R569: on a 30-second explainer film Opus as lead scored 8.8 and Sol 8.2 to 8.6 with plainer illustration, though Sol
+    /// is far cheaper per task in the table. Visual work goes to Claude while its quota has room; near the limit, Sol answers
+    /// and says why.
+    #[test]
+    fn visual_work_is_led_by_opus_when_claude_has_room_and_by_sol_with_a_note_when_it_does_not() {
+        let both = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".into(), "gpt-6.1-terra".into()]);
+        let codex: Vec<_> = both.iter().filter(|p| p.vendor == Vendor::Codex).copied().collect();
+        let route = |scope, pool: &[Profile], factor: &dyn Fn(&Profile) -> Factor| {
+            let r = choose_paced_scoped("visual", "hard", "glance", scope, 0.9, true, pool, factor).unwrap();
+            (r.profile.model, r.profile.effort, r.pace.map(|n| (n.kind, n.vendor)))
+        };
+        let healthy = |_: &Profile| Factor::NEUTRAL;
+        assert_eq!(route("open", &both, &healthy), ("claude-opus-5-5", "medium", None));
+        assert_eq!(route("open best", &both, &healthy), ("claude-opus-5-5", "high", None), "the ask only raises effort");
+        assert_eq!(choose_scoped("visual", "hard", "glance", "open", 0.9, true, &both).unwrap().profile.model, "claude-opus-5-5");
+        // Spare Codex quota does not pull the lead away from Claude.
+        let spare = |p: &Profile| Factor { m: if p.vendor == Vendor::Codex { 0.2 } else { 1.0 }, ..Factor::NEUTRAL };
+        assert_eq!(route("open", &both, &spare).0, "claude-opus-5-5");
+        let near =
+            |p: &Profile| if p.vendor == Vendor::Claude { Factor { m: 3.0, step_ok: false, ..Factor::NEUTRAL } } else { Factor::NEUTRAL };
+        assert_eq!(route("open", &both, &near), ("gpt-6.1-sol", "medium", Some(("low".to_string(), Vendor::Claude))));
+        let fast = |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { LOW_M } else { 1.0 }, ..Factor::NEUTRAL };
+        assert_eq!(route("open", &both, &fast).2, Some(("fast".to_string(), Vendor::Claude)));
+        // The quota gate left Claude out entirely: Sol answers and the note still names Claude.
+        let gated = choose_paced_scoped("visual", "hard", "glance", "open", 0.9, true, &codex, &healthy).unwrap();
+        assert_eq!(gated.profile.model, "gpt-6.1-sol");
+        assert_eq!(limit_note(&gated, &both).map(|n| (n.kind, n.vendor)), Some(("low".to_string(), Vendor::Claude)));
+        assert_eq!(limit_note(&gated, &codex), None, "with Claude not connected Sol leads silently");
+        // Code keeps the table's price: Sol stays the cheaper fitting lead.
+        assert_eq!(
+            choose_paced_scoped("code", "hard", "glance", "tight", 0.9, true, &both, &healthy).unwrap().profile.model,
+            "gpt-6.1-sol"
+        );
     }
 
     #[test]
