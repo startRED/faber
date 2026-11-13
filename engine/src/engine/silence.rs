@@ -148,6 +148,9 @@ impl Core {
             looked.push((conv.clone(), next));
         }
         for (conv, next) in looked {
+            if let Some(turn) = self.heard.get(&conv).map(|h| h.turn.clone()) {
+                self.check_barren(&conv, &turn, now);
+            }
             let Some(h) = self.heard.get_mut(&conv) else { continue };
             let quiet = match next {
                 Look::Again => {

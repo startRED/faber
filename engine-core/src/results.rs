@@ -307,6 +307,52 @@ pub fn tally(c: &Conversation) -> Results {
     r
 }
 
+/// Faber's own record of a conversation, in one line, for the agent that started it (D4): which files it changed and whether a
+/// check ran after its last edit. A report otherwise repeats only what the agent said of itself ("all tests pass"), and a test
+/// run before the final edit proves nothing about it. Read from the stored steps in order, like `tally`; none for a
+/// conversation that neither changed a file nor ran a check (a plain answer).
+pub fn record_line(c: &Conversation) -> Option<String> {
+    let mut files = BTreeSet::new();
+    let (mut run, mut passed, mut failed) = (0u32, 0u32, 0u32);
+    // The outcome of the latest check that came after the latest edit; None once an edit follows every check.
+    let mut after_edit: Option<Option<bool>> = None;
+    for m in c.messages.iter().filter(|m| m.role == Role::Assistant) {
+        for t in m.tools.iter().flatten().filter(|t| !t.declined && !t.interrupted) {
+            let paths = crate::nudge::edited(t);
+            if t.ok == Some(true) && !paths.is_empty() {
+                files.extend(paths);
+                after_edit = None;
+            }
+            if t.check {
+                run += 1;
+                passed += u32::from(t.ok == Some(true));
+                failed += u32::from(t.ok == Some(false));
+                after_edit = Some(t.ok);
+            }
+        }
+    }
+    if files.is_empty() && run == 0 {
+        return None;
+    }
+    let changed = match files.len() {
+        0 => "changed no file".to_string(),
+        1 => "changed 1 file".to_string(),
+        n => format!("changed {n} files"),
+    };
+    let checks = match run {
+        0 => "ran no check".to_string(),
+        _ => format!("ran {run} check{} ({passed} passed, {failed} failed)", if run == 1 { "" } else { "s" }),
+    };
+    let last = match (files.is_empty(), after_edit) {
+        (true, _) => "",
+        (false, Some(Some(true))) => "; the last check passed after the last edit",
+        (false, Some(Some(false))) => "; the last check after the last edit FAILED",
+        (false, Some(None)) => "; the last check after the last edit has no result",
+        (false, None) => "; no check ran after the last edit",
+    };
+    Some(format!("Faber's own record of it: {changed}, {checks}{last}."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,5 +583,33 @@ mod tests {
         assert_eq!((p.total.delivered.files, p.total.cost.turns), (1, 2));
         assert!((p.total.cost.usd - 3.5).abs() < 1e-9);
         assert_eq!(p.total.dry, big.dry, "the dry end shown is the one that spent most");
+    }
+
+    #[test]
+    fn the_record_line_says_whether_a_check_ran_after_the_last_edit() {
+        let check = |id: &str, ok| {
+            let mut t = tool(id, "Bash", json!({ "command": "cargo test" }), ok);
+            t.check = true;
+            t
+        };
+        let edit = |id: &str, path: &str| tool(id, "Edit", json!({ "file_path": path }), Some(true));
+        let line = |tools: Vec<ToolUse>| record_line(&conv(vec![person(1), with_tools(reply(2, "Done, all tests pass."), tools)]));
+        // The agent says "all tests pass"; the record shows the test ran before its final edit.
+        assert_eq!(
+            line(vec![edit("a", "src/a.rs"), check("b", Some(true)), edit("c", "src/b.rs")]).as_deref(),
+            Some("Faber's own record of it: changed 2 files, ran 1 check (1 passed, 0 failed); no check ran after the last edit.")
+        );
+        assert_eq!(
+            line(vec![edit("a", "src/a.rs"), check("b", Some(false)), check("c", Some(true))]).as_deref(),
+            Some("Faber's own record of it: changed 1 file, ran 2 checks (1 passed, 1 failed); the last check passed after the last edit.")
+        );
+        assert!(
+            line(vec![edit("a", "src/a.rs"), check("b", Some(false))]).unwrap().ends_with("the last check after the last edit FAILED.")
+        );
+        assert_eq!(line(vec![]), None, "a plain answer has no record to add");
+        assert_eq!(
+            line(vec![check("a", Some(true))]).as_deref(),
+            Some("Faber's own record of it: changed no file, ran 1 check (1 passed, 0 failed).")
+        );
     }
 }

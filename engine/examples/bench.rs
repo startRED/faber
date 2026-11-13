@@ -252,11 +252,13 @@ fn failed(side: Side, secs: f64, error: impl Into<String>) -> SideResult {
         usage_incomplete: true,
         cost_usd: None,
         models: vec![],
+        requested_model: None,
         authors: pure::Authors::default(),
         reply: String::new(),
         folder: None,
         proof: None,
         stopped_by_cap: false,
+        timed_out: false,
     }
 }
 
@@ -334,11 +336,13 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
         usage_incomplete: outcome.usage_incomplete,
         cost_usd: outcome.cost_usd,
         models,
+        requested_model: Some(options.plain_model.clone()),
         authors: pure::Authors { vendors: vec![options.plain.name().into()], complete: true },
         reply: outcome.text,
         folder: (request.kind == Kind::Project).then(|| work.plain.to_string_lossy().into_owned()),
         proof: None,
         stopped_by_cap: outcome.error.as_deref().is_some_and(|e| e.contains("max_budget")),
+        timed_out: run.timed_out,
     }
 }
 
@@ -545,8 +549,10 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
                     name.contains("helper") || name.contains("conversation")
                 });
                 authors.record(m.vendor.map(Vendor::name), delegated);
+                // A CLI that ran another model than Faber asked for says so in the row.
+                let swapped = m.asked_model.as_deref().map(|asked| format!(", asked {asked}")).unwrap_or_default();
                 let name = format!(
-                    "{}@{} ({})",
+                    "{}@{} ({}{swapped})",
                     m.model.as_deref().unwrap_or("?"),
                     m.effort.as_deref().unwrap_or("?"),
                     m.reason.as_deref().unwrap_or("no route")
@@ -562,6 +568,8 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             let waiting = last.is_some_and(|m| m.needs_you);
             SideResult {
                 side: Side::Faber,
+                // Auto asks per reply; a reply whose CLI swapped the model says so in `models`.
+                requested_model: None,
                 ok: error.is_none() && !reply.trim().is_empty() && !waiting,
                 error: error.or(waiting.then(|| "the answer waits for the person".into())),
                 secs: Some(replies.iter().filter_map(|m| m.took).sum::<u64>()).filter(|t| *t > 0).map_or(wall, |t| t as f64 / 1000.0),
@@ -576,6 +584,8 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
                     .then(|| conversation.copy.as_ref().map_or_else(|| work.repo.clone(), |c| c.folder()).to_string_lossy().into_owned()),
                 proof: None,
                 stopped_by_cap: capped,
+                // Still answering when the time limit came.
+                timed_out: last.is_some_and(|m| m.status == Some(Status::Streaming)),
             }
         }
     };
@@ -832,7 +842,8 @@ fn write_results(run_dir: &Path, options: &Options, rows: &[Row], spent: &Spend)
         "rows": rows,
     });
     std::fs::write(run_dir.join("results.json"), serde_json::to_string_pretty(&value)?)?;
-    std::fs::write(run_dir.join("tables.md"), pure::render_tables(rows, spent, &options.cap))?;
+    let tables = pure::render_tables(rows, spent, &options.cap) + &pure::solved::render(rows);
+    std::fs::write(run_dir.join("tables.md"), tables)?;
     Ok(())
 }
 
@@ -1014,7 +1025,7 @@ async fn main() -> Result<(), Failure> {
         write_results(&root, &options, &rows, &spent)?;
     }
     write_results(&root, &options, &rows, &spent)?;
-    println!("\n{}", pure::render_tables(&rows, &spent, &options.cap));
+    println!("\n{}{}", pure::render_tables(&rows, &spent, &options.cap), pure::solved::render(&rows));
     println!("results: {}", root.join("results.json").display());
     Ok(())
 }

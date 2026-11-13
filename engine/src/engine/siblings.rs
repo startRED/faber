@@ -65,6 +65,12 @@ pub(super) fn member_state(busy: bool, c: &Conversation) -> MemberState {
     }
 }
 
+/// Whether the report `id` already sits in the lead's queue or conversation, alone or merged with others (`Wake::ids`).
+fn delivered(p: &Conversation, id: &str) -> bool {
+    p.queued.iter().any(|q| Wake::carries(&q.id, q.wake.as_ref(), id))
+        || p.messages.iter().any(|m| Wake::carries(&m.id, m.wake.as_ref(), id))
+}
+
 impl Core {
     /// Reports owed when Faber opens: those saved as owed (a close that cut a member's turn off marks it, `shutdown`), and
     /// those of members a crash cut off (their reply still streaming on disk), which no turn end will ever report. One sent
@@ -111,6 +117,8 @@ impl Core {
         }
         // Remove the batch while sending: emit_queue can reenter here after each admitted report.
         let pending = self.parent_reports.remove(parent).unwrap_or_default();
+        // The reports wait in the queue together and go out as one turn (`merge_reports`), never one turn each.
+        let collect = self.batch_reports && pending.len() > 1 && self.collecting.insert(parent.to_string());
         for child in pending {
             if self.convs.get(parent).is_none_or(|c| c.queued.len() >= MAX_QUEUED) {
                 self.parent_reports.entry(parent.into()).or_default().insert(child);
@@ -132,6 +140,11 @@ impl Core {
                 self.save(&child);
             }
         }
+        if collect {
+            self.collecting.remove(parent);
+            self.hand_over_queue(parent, true);
+            self.drain(parent);
+        }
     }
 
     /// The agent called the conversation tool. Every call is answered at once, with why when nothing was done.
@@ -150,6 +163,16 @@ impl Core {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing to read: {why}.")),
             },
+            Ok(Request::ReadMany { ids }) => {
+                let texts: Vec<(bool, String)> = ids
+                    .iter()
+                    .map(|id| match self.read_sibling(conv, id) {
+                        Ok(text) => (true, text),
+                        Err(why) => (false, format!("Nothing to read in {id}: {why}.")),
+                    })
+                    .collect();
+                (texts.iter().any(|(ok, _)| *ok), texts.into_iter().map(|(_, t)| t).collect::<Vec<_>>().join("\n\n---\n\n"))
+            }
             Ok(Request::List) => match self.list_siblings(conv) {
                 Ok(text) => (true, text),
                 Err(why) => (false, format!("Nothing to list: {why}.")),
@@ -547,9 +570,15 @@ impl Core {
             let text = reply.map(Message::said).unwrap_or_default();
             format!("No confirmed conclusion. Latest output: {text}")
         });
-        let text = sibling::finished(&c.title, conv, state, &last);
+        let record = crate::results::record_line(c);
+        let title = c.title.clone();
+        // A piece that ended twice with nothing changed: the report names the step up, or the move (`stronger.rs`).
+        let rung = self.empty_end(conv, state);
+        let moved = self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        let record = [record, rung].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        let text = sibling::finished(&title, conv, state, &last, Some(record.as_str()).filter(|r| !r.is_empty()));
         // Stopped working: the plan step waits for its work to be joined. One that waits for an answer is not done yet.
-        if state != State::Waiting {
+        if state != State::Waiting && !moved {
             self.edit_worker(conv, |w| w.joining = true);
         }
         let mut recipients = vec![parent.clone()];
@@ -563,11 +592,11 @@ impl Core {
             cursor = next;
         }
         for parent in recipients {
-            self.deliver_child_report(conv, parent, text.clone(), report_id.clone());
+            self.deliver_child_report(conv, parent, text.clone(), report_id.clone(), state);
         }
     }
 
-    fn deliver_child_report(&mut self, conv: &str, parent: String, text: String, report_id: String) {
+    fn deliver_child_report(&mut self, conv: &str, parent: String, text: String, report_id: String, state: State) {
         let direct = self.convs.get(conv).is_some_and(|c| c.started_by.as_deref() == Some(parent.as_str()));
         let reported = self
             .convs
@@ -583,12 +612,21 @@ impl Core {
             return;
         }
         let p = &self.convs[&parent];
-        if p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id) {
+        if delivered(p, &report_id) {
             if self.try_save(&parent).is_ok() {
                 self.finish_parent_report(conv, &parent);
             }
             return;
         }
+        if direct && self.hold_report(conv, &parent, state, &text, &report_id) {
+            return;
+        }
+        self.send_child_report(conv, parent, text, report_id);
+    }
+
+    /// Queues or sends one report, or keeps it owed when the lead's queue is full.
+    pub(super) fn send_child_report(&mut self, conv: &str, parent: String, text: String, report_id: String) {
+        let p = &self.convs[&parent];
         if p.queued.len() >= MAX_QUEUED {
             if self.convs.get(conv).is_some_and(|c| c.started_by.as_deref() == Some(parent.as_str())) {
                 self.convs.get_mut(conv).expect("child exists").pending_parent_report = true;
@@ -601,12 +639,7 @@ impl Core {
         if self.send_by_itself_with_id(&parent, text, Wake::of("wake.childDone"), report_id.clone()).is_err_and(|e| e == goals::CAP) {
             self.goal_capped(&parent);
         }
-        if self
-            .convs
-            .get(&parent)
-            .is_some_and(|p| p.queued.iter().any(|q| q.id == report_id) || p.messages.iter().any(|m| m.id == report_id))
-            && self.try_save(&parent).is_ok()
-        {
+        if self.convs.get(&parent).is_some_and(|p| delivered(p, &report_id)) && self.try_save(&parent).is_ok() {
             self.finish_parent_report(conv, &parent);
         }
     }

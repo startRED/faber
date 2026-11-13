@@ -173,6 +173,9 @@ impl Core {
         }
         m.stall = stall;
         self.push(conv, Some(&turn), true);
+        if let Some(s) = stall {
+            self.stall_seen(conv, &turn, s.kind, s.minutes);
+        }
         true
     }
 
