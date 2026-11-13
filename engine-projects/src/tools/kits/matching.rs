@@ -349,6 +349,10 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         ("testing", "playwright"),
         ("image", "image images photo illustration imagem imagens foto ilustracao"),
         ("video", "video animation animacao film filme"),
+        (
+            "audio",
+            "audio narration narrated narrate narrator voiceover podcast audiobook soundtrack sfx tts music narracao narrado narrada narrar narrador locucao locutor audiolivro musica narracion narrador locucion audiolibro narrateur narratrice narre musique erzahler erzahlerin erzahlt vertonung vertont sprecher sprecherin musik hintergrundmusik soundeffekte horbuch",
+        ),
         ("spreadsheet", "spreadsheet excel csv planilha planilhas"),
         ("presentation", "presentation slides powerpoint apresentacao apresentacoes"),
     ] {
@@ -384,6 +388,10 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         (
             "plan",
             "product strategy|estrategia de produto|estrategia de producto|strategie produit|produktstrategie|business model|modelo de negocio|modele economique|geschaftsmodell|market size|market sizing|tamanho do mercado|dimensionar o mercado|tamano del mercado|taille du marche|marktgrosse|marktvolumen|release notes|notas de versao|notas da versao|notas de lanzamiento|notes de version|versionshinweise|meeting|reuniao|reunion|besprechung|sitzung|prioritize|priorizar|prioriser|priorisieren|interview|entrevista|entretien",
+        ),
+        (
+            "audio",
+            "voice-over|voice over|with voice|with a voice|sound effects|sound design|efeitos sonoros|efeito sonoro|trilha sonora|com voz|voz off|efectos de sonido|efectos sonoros|banda sonora|con voz|voix off|avec voix|effets sonores|bande son|bande sonore|mit stimme|text to speech|text-to-speech",
         ),
         (
             "database",
@@ -849,6 +857,35 @@ mod tests {
             }
         }
         assert_eq!(covered, items.iter().map(|item| item.job.as_str()).collect(), "new shipped jobs need five-language examples");
+    }
+
+    /// Any work with sound (narration, voice-over, music, effects) is the audio job, so its catalog runtimes join the kit;
+    /// a video or page with no sound is not.
+    #[test]
+    fn audio_job_matches_narration_music_and_effects_in_all_five_languages() {
+        let audio = |request: &str| labels(request, None).0.contains("audio");
+        for request in [
+            "Make a 30 second narrated video explaining why the sky is blue",
+            "Add a voice-over and sound effects to the product demo",
+            "Faça um vídeo explicando por que o céu é azul, com narração, música e efeitos sonoros",
+            "Grave uma locução para o anúncio",
+            "Haz un video con narración y música de fondo",
+            "Ajoute une voix off et de la musique à la vidéo",
+            "Erstelle ein Video mit Erzähler und Hintergrundmusik",
+            "Vertonung für das Erklärvideo mit Soundeffekte",
+        ] {
+            assert!(audio(request), "{request}");
+        }
+        for request in [
+            "Make a silent animated logo for the landing page",
+            "Faça uma animação do logo sem som para a página inicial",
+            "Haz una animación del logo para la página de inicio",
+            "Crée une animation du logo pour la page d'accueil",
+            "Erstelle eine Logo-Animation für die Startseite",
+            "Write the brand voice guide for our marketing copy",
+        ] {
+            assert!(!audio(request), "{request}");
+        }
     }
 
     #[test]

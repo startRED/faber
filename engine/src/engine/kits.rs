@@ -1645,7 +1645,9 @@ mod tests {
                             let text = claude_input(&messages).await;
                             let note = note.unwrap();
                             assert!(text.starts_with(&note) && text.ends_with(task), "{which}: {text}");
-                            assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 1000, "{which}: {note}");
+                            // Raised from 1,000 with the media sentence (about 160 characters, once per session); the temporary
+                            // folder's three long paths make up most of it.
+                            assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 1200, "{which}: {note}");
                             assert!(!note.contains("# Frontend"), "{which}: skill bodies remain lazy");
                             assert!(!text.contains("Selbst weitermachen"), "{which}: the table stays in the file");
                             assert!(plugin_dirs(&args).is_empty(), "{which}: Chat has no Skill tool to load a plugin");
@@ -1667,7 +1669,13 @@ mod tests {
                             assert!(!text.contains("faber-guide"), "{which}: the kit's index never lists it");
                             assert_eq!(
                                 allowed_tools(&args),
-                                ["Skill(faber-guide:guide)", "Skill(faber-guide:frontend-craft)", "Skill(faber-guide:frontend-proof)"],
+                                [
+                                    "Skill(faber-guide:guide)",
+                                    "Skill(faber-guide:frontend-craft)",
+                                    "Skill(faber-guide:frontend-proof)",
+                                    "Skill(faber-guide:media-craft)",
+                                    "Skill(faber-guide:media-proof)"
+                                ],
                                 "{which}"
                             );
                         }
@@ -1764,7 +1772,7 @@ mod tests {
                     "{which}: {allowed:?}"
                 );
                 if permissions.guarded() {
-                    for name in ["frontend-craft", "frontend-proof"] {
+                    for (name, _) in crate::guide::ORIGINAL_SKILLS {
                         let rule = match area {
                             Area::Chat => format!("Read({})", rule_path(&folder.join(format!("guide-plugin/skills/{name}/SKILL.md")))),
                             Area::Project => format!("Skill(faber-guide:{name})"),
@@ -2032,8 +2040,8 @@ mod tests {
             assert!(argv.windows(2).any(|a| a == ["--input-format", "stream-json"]));
             let mut files = vec![format!("Read({})", rule_path(&guide_file(&folder)))];
             files.extend(
-                ["frontend-craft", "frontend-proof"]
-                    .map(|name| format!("Read({})", rule_path(&folder.join(format!("guide-plugin/skills/{name}/SKILL.md"))))),
+                crate::guide::ORIGINAL_SKILLS
+                    .map(|(name, _)| format!("Read({})", rule_path(&folder.join(format!("guide-plugin/skills/{name}/SKILL.md"))))),
             );
             assert!(
                 !argv.iter().any(|a| a == "--plugin-dir" || a == "--add-dir" || (a.starts_with("Read(") && !files.contains(a))),

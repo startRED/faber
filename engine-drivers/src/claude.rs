@@ -219,13 +219,13 @@ fn guide_plugin_loaded(launch: &ClaudeLaunch) -> bool {
 fn guide_allowed(guide: &crate::guide::Guide, plugin_loaded: bool) -> Vec<String> {
     match guide {
         crate::guide::Guide::Plugin { .. } if plugin_loaded => std::iter::once(crate::guide::SKILL_RULE.to_string())
-            .chain(crate::guide::FRONTEND_SKILLS.iter().map(|(name, _)| format!("Skill(faber-guide:{name})")))
+            .chain(crate::guide::ORIGINAL_SKILLS.iter().map(|(name, _)| format!("Skill(faber-guide:{name})")))
             .collect(),
         crate::guide::Guide::Index { .. } => {
             let Some(file) = guide.file() else { return vec![] };
             let Some(folder) = guide.folder() else { return vec![] };
             std::iter::once(file)
-                .chain(crate::guide::FRONTEND_SKILLS.iter().map(|(name, _)| folder.join("skills").join(name).join("SKILL.md")))
+                .chain(crate::guide::ORIGINAL_SKILLS.iter().map(|(name, _)| folder.join("skills").join(name).join("SKILL.md")))
                 .map(|file| format!("Read({})", crate::permissions::claude_rule_path(&crate::project::git::native_path(&file))))
                 .collect()
         }

@@ -25,10 +25,13 @@ pub const DESCRIPTION: &str = "Use when the person asks how Faber itself works, 
 
 /// The plugin's name and its one skill's, so Claude Code lists it as `faber-guide:guide`. The catalog's own plugin is `faber`.
 pub const SKILL_RULE: &str = "Skill(faber-guide:guide)";
-/// Original Faber instructions, lazily loaded alongside the guide; third-party catalog skills stay external.
-pub const FRONTEND_SKILLS: [(&str, &str); 2] = [
+/// Original Faber instructions, lazily loaded alongside the guide; third-party catalog skills stay external. The media pair
+/// covers any work with sound (narration, music, effects) the way the frontend pair covers what is seen in a browser.
+pub const ORIGINAL_SKILLS: [(&str, &str); 4] = [
     ("frontend-craft", include_str!("frontend-skills/frontend-craft/SKILL.md")),
     ("frontend-proof", include_str!("frontend-skills/frontend-proof/SKILL.md")),
+    ("media-craft", include_str!("frontend-skills/media-craft/SKILL.md")),
+    ("media-proof", include_str!("frontend-skills/media-proof/SKILL.md")),
 ];
 const SKILL: &str = "guide";
 const MANIFEST: &str = r#"{"name":"faber-guide","description":"Faber's own guide to itself.","version":"1.0.0"}"#;
@@ -136,14 +139,14 @@ impl Guide {
     pub fn note(&self) -> Option<String> {
         match self {
             Guide::Text(language) => Some(format!(
-                "{}\nFrontend fallback (frontend-craft and frontend-proof): for anything a person will look at in a browser (a page, screen, form or explainer, even one HTML file), extend the project's existing design system, or with none choose a layout, type and palette from the subject instead of a centered card on a gradient; verify every taught fact; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Look at the result yourself at a desktop and a phone size without a visible window (an installed Chromium browser run headless takes the pictures), fix what you see, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.",
+                "{}\nFrontend fallback (frontend-craft and frontend-proof): for anything a person will look at in a browser (a page, screen, form or explainer, even one HTML file), extend the project's existing design system, or with none choose a layout, type and palette from the subject instead of a centered card on a gradient; verify every taught fact; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Look at the result yourself at a desktop and a phone size without a visible window (an installed Chromium browser run headless takes the pictures), fix what you see, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.\nMedia fallback (media-craft and media-proof): for narration, music or sound effects, make it alone without asking for a voice or recording; generate speech per paragraph at natural speed with no forced duration or time-stretch, short fades and soxr resampling, and time visuals to word timestamps; make music from instruments (MIDI and a SoundFont) and effects from recorded CC0 sounds, never raw oscillators; duck music about 10 dB on the words and normalize in two passes to -14 LUFS and -1 dBTP. Measure loudness, clipping, clicks and gaps inside sentences in .faber/verify/listen, skip any check that cannot run, and report what stayed unmeasured.",
                 text_for(*language)
             )),
             Guide::Index { language, .. } => {
                 let file = crate::project::git::native_path(&self.file()?);
                 let skills = crate::project::git::native_path(&self.folder()?.join("skills"));
                 Some(format!(
-                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. Whenever the result is something a person will look at in a browser (a page, a screen, a form, a dashboard or an explainer with a diagram, even one HTML file), read \"{skills}/frontend-craft/SKILL.md\" before writing it and \"{skills}/frontend-proof/SKILL.md\" before saying it is done; follow the project's own design system and current permissions. The screen is shown in {}.",
+                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. Whenever the result is something a person will look at in a browser (a page, a screen, a form, a dashboard or an explainer with a diagram, even one HTML file), read \"{skills}/frontend-craft/SKILL.md\" before writing it and \"{skills}/frontend-proof/SKILL.md\" before saying it is done; follow the project's own design system and current permissions. For narration, music or sound effects, read media-craft/SKILL.md in that skills folder before making them and media-proof/SKILL.md before saying they are done. The screen is shown in {}.",
                     language.name()
                 ))
             }
@@ -189,16 +192,16 @@ pub fn plugin(data_dir: &Path, language: Language) -> Option<PathBuf> {
     let mut folders: Vec<(PathBuf, Vec<&str>)> = vec![
         (root.clone(), vec![".claude-plugin", "skills"]),
         (root.join(".claude-plugin"), vec!["plugin.json"]),
-        (root.join("skills"), vec![SKILL, "frontend-craft", "frontend-proof"]),
+        (root.join("skills"), [SKILL].into_iter().chain(ORIGINAL_SKILLS.iter().map(|(name, _)| *name)).collect()),
         (root.join(&skill), vec!["SKILL.md"]),
     ];
-    folders.extend(FRONTEND_SKILLS.iter().map(|(name, _)| (root.join("skills").join(name), vec!["SKILL.md"])));
+    folders.extend(ORIGINAL_SKILLS.iter().map(|(name, _)| (root.join("skills").join(name), vec!["SKILL.md"])));
     if !folders.iter().all(|(folder, names)| holds_only(folder, names)) {
         return None;
     }
     let files = [(root.join(".claude-plugin/plugin.json"), MANIFEST.to_string()), (root.join(FILE), skill_file(language))];
-    let frontend = FRONTEND_SKILLS.iter().map(|(name, text)| (root.join("skills").join(name).join("SKILL.md"), text.replace("\r\n", "\n")));
-    for (file, text) in files.into_iter().chain(frontend) {
+    let original = ORIGINAL_SKILLS.iter().map(|(name, text)| (root.join("skills").join(name).join("SKILL.md"), text.replace("\r\n", "\n")));
+    for (file, text) in files.into_iter().chain(original) {
         if std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) && std::fs::read(&file).is_ok_and(|bytes| bytes == text.as_bytes()) {
             continue;
         }
@@ -229,7 +232,7 @@ mod tests {
     fn frontend_skills_reach_native_and_index_sessions_without_catalog_installs() {
         let dir = tempfile::tempdir().unwrap();
         let root = plugin(dir.path(), Language::En).unwrap();
-        for name in ["frontend-craft", "frontend-proof"] {
+        for (name, _) in ORIGINAL_SKILLS {
             let file = root.join(format!("skills/{name}/SKILL.md"));
             let text = std::fs::read_to_string(&file).expect("first-party frontend skill is available");
             assert!(text.contains(&format!("name: {name}")));
@@ -247,7 +250,7 @@ mod tests {
         // A one-file page is browser work too, and the agent looks at it itself: the side-by-side test of 2026-11-11 lost on both.
         let note = Guide::Index { dir: root.clone(), language: Language::En }.note().unwrap();
         assert!(note.contains("even one HTML file") && note.contains("before saying it is done"));
-        let skill = |name: &str| FRONTEND_SKILLS.iter().find(|(n, _)| *n == name).unwrap().1;
+        let skill = |name: &str| ORIGINAL_SKILLS.iter().find(|(n, _)| *n == name).unwrap().1;
         assert!(
             skill("frontend-craft").contains("## A new screen with no design system")
                 && skill("frontend-craft").contains("## Pages that teach")
@@ -261,6 +264,42 @@ mod tests {
         assert!(Guide::Off.note().is_none(), "internal requests receive no skills");
         let fallback = Guide::Text(Language::En).note().unwrap();
         assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));
+        assert!(fallback.contains("media-craft") && fallback.contains("media-proof"));
+    }
+
+    /// Videos of 2026-11-13 had stretched narration (one forced-duration call per sentence) and chiptune effects (sine
+    /// waves in numpy), and nobody could listen. The media pair carries the recipe and a proof that measures instead.
+    #[test]
+    fn media_skills_carry_the_natural_voice_recipe_recorded_sounds_and_a_proof_that_never_stops_the_job() {
+        let skill = |name: &str| ORIGINAL_SKILLS.iter().find(|(n, _)| *n == name).unwrap().1;
+        let craft = skill("media-craft");
+        for rule in [
+            "Never force a duration",
+            "natural speed",
+            "resampler=soxr",
+            "word_timestamps",
+            "Never synthesize music",
+            "FluidSynth",
+            "Kenney",
+            "linear=true",
+            "normalization_type",
+            "0.85 s",
+        ] {
+            assert!(craft.contains(rule), "media-craft keeps {rule}");
+        }
+        assert!(craft.contains("Never ask for their voice") && craft.contains("The request always wins"));
+        let proof = skill("media-proof");
+        assert!(proof.contains("`<listen>` is `.faber/verify/listen` inside the working folder"));
+        assert!(
+            proof.contains("0.6 s inside a sentence")
+                && proof.contains("speechmos")
+                && proof.contains("never pass or fail delivery on a score alone")
+        );
+        assert!(proof.contains("never stops the job"));
+        let dir = tempfile::tempdir().unwrap();
+        let root = plugin(dir.path(), Language::En).unwrap();
+        let note = Guide::Index { dir: root, language: Language::En }.note().unwrap();
+        assert!(note.contains("media-craft/SKILL.md") && note.contains("media-proof/SKILL.md") && note.contains("narration"));
     }
 
     #[test]
@@ -293,7 +332,16 @@ mod tests {
             std::os::unix::fs::symlink(target, at).unwrap();
         };
         let elsewhere = tempfile::tempdir().unwrap();
-        for level in ["", ".claude-plugin", "skills", "skills/guide", "skills/frontend-craft", "skills/frontend-proof"] {
+        for level in [
+            "",
+            ".claude-plugin",
+            "skills",
+            "skills/guide",
+            "skills/frontend-craft",
+            "skills/frontend-proof",
+            "skills/media-craft",
+            "skills/media-proof",
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let root = plugin(dir.path(), Language::En).unwrap();
             let at = if level.is_empty() { root.clone() } else { root.join(level) };

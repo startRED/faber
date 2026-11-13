@@ -21,6 +21,8 @@ For frontend work, the existing guide delivery provides Faber's original `fronte
 skills ([contract](frontend.md)): project-aware composition and interaction states, followed by task, accessibility,
 layout and resource evidence. They complement installed design skills and never impose Faber's own desktop theme
 on another project. Delivery checks do not establish a measured gain in generated interface quality.
+Work with sound gets `media-craft` and `media-proof` the same way ([contract](media.md)): the voice sets the clock,
+music and effects come from instruments and recorded sounds, and the result is measured, not assumed.
 
 Normal mode feels like Claude Code: the user talks only to Faber. Behind it, Claude and Codex sessions work in
 parallel, each on what it does best, and the result must read as if one careful team made it.

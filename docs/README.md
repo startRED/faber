@@ -24,6 +24,8 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/building.md](product/building.md) | How Projects builds software: team, workers, self-development, coherence |
 | [product/git-workflow.md](product/git-workflow.md) | Portable Git housekeeping, separate-copy reuse, dependency caches and project checks |
 | [product/frontend.md](product/frontend.md) | Original frontend design/proof skills, how both AIs receive them, what delivery checks do and do not prove |
+| [product/media.md](product/media.md) | Original media craft/proof skills for narration, music and sound effects, the `audio` kit job, what they prove |
+| [research/audio-runtimes.md](research/audio-runtimes.md) | Building the catalog's audio runtimes: item fields, install path, VRAM gate, licence warnings, checks |
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |
 | [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |

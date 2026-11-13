@@ -3,9 +3,9 @@
 Stageshow adds optional demos in More; [delivery and the Faber scene](../product/frontend.md#evidence-and-limits)
 use existing controls and keep the kit outside the app.
 
-Faber's original frontend-craft and frontend-proof instruction skills are part of its existing first-party guide
-delivery, not catalog entries or a new tool installation path. They add no cards, switches or screen layout; third-party
-design skills keep their existing source, installation and selection rules ([contract](../product/frontend.md)).
+Faber's own frontend and media skills ride its guide, not the catalog: no cards, switches or layout; third-party
+skills keep their own rules ([frontend](../product/frontend.md), [media](../product/media.md)). Audio runtimes are
+[planned](../research/audio-runtimes.md).
 
 An installed browser tool can match a browser performance request without its name being mentioned. This adds no
 screen control and preserves the existing project, permission and on/off boundaries.
