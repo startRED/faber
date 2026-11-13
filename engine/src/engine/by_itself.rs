@@ -99,14 +99,17 @@ impl Core {
             return Err("reason.goal.cap".into());
         }
         let busy = self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        // Reports collected to go out together (`refill_parent_reports`) wait in the queue for the one drain at the end.
+        let collecting = self.collecting.contains(conv);
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
-        let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone");
+        let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone" | "wake.childQuiet");
         // Recovery picks up the cut reply before waiting messages, keeping those messages in every admission save.
         let recovery = matches!(wake.why.as_str(), "wake.updated" | "wake.resumed");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
         // Compaction owns the session until its continuation can start.
         if busy
+            || collecting
             || c.stopped
             || (!c.queued.is_empty() && !recovery)
             || c.compacting
@@ -123,6 +126,9 @@ impl Core {
             }
             self.save(conv);
             self.emit_queue(conv);
+            if collecting {
+                return Ok(());
+            }
             if coordination {
                 self.hand_over_queue(conv, true);
             }

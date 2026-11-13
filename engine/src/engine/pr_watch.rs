@@ -221,7 +221,7 @@ impl Core {
             }
             Next::Wake { why, key, text } => {
                 f.woke = Some(key);
-                let wake = Wake { why: why.into(), pr: Some(f.number), checks: f.failed.clone() };
+                let wake = Wake { pr: Some(f.number), checks: f.failed.clone(), ..Wake::of(why) };
                 // Only an idle conversation gets here, so the turn starts now and its reply is the latest one.
                 match self.send_by_itself(conv, text, wake).map(|()| self.latest_reply(conv)) {
                     Ok(reply) => place = reply.unwrap_or(place),

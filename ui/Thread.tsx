@@ -49,6 +49,8 @@ import { agentState, agentWord, agentSteps, changeOf, isAgentCall, isProgressCal
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 import { Team } from './Team.tsx';
 
+/** The line for Faber's own message: reports merged into one turn read in the plural. */
+const wakeKey = (wake: { why: string; ids?: string[] }) => wake.why === 'wake.childDone' && wake.ids?.length ? 'wake.childrenDone' : wake.why;
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
 // A file the answer created in the chat workspace: images show as a small picture that opens full screen; anything can be saved to
@@ -672,7 +674,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && !choosing() && (!m().vendor || m().reason!.startsWith('reason.moved') || m().reason!.startsWith('reason.autoEffort'));
   const wokeWhy = () => {
     const wake = woke();
-    return wake ? fromEngine(wake.why, { pr: wake.pr ? `#${wake.pr}` : '', checks: (wake.checks ?? []).join(', ') }) : '';
+    return wake ? fromEngine(wakeKey(wake), { pr: wake.pr ? `#${wake.pr}` : '', checks: (wake.checks ?? []).join(', '), count: (wake.ids?.length ?? 0) + 1 }) : '';
   };
   // What Faber did around this turn by itself: the message it sent, a history it sent again. A tooltip, never a row.
   const byFaber = () => [wokeWhy(), m().note ? fromEngine(m().note) : ''].filter(Boolean).join(' · ');
@@ -1307,10 +1309,10 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
         <For each={queuedIds()}>{(id) => {
           const initial = props.queued!.find((q) => q.id === id)!;
           const queued = () => props.queued?.find((q) => q.id === id) ?? initial;
-          const origin = () => ['wake.asked', 'wake.childDone'].includes(queued().wake?.why ?? '') ? queued().wake : undefined;
+          const origin = () => ['wake.asked', 'wake.childDone', 'wake.childQuiet'].includes(queued().wake?.why ?? '') ? queued().wake : undefined;
           return <Show when={origin()} fallback={<Queued conversationId={conversationId} q={queued()}
             temporary={props.temporary} busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />}>
-            {(wake) => <p class="woke"><Icon name="loop" small /><span>{fromEngine(wake().why)}</span>
+            {(wake) => <p class="woke"><Icon name="loop" small /><span>{fromEngine(wakeKey(wake()), { count: (wake().ids?.length ?? 0) + 1 })}</span>
               <Show when={!queued().sending && !props.busy && props.messages.at(-1)?.status !== 'streaming'}>
                 <span class="actions">
                   <button type="button" onClick={() => api.removeQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>{t('queue.remove')}</button>

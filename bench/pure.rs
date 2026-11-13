@@ -8,6 +8,8 @@ use serde_json::Value;
 
 #[path = "quiet.rs"]
 pub mod quiet;
+#[path = "solved.rs"]
+pub mod solved;
 
 // --- Requests -------------------------------------------------------------------------------------------------------
 
@@ -528,11 +530,15 @@ pub struct SideResult {
     pub usage_incomplete: bool,
     pub cost_usd: Option<f64>,
     pub models: Vec<String>,
+    /// The model the side asked its CLI for; None for Faber, whose replies record a swap themselves (`Message::asked_model`).
+    pub requested_model: Option<String>,
     pub authors: Authors,
     pub reply: String,
     pub folder: Option<String>,
     pub proof: Option<Proof>,
     pub stopped_by_cap: bool,
+    /// The run hit the time limit (`RUN_LIMIT`); its proof still runs, so a stop that threw away passing work shows.
+    pub timed_out: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -979,11 +985,13 @@ mod tests {
             usage_incomplete: false,
             cost_usd: Some(usd),
             models: vec![],
+            requested_model: None,
             authors: Authors::default(),
             reply: String::new(),
             folder: None,
             proof: pass.map(|p| Proof { pass: p, checks: vec![Check { name: "c".into(), ok: p, detail: String::new() }] }),
             stopped_by_cap: false,
+            timed_out: false,
         }
     }
 
