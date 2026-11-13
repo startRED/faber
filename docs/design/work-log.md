@@ -85,7 +85,7 @@ their separate grants, version disclosure, backups and preservation of current c
 Helper rows with a known AI show its actor mark beside its name and state.
 
 Review rounds reuse the subagent row: each round shows its score and nests its reviewer helpers. Opening a round shows
-five scores, agreed findings and folded single-reviewer notes; the reply keeps a quiet final score and stop reason. The
+five scores, agreed findings and folded single-reviewer notes; an agreed finding that is not a must-fix reads "optional", and each shows its evidence in quiet ink. The reply keeps a quiet final score and stop reason. The
 round details exist in the page only while their view is open. No timer or new process is added by the screen.
 
 A Codex item that completes with no status of its own, such as `imageView` when the agent looks at a picture, is a

@@ -1143,6 +1143,8 @@ export const es: Messages = {
   'review.notes': "{n} visto por un solo revisor",
   'review.omitted': "Un revisor quedó fuera.",
   'review.jester': "Un revisor se alejó mucho de los demás y quedó fuera.",
+  'review.optional': "opcional",
+  'review.evidence': "Prueba: {text}",
   'review.stop.target': "suficientemente bien",
   'review.stop.agreed': "no quedan problemas compartidos",
   'review.stop.limit': "límite de rondas",

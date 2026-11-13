@@ -1142,6 +1142,8 @@ export const en = {
   'review.notes': "{n} seen by one reviewer",
   'review.omitted': "One reviewer was left out.",
   'review.jester': "One reviewer was far from the others and was left out.",
+  'review.optional': "optional",
+  'review.evidence': "Evidence: {text}",
   'review.stop.target': "good enough",
   'review.stop.agreed': "no agreed problems left",
   'review.stop.limit': "round limit",

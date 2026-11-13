@@ -165,7 +165,9 @@ export interface FaberAct {
   change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
   sent?: string;
 }
-export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; reviewers: string[] }
+export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; evidence?: string; severity?: 'P0' | 'P1' | 'P2' | 'P3'; visible?: boolean; reviewers: string[] }
+/** What the agent must fix (engine `Row::blocks`): what a person would notice, and P0 or P1 problems; a row with no severity blocks. */
+export const findingBlocks = (f: ReviewFinding): boolean => !!f.visible || !f.severity || f.severity === 'P0' || f.severity === 'P1';
 export interface ReviewRound { call?: string; lines: [number, number, number, number, number]; total: number; reviewers: string[]; scores?: [string, [number, number, number, number, number]][]; omitted?: string[]; jesters: string[]; agreed: ReviewFinding[]; notes: ReviewFinding[] }
 export interface Message {
   review?: { rounds: ReviewRound[]; stop?: string };

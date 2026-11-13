@@ -982,6 +982,8 @@ export const de: Messages = {
   'review.notes': "{n} nur von einer Person gesehen",
   'review.omitted': "Eine prüfende Instanz wurde ausgelassen.",
   'review.jester': "Eine Bewertung lag weit von den anderen entfernt und wurde ausgelassen.",
+  'review.optional': "optional",
+  'review.evidence': "Nachweis: {text}",
   'review.stop.target': "gut genug",
   'review.stop.agreed': "keine gemeinsamen Probleme mehr",
   'review.stop.limit': "Rundenlimit",

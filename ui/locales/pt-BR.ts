@@ -1141,6 +1141,8 @@ export const ptBR: Messages = {
   'review.notes': "{n} visto por um só revisor",
   'review.omitted': "Um revisor ficou de fora.",
   'review.jester': "Um revisor deu uma nota muito diferente e ficou de fora.",
+  'review.optional': "opcional",
+  'review.evidence': "Prova: {text}",
   'review.stop.target': "bom o suficiente",
   'review.stop.agreed': "nenhum problema em comum restante",
   'review.stop.limit': "limite de rodadas",

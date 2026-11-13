@@ -982,6 +982,8 @@ export const fr: Messages = {
   'review.notes': "{n} vu par un seul réviseur",
   'review.omitted': "Un réviseur a été écarté.",
   'review.jester': "Un réviseur trop éloigné des autres a été écarté.",
+  'review.optional': "facultatif",
+  'review.evidence': "Preuve : {text}",
   'review.stop.target': "suffisant",
   'review.stop.agreed': "plus de problème partagé",
   'review.stop.limit': "limite de tours",
