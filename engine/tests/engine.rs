@@ -7646,9 +7646,12 @@ async fn review_rounds_use_fresh_read_only_reviewers_and_stop() {
     let mut second = next_pipe(&made).await;
     assert!(first.args.windows(2).any(|a| a == ["--permission-mode", "plan"]), "{:?}", first.args);
     assert!(second.args.windows(2).any(|a| a == ["--permission-mode", "plan"]), "{:?}", second.args);
-    let answer = r#"{"lines":[4,4,4,4,4],"rows":[{"line":1,"file":"a.rs","at":1,"what":"broken","should":"fix"},{"line":2,"file":"b.rs","what":"wrong","should":"fix"},{"line":3,"file":"c.rs","what":"unsafe","should":"fix"},{"line":4,"file":"d.rs","what":"complex","should":"fix"},{"line":5,"file":"e.rs","what":"untested","should":"test"}]}"#;
+    let answer = r#"{"lines":[4,4,4,4,4],"rows":[{"line":1,"file":"a.rs","at":1,"what":"broken","evidence":"line shows it","should":"fix"},{"line":2,"file":"b.rs","what":"wrong","evidence":"line shows it","should":"fix"},{"line":3,"file":"c.rs","what":"unsafe","evidence":"line shows it","should":"fix"},{"line":4,"file":"d.rs","what":"complex","evidence":"line shows it","should":"fix"},{"line":5,"file":"e.rs","what":"untested","evidence":"line shows it","should":"test"}]}"#;
     let mut second_answer: serde_json::Value = serde_json::from_str(answer).unwrap();
-    second_answer["rows"].as_array_mut().unwrap().push(json!({"line":1,"file":"only.rs","what":"private note","should":"fix"}));
+    second_answer["rows"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"line":1,"file":"only.rs","what":"private note","evidence":"line shows it","should":"fix"}));
     review_finish(&mut first, answer).await;
     review_finish(&mut second, &second_answer.to_string()).await;
     let c = until(&engine, &id, |c| c.messages.iter().any(|m| m.review.as_ref().is_some_and(|r| !r.rounds.is_empty()))).await;
@@ -7661,7 +7664,7 @@ async fn review_rounds_use_fresh_read_only_reviewers_and_stop() {
             let output = main.lines.lock().unwrap().iter().find(|v| v["response"]["request_id"] == "review1").cloned();
             if let Some(output) = output {
                 let text = output["response"]["response"]["mcp_response"]["result"]["content"][0]["text"].as_str().unwrap();
-                assert!(text.contains("Score: 20 out of 25") && text.contains("Agreed:") && !text.contains("private note"), "{text}");
+                assert!(text.contains("Score: 20 out of 25") && text.contains("Agreed, fix:") && !text.contains("private note"), "{text}");
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -7696,8 +7699,11 @@ async fn review_rounds_use_fresh_read_only_reviewers_and_stop() {
 #[test]
 fn review_rounds_agree_only_on_shared_rows_and_tool_is_project_only() {
     use faber_engine::{helper, review};
-    let a = review::parse(r#"{"lines":[4,4,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","should":"fix"},{"line":2,"file":"only.rs","what":"note","should":"fix"}]}"#).unwrap();
-    let b = review::parse(r#"{"lines":[4,5,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","should":"fix"}]}"#).unwrap();
+    let a = review::parse(r#"{"lines":[4,4,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","evidence":"line shows it","should":"fix"},{"line":2,"file":"only.rs","what":"note","evidence":"line shows it","should":"fix"}]}"#).unwrap();
+    let b = review::parse(
+        r#"{"lines":[4,5,5,5,5],"rows":[{"line":1,"file":"shared.rs","what":"bad","evidence":"line shows it","should":"fix"}]}"#,
+    )
+    .unwrap();
     let round = review::score(&[("one".into(), a), ("two".into(), b)]);
     assert_eq!(round.total, 23);
     assert_eq!(round.agreed.len(), 1);

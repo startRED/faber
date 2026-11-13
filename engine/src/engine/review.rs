@@ -1,5 +1,41 @@
 use super::*;
-use crate::review::{self, Next, Reason, Verdict};
+use crate::review::{self, Next, Reason, Role, Verdict};
+
+/// The changes a reviewer reads inline, at most this many bytes in all and per file; the rest it reads in the folder.
+const DIFF_BYTES: usize = 40_000;
+const FILE_BYTES: usize = 12_000;
+/// The person's request as a reviewer reads it.
+const REQUEST_CHARS: usize = 4_000;
+
+/// The real changes of the copy against its base, read with git off the engine lock: each file's patch, cut to a bound, then
+/// the names of the files that did not fit. None when the conversation has no copy to compare.
+fn diff_of(run: GitRunner, copy: &crate::project::copy::WorkCopy) -> Option<String> {
+    let mut exec = run()?;
+    let files = crate::changes::list(&mut *exec, copy);
+    if files.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    let mut left = vec![];
+    for file in files {
+        if text.len() >= DIFF_BYTES || file.binary || file.too_large {
+            left.push(file.path);
+            continue;
+        }
+        let patch = crate::changes::patch(&mut *exec, copy, &file.path);
+        if patch.error.is_some() || patch.binary || patch.too_large {
+            left.push(file.path);
+            continue;
+        }
+        let cut: String = patch.text.chars().take(FILE_BYTES.min(DIFF_BYTES - text.len().min(DIFF_BYTES))).collect();
+        let whole = cut.len() == patch.text.len();
+        text.push_str(&format!("--- {}\n{cut}{}\n", file.path, if whole { "" } else { "\n[cut: read the rest in the folder]" }));
+    }
+    if !left.is_empty() {
+        text.push_str(&format!("Also changed, read in the folder: {}\n", left.join(", ")));
+    }
+    Some(text)
+}
 
 pub(super) struct Run {
     pub(super) conv: String,
@@ -12,9 +48,16 @@ pub(super) struct Run {
     same_vendor: bool,
 }
 
+/// Who reviews (the owner's rule of 2026-11-13): the AI that did not write the change when it is connected and has quota,
+/// with a fresh session of the writer's own AI as R543's second reviewer in the skeptical role; with one AI, two fresh
+/// sessions of it, the second skeptical. Never the writer's own session.
+pub(super) fn reviewers(own: Vendor, other: Vendor, other_ready: bool) -> [(Vendor, Role); 2] {
+    [(if other_ready { other } else { own }, Role::Defects), (own, Role::Skeptic)]
+}
+
 fn instruction(next: Next) -> String {
     match next {
-        Next::Fix => "Next: fix the agreed problems, then call review again".into(),
+        Next::Fix => "Next: fix the rows marked Agreed, fix, then call review again".into(),
         Next::Revert => "Next: the last round made it worse; put back your edits since the previous review, then stop".into(),
         Next::Stop(reason) => format!(
             "Next: stop ({})",
@@ -71,16 +114,22 @@ impl Core {
             "Compare with the copy base. Changed paths:\n{}",
             files.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n")
         );
-        let prompt = review::brief(request, &note);
+        let c = &self.convs[conv];
+        // The person's words, not the writer's account: the writer's text goes in as a claim to check (task A3).
+        let asked: String = crate::proof::asked(c).chars().take(REQUEST_CHARS).collect();
+        let asked = if asked.trim().is_empty() { request.to_string() } else { asked };
+        let claim = request.to_string();
+        let source = self.git.clone().zip(c.copy.clone().filter(|copy| !copy.root.is_empty()));
         let other = crate::helper::other(own);
-        let vendors = [if self.opts.clis.contains_key(&other) { other } else { own }, own];
+        let other_ready = self.opts.clis.contains_key(&other) && self.has_quota(other);
+        let picked = reviewers(own, other, other_ready);
         let mut pending = HashMap::new();
         let mut jobs = Vec::new();
-        for (i, vendor) in vendors.into_iter().enumerate() {
+        for (i, (vendor, role)) in picked.into_iter().enumerate() {
             let id = format!("review-{}", uuid::Uuid::new_v4().simple());
             let name = format!("{} {}", vendor.name(), i + 1);
             pending.insert(id.clone(), name);
-            jobs.push((id, vendor));
+            jobs.push((id, vendor, role));
         }
         self.reviews.insert(
             call.clone(),
@@ -92,10 +141,40 @@ impl Core {
                 answers: vec![],
                 omitted: vec![],
                 quota_only: true,
-                same_vendor: vendors[0] == vendors[1],
+                same_vendor: picked[0].0 == picked[1].0,
             },
         );
-        for (id, vendor) in jobs {
+        // The diff is read with git off the lock, then the reviewers start; a stopped or replaced reply cancels them.
+        let Some((run, copy)) = source else {
+            self.start_reviewers(conv, call, jobs, &asked, &claim, &note);
+            return;
+        };
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        self.opts.runtime.spawn_blocking(move || {
+            let diff = diff_of(run, &copy).unwrap_or(note);
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            core.start_reviewers(&conv, call, jobs, &asked, &claim, &diff);
+        });
+    }
+
+    /// Whether some model of `vendor` may run a helper now (quota and billing), checked before a reviewer is picked so a
+    /// vendor out of quota is replaced instead of left out.
+    fn has_quota(&self, vendor: Vendor) -> bool {
+        crate::route::candidates(&self.vendors(), &self.codex_models)
+            .into_iter()
+            .filter(|p| p.vendor == vendor)
+            .any(|p| self.allows(p.vendor, crate::budget::family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+    }
+
+    fn start_reviewers(&mut self, conv: &str, call: String, jobs: Vec<(String, Vendor, Role)>, asked: &str, claim: &str, diff: &str) {
+        let Some(sid) = self.reviews.get(&call).map(|r| r.sid) else { return };
+        if self.live.get(conv).is_none_or(|l| l.sid != sid || l.turn.is_none()) {
+            self.reviews.remove(&call);
+            return;
+        }
+        for (id, vendor, role) in jobs {
+            let prompt = review::brief(role, asked, claim, diff);
             self.handle(
                 conv,
                 sid,
@@ -106,7 +185,7 @@ impl Core {
                     parent: Some(call.clone()),
                 },
             );
-            self.launch_reviewer(conv.to_string(), call.clone(), id, vendor, prompt.clone());
+            self.launch_reviewer(conv.to_string(), call.clone(), id, vendor, prompt);
         }
     }
 
@@ -183,15 +262,20 @@ impl Core {
         for f in &round.agreed {
             let r = &f.row;
             text.push_str(&format!(
-                "\nAgreed: line {}, {}{}: {}; should: {}",
+                "\n{}: line {}, {}{}: {}; should: {}; evidence: {}",
+                if r.blocks() { "Agreed, fix" } else { "Agreed, optional" },
                 r.line,
                 r.file,
                 r.at.map(|n| format!(":{n}")).unwrap_or_default(),
                 r.what,
-                r.should
+                r.should,
+                r.evidence
             ));
         }
-        text.push_str(&format!("\nNotes seen by one reviewer: {}", round.notes.len()));
+        text.push_str(&format!("\nNotes seen by one reviewer or without evidence: {}", round.notes.len()));
+        if round.reviewers.len() == 1 {
+            text.push_str("\nOnly one reviewer answered: its findings with evidence count as agreed.");
+        }
         if run.same_vendor {
             text.push_str("\nBoth reviews used the same AI.");
         }
@@ -213,5 +297,20 @@ impl Core {
         self.emit_message(conv, &mid);
         session.helper_reply(&run.call, true, text);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ai_that_did_not_write_reviews_first_and_a_fresh_skeptic_of_the_writers_ai_second() {
+        assert_eq!(reviewers(Vendor::Codex, Vendor::Claude, true), [(Vendor::Claude, Role::Defects), (Vendor::Codex, Role::Skeptic)]);
+        assert_eq!(
+            reviewers(Vendor::Codex, Vendor::Claude, false),
+            [(Vendor::Codex, Role::Defects), (Vendor::Codex, Role::Skeptic)],
+            "the other AI missing or out of quota: two fresh sessions of the writer's AI, one skeptical"
+        );
     }
 }

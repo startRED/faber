@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorText, type ChildWords, type ToolUse, type TranscriptEntry } from './api.ts';
+import { api, errorText, findingBlocks, type ChildWords, type ToolUse, type TranscriptEntry } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { ToEnd } from './Floating.tsx';
 import { fromEngine, t } from './i18n.ts';
@@ -481,7 +481,7 @@ export function AgentChat(props: {
         <p class="side-meta">{agentMeta(props.step, props.streaming)}</p>
         <Show when={props.step.review}>{(round) => <section class="review-round">
           <For each={(['asked', 'correct', 'safe', 'simple', 'checked'] as const)}>{(line, i) => <p>{t(`review.line.${line}`)}: {round().lines[i()]} / 5</p>}</For>
-          <For each={round().agreed}>{(finding) => <p><b><Breakable text={`${finding.file}${finding.at == null ? '' : `:${finding.at}`}`} /></b><br />{finding.what}<br />{finding.should}</p>}</For>
+          <For each={round().agreed}>{(finding) => <p><b><Breakable text={`${finding.file}${finding.at == null ? '' : `:${finding.at}`}`} /></b><Show when={!findingBlocks(finding)}> · {t('review.optional')}</Show><br />{finding.what}<br />{finding.should}<Show when={finding.evidence}>{(e) => <><br /><span class="side-meta">{t('review.evidence', { text: e() })}</span></>}</Show></p>}</For>
           <Show when={round().notes.length}><details class="disclosure"><summary>{t('review.notes', { n: round().notes.length })}</summary><For each={round().notes}>{(finding) => <p><b><Breakable text={`${finding.file}${finding.at == null ? '' : `:${finding.at}`}`} /></b><br />{finding.what}<br />{finding.should}</p>}</For></details></Show>
           <Show when={round().omitted?.length}><p class="side-meta">{t('review.omitted')}</p></Show>
           <Show when={round().jesters.length}><p class="side-meta">{t('review.jester')}</p></Show>

@@ -165,7 +165,9 @@ export interface FaberAct {
   change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
   sent?: string;
 }
-export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; reviewers: string[] }
+export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; evidence?: string; severity?: 'P0' | 'P1' | 'P2' | 'P3'; visible?: boolean; reviewers: string[] }
+/** What the agent must fix (engine `Row::blocks`): what a person would notice, and P0 or P1 problems; a row with no severity blocks. */
+export const findingBlocks = (f: ReviewFinding): boolean => !!f.visible || !f.severity || f.severity === 'P0' || f.severity === 'P1';
 export interface ReviewRound { call?: string; lines: [number, number, number, number, number]; total: number; reviewers: string[]; scores?: [string, [number, number, number, number, number]][]; omitted?: string[]; jesters: string[]; agreed: ReviewFinding[]; notes: ReviewFinding[] }
 export interface Message {
   review?: { rounds: ReviewRound[]; stop?: string };
@@ -279,6 +281,22 @@ export interface PlanCount {
   done: number;
   total: number;
 }
+/** What Faber noticed in a request's edits (engine `guard::Fact`). */
+export type GuardFact =
+  | { kind: 'skipped' | 'deleted' | 'stub'; file: string }
+  | { kind: 'weakened'; file: string; removed: number }
+  | { kind: 'outside'; files: string[]; count: number };
+/** Faber's reading of a done conclusion (engine `Proof`): receipts per requirement, and what it noticed in the edits. */
+export interface Proof {
+  confirmed: number;
+  total: number;
+  missing?: string[];
+  unchecked?: boolean;
+  failed?: boolean;
+  facts?: GuardFact[];
+  /** Faber let the conclusion through after asking for proof: it is not confirmed. */
+  labelled?: boolean;
+}
 /** The closing box of a task (engine `WrapUp`): a recap, and maybe one question with its replies, the recommendation first. */
 export interface WrapUp {
   recap: string;
@@ -289,7 +307,14 @@ export interface WrapUp {
   /** How the agent concluded; absent on a box written before conclusions had outcomes. */
   outcome?: 'done' | 'blocked' | 'needsYou';
   /** What the agent said it did, the result, what is not done and what it checked. */
-  summary?: { did: string; result: string; notDone?: string; verified?: string };
+  summary?: {
+    did: string; result: string; notDone?: string; verified?: string;
+    /** Each thing asked, the receipt the agent named, and whether Faber confirmed it. */
+    requirements?: { asked: string; proof?: string; confirmed?: boolean }[];
+    assumed?: string; couldNotReach?: string;
+  };
+  /** What Faber itself saw behind a done conclusion that followed edits (engine `Proof`). */
+  proof?: Proof;
   /** The reply Faber gave for the person while Keep going ran and nobody answered. */
   answered?: string;
 }

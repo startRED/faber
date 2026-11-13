@@ -41,6 +41,24 @@ pub struct Row {
     pub at: Option<u32>,
     pub what: String,
     pub should: String,
+    /// What shows the problem is real: the code as it stands, the sentence of the request it breaks, or a failing run. A
+    /// finding without it is kept as a note and never sends the agent back to fix.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub evidence: String,
+    /// P0 (breaks or loses data) to P3 (polish), as the reviewer judged it. Absent on rows written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// A person using the result would notice it on a first pass.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub visible: bool,
+}
+
+impl Row {
+    /// What the agent must fix: anything a person would notice, whatever its severity, and any P0 or P1 problem nobody
+    /// would see (owner's rule of 2026-11-13, "IA (Erick delegou)" for the technical part). A row with no severity blocks.
+    pub fn blocks(&self) -> bool {
+        self.visible || self.severity.as_deref().is_none_or(|s| matches!(s, "P0" | "P1"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,19 +121,37 @@ pub enum Next {
     Fix,
 }
 
-/// Give each reviewer the same task and evidence.
-pub fn brief(request: &str, diff_note: &str) -> String {
-    format!(
-        r#"Review the changes against the copy base. Work read-only and change nothing.
-Score each line from 0 to 5 (5 is best): 1. Does what was asked; 2. Correct; 3. Safe; 4. Simple; 5. Checked.
-For every lost point give a row with its line number, file, optional line number, what is there and what it should be. Nothing to report (all fives and no rows) is a correct answer. Never guess at a problem you cannot point to.
-Answer with one JSON object and nothing else: {{"lines":[5 ints],"rows":[{{"line":1-5,"file":"path","at":int|null,"what":"...","should":"..."}}]}}
+/// The two review roles. The default one hunts defects; the second, given to a fresh session of the writer's own AI, is
+/// skeptical and checks the request part by part (the fresh-session fallback of R146).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Defects,
+    Skeptic,
+}
 
-Request:
+/// What every reviewer is given: the person's request, the real changes, and the writer's own account marked as a claim to
+/// check, never as a fact. `diff` is the changes against the copy base, cut to a bound by the engine.
+pub fn brief(role: Role, request: &str, claim: &str, diff: &str) -> String {
+    let role = match role {
+        Role::Defects => "Find the defects the author missed.",
+        Role::Skeptic => {
+            "You did not write this change and its author may be wrong. Trust nothing it claims: take each part of the request in turn and check it against the changes, then look for what the change breaks."
+        }
+    };
+    format!(
+        r#"Review the changes against the copy base. Work read-only and change nothing. {role}
+Score each line from 0 to 5 (5 is best): 1. Does what was asked; 2. Correct; 3. Safe; 4. Simple; 5. Checked.
+For every lost point give a row with its line number, file, optional line number, what is there, what it should be, and evidence: the code as it stands, the sentence of the request it breaks, or a run that fails. A row without evidence is dropped. Give severity P0 (breaks or loses data), P1 (wrong result), P2 (worse but works) or P3 (polish), and visible: true when a person using the result would notice it on a first pass. Nothing to report (all fives and no rows) is a correct answer. Never guess at a problem you cannot point to.
+Answer with one JSON object and nothing else: {{"lines":[5 ints],"rows":[{{"line":1-5,"file":"path","at":int|null,"what":"...","should":"...","evidence":"...","severity":"P0-P3","visible":bool}}]}}
+
+The person's request:
 {request}
 
+The author's claim (check it, do not trust it):
+{claim}
+
 Changes against the copy base:
-{diff_note}"#
+{diff}"#
     )
 }
 
@@ -175,13 +211,67 @@ pub fn parse(text: &str) -> Result<Verdict, &'static str> {
                 at: v.get("at").and_then(|n| n.as_u64()).and_then(|n| u32::try_from(n).ok()),
                 what: what.chars().take(MAX_ROW_CHARS).collect(),
                 should: v.get("should").and_then(|v| v.as_str()).unwrap_or("").chars().take(MAX_ROW_CHARS).collect(),
+                evidence: v.get("evidence").and_then(|v| v.as_str()).unwrap_or("").trim().chars().take(MAX_ROW_CHARS).collect(),
+                severity: v
+                    .get("severity")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_uppercase())
+                    .filter(|s| matches!(s.as_str(), "P0" | "P1" | "P2" | "P3")),
+                visible: v.get("visible").and_then(|v| v.as_bool()).unwrap_or(false),
             })
         })
         .collect();
-    if scores.iter().enumerate().any(|(i, score)| *score < 5 && !rows.iter().any(|row| row.line as usize == i + 1)) {
-        return Err("error.review.unexplained");
+    // A point taken without a row is given back instead of throwing the whole verdict away: on the planted-bug bench of
+    // 2026-11-13 a quarter of the verdicts lost every evidenced finding for one unexplained point (A3).
+    for (i, score) in scores.iter_mut().enumerate() {
+        if *score < 5 && !rows.iter().any(|row| row.line as usize == i + 1) {
+            *score = 5;
+        }
     }
     Ok(Verdict { lines: scores, rows })
+}
+
+/// Lines this far apart in one file can be one problem described by two reviewers.
+const NEAR: u32 = 5;
+/// Share of meaningful words two descriptions must have in common to be one problem.
+const SAME_MEANING: f32 = 0.25;
+
+fn same_file(a: &str, b: &str) -> bool {
+    let norm = |p: &str| p.replace('\\', "/").trim_start_matches("./").to_lowercase();
+    let (a, b) = (norm(a), norm(b));
+    a == b || a.ends_with(&format!("/{b}")) || b.ends_with(&format!("/{a}"))
+}
+
+/// The meaningful words of a description, without their endings and cut to four letters, so "writes", "writing" and
+/// "written" meet.
+fn words(row: &Row) -> std::collections::BTreeSet<String> {
+    const COMMON: [&str; 24] = [
+        "the", "and", "for", "with", "that", "this", "when", "from", "into", "not", "should", "must", "but", "are", "was", "has", "have",
+        "its", "then", "than", "which", "will", "can", "instead",
+    ];
+    format!("{} {}", row.what, row.should)
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3 && !COMMON.contains(w))
+        .map(|w| {
+            let w = ["ing", "ed", "es", "s"].iter().find_map(|end| w.strip_suffix(end).filter(|stem| stem.len() >= 3)).unwrap_or(w);
+            w.chars().take(4).collect()
+        })
+        .collect()
+}
+
+/// Two reviewers raised the same problem: the same file, nearby lines (or a line only one names), and descriptions that
+/// share enough meaningful words. A shared location alone is not agreement.
+pub fn same_problem(a: &Row, b: &Row) -> bool {
+    if a == b {
+        return true;
+    }
+    if !same_file(&a.file, &b.file) || a.at.zip(b.at).is_some_and(|(x, y)| x.abs_diff(y) > NEAR) {
+        return false;
+    }
+    let (x, y) = (words(a), words(b));
+    let union = x.union(&y).count();
+    union > 0 && x.intersection(&y).count() as f32 / union as f32 >= SAME_MEANING
 }
 
 fn median(values: &mut [u32]) -> u32 {
@@ -205,16 +295,30 @@ pub fn score(by: &[(String, Verdict)]) -> Round {
     let mut findings: Vec<Finding> = Vec::new();
     for (name, verdict) in &counted {
         for row in &verdict.rows {
-            if let Some(finding) = findings.iter_mut().find(|f| f.row == *row) {
+            if let Some(finding) = findings.iter_mut().find(|f| same_problem(&f.row, row)) {
                 if !finding.reviewers.contains(name) {
                     finding.reviewers.push(name.clone());
                 }
+                // The agreed row carries evidence when either reviewer gave it, and the graver judgment.
+                if finding.row.evidence.is_empty() {
+                    finding.row.evidence = row.evidence.clone();
+                }
+                finding.row.visible |= row.visible;
+                // A reviewer that gave no severity keeps the row blocking (`Row::blocks`); otherwise the graver one.
+                finding.row.severity = match (&finding.row.severity, &row.severity) {
+                    (Some(a), Some(b)) => Some(a.min(b).clone()),
+                    _ => None,
+                };
             } else {
                 findings.push(Finding { row: row.clone(), reviewers: vec![name.clone()] });
             }
         }
     }
-    let (mut agreed, mut notes): (Vec<_>, Vec<_>) = findings.into_iter().partition(|f| f.reviewers.len() >= 2);
+    // Two reviewers must agree; when only one answered (the other ran out of quota or failed), its findings with evidence
+    // still go back to the agent instead of all becoming notes. A finding without evidence never sends the agent back.
+    let needed = counted.len().clamp(1, 2);
+    let (mut agreed, mut notes): (Vec<_>, Vec<_>) =
+        findings.into_iter().partition(|f| f.reviewers.len() >= needed && !f.row.evidence.is_empty());
     agreed.truncate(MAX_ROWS);
     notes.truncate(MAX_ROWS - agreed.len());
     Round {
@@ -257,7 +361,7 @@ pub fn next(rounds: &[Round]) -> Next {
     if newest.total >= TARGET {
         return Next::Stop(Reason::Target);
     }
-    if newest.agreed.is_empty() {
+    if !newest.agreed.iter().any(|f| f.row.blocks()) {
         return Next::Stop(Reason::NoAgreed);
     }
     if flat >= 2 {
@@ -274,7 +378,19 @@ mod tests {
     use super::*;
 
     fn row(line: u32, file: &str) -> Row {
-        Row { line, file: file.into(), at: None, what: "x".into(), should: "y".into() }
+        Row {
+            line,
+            file: file.into(),
+            at: None,
+            what: "x".into(),
+            should: "y".into(),
+            evidence: "e".into(),
+            severity: None,
+            visible: false,
+        }
+    }
+    fn said(file: &str, at: u32, what: &str, should: &str) -> Row {
+        Row { at: Some(at), what: what.into(), should: should.into(), ..row(2, file) }
     }
     fn verdict(lines: [u32; 5], rows: Vec<Row>) -> Verdict {
         Verdict { lines, rows }
@@ -292,9 +408,11 @@ mod tests {
     fn parses_fences_and_explanations() {
         let v = parse("words ```json\n{\"lines\":[4,5,5,5,5],\"rows\":[{\"line\":1,\"file\":\"a\",\"what\":\"a \\\"}\\\"\",\"should\":\"b\"}]}\n``` tail").unwrap();
         assert_eq!(v.rows[0].what, "a \"}\"");
-        assert_eq!(parse("{\"lines\":[4,5,5,5,5],\"rows\":[]}"), Err("error.review.unexplained"));
+        assert_eq!(parse("{\"lines\":[4,5,5,5,5],\"rows\":[]}").unwrap().lines, [5; 5], "an unexplained point is given back");
         assert_eq!(parse("no object"), Err("error.review.no_json"));
-        assert_eq!(parse("{\"lines\":[4,5,5,5,5],\"rows\":[{\"line\":1,\"file\":\"a.rs\"}]}"), Err("error.review.unexplained"));
+        let kept = parse("{\"lines\":[1,4,5,5,5],\"rows\":[{\"line\":1,\"file\":\"a.rs\",\"what\":\"w\"},{\"line\":1,\"file\":\"a.rs\"}]}")
+            .unwrap();
+        assert_eq!((kept.lines, kept.rows.len()), ([1, 5, 5, 5, 5], 1), "the explained rows stay");
         assert_eq!(parse("{\"lines\":[6,5,5,5,5]}"), Err("error.review.bad_lines"));
     }
 
@@ -330,6 +448,57 @@ mod tests {
         let r = score(&[person("a", [4; 5], vec![first.clone(), first.clone()]), person("b", [4; 5], vec![first])]);
         assert_eq!(r.agreed.len(), 1);
         assert_eq!(r.agreed[0].reviewers, ["a", "b"]);
+    }
+
+    #[test]
+    fn two_reviewers_describing_one_problem_in_their_own_words_agree() {
+        let a = said("src/store.rs", 88, "save() writes without holding the lock", "take the lock before writing");
+        let b =
+            said("./src/store.rs", 90, "Writes in save are not locked, so two saves can interleave", "Hold the store lock while saving");
+        let r = score(&[person("a", [4; 5], vec![a]), person("b", [4; 5], vec![b])]);
+        assert_eq!(r.agreed.len(), 1, "{:?}", r.notes);
+        let far = said("src/store.rs", 300, "save() writes without holding the lock", "take the lock before writing");
+        let near = said("src/store.rs", 88, "save() writes without holding the lock", "take the lock before writing");
+        assert!(!same_problem(&near, &far), "the same words far apart are two places");
+    }
+
+    #[test]
+    fn one_answering_reviewer_still_sends_back_its_evidenced_findings() {
+        let real = said("a.rs", 3, "divides by zero on an empty cart", "return 0 for an empty cart");
+        let vague = Row { evidence: String::new(), ..said("b.rs", 9, "might be slow", "cache it") };
+        let r = score(&[person("a", [3; 5], vec![real.clone(), vague.clone()])]);
+        assert_eq!(r.agreed.iter().map(|f| &f.row).collect::<Vec<_>>(), [&real]);
+        assert_eq!(r.notes.iter().map(|f| &f.row).collect::<Vec<_>>(), [&vague], "no evidence: a note, never a fix");
+        assert_eq!(next(&[r]), Next::Fix, "before, a lone reviewer's findings all became notes and the agent was told to stop");
+        let unproven = score(&[person("a", [4; 5], vec![vague.clone()]), person("b", [4; 5], vec![vague])]);
+        assert!(unproven.agreed.is_empty(), "two reviewers agreeing without evidence is still no proof");
+    }
+
+    #[test]
+    fn only_what_a_person_notices_or_p0_p1_sends_the_agent_back() {
+        let polish = Row { severity: Some("P3".into()), ..said("a.css", 1, "spacing uneven", "even spacing") };
+        let seen = Row { visible: true, ..polish.clone() };
+        let grave = Row { severity: Some("P1".into()), ..said("a.rs", 1, "wrong total", "right total") };
+        assert!(!polish.blocks() && seen.blocks() && grave.blocks() && row(1, "a").blocks());
+        let r = score(&[person("a", [4; 5], vec![polish.clone()]), person("b", [4; 5], vec![polish])]);
+        assert_eq!(r.agreed.len(), 1);
+        assert_eq!(next(&[r]), Next::Stop(Reason::NoAgreed), "agreed polish nobody would notice is optional");
+        for (a, b) in [(None, Some("P2")), (Some("P2"), None)] {
+            let one = |s: Option<&str>| Row { severity: s.map(Into::into), ..said("a.css", 1, "spacing uneven", "even spacing") };
+            let r = score(&[person("a", [4; 5], vec![one(a)]), person("b", [4; 5], vec![one(b)])]);
+            assert!(r.agreed[0].row.blocks(), "a reviewer with no severity keeps the agreed row blocking");
+        }
+        let v = parse(r#"{"lines":[4,5,5,5,5],"rows":[{"line":1,"file":"a","what":"w","should":"s","evidence":" e ","severity":"p2","visible":true}]}"#).unwrap();
+        assert_eq!((v.rows[0].evidence.as_str(), v.rows[0].severity.as_deref(), v.rows[0].visible), ("e", Some("P2"), true));
+    }
+
+    #[test]
+    fn the_brief_marks_the_writers_account_as_a_claim() {
+        let b = brief(Role::Skeptic, "Make login remember me", "All tests pass, it is safe.", "+ remember = true");
+        let (request, claim, diff) = (b.find("Make login").unwrap(), b.find("All tests pass").unwrap(), b.find("+ remember").unwrap());
+        assert!(request < claim && claim < diff);
+        assert!(b[..claim].contains("check it, do not trust it"));
+        assert!(b.contains("Trust nothing it claims") && !brief(Role::Defects, "r", "c", "d").contains("Trust nothing"));
     }
 
     #[test]

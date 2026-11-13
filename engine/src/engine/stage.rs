@@ -77,6 +77,7 @@ mod tests {
             answered: None,
             outcome: None,
             summary: None,
+            proof: None,
         };
         // A reply of `conv` that runs, then ends with `box_`.
         let run = |conv: &str, reply: &str, box_: Option<crate::model::WrapUp>, end: bool| {

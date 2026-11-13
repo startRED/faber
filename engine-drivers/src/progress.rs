@@ -5,7 +5,7 @@
 
 pub use crate::conversation_state::first_sentence;
 use crate::conversation_state::line;
-use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanSize, PlanStep, StepState, WrapUp};
+use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanSize, PlanStep, Requirement, StepState, WrapUp};
 pub use crate::project::memory::{FollowUp, follow_up_ready};
 use serde_json::{Value, json};
 
@@ -30,6 +30,8 @@ const EVIDENCE_CHARS: usize = 200;
 pub const STATUS_CHARS: usize = 50;
 /// The longest each part of a conclusion is, in characters.
 const PART_CHARS: usize = 300;
+/// A done conclusion lists at most this many requirements (`crate::proof`).
+const REQUIREMENTS: usize = 12;
 const ASK_CHARS: usize = 120;
 const ACTION_CHARS: usize = 40;
 /// What a step's `id`, `files` and `waits` may hold. The agent reads these keys in the error of a refused `plan` call (they never
@@ -607,10 +609,27 @@ pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
         result: part(&input["result"]),
         not_done: part(&input["not_done"]),
         verified: part(&input["verified"]),
+        requirements: input["requirements"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let asked = text_of(&r["asked"], PART_CHARS)?;
+                Some(Requirement { asked, proof: part(&r["proof"]), confirmed: false })
+            })
+            .take(REQUIREMENTS)
+            .collect(),
+        assumed: part(&input["assumed"]),
+        // Agents fill an empty field with "nothing" or "none" (seen in the done-with-proof bench, 2026-11-13).
+        could_not_reach: Some(part(&input["could_not_reach"]))
+            .filter(|s| !matches!(s.trim().trim_end_matches('.').to_lowercase().as_str(), "nothing" | "none" | "n/a" | "na" | "-"))
+            .unwrap_or_default(),
     };
     if summary.did.is_empty() || summary.result.is_empty() {
         return Err("A conclusion needs did (what you did) and result (what is now true).".into());
     }
+    // Something the agent could not reach (a key, a login) is never done: it is the person's to give.
+    let outcome = if outcome == Outcome::Done && !summary.could_not_reach.is_empty() { Outcome::NeedsYou } else { outcome };
     if outcome == Outcome::Done && summary.verified.is_empty() {
         return Err("A done conclusion needs verified: what you ran or looked at that shows the result. If you did not check it, conclude with needs_you or blocked and say what is not verified in not_done."
             .into());
@@ -620,7 +639,16 @@ pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
         true => summary.result.clone(),
         false => format!("{}. Not done: {}", summary.result.trim_end_matches('.'), summary.not_done),
     };
-    Ok(WrapUp { recap, ask, actions, done: outcome == Outcome::Done, outcome: Some(outcome), summary: Some(summary), answered: None })
+    Ok(WrapUp {
+        recap,
+        ask,
+        actions,
+        done: outcome == Outcome::Done,
+        outcome: Some(outcome),
+        summary: Some(summary),
+        answered: None,
+        proof: None,
+    })
 }
 
 #[cfg(test)]
@@ -725,6 +753,23 @@ mod tests {
         assert!(!passed(&e, 190), "exactly one and a half times: no");
         assert!(passed(&e, 191), "just above");
         assert!(!passed(&e, 10), "spend below the base never counts");
+    }
+
+    #[test]
+    fn a_done_conclusion_reads_its_requirements_and_an_empty_could_not_reach() {
+        let box_ = wrap_up(&json!({
+            "outcome": "done", "did": "d", "result": "r", "verified": "v", "could_not_reach": "nothing",
+            "requirements": [{"asked": "blue button", "proof": "npm test"}, {"proof": "no ask"}], "assumed": "metric units"
+        }))
+        .unwrap();
+        let s = box_.summary.unwrap();
+        assert_eq!(s.requirements.len(), 1, "a requirement with no ask is dropped");
+        assert_eq!((s.requirements[0].asked.as_str(), s.requirements[0].proof.as_str()), ("blue button", "npm test"));
+        assert_eq!(s.could_not_reach, "", "\"nothing\" is not something unreached");
+        assert_eq!(s.assumed, "metric units");
+        let unreached =
+            wrap_up(&json!({"outcome": "done", "did": "d", "result": "r", "verified": "v", "could_not_reach": "the API key"})).unwrap();
+        assert_eq!((unreached.outcome, unreached.done), (Some(Outcome::NeedsYou), false), "what it could not reach is the person's");
     }
 
     #[test]

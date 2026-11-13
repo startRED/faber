@@ -474,10 +474,11 @@ impl Core {
                 Ok("The person sees it.".into())
             }
             progress::WRAP_UP_TOOL => {
-                let box_ = progress::wrap_up(input)?;
+                let mut box_ = progress::wrap_up(input)?;
                 if self.turn(conv).is_none() {
                     return Err("No reply is under way.".into());
                 }
+                self.weigh_proof(conv, &mut box_)?;
                 self.close_follow_ups(conv, input, box_.done)?;
                 let m = self.turn(conv).ok_or("No reply is under way.")?;
                 let done = box_.done;

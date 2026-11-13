@@ -97,6 +97,22 @@ pub(super) fn conclusion_line(c: &Conversation) -> Option<String> {
     }
 }
 
+/// One conclusion wake per request, and one more for each done conclusion refused for missing proof (at most
+/// `proof::MAX_ASKS` of those): the refusal reaches the agent only through this wake.
+fn conclusion_wake_left(c: &Conversation) -> bool {
+    let replies = || c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some());
+    let wakes = replies().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion")).count();
+    if wakes == 0 && !replies().any(|m| m.conclusion_requested) {
+        return true;
+    }
+    let last = c.messages.last();
+    // Each proof refusal gets its reminder, after the first missing-conclusion one too; refusals stop at MAX_ASKS
+    // (`Core::weigh_proof`), so at most MAX_ASKS + 1 reminders reach one request.
+    wakes <= crate::proof::MAX_ASKS
+        && last
+            .is_some_and(|m| !m.conclusion_requested && m.conclusion_error.as_deref().is_some_and(|e| e.starts_with(crate::proof::REFUSED)))
+}
+
 /// What Faber says, once, to an agent whose turn ended with work done and no conclusion. It names its sender: an agent that
 /// reads it as the person's words answers "as you asked" for something the person never said.
 const CONCLUDE: &str = "Faber sends this, not the person: your last turn ended without concluding the task. Check what really got done, then end your closing message with the <|faber-wrap-up|> JSON block and the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
@@ -164,12 +180,7 @@ impl Core {
                 && !c.compacting
                 && matches!(result_kind(c), Some(EndKind::Done | EndKind::Unconcluded))
                 && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))
-                && !c
-                    .messages
-                    .iter()
-                    .rev()
-                    .take_while(|m| m.role != Role::User || m.wake.is_some())
-                    .any(|m| m.conclusion_requested || m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion"))
+                && conclusion_wake_left(c)
         })
     }
 
@@ -227,6 +238,35 @@ impl Core {
         }
         self.save(conv);
         let _ = self.send_by_itself(conv, text, Wake::of("wake.conclusion"));
+    }
+
+    /// Done only with proof (`crate::proof`): a done conclusion after edits to source is weighed against the request's own
+    /// receipts. Unproven, it is refused at most `proof::MAX_ASKS` times (each refusal reaches the agent through the one
+    /// conclusion wake), then let through labelled for the person. Reads only stored calls: no process, no model call.
+    pub(super) fn weigh_proof(&mut self, conv: &str, box_: &mut crate::model::WrapUp) -> Result<(), String> {
+        if !box_.done {
+            return Ok(());
+        }
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return Ok(()) };
+        let Some(summary) = box_.summary.as_mut() else { return Ok(()) };
+        let root = self.live.get(conv).map(|l| l.cwd.to_string_lossy().into_owned()).unwrap_or_default();
+        let Some(mut a) = crate::proof::assess(c, summary, &root) else { return Ok(()) };
+        if !a.problems.is_empty() {
+            if crate::proof::refusals(c) < crate::proof::MAX_ASKS {
+                let refused = crate::proof::refusal(&a.problems);
+                let reply = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().rev().find(|m| m.role == Role::Assistant));
+                if let Some(m) = reply {
+                    m.proof_asks = m.proof_asks.saturating_add(1);
+                }
+                return Err(refused);
+            }
+            a.proof.labelled = true;
+        }
+        for (r, ok) in summary.requirements.iter_mut().zip(&a.requirements) {
+            r.confirmed = *ok;
+        }
+        box_.proof = crate::proof::worth_showing(&a.proof).then_some(a.proof);
+        Ok(())
     }
 
     pub(super) fn fold_notice_input(&mut self, conv: &str, text: String) -> String {
@@ -582,6 +622,95 @@ mod tests {
             assert!(reports[0].text.contains("stopped with an error in its latest turn"), "{}", reports[0].text);
         });
         engine.shutdown();
+    }
+
+    /// A project task that edited a file and ran nothing after: done is refused twice, then let through labelled.
+    #[tokio::test]
+    async fn done_without_proof_is_refused_twice_then_labelled() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let closing = || {
+            crate::progress::wrap_up(&json!({
+                "outcome": "done", "did": "Fixed a.", "result": "a works.", "verified": "Looked at it.",
+                "requirements": [{"asked": "fix a", "proof": "cargo test"}]
+            }))
+            .unwrap()
+        };
+        let id = engine.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            let c = core.convs.get_mut(&id).unwrap();
+            c.area = Area::Project;
+            c.messages.push(Message::new("u".into(), Role::User, "Fix a".into(), 1));
+            let mut r = Message::new("r0".into(), Role::Assistant, String::new(), 2);
+            r.tools = Some(vec![
+                serde_json::from_value(
+                    json!({"id":"t","name":"Edit","input":{"file_path":"src/a.rs","old_string":"a","new_string":"b"},"ok":true}),
+                )
+                .unwrap(),
+            ]);
+            c.messages.push(r);
+            id
+        });
+        for n in 0..crate::proof::MAX_ASKS {
+            let refused = engine.with(|core| {
+                let mut box_ = closing();
+                let e = core.weigh_proof(&id, &mut box_).unwrap_err();
+                // What the engine stores for the refused block, then the reminder and the agent's next reply.
+                let c = core.convs.get_mut(&id).unwrap();
+                c.messages.last_mut().unwrap().conclusion_error = Some(e.clone());
+                assert!(conclusion_wake_left(c), "attempt {n}: a proof refusal gets one more reminder");
+                let wake: Message = serde_json::from_value(
+                    json!({"id": format!("w{n}"), "role": "user", "text": "", "at": 3, "wake": {"why": "wake.conclusion"}}),
+                )
+                .unwrap();
+                c.messages.push(wake);
+                c.messages.push(Message::new(format!("r{}", n + 1), Role::Assistant, String::new(), 4));
+                e
+            });
+            assert!(refused.starts_with(crate::proof::REFUSED), "{refused}");
+            assert!(refused.contains("cargo test"), "{refused}");
+        }
+        engine.with(|core| {
+            let mut box_ = closing();
+            core.weigh_proof(&id, &mut box_).expect("after two refusals done goes through");
+            let proof = box_.proof.expect("labelled");
+            assert!(proof.labelled);
+            assert_eq!((proof.confirmed, proof.total), (0, 1));
+            assert!(!box_.summary.unwrap().requirements[0].confirmed);
+            assert_eq!(crate::proof::refusals(&core.convs[&id]), crate::proof::MAX_ASKS);
+            assert!(!conclusion_wake_left(&core.convs[&id]), "a labelled done needs no reminder");
+        });
+        engine.shutdown();
+    }
+
+    #[test]
+    fn a_second_conclusion_reminder_follows_only_a_proof_refusal() {
+        let wake: Message =
+            serde_json::from_value(json!({"id": "w", "role": "user", "text": "", "at": 3, "wake": {"why": "wake.conclusion"}})).unwrap();
+        let mut c = conv(vec![person(), worked()]);
+        assert!(conclusion_wake_left(&c), "the first reminder");
+        c.messages.push(wake);
+        let mut again = worked();
+        again.conclusion_error = Some("error.wrapUp.outcome".into());
+        c.messages.push(again);
+        assert!(!conclusion_wake_left(&c), "any other rejected block keeps the one reminder");
+        c.messages.last_mut().unwrap().conclusion_error = Some(format!("{}: run the tests", crate::proof::REFUSED));
+        assert!(conclusion_wake_left(&c), "the first proof refusal after the missing-conclusion reminder");
+        let refused = |c: &mut Conversation, n: usize| {
+            c.messages.push(
+                serde_json::from_value(
+                    json!({"id": format!("w{n}"), "role": "user", "text": "", "at": 5, "wake": {"why": "wake.conclusion"}}),
+                )
+                .unwrap(),
+            );
+            let mut m = worked();
+            m.conclusion_error = Some(format!("{}: run the tests", crate::proof::REFUSED));
+            c.messages.push(m);
+        };
+        refused(&mut c, 2);
+        assert!(conclusion_wake_left(&c), "the second proof refusal still gets its reminder, for the labelled third attempt");
+        refused(&mut c, 3);
+        assert!(!conclusion_wake_left(&c), "never more than MAX_ASKS + 1 reminders");
     }
 
     fn conv(messages: Vec<Message>) -> Conversation {

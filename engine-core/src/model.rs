@@ -542,6 +542,10 @@ pub struct Message {
     /// A rejected conclusion, passed to the bounded conclusion reminder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conclusion_error: Option<String>,
+    /// How many done conclusions of this reply Faber refused for missing proof (`crate::proof`), counted per attempt so
+    /// a reply that retries its closing call cannot be refused forever.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub proof_asks: u8,
     /// Kept decision hashes present before this reply's closing fold; cleared after a complete comparison.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fold_kept: Vec<KeptDecision>,
@@ -978,6 +982,34 @@ pub struct WrapUp {
     /// The four parts of a conclusion in the agent's own words (what it did, the result, what is not done, what it checked).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<ConclusionSummary>,
+    /// What Faber itself saw behind a done conclusion that followed edits (`crate::proof`): the requirements its tools'
+    /// receipts confirm, and what its look at the edits noticed (`crate::guard`). Absent when it had nothing to weigh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<Proof>,
+}
+
+/// Faber's own reading of a done conclusion (`crate::proof::assess`), shown under it so the person sees what is confirmed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Proof {
+    /// Requirements the agent listed, and how many a receipt after the last edit confirms.
+    pub confirmed: u32,
+    pub total: u32,
+    /// The requirements no receipt confirms, and what the agent could not reach, in its own words.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<String>,
+    /// No check, command or look ran successfully after the last edit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchecked: bool,
+    /// The last check after the last edit failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failed: bool,
+    /// What Faber noticed in the edits themselves: a test turned off or weakened, a stub, files outside the plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<crate::guard::Fact>,
+    /// Faber let the conclusion through after asking for proof: what is above is not confirmed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub labelled: bool,
 }
 
 /// How an agent ended its task, through the closing call (`crate::progress::wrap_up`).
@@ -993,7 +1025,7 @@ pub enum Outcome {
 }
 
 /// What a conclusion says, in four short parts. `did` and `result` are always there; the others only when they say something.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConclusionSummary {
     pub did: String,
@@ -1002,6 +1034,27 @@ pub struct ConclusionSummary {
     pub not_done: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub verified: String,
+    /// Each thing the person asked, in their words, with what shows it is met (`crate::proof`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<Requirement>,
+    /// What the agent guessed instead of asking.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub assumed: String,
+    /// What it could not get to (a key, a login, a file); never part of a done result (`building.md`, the missing-item gate).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub could_not_reach: String,
+}
+
+/// One thing the person asked and the receipt the agent names for it: a command it ran, `verify`, or `look` for a page or
+/// screen it opened. `confirmed` is Faber's, never the agent's: a receipt of this request after the last edit matches it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Requirement {
+    pub asked: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proof: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirmed: bool,
 }
 
 impl WrapUp {
@@ -1134,6 +1187,7 @@ impl Message {
             closed: false,
             conclusion_requested: false,
             conclusion_error: None,
+            proof_asks: 0,
             fold_kept: vec![],
             fold_lost: false,
             halt: None,

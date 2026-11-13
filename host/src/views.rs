@@ -294,6 +294,7 @@ mod tests {
             answered: None,
             outcome: None,
             summary: None,
+            proof: None,
         });
         assert_eq!(state(None, Some(&concluded)), "concluded");
         concluded.wrap_up.as_mut().unwrap().done = false;
