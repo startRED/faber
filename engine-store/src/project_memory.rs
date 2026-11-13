@@ -1228,7 +1228,7 @@ pub fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String
     if file.too_large {
         return Err(READ);
     }
-    Ok(file
+    let mut kept: Vec<_> = file
         .entries
         .into_iter()
         .rev()
@@ -1244,6 +1244,12 @@ pub fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String
                     KeptDecision::Legacy(_) => true,
                 })
         })
+        .collect();
+    // E3 (2026-11-13 harness study): the card's room is capped, and a project's many AI decisions pushed out the person's own
+    // older words ("no extra libraries"). Theirs come first, each group newest first.
+    kept.sort_by_key(|(_, author)| *author != Some("person"));
+    Ok(kept
+        .into_iter()
         .map(|(body, author)| if author == Some("person") { body.strip_suffix(STALE).unwrap_or(&body).to_owned() } else { body })
         .collect())
 }
@@ -2197,6 +2203,28 @@ mod tests {
         for name in ["plans", "recipes", "learning", "memory"] {
             assert!(list.files.iter().any(|file| file.path == format!(".faber/{name}.md")), "{name}");
         }
+    }
+
+    /// E3: the card keeps about 2 KB of decisions; a person's own old line comes before the AI's newer ones, so it is the
+    /// last to fall off.
+    #[test]
+    fn the_persons_own_kept_decisions_come_first_on_the_card() {
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path().join(".faber");
+        std::fs::create_dir(&dir).unwrap();
+        let mut text = String::from("- No extra libraries. [by person]\n");
+        let mut kept = vec![KeptDecision::of("- No extra libraries.")];
+        for n in 0..3 {
+            text.push_str(&format!("- AI choice {n}. [by AI]\n"));
+            kept.push(KeptDecision::of(&format!("- AI choice {n}.")));
+        }
+        text.push_str("- Portuguese only. [by person]\n");
+        kept.push(KeptDecision::of("- Portuguese only."));
+        std::fs::write(dir.join("decisions.md"), text).unwrap();
+        assert_eq!(
+            kept_for_card(project.path(), &kept).unwrap(),
+            ["- Portuguese only.", "- No extra libraries.", "- AI choice 2.", "- AI choice 1.", "- AI choice 0."]
+        );
     }
 
     #[test]

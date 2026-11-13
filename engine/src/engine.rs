@@ -554,6 +554,9 @@ struct Core {
     compacts: HashMap<String, compact::Plan>,
     /// Compactions the CLI is running, watched for their time (`compact.rs`, task 110).
     compactions: HashMap<String, compact::Timed>,
+    /// Conversations compacted since their last message went out: the next one carries the person's own words again
+    /// (`compact::Core::goal_pin`). Kept in memory only; a restart forgets it, as it forgets the live session.
+    repins: HashSet<String>,
     /// Which conversation branched from which (`versions.rs`), read at the first look.
     links: Option<Vec<(String, String)>>,
     /// The Keep going turn at which Faber last compacted a conversation by itself, so a compaction that failed is not
@@ -779,6 +782,7 @@ impl Engine {
                 installing: false,
                 compacts: HashMap::new(),
                 compactions: HashMap::new(),
+                repins: HashSet::new(),
                 links: None,
                 boundary: HashMap::new(),
                 draft: None,
@@ -4861,6 +4865,10 @@ impl Core {
         } else {
             text
         };
+        // A session that just started with the history above already has the person's words. Either way an ordinary message
+        // that goes out clears the mark (below).
+        let repinned = !text.starts_with('/');
+        let text = if kit_reset { text } else { self.goal_pin(id, text) };
         let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
         let tool_kit = self.live.get_mut(id).and_then(|l| std::mem::replace(&mut l.kit_pending, false).then(|| l.tool_kit.clone()));
         let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));
@@ -4919,6 +4927,9 @@ impl Core {
                 None => (text, images),
             };
             l.session.send(UserTurn { text, images });
+            if repinned {
+                self.repins.remove(id);
+            }
         }
         self.finish_worker_admission(&Self::turn_admission_key(id, reply_id));
         self.listen(id);

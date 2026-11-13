@@ -706,7 +706,7 @@ pub fn card(facts: &Facts, kept: &[&str], taste: &[&str]) -> String {
     let mut out = OPEN.to_string();
     out.push_str(&card_lines("", &rules, 3 * 1024 - OPEN.len() - CLOSE.len(), "more rule lines"));
     for (bodies, head, share, omitted) in [
-        (kept, "\n## Decisions the person kept, newest first\n\n", 2 * 1024, "older decisions"),
+        (kept, "\n## Decisions the person kept, their own words first, newest first\n\n", 2 * 1024, "older decisions"),
         (taste, "\n## Taste the person kept\n\n", 1024, "more taste lines"),
     ] {
         let lines: Vec<_> = bodies
@@ -828,10 +828,10 @@ mod tests {
         assert!(text.len() <= 6 * 1024, "framing must fit too: {}", text.len());
         assert!(!text.contains("UNTRUSTED_DESCRIPTION"));
         assert!(text.starts_with("```faber-start-card\n") && text.ends_with("```"));
-        let (rules, rest) = text.split_once("\n## Decisions the person kept, newest first\n\n").unwrap();
+        let (rules, rest) = text.split_once("\n## Decisions the person kept, their own words first, newest first\n\n").unwrap();
         let (decisions, taste_part) = rest.split_once("\n## Taste the person kept\n\n").unwrap();
         assert!(rules.len() <= 3 * 1024);
-        assert!(decisions.len() + "\n## Decisions the person kept, newest first\n\n".len() <= 2 * 1024);
+        assert!(decisions.len() + "\n## Decisions the person kept, their own words first, newest first\n\n".len() <= 2 * 1024);
         assert!(taste_part.len() - 3 + "\n## Taste the person kept\n\n".len() <= 1024);
         assert_eq!(decisions.matches(&decision).count(), 4);
         assert!(decisions.contains("16 older decisions; search them with memory_search."));

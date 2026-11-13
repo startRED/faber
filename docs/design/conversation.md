@@ -103,7 +103,10 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   mark on the next reply, its tooltip naming the pull request and its failed checks.
 - When the project card lists checks, the agent can run them with the verify tool, shown in the work log. When no checks are declared, it checks the result directly instead. The conclusion block is removed from both streaming text and the saved answer; a rejected block makes no box and its reason goes to the one closing reminder. Ending a reply starts no
   automatic checks, file-change scan or correction turn (R534). Older histories keep their check rows and fix-wake
-  tooltips. Permissions and reply-style changes preserve scheduled compaction and its exact continuation. A retired
+  tooltips. Permissions and reply-style changes preserve scheduled compaction and its exact continuation. After any compaction (the
+  CLI's own, the agent's, Keep going's or Compact now) the next message the agent gets starts with the person's first
+  request and their newest earlier ones, word for word and once (E1, about 1,500 characters at most), because a summary
+  can drop an early rule such as "Portuguese only"; the person sees nothing new. A retired
   server closes once its last
   session finishes. The shared running-state refresh handles every end of work, including Stop, explicit checks ending,
   Keep going ending by itself or being turned off, archive and quota stops; removing a conversation closes its session

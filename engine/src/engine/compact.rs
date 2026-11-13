@@ -100,6 +100,11 @@ impl Core {
     /// The CLI compacted the conversation: what it holds is the summary now. Claude Code says how big it is; Codex reports
     /// the new size as a context update of its own.
     pub(super) fn note_compacted(&mut self, conv: &str, vendor: Vendor, after: Option<u64>) {
+        // The person's own words go back with the next message (E1), whoever compacted: the CLI by itself, the agent, Keep
+        // going or Compact now. A compaction inside a turn is answered at the next one: Faber cannot speak inside a turn.
+        if self.convs.contains_key(conv) {
+            self.repins.insert(conv.to_string());
+        }
         // The summary replaces a first input that told the session of Faber's guide (Claude Code, a resumed Codex thread); a new
         // Codex thread's instructions are kept.
         if let Some(l) = self.live.get_mut(conv)
@@ -110,6 +115,26 @@ impl Core {
         }
         if after.is_some() {
             self.note_context(conv, vendor, after, None);
+        }
+    }
+
+    /// The message about to go out, after the person's earlier words when the conversation was compacted since its last
+    /// one (E1 of the 2026-11-13 harness study). The rules ride the system prompt and survive a compaction; the goal does not.
+    /// The message being sent and Faber's own wake lines are not the person's earlier words. A slash command goes alone, as
+    /// the guide's line does (`kits::first_input`), and the words wait for the next ordinary message. The mark goes only once
+    /// the message is handed to the session (`Core::start`), so a send refused before that keeps it for the next one.
+    pub(super) fn goal_pin(&self, conv: &str, text: String) -> String {
+        if text.starts_with('/') || !self.repins.contains(conv) {
+            return text;
+        }
+        let Some(c) = self.convs.get(conv) else { return text };
+        let held = c.context_messages();
+        // The last two are the message being sent and the reply that answers it.
+        let earlier = &held[..held.len().saturating_sub(2)];
+        let requests: Vec<&str> = earlier.iter().filter(|m| m.role == Role::User && m.wake.is_none()).map(|m| m.text.as_str()).collect();
+        match sibling::goal_pin(&requests) {
+            Some(pin) => format!("{pin}\n\n{text}"),
+            None => text,
         }
     }
 
@@ -385,6 +410,8 @@ impl Core {
     /// handoff waits behind existing messages, which enter the fresh session first; Keep going follows the whole queue.
     fn clear(&mut self, conv: &str) {
         let Some(Plan { next: Some(next), .. }) = self.compacts.remove(conv) else { return };
+        // The fresh context's first turn carries every request word for word already.
+        self.repins.remove(conv);
         if let Some(l) = self.retire(conv) {
             l.session.retire();
         }
