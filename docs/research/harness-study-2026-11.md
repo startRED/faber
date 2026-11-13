@@ -23,10 +23,14 @@ The rival harnesses and the proposed build order are in [harness-rivals-and-buil
    output saves little. Implication: each wake-up of the main agent is expensive, and batching reports attacks the largest
    cost source.
 
-2. **The harness matters as much as the model.** [evidence, with a vendor claim] Several 2026 studies on Terminal-Bench
-   report that the same model scores up to about 44 points apart, and costs up to about 40 times more, across harnesses.
-   Factory reports 65.2% for its Droid harness against 57.6% for Claude Code with the same Opus 5.5 model. That is Factory's
-   own figure, not an independent one. Implication: Faber must measure per task type, not trust a general ranking.
+2. **The harness changes cost a lot; its effect on pass rate is small and unsettled.** [evidence, with a vendor claim]
+   A 50-task preprint (arXiv 2607.22585) reports up to about 40 times more tokens per solved task across harnesses, with
+   pass-rate differences of 0 to 8 points whose confidence intervals mostly include zero. On SWE-Bench Pro V2 the scaffold
+   explains 0.29% of the variance and the task 31.7%. A single run is noise: the same configuration moves 2.2 to 6.0 points
+   between runs (arXiv 2602.07150), so seeing a 2-point gain takes about 9 to 15 runs per arm. Factory reports 65.2% for
+   its Droid harness against 57.6% for Claude Code with the same Opus 5.5 model; that is Factory's own figure, not an
+   independent one. An earlier draft of this page said "up to 44 points apart"; the deeper pass did not support it.
+   Implication: the case for harness work rests on cost and on named failure modes, and Faber must measure per task type.
 
 3. **Agents flatter their own work; cross-vendor review finds more.** [evidence] A judge is more lenient with code it wrote
    itself, and models let through 64.5% of the errors they generated (arXiv 2604.06996, 2507.02778). In a planted-error
