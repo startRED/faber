@@ -383,17 +383,6 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             let path = crate::permissions::claude_rule_path(&crate::project::git::native_path(guide));
             catalog_deny.extend([format!("Edit({path}/**)"), format!("Write({path}/**)")]);
         }
-        // The person's "never touch" rules (decided 2026-11-13): deny rules hold in bypassPermissions too, so Full access keeps them
-        // for the file tools. A folder's rule covers what is inside it.
-        for protected in &launch.tuning.protected {
-            let path = crate::permissions::claude_rule_path(&crate::project::git::native_path(protected));
-            catalog_deny.extend([
-                format!("Edit({path})"),
-                format!("Write({path})"),
-                format!("Edit({path}/**)"),
-                format!("Write({path}/**)"),
-            ]);
-        }
         let with_own =
             |rules: Vec<String>| rules.into_iter().chain(web.iter().cloned()).chain(catalog_deny.iter().cloned()).collect::<Vec<_>>();
         let deny = || with_own(tool_deny(&env));
@@ -481,9 +470,6 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             }
             if launch.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
-            }
-            if launch.progress && launch.tuning.assumptions {
-                words.push_str(crate::persona::ASSUMPTIONS);
             }
             if launch.leads {
                 words.push_str(crate::persona::LEADS);
@@ -1125,17 +1111,10 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
-                                    let kept_out = crate::permissions::names_protected(tool, input, opts.cwd.to_str(), &opts.launch.tuning.protected);
                                     if (opts.launch.permissions.guarded() && tool == "Monitor")
-                                        || kept_out
                                         || crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
-                                        let message = if kept_out {
-                                            "Faber refused this: the person's kept rule says never to touch that path. Leave it as it is."
-                                        } else {
-                                            "Faber refused a write to its protected notes or data folder."
-                                        };
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
-                                            "response": { "behavior": "deny", "message": message } } });
+                                            "response": { "behavior": "deny", "message": "Faber refused a write to its protected notes or data folder." } } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
                                             shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;

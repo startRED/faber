@@ -52,8 +52,6 @@ the allocation model, not a measured whole-app RAM/CPU result or proof that ever
 
 A new screen in a folder with no design system gets a direction taken from its subject (a named brand, a layout
 that uses a wide screen, one type contrast, a small palette, a drawn mark) instead of a card centered on a gradient.
-When a project conversation's first request is about looks and names no look, the ask judge (R574) has the agent offer
-two or three one-line directions from the subject first, its recommendation first, and build the one the person picks.
 A page that teaches lists the facts an expert expects, draws every step it names with text readable on a phone, and
 is reread once as a checker before delivery; the persona asks the same reread of any explanation in Chat.
 

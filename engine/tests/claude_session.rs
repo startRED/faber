@@ -986,50 +986,6 @@ fn only_a_project_agent_given_the_bigger_offer_tool_is_told_to_use_it() {
     assert!(!helper.contains(leads) && !prompt(ClaudeLaunch { leads: true, ..launch(Area::Chat) }).contains(leads));
 }
 
-/// E2 (research of 2026-11-13): every sentence Faber adds rides every turn of every conversation, and generated instruction
-/// prose was measured to raise cost about 20% with no gain. The largest prompt Faber appends, a project's own lead with the
-/// person's name, its own reply style and the helper, offer and team rules (the start card and the person's group words are
-/// capped on their own), stays under a budget, so growing it is a choice made with an evaluation number (`docs/dev/evals.md`).
-#[test]
-fn the_largest_prompt_faber_appends_stays_within_its_byte_budget() {
-    use faber_engine::helper::Helper;
-    use faber_engine::model::{ReplyStyle, Tuning};
-    /// Measured 2026-11-13 at 11,000 with the assumptions list on; leaves about 400 bytes for one short sentence. Lower it
-    /// when the prompt shrinks.
-    const LEAD_BUDGET: usize = 11_800;
-    const CHAT_BUDGET: usize = 3_900;
-    let prompt = |l: ClaudeLaunch| {
-        let args = claude_args(&l);
-        args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1].clone()
-    };
-    let tuning = Tuning { reply_style: ReplyStyle::Own, reply_style_text: "x".repeat(400), assumptions: true, ..Default::default() };
-    let named = |l: ClaudeLaunch| ClaudeLaunch { user_name: Some("Erick".into()), tuning: tuning.clone(), ..l };
-    let lead = prompt(named(ClaudeLaunch { helper: Helper::Offers, progress: true, leads: true, ..launch(Area::Project) }));
-    let chat = prompt(named(launch(Area::Chat)));
-    eprintln!("lead prompt {} bytes, chat prompt {} bytes", lead.len(), chat.len());
-    assert!(lead.len() <= LEAD_BUDGET, "the lead's prompt grew to {} bytes (budget {LEAD_BUDGET})", lead.len());
-    assert!(chat.len() <= CHAT_BUDGET, "the chat prompt grew to {} bytes (budget {CHAT_BUDGET})", chat.len());
-}
-
-/// E6: the assumptions list reaches a project's own agent only when the person turned it on; Chat, a helper and the default
-/// never get it.
-#[test]
-fn only_a_project_agent_whose_person_chose_it_lists_its_assumptions() {
-    use faber_engine::helper::Helper;
-    use faber_engine::model::Tuning;
-    let prompt = |l: ClaudeLaunch| {
-        let args = claude_args(&l);
-        args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1].clone()
-    };
-    let list = faber_engine::persona::ASSUMPTIONS;
-    let on = |l: ClaudeLaunch| ClaudeLaunch { tuning: Tuning { assumptions: true, ..Default::default() }, ..l };
-    assert!(prompt(on(ClaudeLaunch { progress: true, helper: Helper::Offers, ..launch(Area::Project) })).contains(list));
-    assert!(!prompt(ClaudeLaunch { progress: true, helper: Helper::Offers, ..launch(Area::Project) }).contains(list), "off by default");
-    assert!(!prompt(on(ClaudeLaunch { helper: Helper::Is, ..launch(Area::Project) })).contains(list), "a helper reports, it does not list");
-    assert!(!prompt(on(ClaudeLaunch { progress: true, ..launch(Area::Chat) })).contains(list), "Chat answers as the AI itself");
-    assert!(list.contains("ask that one first"), "the list never replaces the question that matters");
-}
-
 #[test]
 fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_side_question() {
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
@@ -2116,21 +2072,4 @@ fn a_project_lead_sets_its_own_subagents_models_by_role() {
             assert!(!prompt(&other).contains(faber_engine::helper::HELPERS), "{area:?} {helper:?}");
         }
     }
-}
-
-/// Item 10 (decided 2026-11-13): a path the person's kept rule says never to touch is denied to the file tools in every mode
-/// that runs the project's tools, Full access included, since deny rules hold in bypassPermissions.
-#[test]
-fn the_persons_never_touch_paths_are_denied_to_the_file_tools_even_in_full_access() {
-    let tuning = faber_engine::model::Tuning { protected: vec![r"C:\work\shop\legacy".into()], ..Default::default() };
-    for permissions in [Permissions::FullAccess, Permissions::Auto, Permissions::AcceptEdits, Permissions::Ask] {
-        let deny = deny_rules(&claude_args(&ClaudeLaunch { permissions, tuning: tuning.clone(), ..launch(Area::Project) }));
-        for rule in
-            ["Edit(//c/work/shop/legacy)", "Write(//c/work/shop/legacy)", "Edit(//c/work/shop/legacy/**)", "Write(//c/work/shop/legacy/**)"]
-        {
-            assert!(deny.contains(&rule.to_string()), "{permissions:?} {rule} {deny:?}");
-        }
-    }
-    let deny = deny_rules(&claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(Area::Project) }));
-    assert!(!deny.iter().any(|rule| rule.contains("legacy")), "no rule, no refusal");
 }

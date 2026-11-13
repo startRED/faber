@@ -6,15 +6,6 @@ Readable cards keep the original request in a disclosure. Commands preserve argu
 
 Mode details distinguish requested CLI policy from machine isolation, which remains unverified. No new process or idle timer is kept. Full access retains its existing stored value and default; remembered-rule withdrawal and denial feedback need the separate host-command change.
 
-A decision the person wrote and kept as "never touch `path`" (R575) needs no card of its own: in every mode Claude Code's file
-tools are denied the path, a guarded Codex sandbox keeps it read-only, and an approval that names it is declined before any card,
-with a line telling the agent to leave it as it is. In Full access a shell command is not stopped; nothing on screen claims more.
-The paths are read when a session starts (a rule kept mid-conversation holds from the next start), each on its own; a path
-through a link, outside the project or with pattern characters (in it or in the project's folder) protects nothing, at most 32
-count within 2,048 characters, and a decision list that cannot be read keeps the paths last read in this run (none on the first
-start). Only path fields (`source` and `destination` too) and command lines are compared, never a description; a command line
-that only mentions the name, as in a commit message, is refused too.
-
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
   menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the

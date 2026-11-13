@@ -447,64 +447,6 @@ pub fn cleared_prompt(requests: &[&str], next: &str) -> String {
     )
 }
 
-/// The most of the person's earlier words that go back in front of the agent after a compaction: about 400 tokens, once.
-const MAX_PIN: usize = 1500;
-/// Of which the first request, the goal the rest refine, may take this much.
-const MAX_GOAL: usize = 700;
-
-/// What goes ahead of the first message after a compaction (E1 of the 2026-11-13 harness study): the summary keeps what the
-/// model judged worth keeping, which is where a person's early rule ("Portuguese only") gets lost, so their first request
-/// and their newest earlier ones go back word for word. None when there is nothing earlier than the message being sent.
-pub fn goal_pin(requests: &[&str]) -> Option<String> {
-    let requests: Vec<&str> = requests.iter().map(|r| r.trim()).filter(|r| !r.is_empty()).collect();
-    let (first, rest) = requests.split_first()?;
-    // What a character takes once quoted: a new line also carries the next line's quote mark.
-    let cost = |c: char| if c == '\n' { 3 } else { 1 };
-    // A request as it is quoted, cut to what fits: its characters, quote marks and the blank line after it.
-    let fit = |text: &str, room: usize| {
-        let mut used = 4;
-        let mut kept = String::new();
-        for c in text.chars() {
-            if used + cost(c) > room {
-                kept.push('…');
-                return (used, kept, true);
-            }
-            used += cost(c);
-            kept.push(c);
-        }
-        (used, kept, false)
-    };
-    let (used, goal, _) = fit(first, MAX_GOAL);
-    let mut room = MAX_PIN.saturating_sub(used);
-    let mut later = Vec::new();
-    for r in rest.iter().rev().filter(|r| *r != first) {
-        let (n, kept, cut) = fit(r, room);
-        if cut {
-            if later.is_empty() && room > 100 {
-                later.push(kept);
-            }
-            break;
-        }
-        room -= n;
-        later.push(kept);
-    }
-    later.reverse();
-    let later = match later.is_empty() {
-        true => String::new(),
-        false => format!(
-            "\n\nThe newest earlier requests, oldest first:\n\n{}",
-            later.iter().map(|r| format!("> {}", r.replace('\n', "\n> "))).collect::<Vec<_>>().join("\n\n")
-        ),
-    };
-    // The requests are named as this conversation's, not the person's: in a conversation an agent started they are its brief.
-    Some(format!(
-        "Your context was just compacted. So that the summary loses nothing that was asked, the requests this conversation \
-         received follow again, word for word, for reference only: work that is already done stays done, and what to answer \
-         now is the message after them.\n\nThe first request in this conversation:\n\n> {}{later}\n\n---",
-        goal.replace('\n', "\n> ")
-    ))
-}
-
 /// The answer to an archive.
 pub const ARCHIVED: &str = "This conversation is archived: it left the sidebar, and the person can bring it back. End your turn now.";
 
@@ -692,33 +634,6 @@ Then write the docs."
         // One request longer than all the room is cut, never dropped.
         let p = cleared_prompt(&[&"x".repeat(MAX_REQUESTS + 10)], "n");
         assert!(p.contains(&format!("{}…", "x".repeat(MAX_REQUESTS))));
-    }
-
-    #[test]
-    fn the_pin_after_a_compaction_quotes_the_first_request_and_the_newest_ones_within_its_room() {
-        assert_eq!(goal_pin(&[]), None);
-        assert_eq!(goal_pin(&["  ", ""]), None, "no words of the person, no pin");
-        let p = goal_pin(&["Make the invoice page match the mockup.\nPortuguese only.", "Also the footer."]).unwrap();
-        assert!(p.contains("> Make the invoice page match the mockup.\n> Portuguese only."), "{p}");
-        assert!(p.contains("> Also the footer.") && p.ends_with("---"), "{p}");
-        assert!(p.contains("work that is already done stays done"), "old requests are context, never a new order");
-        // The goal keeps its place however long the conversation gets; the oldest of the later requests go first.
-        let long = "m".repeat(400);
-        let p = goal_pin(&["Goal.", &format!("a{long}"), &format!("b{long}"), &format!("c{long}"), &format!("d{long}")]).unwrap();
-        assert!(p.contains("> Goal.") && p.contains(&format!("d{long}")) && !p.contains(&format!("a{long}")), "{p}");
-        // A huge first request is cut, never dropped, and the pin stays near its bound.
-        let p = goal_pin(&[&"g".repeat(5000), &"n".repeat(5000)]).unwrap();
-        assert!(p.contains(&format!("> {}…", "g".repeat(MAX_GOAL - 4))) && p.contains("n…"), "{p}");
-        assert!(p.chars().count() < MAX_PIN + 500, "{}", p.chars().count());
-        // Many short or many-line requests: the bound counts the quote marks and the blank lines too.
-        let many: Vec<String> = (0..2000).map(|n| n.to_string()).collect();
-        let p = goal_pin(&many.iter().map(String::as_str).collect::<Vec<_>>()).unwrap();
-        assert!(p.chars().count() < MAX_PIN + 500 && p.contains("> 1999"), "{}", p.chars().count());
-        let lines = "a\n".repeat(2000);
-        let p = goal_pin(&[&lines, "Next.", &lines]).unwrap();
-        assert!(p.chars().count() < MAX_PIN + 500, "{}", p.chars().count());
-        // A request repeated word for word is quoted once.
-        assert_eq!(goal_pin(&["Same.", "Same."]).unwrap().matches("Same.").count(), 1);
     }
 
     #[test]

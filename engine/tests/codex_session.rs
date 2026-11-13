@@ -2396,14 +2396,6 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     let lead = CodexThread { progress: true, leads: true, ..thread(None, None, None) };
     assert!(thread_params(Area::Project, &lead).1["developerInstructions"].as_str().unwrap().ends_with(faber_engine::persona::LEADS));
     assert!(!thread_params(Area::Chat, &lead).1["developerInstructions"].as_str().unwrap().contains(faber_engine::persona::LEADS));
-    // E6: the assumptions list only when the person chose it, and only for the project's own agent.
-    let list = faber_engine::persona::ASSUMPTIONS;
-    let chosen = |t: CodexThread| CodexThread { tuning: faber_engine::model::Tuning { assumptions: true, ..Default::default() }, ..t };
-    let words = |area, t: &CodexThread| thread_params(area, t).1["developerInstructions"].as_str().unwrap().to_string();
-    assert!(words(Area::Project, &chosen(CodexThread { progress: true, ..thread(None, None, None) })).contains(list));
-    assert!(!words(Area::Project, &CodexThread { progress: true, ..thread(None, None, None) }).contains(list));
-    assert!(!words(Area::Project, &chosen(thread(None, None, None))).contains(list), "a helper never lists");
-    assert!(!words(Area::Chat, &chosen(CodexThread { progress: true, ..thread(None, None, None) })).contains(list));
     // Bench v11 (2026-11-12): spawned agents inherited the lead's model. The agent that offers the helper tool sets Codex's
     // documented default for them and is steered to its helpers; a helper itself and Chat set nothing.
     use faber_engine::helper::{HELPERS, Helper, Subagents};

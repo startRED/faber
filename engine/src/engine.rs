@@ -40,7 +40,6 @@ mod browse;
 mod by_itself;
 mod carry_on;
 mod changes;
-mod clarify;
 mod closed;
 mod command_wait;
 mod compact;
@@ -590,9 +589,6 @@ struct Core {
     compacts: HashMap<String, compact::Plan>,
     /// Compactions the CLI is running, watched for their time (`compact.rs`, task 110).
     compactions: HashMap<String, compact::Timed>,
-    /// Conversations compacted since their last message went out: the next one carries the person's own words again
-    /// (`compact::Core::goal_pin`). Kept in memory only; a restart forgets it, as it forgets the live session.
-    repins: HashSet<String>,
     /// Which conversation branched from which (`versions.rs`), read at the first look.
     links: Option<Vec<(String, String)>>,
     /// The Keep going turn at which Faber last compacted a conversation by itself, so a compaction that failed is not
@@ -684,14 +680,6 @@ struct Core {
     asides: HashMap<String, Vec<aside::Aside>>,
     asking: HashMap<String, aside::Asking>,
     titles: HashMap<String, title::Pending>,
-    /// Answers the ask judge in place of a model (`set_judge_ask`); tests only.
-    judge_ask: Option<Ask>,
-    /// Whether a project's first request gets the ask judge's read; the app turns it on (`enable_ask_judge`).
-    judge_on: bool,
-    /// Each project's never-touch paths last read well (R575), kept for a start whose decision list cannot be read.
-    protected_seen: HashMap<String, Vec<String>>,
-    /// The ask judge's note for a conversation's first reply, read once when that turn goes out (`clarify.rs`).
-    judge_notes: HashMap<String, (String, String)>,
     #[cfg(test)]
     title_ask: Option<Ask>,
     /// The subagents of each running reply, followed for signs of being stuck.
@@ -829,7 +817,6 @@ impl Engine {
                 installing: false,
                 compacts: HashMap::new(),
                 compactions: HashMap::new(),
-                repins: HashSet::new(),
                 links: None,
                 boundary: HashMap::new(),
                 draft: None,
@@ -884,10 +871,6 @@ impl Engine {
                 titles: HashMap::new(),
                 #[cfg(test)]
                 title_ask: None,
-                judge_ask: None,
-                judge_on: false,
-                protected_seen: HashMap::new(),
-                judge_notes: HashMap::new(),
                 watched: HashMap::new(),
                 goals: Default::default(),
                 heard: HashMap::new(),
@@ -1145,15 +1128,6 @@ impl Engine {
     /// for them. Anything else in `events` is ignored.
     pub fn note_account_events(&self, vendor: Vendor, events: Vec<EngineEvent>) {
         self.with(|c| events.into_iter().for_each(|e| c.note_account_event(vendor, e)))
-    }
-    /// Lets a project's first request get the ask judge's read (R574, `clarify.rs`); the app calls it once at start.
-    pub fn enable_ask_judge(&self) {
-        self.with(|c| c.judge_on = true)
-    }
-    /// Answers the ask judge in place of a model, so a test calls none (`clarify.rs`).
-    #[doc(hidden)]
-    pub fn set_judge_ask(&self, ask: Ask) {
-        self.with(|c| c.judge_ask = Some(ask))
     }
     pub fn set_codex_models(&self, models: Vec<String>, recommended: Option<String>) {
         self.with(|c| {
@@ -2736,7 +2710,6 @@ impl Core {
             permissions_revision: before.permissions_revision,
             previews: patch.previews.or(before.previews),
             faber_trust: patch.faber_trust.or(before.faber_trust),
-            show_assumptions: patch.show_assumptions.or(before.show_assumptions),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.
@@ -4932,11 +4905,6 @@ impl Core {
         } else {
             text
         };
-        // A session that just started with the history above already has the person's words. Either way an ordinary message
-        // that goes out clears the mark (below).
-        let repinned = !text.starts_with('/');
-        let text = if kit_reset { text } else { self.goal_pin(id, text) };
-        let text = self.judged_text(id, reply_id, text);
         let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
         let tool_kit = self.live.get_mut(id).and_then(|l| std::mem::replace(&mut l.kit_pending, false).then(|| l.tool_kit.clone()));
         let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));
@@ -4995,9 +4963,6 @@ impl Core {
                 None => (text, images),
             };
             l.session.send(UserTurn { text, images });
-            if repinned {
-                self.repins.remove(id);
-            }
         }
         self.finish_worker_admission(&Self::turn_admission_key(id, reply_id));
         self.listen(id);
@@ -5217,23 +5182,6 @@ impl Core {
             mode,
         );
         project_tools.start_card = start_card.clone();
-        let mut protected = vec![];
-        // The person's "never touch" rules (R575), read once per session start: Faber's small record of kept decisions and the
-        // project's decision list, for a project's conversations only.
-        if area == Area::Project
-            && let Some(project) = project_id.as_deref()
-        {
-            let kept = self.store.kept_decisions(project);
-            let names = match crate::project::memory::kept_protected(&cwd, &kept) {
-                Ok(names) => {
-                    self.protected_seen.insert(project.to_string(), names.clone());
-                    names
-                }
-                // A decision list that cannot be read (too large, refused) never lifts a rule this run has already seen.
-                Err(_) => self.protected_seen.get(project).cloned().unwrap_or_default(),
-            };
-            protected = names.into_iter().map(|name| cwd.join(name)).collect();
-        }
         let kit_reset = (c.temporary && c.messages.len() > 2)
             || card_reset
             || (mode != kits::SessionStart::Compact
@@ -5344,8 +5292,7 @@ impl Core {
                         group_instructions,
                         user_name,
                         flags,
-                        // The live session keeps `tuning` without them, so its reuse check reads the settings alone.
-                        tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
+                        tuning: tuning.clone(),
                         tools: project_tools,
                         subagents: subagents.clone(),
                     },
@@ -5386,7 +5333,7 @@ impl Core {
                         user_name,
                         permissions,
                         leave_plan,
-                        tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
+                        tuning: tuning.clone(),
                         subagents: subagents.clone(),
                     },
                     sink,
@@ -5555,7 +5502,6 @@ impl Core {
             return Err("error.update.activeOperations".into());
         }
         self.validate_research(&req.text)?;
-        let from_person = wake.is_none() && task.is_none();
         let mut req = self.own_cli(req);
         let existing = req.conversation_id.as_deref().and_then(|id| {
             self.load(id).map(|c| {
@@ -5734,8 +5680,6 @@ impl Core {
                 confidence: 0.95,
             },
         );
-        // The ask judge reads a first request while the router does; the turn waits for both, each within its budget.
-        let judge = self.ask_judge(&id, &req.text, from_person);
         if let Some(before) = route {
             // A conversation a lead started carries the work it stated: the table picks from that, and nothing is asked.
             let given = self.given.remove(&id).filter(|_| before.is_none());
@@ -5759,12 +5703,11 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let (result, judged) = tokio::join!(tokio::time::timeout(auto::FIRST_BUDGET, route), clarify::wait(judge));
+                let result = tokio::time::timeout(auto::FIRST_BUDGET, route).await;
                 let failed = !matches!(&result, Ok(Ok(None)) | Ok(Ok(Some((Some(_), _)))));
                 let verdict = result.ok().and_then(|r| r.ok()).flatten().and_then(|(v, actor)| v.map(|v| (v, actor)));
                 if let Some(core) = me.upgrade() {
                     let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                    core.judged(&conv, &reply_id, judged);
                     // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
                     // conversation under way only moves up.
                     let actor = verdict.as_ref().map(|(_, actor)| actor.clone()).unwrap_or(crate::act::Actor::Faber);
@@ -5779,29 +5722,6 @@ impl Core {
                         )
                     });
                     core.after_route(&conv, &reply_id, routed, (pick, actor, failed), text, images);
-                }
-            });
-            return Ok(id);
-        }
-        if let Some(judge) = judge {
-            // The first answer waits for the judge alone; a reply stopped meanwhile stays stopped.
-            self.push(&id, Some(&reply_id), true);
-            let (me, conv, images, by_hand) = (self.me.clone(), id.clone(), req.images, !auto);
-            tokio::spawn(async move {
-                let judged = clarify::wait(Some(judge)).await;
-                let Some(core) = me.upgrade() else { return };
-                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                let waiting = core
-                    .convs
-                    .get(&conv)
-                    .and_then(|c| c.messages.iter().find(|m| m.id == reply_id))
-                    .is_some_and(|m| m.status == Some(Status::Streaming));
-                if !waiting || core.closing {
-                    return;
-                }
-                core.judged(&conv, &reply_id, judged);
-                if let Err(error) = core.dispatch(&conv, &reply_id, &pick, text, images, by_hand) {
-                    core.fail_reply(&conv, &reply_id, error);
                 }
             });
             return Ok(id);
