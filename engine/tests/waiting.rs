@@ -598,7 +598,6 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         branch_of: None,
         started_by: None,
         pending_parent_report: false,
-        empty_ends: vec![],
         waiting_on: None,
         goal_fix: None,
         spent_usd: 0.0,

@@ -546,7 +546,7 @@ impl Core {
             files: vec![],
             choice: Choice { vendor: "auto".into(), model: None, effort: None },
         };
-        let wake = Wake { checks: vec![goal.words.clone()], ..Wake::of("wake.goalBroke") };
+        let wake = Wake { why: "wake.goalBroke".into(), pr: None, checks: vec![goal.words.clone()] };
         // Saved with its first message before it failed: it stays, with the error in its reply. Otherwise nothing is left.
         match self.launch_sibling(&id, req, Some(wake)) {
             Ok(()) => {}

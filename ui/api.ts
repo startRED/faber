@@ -235,8 +235,7 @@ export interface Message {
   /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
   follow?: Follow;
   /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */
-  /** `ids`: the other reports a merged `wake.childDone` carries (`wakeKey`). */
-  wake?: { why: string; pr?: number; checks?: string[]; ids?: string[] };
+  wake?: { why: string; pr?: number; checks?: string[] };
   /** Faber was closed while this reply ran, so it was cut (set when the conversation loaded); "Continue" offers to go on. */
   closed?: boolean;
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
@@ -641,8 +640,6 @@ export interface Settings {
   userName?: string;
   keepAwake?: boolean;
   resumeInterrupted?: boolean;
-  /** A piece that ended twice with nothing changed moves to the stronger model by itself (off by default). */
-  strongerWhenStuck?: boolean;
   autostart?: boolean;
   /** Receive previews: update checks read the preview channel. Off by default; turning it off never downgrades. */
   previews?: boolean;

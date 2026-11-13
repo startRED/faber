@@ -73,32 +73,6 @@ pub fn next_rung(now: &Pick, allowed: &[Profile]) -> Option<Pick> {
     })
 }
 
-/// The next stronger model of the same AI, for a piece that keeps ending with nothing changed (D7 step A): the weakest
-/// allowed model that beats the current one on one score and loses on neither, at the current effort when that row exists,
-/// else at its lowest. With it, how many times the current row's price a turn costs there (the table's relative cost).
-pub fn stronger_model(now: &Pick, allowed: &[Profile]) -> Option<(Pick, f32)> {
-    let model = now.model.as_deref()?;
-    let here = PROFILES.iter().find(|p| p.vendor == now.vendor && p.model == model && p.effort == now.effort)?;
-    let better = |p: &&Profile| {
-        p.vendor == here.vendor
-            && p.model != here.model
-            && p.iq >= here.iq
-            && p.agent >= here.agent
-            && (p.iq > here.iq || p.agent > here.agent)
-    };
-    let target = allowed.iter().filter(better).min_by_key(|p| (p.iq, p.agent))?;
-    let rows = || allowed.iter().filter(|p| p.vendor == here.vendor && p.model == target.model).filter(better);
-    let next = rows().find(|p| p.effort == here.effort).or_else(|| rows().min_by_key(|p| EFFORTS.iter().position(|e| *e == p.effort)))?;
-    let pick = Pick {
-        vendor: next.vendor,
-        model: Some(next.model.into()),
-        effort: next.effort.into(),
-        reason: "reason.chosen".into(),
-        pace: None,
-    };
-    Some((pick, next.cost / here.cost.max(f32::EPSILON)))
-}
-
 // ponytail: command-line phrases read in the program position of each command segment; a check hidden in a script
 // (`make ci`) is not seen, and so is anything this small reader does not understand (substitution, subshells,
 // heredocs, an open quote). Better than a nudge nobody can trust, and a list the router could own later.

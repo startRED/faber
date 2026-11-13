@@ -56,14 +56,6 @@ Cross-vendor verdict totals describe independent opinions, not completed qualifi
 
 Actual spending remains visible for failed or skipped work. The cost percentage appears only when every request with a recorded side has both sides completed successfully, without errors or cap stops, and both costs are known. Requests with no recorded sides do not affect that comparison. This compares the cost of completed work; it does not qualify the quality or approved-task cost targets.
 
-## Cost per solved request
-
-`tables.md` ends with a section per side (`bench/solved.rs`): runs, runs with an executable proof, solved (proof passed
-inside the time limit), timeouts, timeouts whose folder already passed its proof, all dollars, dollars and first-time
-tokens per solved request, and any model a CLI ran other than the one asked for (the plain side's `--model`, or a Faber
-reply's `askedModel`). A failed run still costs; one unknown cost makes the total unknown. Judge a model or a change by
-dollars per solved request at an equal or better solved count, never by price per token.
-
 ## Pausing for other account use
 
 Before each plain side, Faber side and judge, the harness requires two new readings with the same vendor-wide windows, reset times and usage. They must be at least the existing status-reading gap apart (five minutes for Claude, one for Codex). Missing, invalid, stale or changed readings keep admission closed. After its own work, it first waits the engine's quota-reporting lag (ten minutes for Claude, five for Codex), then establishes a new baseline. It reads only the vendors that the next stage can use; all must have a fresh quiet interval together. Status commands use the existing local `/usage` and rate-limit reader, without asking a model. If `/usage` unexpectedly reports model work, spending becomes unknown and the run ends without retrying it.

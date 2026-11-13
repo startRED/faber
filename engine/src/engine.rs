@@ -74,10 +74,8 @@ mod parked;
 mod pick_up;
 mod plan;
 mod pr_watch;
-mod quiet_child;
 mod quota_watch;
 mod recovery;
-mod report_hold;
 mod research;
 mod resume_cut;
 mod rewind;
@@ -87,7 +85,6 @@ mod settings_change;
 mod siblings;
 mod silence;
 mod stage;
-mod stronger;
 mod stuck_watch;
 mod temporary;
 mod title;
@@ -402,31 +399,6 @@ fn next_queued(c: &Conversation) -> Option<usize> {
     }
 }
 
-/// Reports of conversations an agent started that wait one behind the other from `at` become one queued turn (D1): the first
-/// takes the others' texts and their ids (`Wake::ids`), so five reports cost the lead one turn instead of five, and each is
-/// still found delivered after a restart. A message of the person's between two reports keeps them apart.
-fn merge_reports(c: &mut Conversation, at: usize) -> bool {
-    let report = |q: &QueuedTurn| !q.sending && q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone");
-    if !c.queued.get(at).is_some_and(report) {
-        return false;
-    }
-    let end = c.queued[at..].iter().position(|q| !report(q)).map_or(c.queued.len(), |n| at + n);
-    if end - at < 2 {
-        return false;
-    }
-    let rest: Vec<QueuedTurn> = c.queued.drain(at + 1..end).collect();
-    let head = &mut c.queued[at];
-    let wake = head.wake.as_mut().expect("a report carries its wake");
-    let merged = !wake.ids.is_empty();
-    let texts: Vec<String> = rest.iter().map(|q| q.text.clone()).collect();
-    head.text = crate::sibling::finished_many(&head.text, merged, &texts);
-    for q in rest {
-        wake.ids.push(q.id);
-        wake.ids.extend(q.wake.map(|w| w.ids).unwrap_or_default());
-    }
-    true
-}
-
 fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
     c.resumable(vendor).is_none() && c.context_messages().iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
@@ -534,13 +506,6 @@ struct Core {
     transcript_timer: bool,
     /// Only the ids of durable child notices waiting for room, never another queue of report text.
     parent_reports: HashMap<String, HashSet<String>>,
-    /// Leads whose owed reports are being gathered into their queue, to go out as one turn (`refill_parent_reports`).
-    collecting: HashSet<String>,
-    /// Routine reports held a few seconds before they wake an idle lead, so the ones that follow join them (`report_hold.rs`).
-    holds: HashMap<String, report_hold::Hold>,
-    /// Reports that wait together go out together, and an idle lead's wake waits for the ones that follow. Off only to
-    /// measure the difference (`Engine::set_batch_reports`).
-    batch_reports: bool,
     /// The closing box each leading agent last told the tray about (`stage.rs`), so one box is told once. Never saved: after a
     /// restart only a new run ends.
     stage_told: HashMap<String, String>,
@@ -805,9 +770,6 @@ impl Engine {
                 old_inputs_deleted: HashSet::new(),
                 transcript_timer: false,
                 parent_reports: HashMap::new(),
-                collecting: HashSet::new(),
-                holds: HashMap::new(),
-                batch_reports: true,
                 stage_told: HashMap::new(),
                 quiet_teams: HashMap::new(),
                 sibling_reads: HashMap::new(),
@@ -2703,7 +2665,6 @@ impl Core {
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
             keep_awake: patch.keep_awake.or(before.keep_awake),
             resume_interrupted: patch.resume_interrupted.or(before.resume_interrupted),
-            stronger_when_stuck: patch.stronger_when_stuck.or(before.stronger_when_stuck),
             autostart: patch.autostart.or(before.autostart),
             grants_epoch: before.grants_epoch,
             before_plan: before.before_plan,
@@ -3184,13 +3145,11 @@ impl Core {
             }
             EngineEvent::Started { session_id, model } => {
                 // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
-                let asked = self.live.get_mut(conv).and_then(|l| {
+                if let Some(l) = self.live.get_mut(conv) {
                     l.running = Some(model.clone());
-                    l.model.clone().filter(|asked| !crate::router::same_model(asked, &model))
-                });
+                }
                 if let Some(m) = self.turn(conv) {
                     m.model = Some(model);
-                    m.asked_model = asked;
                 }
                 // Not saved yet: the id becomes resumable with the first sign that a turn ran on it (above).
                 if let Some(l) = self.live.get_mut(conv) {
@@ -4117,7 +4076,7 @@ impl Core {
             if finished
                 || c.stopped
                 || (coordination_only && next.wake.is_none())
-                || next.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.asked" | "wake.childDone" | "wake.childQuiet"))
+                || next.wake.as_ref().is_some_and(|w| !matches!(w.why.as_str(), "wake.asked" | "wake.childDone"))
                 || research::question(&next.text).is_some()
                 || ![vendor, "auto"].contains(&next.choice.vendor.as_str())
             {
@@ -4308,9 +4267,6 @@ impl Core {
         let Some(c) = self.convs.get_mut(conv) else { return };
         if !idle || c.stopped || c.compacting {
             return;
-        }
-        if self.batch_reports {
-            merge_reports(c, next);
         }
         let next = c.queued.remove(next);
         self.save(conv);
@@ -5457,7 +5413,6 @@ impl Core {
             branch_of: None,
             started_by: None,
             pending_parent_report: false,
-            empty_ends: vec![],
             waiting_on: None,
             goal_fix: None,
             spent_usd: 0.0,

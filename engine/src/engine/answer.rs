@@ -2244,21 +2244,4 @@ pub(super) mod tests {
         let rung = ("nudge.noCheck".to_string(), "claude-sonnet-5-5".to_string(), "high".to_string());
         assert_eq!(offered(true), (false, serde_json::Value::Null, Some(rung)));
     }
-
-    #[tokio::test]
-    async fn a_model_the_cli_swapped_is_kept_beside_the_one_it_ran() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = engine(&dir);
-        for (ran, swapped) in [("claude-haiku-5-5", Some("claude-sonnet-5-5")), ("claude-sonnet-5-5[1m]", None)] {
-            let id = seed(&engine, Session::from_fn(|_| {}), &[("t1", &[])]);
-            engine.with(|core| {
-                core.live.get_mut(&id).unwrap().model = Some("claude-sonnet-5-5".into());
-                core.handle(&id, 1, EngineEvent::Started { session_id: "s".into(), model: ran.into() });
-                let reply = core.convs[&id].messages.last().unwrap();
-                assert_eq!(reply.model.as_deref(), Some(ran));
-                assert_eq!(reply.asked_model.as_deref(), swapped, "asked claude-sonnet-5-5, ran {ran}");
-            });
-        }
-        engine.shutdown();
-    }
 }

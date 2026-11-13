@@ -620,8 +620,8 @@ check('settings: unsupported system controls are absent outside Windows', () => 
     onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
   }));
   try {
-    // Hooks, full trust, stronger AI if stuck, notify, sound, resume and previews; keep-awake and autostart are Windows-only.
-    equal(view.host.querySelectorAll('input[role="switch"]').length, 7);
+    // Hooks, full trust, notify, sound, resume and previews; keep-awake and autostart are Windows-only.
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 6);
   } finally {
     view.stop();
     if (original) Object.defineProperty(navigator, 'userAgent', original);

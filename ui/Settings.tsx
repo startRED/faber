@@ -265,7 +265,6 @@ export function Settings(props: Props) {
               <Toggle id="set-hooks" label={t('set.hooksBody')} hint={t(mode() === 'dontAsk' ? 'set.hooksLocked' : 'set.hooksHint')} more={[t('set.hooksMore'), t('set.hooksScope'), ...hookLines()]} checked={mode() === 'dontAsk' || props.saved.userHooks === true} disabled={mode() === 'dontAsk'} onChange={(on) => save({ userHooks: on })} />
               {/* Guardrail 3: when the agent changes Faber itself it asks; this skips that card and nothing else (never sending, publishing, paying or deleting). */}
               <Toggle id="set-trust" label={t('set.faberTrust')} hint={t('set.faberTrustHint')} more={t('set.faberTrustMore')} checked={props.saved.faberTrust === true} onChange={(on) => save({ faberTrust: on })} />
-              <Toggle id="set-stronger" label={t('set.strongerWhenStuck')} hint={t('set.strongerWhenStuckHint')} more={t('set.strongerWhenStuckMore')} checked={props.saved.strongerWhenStuck === true} onChange={(on) => save({ strongerWhenStuck: on })} />
               <Show when={props.onChatFolder}>
                 <ChatFolder {...props} />
               </Show>
