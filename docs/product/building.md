@@ -103,7 +103,9 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 - **Missing-item gate.** A worker finishes through a report with required "assumed" and "could not reach" fields. A
   missing login, tool, file or secret, or a stand-in (a mock, a fake key, an invented path), keeps the step waiting
   with the missing item named, and "done" is refused. The user's answer goes into the brief, and every new brief is
-  checked against past gaps first. The reviewer from the other vendor checks "assumed" against the diff.
+  checked against past gaps first. The reviewer from the other vendor checks "assumed" against the diff. Built for a
+  single project conversation (R570): a done after edits names each thing asked with its proof, Faber matches the
+  proofs with what ran after the last edit, and an unproven done is refused twice, then shown as not confirmed.
 - **A canary before a batch.** When the lead fans out similar workers (one per repository, file, chapter or
   thumbnail), one runs first and passes its proof and a review from the other vendor; its mistakes become rules in
   the brief, then the rest start in parallel. Batches of three or fewer, or with a very cheap proof, skip it.

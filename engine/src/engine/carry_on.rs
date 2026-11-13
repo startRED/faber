@@ -100,7 +100,7 @@ mod tests {
         m.wrap_up = Some(WrapUp {
             recap: "Part of it.".into(),
             outcome: Some(outcome),
-            summary: Some(ConclusionSummary { did: "d".into(), result: "r".into(), not_done: left.into(), verified: String::new() }),
+            summary: Some(ConclusionSummary { did: "d".into(), result: "r".into(), not_done: left.into(), ..Default::default() }),
             ..Default::default()
         });
         if wrote {

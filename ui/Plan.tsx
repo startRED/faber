@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { Plan, PlanCount, WrapUp } from './api.ts';
+import type { GuardFact, Plan, PlanCount, Proof, WrapUp } from './api.ts';
 import { Collapse } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -79,6 +79,25 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
   );
 }
 
+/** What Faber saw behind a done conclusion: how many things asked a receipt confirms, what is not confirmed, and what it
+ * noticed in the edits. Quiet lines; a conclusion let through without proof says so first. */
+function ProofLines(props: { proof: Proof }) {
+  const fact = (f: GuardFact) =>
+    f.kind === 'outside' ? t('wrap.fact.outside', { n: f.count, files: f.files.join(', ') })
+      : f.kind === 'weakened' ? t('wrap.fact.weakened', { file: f.file, n: f.removed })
+      : t(`wrap.fact.${f.kind}`, { file: f.file });
+  return (
+    <div class="wrap-proof" data-labelled={props.proof.labelled ? '' : undefined}>
+      <Show when={props.proof.labelled}><p>{t('wrap.proof.labelled')}</p></Show>
+      <Show when={props.proof.total > 0}><p>{t('wrap.proof.count', { confirmed: props.proof.confirmed, total: props.proof.total })}</p></Show>
+      <Show when={props.proof.missing?.length}><p>{t('wrap.proof.missing', { list: (props.proof.missing ?? []).join('; ') })}</p></Show>
+      <Show when={props.proof.failed}><p>{t('wrap.proof.failed')}</p></Show>
+      <Show when={props.proof.unchecked && props.proof.labelled && !props.proof.total}><p>{t('wrap.proof.unchecked')}</p></Show>
+      <For each={props.proof.facts ?? []}>{(f) => <p>{fact(f)}</p>}</For>
+    </div>
+  );
+}
+
 /** The closing box of a task: the recap, and one question whose buttons reply for the person, the recommendation first. A
  * question Faber answered for them while Keep going ran keeps no buttons: the reply's answers card says what it chose. */
 export function WrapUpBox(props: { box: WrapUp; open: boolean; written?: boolean; onReply?: (text: string) => void }) {
@@ -86,11 +105,12 @@ export function WrapUpBox(props: { box: WrapUp; open: boolean; written?: boolean
   // An AI that concluded and wrote nothing after it leaves the recap here, so the result is never lost.
   const own = () => !!props.box.summary && props.written !== false;
   return (
-    <Show when={!own() || props.box.ask}>
+    <Show when={!own() || props.box.ask || props.box.proof}>
       <section class="wrap-up" aria-label={t('wrap.label')}>
         <Show when={!own()}>
           <p class="recap">{props.box.recap}</p>
         </Show>
+        <Show when={props.box.proof}>{(proof) => <ProofLines proof={proof()} />}</Show>
         <Show when={props.box.ask}>
           {(ask) => (
             <div class="wrap-ask">

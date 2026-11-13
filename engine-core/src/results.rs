@@ -394,6 +394,7 @@ mod tests {
             answered: None,
             outcome: None,
             summary: None,
+            proof: None,
         });
         let c = conv(vec![person(1), reply(2, "Here is why."), faber(3), reply(4, "I looked again."), faber(5), done]);
         let r = tally(&c);
@@ -453,6 +454,7 @@ mod tests {
             answered: None,
             outcome: None,
             summary: None,
+            proof: None,
         });
         let c = conv(vec![faber(3), open]);
         assert_eq!(tally(&c).dry.turns, 1);
@@ -471,6 +473,7 @@ mod tests {
             answered: None,
             outcome: None,
             summary: None,
+            proof: None,
         });
         let r = tally(&conv(vec![person(1), running]));
         assert_eq!((r.cost.turns, r.delivered.files, r.delivered.answers), (0, 1, 0));
