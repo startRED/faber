@@ -121,6 +121,7 @@ would end with it). It says that the agent has given no news for N minutes (10 e
 command runs; the number moves once a minute), that compacting the conversation has taken N minutes (past 5), that it keeps running the same
 step (six times in a row, or 10 with no file changed whatever came between), or that the same step failed three times
 with no file changed. The sign stops nothing: the existing 15-minute stop with no open step still applies.
+Quiet or stuck pieces: [queue](queue.md#child-reports).
 The running column shows the same words on the row, with "Open conversation", like a stuck helper's.
 
 Up to three helpers run if memory allows; reports, saved logs and their exchanges with the lead: [team channel](helper-team.md).

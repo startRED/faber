@@ -15,7 +15,16 @@
   Other automatic continuations keep waiting for their own turn.
 - Turn completion drains this queue and reports to the parent through the same idempotent path, including after
   compaction and interrupted-turn recovery, carrying the existing conclusion state once per reply. Reply endings
-  start no automatic checks or fix wakes. Plan approval, Stop and Keep going keep their holds. No new control or timer.
+  start no automatic checks or fix wakes. Plan approval, Stop and Keep going keep their holds. No new control.
+- Reports that wait one behind the other go out as one turn: the lead reads them all together, under one quiet line in
+  the plural ("3 conversations this agent started finished…", `wake.childrenDone`); the merged message keeps each
+  report's id (`Wake.ids`) so a restart never sends one twice. A person's message between two reports keeps them apart.
+  A routine report (the conversation concluded) to an idle lead whose other conversations still work waits 5 seconds,
+  pushed back by each report that joins it and never past 30 seconds after the first (`report_hold.rs`); a failed,
+  stopped, cut-off, unconcluded or needs-the-person report goes out at once and takes the held ones along, as does the
+  last report of a team. Each report starts with Faber's own record of the conversation: files changed, checks run, and
+  whether a check ran after the last edit (`results::record_line`). Successes can reach the lead up to 30 seconds later
+  (IA, Erick delegated, 2026-11-13).
 - A queued chip keeps its badge, words and attachments. Edit uses the same quiet text button as Remove and Send now;
   while editing, a small text box replaces only the words and Save and Cancel replace the actions. Enter saves,
   Shift+Enter adds a line and Escape cancels from any control in the editor form; composition input never saves or
@@ -46,3 +55,11 @@
 - Checks: `tests/ui/edit-queued.check.ts` covers keys, focus and draft recovery, including a recreated app;
   `testkit/src/screen/app.rs` sends the edited words through the real command to the fake CLI.
 
+## Child reports
+
+A conversation another agent started tells that agent once per reply (`quiet_child.rs`, `wake.childQuiet`): when a step of its
+own has said nothing for 30 minutes, when it repeats the same step or fails it three times, or when it has worked for an hour
+without changing a file or passing a check. The line names the conversation and its latest step and says Faber stopped
+nothing; held reports go out first. A piece that ends twice in a row with no file changed and no conclusion gets, in its
+lead's report, the same AI's stronger model and how much more a turn costs there; with "Stronger AI if stuck"
+on, Faber moves it there once with one checkable step (`stronger.rs`, `wake.stronger`).

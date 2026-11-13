@@ -431,6 +431,10 @@ pub struct Message {
     pub vendor: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The model Faber asked the CLI for, kept only when the CLI said it runs another (`model`): a vendor that swaps a
+    /// model behind its name shows up in the record and the bench instead of as answers that quietly got worse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asked_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -711,11 +715,20 @@ pub struct Wake {
     pub pr: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<String>,
+    /// The other queued items this one stands for: reports of conversations an agent started that Faber merged into one turn
+    /// (`wake.childDone`), by their report ids, so a restart still finds each report delivered and never sends it twice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
 }
 
 impl Wake {
     pub fn of(why: &str) -> Wake {
-        Wake { why: why.into(), pr: None, checks: vec![] }
+        Wake { why: why.into(), pr: None, checks: vec![], ids: vec![] }
+    }
+
+    /// Whether the message or queued item `own` (its id) carrying this wake delivered the report `id`.
+    pub fn carries(own: &str, wake: Option<&Wake>, id: &str) -> bool {
+        own == id || wake.is_some_and(|w| w.ids.iter().any(|i| i == id))
     }
 }
 
@@ -1093,6 +1106,7 @@ impl Message {
             attachments: None,
             vendor: None,
             model: None,
+            asked_model: None,
             effort: None,
             reason: None,
             overload_retry: None,
@@ -1290,6 +1304,10 @@ pub struct Conversation {
     /// Its latest completion still needs a place in its parent's bounded inbox.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pending_parent_report: bool,
+    /// The replies in a row, latest last, that ended this piece without changing a file and without concluding it
+    /// (`stronger.rs`); a reply that changes a file or concludes empties it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub empty_ends: Vec<String>,
     /// The agent declared it waits for the conversations it started (or for a stated reason) instead of being done: its turn
     /// ending is then not an ending (`crate::sibling` `wait`). Cleared when a conversation it waits for reports, or at its next turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1708,6 +1726,10 @@ pub struct Settings {
     /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
+    /// A piece an agent handed out that ended twice without changing anything moves by itself to the stronger model of the
+    /// same AI, with a narrower instruction (off by default: the lead is told the step up and its quota cost, and decides).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stronger_when_stuck: Option<bool>,
     /// A random token that every stricter mode replaces, in the same save that changes the mode. A remembered "Always allow"
     /// stands only if it was made under the current token, wherever it is still stored, so a conversation file that failed to
     /// update cannot bring it back, and no clock is involved. A grant with no token stands only while the settings have never
@@ -1768,6 +1790,10 @@ impl Settings {
         self.autostart.unwrap_or(false)
     }
 
+    pub fn stronger_when_stuck(&self) -> bool {
+        self.stronger_when_stuck.unwrap_or(false)
+    }
+
     pub fn faber_trust(&self) -> bool {
         self.faber_trust.unwrap_or(false)
     }
@@ -1783,6 +1809,7 @@ impl Settings {
             keep_awake: Some(self.keep_awake()),
             resume_interrupted: Some(self.resume_interrupted()),
             autostart: Some(self.autostart()),
+            stronger_when_stuck: Some(self.stronger_when_stuck()),
             ..self
         }
     }
@@ -2239,7 +2266,7 @@ mod tests {
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
         assert_eq!(
             serde_json::to_value(Settings::default().shown()).unwrap(),
-            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false })
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false, "strongerWhenStuck": false })
         );
         let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
         assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));

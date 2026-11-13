@@ -58,6 +58,13 @@ pub fn pinned(vendor: Vendor, model: &str) -> &str {
         .map_or(model, |p| p.model)
 }
 
+/// Whether the model a CLI says it runs is the one asked for: case aside, and without the context size Claude Code may add
+/// ("claude-opus-5-5[1m]"). Anything else is another model.
+pub fn same_model(asked: &str, ran: &str) -> bool {
+    let bare = |m: &str| m.split('[').next().unwrap_or(m).trim().to_ascii_lowercase();
+    bare(asked) == bare(ran)
+}
+
 /// The model a start runs when nothing named one, so that no start leaves the choice to the CLI (rule 2 of
 /// docs/product/models.md): Claude's is Auto's everyday model. ChatGPT's comes from the account first: its recommended model,
 /// else the first model it lists that Auto's table knows, else the first it lists; the table's own first model only when the
