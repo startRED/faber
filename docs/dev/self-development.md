@@ -43,6 +43,12 @@ conversations or planned three or more steps, and how many small ones started no
 tokens and dollars at API price. Run it before and after a change to the agent's instructions or tools
 (`engine-drivers/src/persona.rs`, `engine-drivers/src/sibling.rs`); `cargo test -p faber-engine --example leader_eval` checks its counting.
 
+`cargo run -p faber-engine --example fanout_eval [-- runs children]` measures what a wave of reports costs a lead: a Haiku
+lead starts `children` Haiku conversations that each write one file, waits and checks them. Runs alternate report batching
+off and on (`Engine::set_batch_reports`) and print lead turns, report wakes and the reports they carried, cache reads,
+first-time tokens, dollars, seconds from the last conversation's end to the lead's next answer, files right and reports
+lost. Run it before and after a change to how reports reach a lead (`siblings.rs`, `report_hold.rs`).
+
 ## What stays the owner's
 
 Direction, taste, money and license (AGENTS.md). The agent asks those in a question card inside its message and goes on
