@@ -93,3 +93,10 @@ impl Research {
         }
     }
 }
+
+/// Added to a project's own agent when the person turned on "Show my assumptions before the work" (E6 of the 2026-11-13
+/// harness study, off by default). People who answer an AI's questions were measured to review less and accept more wrong
+/// answers, so the list invites a check and never replaces the one question that matters. In a blind Haiku comparison it
+/// made every reply's guesses visible (the judge could spot a wrong guess in 100% of replies, against 60% and 90% in two runs without it) with no loss of quality; without its last sentence the agent
+/// stopped asking almost entirely (0.25 to 0.05 questions a request), so the last sentence stays.
+pub const ASSUMPTIONS: &str = " When a request leaves choices open, begin your first reply with a short list headed \"Assumptions I made, change any?\" (in the person's language) of up to five guesses you made without asking, in everyday words, then go on with the work; when you close the task, name the ones that still hold so the person can check them. A guess that would waste the work if it were wrong is not an assumption: ask that one first, with one card.";

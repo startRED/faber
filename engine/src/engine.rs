@@ -2675,6 +2675,7 @@ impl Core {
             permissions_revision: before.permissions_revision,
             previews: patch.previews.or(before.previews),
             faber_trust: patch.faber_trust.or(before.faber_trust),
+            show_assumptions: patch.show_assumptions.or(before.show_assumptions),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.

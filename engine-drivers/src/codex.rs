@@ -1209,6 +1209,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             if t.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
             }
+            if t.progress && t.tuning.assumptions {
+                words.push_str(crate::persona::ASSUMPTIONS);
+            }
             if t.leads {
                 words.push_str(crate::persona::LEADS);
             }

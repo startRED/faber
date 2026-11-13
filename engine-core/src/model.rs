@@ -1730,6 +1730,10 @@ pub struct Settings {
     /// tool of the agent does (in Full access the agent could still edit the file itself, so this is no wall against it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub faber_trust: Option<bool>,
+    /// A project's agent lists the guesses it made without asking before it works (`persona::ASSUMPTIONS`, E6 of the
+    /// 2026-11-13 harness study). Off by default until the owner chooses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_assumptions: Option<bool>,
 }
 
 /// A fresh grants epoch: 244 random bits as hex.
@@ -1921,6 +1925,8 @@ pub struct Tuning {
     /// The language chosen for Faber's screen ("en", "pt-BR"...), none when it follows the system: the replies' language when
     /// the person's latest message has none of its own (task 130).
     pub language: Option<String>,
+    /// The person chose to see the agent's assumptions before the work (`Settings::show_assumptions`).
+    pub assumptions: bool,
 }
 
 impl Settings {
@@ -1932,6 +1938,7 @@ impl Settings {
             reply_style: self.reply_style.unwrap_or_default(),
             reply_style_text: self.reply_style_text.as_deref().map(clean_reply_style_text).unwrap_or_default(),
             language: self.language.clone(),
+            assumptions: self.show_assumptions == Some(true),
         }
     }
 }

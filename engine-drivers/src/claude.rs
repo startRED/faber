@@ -471,6 +471,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             if launch.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
             }
+            if launch.progress && launch.tuning.assumptions {
+                words.push_str(crate::persona::ASSUMPTIONS);
+            }
             if launch.leads {
                 words.push_str(crate::persona::LEADS);
             }
