@@ -415,10 +415,10 @@ pub fn claude_agents(team: &Subagents) -> Value {
 /// The goal sentence and the plan check (bench 2026-11-12): a lead whose plan named what a 12-year-old must be able to say
 /// after one viewing made the clearest film (v11, 8.8); one whose plan named only a look built a polished film whose picture
 /// contradicted its point (v12, 8.2), and neither review caught it, since both judged the build and not the point.
-pub const HELPERS: &str = " Hand a piece that changes files, a review of finished work and a second opinion to the helper tool, not to your own subagents: Faber gives each piece the right model, and a review the other AI when it is connected. Keep your own subagents for quick read-only searches. Before you plan work that takes more than one piece, write in one sentence what the person, or the audience they named, must get from the result (what they can do, say or find after it), and put it first in the plan; have a review helper check the plan against that sentence before anything is built, and give the sentence to every reviewer of the finished work.";
+pub const HELPERS: &str = " Hand a piece that changes files, a review of finished work and a second opinion to the helper tool, not to your own subagents: Faber gives each piece the right model, and a review the other AI when it is connected. Keep your own subagents for quick read-only searches. Before you plan work that takes more than one piece, write in one sentence what the person, or the audience they named, must get from the result (what they can do, say or find after it), and put it first in the plan; have a review helper check the plan against that sentence before anything is built, and give the sentence to every reviewer of the finished work. Fix every finding a person would notice, whatever severity the reviewer gave it, and review again; a review that still lists one is no approval.";
 
 /// What every review helper is told before its brief: the point before the polish, whatever the work is.
-pub const SUBSTANCE: &str = "Judge substance before craft. First say in one sentence what was asked and for whom (the person, or the audience the request names), then meet the result the way they will: open, run, watch or read it, not only its source. List first anything that leaves out what was asked, would not be clear to them on a first pass, or contradicts its own point (a picture, example, number or wording that says otherwise), even when everything else is polished; then craft. A fine finish never makes up for a missed point.";
+pub const SUBSTANCE: &str = "Judge substance before craft. First say in one sentence what was asked and for whom (the person, or the audience the request names), then meet the result the way they will: open, run, watch or read it, not only its source. List first anything that leaves out what was asked, would not be clear to them on a first pass, or contradicts its own point (a picture, example, number or wording that says otherwise), even when everything else is polished; then craft. A fine finish never makes up for a missed point. Grade by what they would notice, not by kind: anything they would see or hear on a first pass (the main subject, a face, the key moment, a voice, the first screen) is a problem to fix, never optional polish. Something you cannot check yourself that has a safer known way (a step known to degrade the result) is a problem to fix too, not a note for a person to check.";
 
 /// What the helper's session is asked: the agent's own title and brief, with a bounded team channel.
 pub fn prompt(input: &Value) -> Option<String> {
@@ -1078,6 +1078,10 @@ mod team_tests {
                 && HELPERS.contains("check the plan against that sentence before anything is built")
         );
         assert!(HELPERS.contains("give the sentence to every reviewer"));
+        // Bench v13 (2026-11-12): the review saw rays covering the child's face and a voice slowed 0.8x afterwards, filed both as
+        // optional, and the lead approved; the owner noticed both at once.
+        assert!(SUBSTANCE.contains("never optional polish") && SUBSTANCE.contains("a safer known way"));
+        assert!(HELPERS.contains("whatever severity the reviewer gave it"));
     }
 }
 

@@ -273,12 +273,15 @@ impl Core {
         self.allows(vendor, family, Purpose::UserTurn { by_hand: false }, false).map_err(refusal)?;
         let project = self.convs.get(conv).and_then(|c| c.project_id.clone());
         let disabled = self.project_disabled_servers(project.as_deref());
-        let raw = self.session_tools(vendor, Area::Project, permissions, project.as_deref(), &prompt, &cwd);
+        // Skills are picked from the agent's own words for the piece, never from Faber's standing helper text: the review
+        // wording (`helper::SUBSTANCE`) would otherwise pull the same kits into every review.
+        let words = ["title", "brief"].map(|k| input[k].as_str().unwrap_or_default().trim()).join("\n\n");
+        let raw = self.session_tools(vendor, Area::Project, permissions, project.as_deref(), &words, &cwd);
         if !self.worker_admitted(&check_name, conv) {
             return Err(super::worker_memory::PENDING);
         }
         let (mut tools, _) = self
-            .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, prompt.clone(), None, vec![], disabled, raw, None)
+            .check_kit(&check_name, conv, vendor, Area::Project, permissions, &cwd, words, None, vec![], disabled, raw, None)
             .map_err(|_| super::mcp_servers::CHECK_PENDING)?;
         self.finish_worker_admission(&check_name);
         let flags = if vendor == Vendor::Claude { self.claude_flags_for(&cli) } else { Default::default() };

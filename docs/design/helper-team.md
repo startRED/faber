@@ -46,7 +46,9 @@ Every review helper, a Review round's included, is told before its brief to judg
 it), and list first what is missing, unclear on a first pass or contradicts its own point. The lead's helper note
 (`helper::HELPERS`) asks it to open any plan of more than one piece with one sentence of what the person or their named
 audience must get from the result, to have a review helper check the plan against it before building, and to pass it to
-every reviewer. Why: on the 2026-11-12 explainer bench the lead whose plan stated that outcome made the clearest film,
+every reviewer. Reviewers grade by what that audience would notice on a first pass, never by kind, and treat an
+unchecked risk with a safer known way as a problem; the lead fixes every finding a person would notice, whatever its
+severity, and reviews again (v13 approved rays over the child's face and a voice slowed 0.8x afterwards as optional). Why: on the 2026-11-12 explainer bench the lead whose plan stated that outcome made the clearest film,
 and a polished film whose picture contradicted its point passed two craft reviews. Cost: about 1 KB more prompt per lead
 and reviewer and one short plan review on multi-piece work; no process, state or memory.
 A tell addressed to the lead is refused with instructions to use ask.
