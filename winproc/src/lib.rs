@@ -8,6 +8,9 @@
 //! Project memory uses handle-relative, no-follow file access through `MemoryDirectory` on Windows.
 //! The command line's named pipe is made here too, open only to the signed-in user (`pipe.rs`), with the user's language for its words (`locale.rs`).
 
+mod gpu;
+pub use gpu::available_vram_mb;
+
 /// Puts this dedicated worker in macOS's background quality-of-service class until it exits.
 #[cfg(target_os = "macos")]
 pub fn background_thread() -> std::io::Result<()> {

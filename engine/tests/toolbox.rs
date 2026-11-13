@@ -617,6 +617,7 @@ fn careful(commit: &str) -> faber_engine::tools::Item {
         path: "skills/careful".into(),
         digest: faber_engine::tools::digest(dir.path()).unwrap(),
         chat_safe: false,
+        runtime: None,
         server: None,
     }
 }

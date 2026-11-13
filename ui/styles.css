@@ -1900,6 +1900,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .catalog-batch-error { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-left: 10px; color: var(--ink); box-shadow: inset 2px 0 0 var(--danger); }
 .catalog-batch-count { font-weight: 580; font-variant-numeric: tabular-nums; }
 .catalog-batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.catalog-detail .catalog-runtime-line { display: block; margin: 10px 0; }
 .catalog-detail { max-width: 720px; margin: 0 auto; }
 .catalog-return { position: sticky; top: 0; z-index: 1; padding: 12px 0; background: var(--bg); }
 .catalog-detail h1 { margin: 0 0 6px; overflow-wrap: anywhere; }

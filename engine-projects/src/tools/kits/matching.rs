@@ -827,13 +827,34 @@ mod tests {
                     "Miss die Leistung meines Servers",
                 ],
             ),
+            (
+                "faster-whisper",
+                [
+                    "Add a voice-over and sound effects to the product demo",
+                    "Grave uma locução para o anúncio",
+                    "Haz un video con narración y música de fondo",
+                    "Ajoute une voix off et de la musique à la vidéo",
+                    "Erstelle ein Video mit Erzähler und Hintergrundmusik",
+                ],
+                [
+                    "Make a silent animated logo for the landing page",
+                    "Faça uma animação do logo sem som para a página inicial",
+                    "Haz una animación del logo para la página de inicio",
+                    "Crée une animation du logo pour la page d'accueil",
+                    "Erstelle eine Logo-Animation für die Startseite",
+                ],
+            ),
         ];
         let items = crate::tools::catalog();
         let temp = tempfile::tempdir().unwrap();
         let store = crate::tools::Store::with_catalog(temp.path(), items.to_vec());
         let mut installed = std::collections::BTreeMap::new();
         for item in items {
-            let marker = store.dir(item).join(item.server.as_ref().map_or("SKILL.md", |server| server.entry.as_str()));
+            let marker = store.dir(item).join(if item.runtime.is_some() {
+                "instructions/SKILL.md"
+            } else {
+                item.server.as_ref().map_or("SKILL.md", |server| server.entry.as_str())
+            });
             std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
             std::fs::write(marker, "Matching fixture; not delivered as instructions").unwrap();
             installed.insert(item.id.clone(), item.commit.clone());

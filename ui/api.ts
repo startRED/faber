@@ -762,6 +762,11 @@ export interface Attachment {
 export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
 /** One skill of Faber's catalog (src-tauri/src/tools.rs). */
 export interface ToolRow {
+  runtime?: { kind: 'python' | 'file'; source: string; sha256: string; size: number; weights_license: string; capability: string; min_vram_mb?: number; command: string } | null;
+  uvAvailable?: boolean;
+  runtimeAvailable?: boolean;
+  runtimeFits?: boolean;
+  runtimeDownloadSize?: number;
   removedEnabled?: boolean | null;
   hasCopy?: boolean;
   id: string;

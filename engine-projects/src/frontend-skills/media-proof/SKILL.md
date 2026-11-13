@@ -48,6 +48,13 @@ installed for tighter alignment), save it in `<listen>`, and compare it with the
 
 ## 3. Scores (advisory)
 
+Use the installed one: when the session kit lists `speechmos`, `utmosv2` or `audiobox-aesthetics`, run each installed
+command on the relevant generated stem and save its JSON output in `<listen>`. DNSMOS takes the voice stem;
+UTMOSv2 takes the voice stem when its GPU fits; Audiobox takes the music/effects stems and final mix. Use the absolute
+command from the kit, including its isolated Python flags and launcher, followed by the audio path. Never substitute
+an unpinned download or ask the person for source material. If an installed scorer fails, record its error as not run
+and continue. Copy Audiobox's attribution line into the credits file.
+
 - DNSMOS through `speechmos` on the processor: signal, background and overall quality of the voice.
 - UTMOSv2 for naturalness, only when a graphics card fits it.
 - Audiobox Aesthetics for the production quality of music and effects (its licence asks for attribution).
