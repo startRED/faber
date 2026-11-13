@@ -74,6 +74,8 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
 | [research/aside-study.md](research/aside-study.md) | A static study of another app's browser and desk, and the build order the browser lane follows |
+| [research/harness-study-2026-11.md](research/harness-study-2026-11.md) | Before changing how the lead agent reviews, verifies, hands off or asks: what measured studies and user complaints say raises quality and cuts cost, and which figures are still unverified |
+| [research/harness-rivals-and-build-order-2026-11.md](research/harness-rivals-and-build-order-2026-11.md) | Before borrowing an idea from another harness: what each rival does best, its weakness, and the proposed build order (quality, then cost, then time) |
 | [dev/workflow.md](dev/workflow.md) | The lanes (how many, how big, how reviewed), lane claims, the task queue, a red base and the numbers given at landing |
 | [dev/landing.md](dev/landing.md) | Merge on green: the queue, batches and local checks before landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
