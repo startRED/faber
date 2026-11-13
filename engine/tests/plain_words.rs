@@ -57,7 +57,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                         let args = claude_args(&ClaudeLaunch { area, ..launch.clone() });
                         let words = &args[args.iter().position(|a| a == "--append-system-prompt").unwrap() + 1];
                         assert_rule(words);
-                        assert_eq!(words.contains("Technical details view"), area == Area::Project);
+                        assert_eq!(words.contains("Never wait by sleeping or polling"), area == Area::Project);
                         assert!(!words.contains("saved for the next version"));
                     }
                     start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch, spawn, sandbox: None }, sink)
@@ -88,7 +88,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                         let (_, params) = thread_params(area, &thread);
                         let words = params["developerInstructions"].as_str().unwrap();
                         assert_rule(words);
-                        assert_eq!(words.contains("Technical details view"), area == Area::Project);
+                        assert_eq!(words.contains("Never wait by sleeping or polling"), area == Area::Project);
                         assert!(!words.contains("saved for the next version"));
                     }
                     CodexServer::start(CodexServerOptions {

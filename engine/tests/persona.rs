@@ -6,7 +6,6 @@ fn plain_words_keep_failures_unfinished_work_decisions_and_useful_file_locations
     assert!(text.contains("Always say plainly when something failed, is not finished, or needs the person's decision"));
     assert!(text.contains("plain words never drop a problem"));
     assert!(text.contains("Allow a file location when the person needs to find or open something you made"));
-    assert!(!text.contains("Technical details view"), "the common Chat persona must not promise a project-only view");
     assert!(!text.contains("saved for the next version"), "saving alone promises no release");
 }
 
@@ -174,13 +173,9 @@ fn every_project_receives_the_portable_git_workflow_without_changing_chat() {
     for rule in [
         "In every project, use its existing workflow",
         "do not make another full clone for each task",
-        "never share a writable dependency tree between incompatible lockfiles or toolchains",
-        "reuse passes only while their inputs and environment are unchanged",
-        "When checks are declared, use verify full before delivery and after environment, toolchain or installed dependency changes",
-        "exact revision being delivered",
+        "use verify fast while iterating and verify full before delivery",
         "never silently update the person's checkout",
-        "without removing required checks or replacing its pipeline",
-        "only Faber-owned idle copies",
+        "keep its existing CI, required checks and permissions",
     ] {
         assert!(project.contains(rule), "missing workflow rule: {rule}");
         assert!(!common.contains(rule), "project workflow leaked into Chat: {rule}");
@@ -197,6 +192,10 @@ fn a_project_prompt_teaches_the_bigger_offer_and_the_common_persona_does_not() {
     assert!(offer.contains("offer_bigger") && offer.contains("offer the larger version once"));
     assert!(offer.contains("the request as asked stays the default"));
     assert!(offer.contains("Do not ask this any other way."), "the code counts only the tool");
+    assert!(
+        offer.contains("do the request as asked first") && offer.contains("Never hold the work for this offer"),
+        "the offer never delays the work"
+    );
 }
 
 #[test]

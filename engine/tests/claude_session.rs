@@ -977,7 +977,7 @@ fn only_a_project_agent_given_the_bigger_offer_tool_is_told_to_use_it() {
     assert!(prompt(ClaudeLaunch { progress: true, ..launch(Area::Project) }).ends_with(faber_engine::persona::BIGGER_OFFER));
     // A helper has the project's details and none of the agent's own tools.
     let helper = prompt(launch(Area::Project));
-    assert!(helper.contains("Technical details") && !helper.contains("offer_bigger"), "{helper}");
+    assert!(helper.contains("Never wait by sleeping or polling") && !helper.contains("offer_bigger"), "{helper}");
     assert!(!prompt(launch(Area::Chat)).contains("offer_bigger"));
     // The person's own project agent is told when to lead a small team; a team member, a helper and Chat never are.
     let leads = faber_engine::persona::LEADS;

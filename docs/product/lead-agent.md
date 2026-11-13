@@ -56,8 +56,9 @@ direction, 2026-10-21). Five proposals for the lead agent; the owner chose on 20
   goals, the switch per project in Settings (off by default), the check run through the verifier, a fix started as an
   ordinary conversation in a separate copy, and US$2 a day per project. Of phase 2, the local crash file is built (R421), and so are, in Faber's own project, a goal over the installed Faber's crash file (the dev Faber reads it, read
   only; Faber sends it nowhere itself, but when a fix starts the newest lines are given to the AI that fixes it) and a fix whose copy starts at the build's commit when the repository has it (R425, R426, R427). A source over another program's logs is not built.
-- **Offer the bigger ask** (approved and built, 2026-10-22: the `offer_bigger` tool of the toolbox below). When a request is small and the goal behind it is clear, the lead offers the larger version
-  in a question card whose default is the request as asked, already chosen so one press of Send sends it: "You asked to fix this crash. Should I keep the app free of
+- **Offer the bigger ask** (approved and built, 2026-10-22: the `offer_bigger` tool of the toolbox below). When a request is small and the goal behind it is clear, the lead does it as asked and then offers the larger version
+  in a question card whose default is the request as asked, already chosen so one press of Send keeps it (never before
+  the work: a card that held the start cost about 50 s of a 99 s fix in a real run on 2026-11-12): "You asked to fix this crash. Should I keep the app free of
   crashes?" At most one per conversation, so it never turns into noise; people new to AI gain the most from it.
 - **A deeper pass before big work** (not chosen, 2026-10-22). Before it writes the workers' briefs, the lead answers four questions in one short
   turn: what a top professional would do that the request leaves out, the rawest material they would start from, the

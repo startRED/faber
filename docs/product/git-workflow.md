@@ -37,10 +37,11 @@ hashes disable reuse, and passes are scoped to the working folder. The cache doe
 to environment variables, tool binaries or installed dependency contents: agents must use full verification after
 those changes and before delivery, rather than trust a previous fast pass.
 
-Both project drivers instruct agents to use available package-manager download caches, preserve required final
-checks on the exact delivered revision and avoid sharing writable dependency trees between incompatible lockfiles
-or toolchains. Independent work uses separate copies; changes to the same files need coordination. These instructions
-do not prove that an external tool or agent followed every recommendation.
+Both project drivers tell agents only what changes their own work: stay in the working folder instead of cloning,
+use verify fast while iterating and verify full before delivery, preserve local edits and unique commits, and keep
+the project's CI, required checks and permissions. Caches, copy retirement and Git upkeep are Faber's job and stay
+out of the prompt, so a project task is not steered toward them. These instructions do not prove that an external
+tool or agent followed every recommendation.
 
 The project's own instructions, CI and permission mode remain authoritative. Faber does not replace another
 project's pipeline or install tools automatically. When authorized to optimize one, the agent reuses its existing
