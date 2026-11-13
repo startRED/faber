@@ -1,10 +1,5 @@
 # Plan: audio runtimes in the catalog
 
-Status: built in `lane/audio-runtimes`. The implementation follows this contract; [media](../product/media.md)
-and [catalog design](../design/catalog.md#audio-runtimes) describe the delivered behavior, platform exclusions,
-download limits and verification. Hash-locked requirements, source/weight pins and immutable wheel integrity metadata
-live beside `engine-projects/src/tools.json`. All downloads are on demand and nothing third-party is bundled.
-
 Plan for the third part of the media work ([media craftsmanship](../product/media.md)). The skills and the `audio`
 job shipped first; the catalog cannot yet install anything that is not a GitHub folder or an npm server, so the agent
 today installs faster-whisper or FluidSynth itself, under its permissions, as media-craft tells it. This page is the

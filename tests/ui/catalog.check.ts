@@ -30,7 +30,7 @@ check('catalog: every shipped item resolves to its shared name in every language
   try {
     for (const locale of LANGUAGES) {
       useLanguage(locale.code);
-      for (const row of [...catalog.skills, ...catalog.servers, ...(catalog.runtimes ?? [])]) {
+      for (const row of [...catalog.skills, ...catalog.servers]) {
         const key = `catalog.name.${row.id}` as Key;
         ok(Object.hasOwn(locale.messages, key), `${locale.code}: ${row.id} has a hand-written name`);
         const name = locale.messages[key];
@@ -104,84 +104,6 @@ Object.assign(window, { __faberCatalogReplacementPreview: async () => {
   await tap(button(view.root, 'catalog.replace'));
   return true;
 } });
-
-const audioRows = (): ToolRow[] => [
-  { ...sample()[0], id: 'faster-whisper', job: 'audio', runtime: { kind: 'python', source: 'https://example.com/audio.whl', sha256: 'a'.repeat(64), size: 1024, weights_license: 'MIT', capability: 'align', command: '.venv/bin/python' }, uvAvailable: true },
-  { ...sample()[0], id: 'utmosv2', job: 'audio', license: 'CC-BY-NC-4.0', runtime: { kind: 'python', source: 'https://example.com/qa.whl', sha256: 'a'.repeat(64), size: 1024, weights_license: 'MIT', capability: 'qa', command: '.venv/bin/python', min_vram_mb: 4096 }, uvAvailable: true },
-  { ...sample()[0], id: 'audiobox-aesthetics', job: 'audio', runtime: { kind: 'python', source: 'https://example.com/aes.whl', sha256: 'a'.repeat(64), size: 2048, weights_license: 'CC-BY-4.0', capability: 'qa', command: '.venv/bin/python', min_vram_mb: 4096 }, uvAvailable: true },
-];
-
-Object.assign(window, { __faberAudioCatalogPreview: async () => {
-  const view = await panel({ rows: audioRows() });
-  view.root.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);z-index:10000';
-  return true;
-} });
-
-check('catalog runtimes: licence warnings precede installation in every language', async () => {
-  const language = lang();
-  try {
-    for (const locale of LANGUAGES) {
-      useLanguage(locale.code);
-      const rows = audioRows(), view = await panel({ rows });
-      try {
-        const mit = cards(view.root).find((card) => card.dataset.catalogCard === 'faster-whisper')!;
-        const nc = cards(view.root).find((card) => card.dataset.catalogCard === 'utmosv2')!;
-        const by = cards(view.root).find((card) => card.dataset.catalogCard === 'audiobox-aesthetics')!;
-        equal(mit.querySelector('[data-license-notice]'), null);
-        ok(nc.textContent?.includes(t('catalog.license.nonCommercial')), locale.code);
-        ok(by.textContent?.includes(t('catalog.license.attribution')), locale.code);
-        ok(by.textContent?.includes(t('catalog.runtimeMemory', { n: 4096 })));
-        await tap(nc);
-        ok(view.root.querySelector('.catalog-detail')?.textContent?.includes(t('catalog.license.nonCommercial')));
-        const notices = [...view.root.querySelectorAll<HTMLElement>('.catalog-detail [data-license-notice]')];
-        const info = view.root.querySelector<HTMLElement>('.catalog-detail [data-runtime-info]')!;
-        const install = button(view.root, 'catalog.install').getBoundingClientRect();
-        let previous = info.getBoundingClientRect().bottom;
-        for (const notice of notices) {
-          const box = notice.getBoundingClientRect();
-          ok(box.top >= previous && box.bottom <= install.top, 'licence notices have separate readable lines before Install');
-          previous = box.bottom;
-        }
-        deepEqual(view.calls.install, []);
-        await tap(button(view.root, 'catalog.back'));
-        // The model's licence is independent of the code's.
-        view.store[1].license = 'MIT'; view.store[1].runtime!.weights_license = 'CC-BY-NC-4.0'; view.publish(); await tick();
-        ok(cards(view.root).find((card) => card.dataset.catalogCard === 'utmosv2')?.textContent?.includes(t('catalog.license.nonCommercial')));
-      } finally { view.close(); }
-    }
-  } finally { useLanguage(language); }
-});
-
-check('catalog runtimes: missing uv links to its own installer and cannot install', async () => {
-  const rows = audioRows(); rows[0].uvAvailable = false;
-  const view = await panel({ rows });
-  try {
-    const card = cards(view.root).find((card) => card.dataset.catalogCard === 'faster-whisper')!;
-    ok(card.textContent?.includes(t('catalog.uvHelp')));
-    await tap(card);
-    ok(button(view.root, 'catalog.install').disabled);
-    await tap(button(view.root, 'catalog.getUv'));
-    deepEqual(view.calls.links, ['https://docs.astral.sh/uv/getting-started/installation/']);
-    deepEqual(view.calls.install, []);
-  } finally { view.close(); }
-});
-
-check('catalog runtimes: GPU memory warning blocks installation and refreshes when memory fits', async () => {
-  const rows = audioRows(); rows[1].runtimeFits = false;
-  const view = await panel({ rows });
-  try {
-    const card = cards(view.root).find((card) => card.dataset.catalogCard === 'utmosv2')!;
-    ok(card.querySelector('[data-runtime-memory-unavailable]'));
-    equal(card.parentElement?.querySelector('[data-catalog-quick-install]'), null);
-    await tap(card);
-    ok(view.root.querySelector('.catalog-detail [data-runtime-memory-unavailable]'));
-    ok(button(view.root, 'catalog.install').disabled);
-    deepEqual(view.calls.install, []);
-    view.store[1].runtimeFits = true; view.publish(); await tick();
-    equal(view.root.querySelector('[data-runtime-memory-unavailable]'), null);
-    equal(button(view.root, 'catalog.install').disabled, false);
-  } finally { view.close(); }
-});
 
 check('catalog: search comes before the select shown action', async () => {
   const view = await panel();

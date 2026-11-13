@@ -64,7 +64,6 @@ fn fixture(dir: &Path, files: &[(&str, &str)], package_metadata: &str) -> (Defin
         path: "bundle".into(),
         digest: digest(source.path()).unwrap(),
         chat_safe: false,
-        runtime: None,
         server: None,
     };
     let (tgz, package_digest) = package(dir, package_metadata);
@@ -126,7 +125,6 @@ fn a_skill_only_plugin_needs_no_node_and_keeps_its_lifecycle_and_vendor_delivery
             path: "bundle".into(),
             digest: digest(&source).unwrap(),
             chat_safe: false,
-            runtime: None,
             server: None,
         },
         parts: vec![Part {

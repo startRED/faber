@@ -68,7 +68,6 @@ pub(super) fn pinned_tree_fixture(leaf_scripts: serde_json::Value, leaf_files: &
         path: String::new(),
         digest: digest(source.path()).unwrap(),
         chat_safe: false,
-        runtime: None,
         server: Some(faber_engine::tools::Server {
             package: "@scope/tree".into(),
             version: "1.0.0".into(),
@@ -345,18 +344,11 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
     use faber_engine::tools::{Tier, catalog};
     let source = include_str!("../../engine-projects/src/tools.json");
     let file: serde_json::Value = serde_json::from_str(source).unwrap();
-    let entries: Vec<_> = file["skills"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .chain(file["servers"].as_array().unwrap())
-        .chain(file["runtimes"].as_array().unwrap())
-        .collect();
+    let entries: Vec<_> = file["skills"].as_array().unwrap().iter().chain(file["servers"].as_array().unwrap()).collect();
     let items = catalog();
     assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
     assert_eq!(file["skills"].as_array().unwrap().len(), 115, "audited skills and the pinned on-demand product demo kit");
     assert_eq!(file["servers"].as_array().unwrap().len(), 4, "only audited credential-free trees enter the catalog");
-    assert_eq!(file["runtimes"].as_array().unwrap().len(), 11, "processor tools, recorded packs and advisory GPU tools are present");
     assert!(source.len() <= 128 * 1024, "metadata budget including complete runtime pins: {} bytes", source.len());
     let locales = [
         include_str!("../../ui/locales/en.ts"),
@@ -373,13 +365,7 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
         assert_eq!(entry["id"].as_str(), Some(item.id.as_str()));
         assert!(matches!(
             item.license.as_str(),
-            "MIT"
-                | "Apache-2.0"
-                | "BSD-3-Clause"
-                | "Apache-2.0 AND OFL-1.1"
-                | "Apache-2.0 AND MIT AND CC-BY-4.0"
-                | "LGPL-2.1-or-later"
-                | "CC0-1.0"
+            "MIT" | "Apache-2.0" | "BSD-3-Clause" | "Apache-2.0 AND OFL-1.1" | "Apache-2.0 AND MIT AND CC-BY-4.0"
         ));
         assert_eq!(item.commit.len(), 40, "full commit: {}", item.id);
         assert_eq!(item.digest.len(), 64, "digest: {}", item.id);
@@ -389,7 +375,7 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
             "game-design" => 23,
             "marketing" => 11,
             "debugging" | "testing" | "lean" | "design" | "architecture" | "plan" | "mcp" | "skills" | "performance" | "database"
-            | "payments" | "platform" | "mobile" | "auth" | "measure" | "documents" | "web" | "research" | "audio" => 14,
+            | "payments" | "platform" | "mobile" | "auth" | "measure" | "documents" | "web" | "research" => 14,
             unknown => panic!("unknown job: {unknown}"),
         };
         let count = counts.entry(&item.job).or_insert(0);
@@ -463,7 +449,6 @@ fn item() -> Item {
         path: "skills/careful".into(),
         digest: digest(dir.path()).unwrap(),
         chat_safe: false,
-        runtime: None,
         server: None,
     }
 }
@@ -685,7 +670,6 @@ async fn a_server_downloads_from_npm_s_path_and_installs_only_with_the_catalog_s
         path: String::new(),
         digest: digest(dir.path()).unwrap(),
         chat_safe: false,
-        runtime: None,
         server: Some(faber_engine::tools::Server {
             package: "@scope/measure".into(),
             version: version.into(),

@@ -351,9 +351,7 @@ fn english() -> &'static HashMap<&'static str, String> {
 
 /// What a catalog item is called to the agent: a tool server, a plugin or a skill.
 fn kind_of(item: &Item, plugin: bool) -> &'static str {
-    if item.runtime.is_some() {
-        "audio runtime"
-    } else if item.server.is_some() {
+    if item.server.is_some() {
         "tool server"
     } else if plugin {
         "plugin"
@@ -469,23 +467,17 @@ pub fn bigger_reply(card: &Value, answer: Option<&str>) -> String {
 /// the tool from its own `catalog.name.<id>` and `tools.<id>` words.
 /// `runs_code` is true for a tool server, or a plugin that brings one: the card says it runs code on this computer.
 pub fn install_card(item: &Item, plugin: bool, runs_code: bool) -> Value {
-    let kind = if item.runtime.is_some() {
-        "runtime"
-    } else if item.server.is_some() {
+    let kind = if item.server.is_some() {
         "server"
     } else if plugin {
         "plugin"
     } else {
         "skill"
     };
-    let mut card = json!({
+    json!({
         "kind": kind, "id": item.id, "repo": item.repo, "license": item.license, "version": version_of(item),
-        "server": item.server.is_some(), "code": runs_code || item.runtime.as_ref().is_some_and(|runtime| runtime.kind == crate::tools::runtime::Kind::Python || runtime.command.ends_with(".exe"))
-    });
-    if let Some(runtime) = &item.runtime {
-        card["runtime"] = serde_json::to_value(runtime).expect("runtime descriptor");
-    }
-    card
+        "server": item.server.is_some(), "code": runs_code
+    })
 }
 
 /// The pinned version an install brings: a server's release, or a skill's commit.

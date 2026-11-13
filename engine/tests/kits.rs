@@ -26,7 +26,6 @@ fn skill(id: &str, job: &str, body: &str) -> Item {
         digest: digest(dir.path()).unwrap(),
         server: None,
         chat_safe: false,
-        runtime: None,
         cli_name: None,
         tier: Default::default(),
     }
@@ -661,7 +660,6 @@ fn chat_servers_require_an_explicit_review_and_never_cross_guarded_modes_or_proj
             tree: vec![],
         }),
         chat_safe,
-        runtime: None,
         cli_name: None,
         tier: Default::default(),
     };

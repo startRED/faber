@@ -3,8 +3,7 @@
 // hashes of the last read carried between calls (`memo`) like the host does per tab. Tokens are the estimate of
 // `scripts/tool-tokens.mjs`, plus `HEADER` for the lines Faber adds to every answer. docs/dev/benchmark.md has the figures.
 
-import { appliedLook, applyLook } from '../../ui/appearance.ts';
-import { check, deepEqual, equal, frames, ok } from './check.ts';
+import { check, deepEqual, equal, ok } from './check.ts';
 import act from '../../host/src/pane/act.js';
 import shop from '../../bench/browse/shop.html?raw';
 import article from '../../bench/browse/article.html?raw';
@@ -22,9 +21,6 @@ type Out = { view: string; memo: unknown; diff: boolean };
 type Answer = { ok: boolean; why?: string; turn?: string };
 
 async function onBench(html: string, run: (root: HTMLElement) => void | Promise<void>) {
-  const look = appliedLook();
-  // A prior theme's view-transition snapshot intercepts point hits as <html>; this fixture needs its live page.
-  if (look) { await applyLook({ ...look, motion: 'none' }); await frames(); }
   const root = document.createElement('div');
   root.style.cssText = 'position: fixed; left: 0; top: 0; width: 900px; height: 600px; overflow: auto;';
   const parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -33,7 +29,7 @@ async function onBench(html: string, run: (root: HTMLElement) => void | Promise<
   root.append(...parsed.body.childNodes);
   document.body.append(root);
   for (const code of scripts) { const s = document.createElement('script'); s.textContent = `{ ${code} }`; root.append(s); }
-  try { await run(root); } finally { root.remove(); if (look) await applyLook(look); }
+  try { await run(root); } finally { root.remove(); }
 }
 
 /** The agent's side: reads and acts as the host does, keeping each answer's memo for the next call. */

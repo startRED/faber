@@ -11,10 +11,6 @@ engine or a method (such as a given TTS command), use it and fit the rest of thi
 
 ## Make it alone
 
-Use the installed one first: the session kit lists checked audio runtimes with their absolute command, capability
-and licence. Run that command with `--help` for its arguments instead of installing another copy. The file entries
-point directly to the installed SoundFont or recorded sound-pack folder. Keep attribution with the finished work.
-
 When the person asked for the finished work, make all of it. Never ask for their voice, a recording, a sample or
 consent, and never stop to ask which voice they prefer. Use the engine's built-in voices or its voice design in the
 language of the script. Clone a voice only when the person supplied a real human recording or asked for a clone,

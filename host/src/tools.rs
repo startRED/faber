@@ -16,10 +16,6 @@ fn install_error(why: InstallError) -> String {
                     | "error.tools.host"
                     | "error.tools.size"
                     | "error.tools.tree"
-                    | "error.tools.digest"
-                    | "error.tools.uvMissing"
-                    | "error.tools.space"
-                    | "error.tools.vram"
             ) =>
         {
             detail
@@ -34,7 +30,7 @@ mod install_errors {
 
     #[test]
     fn checked_package_refusals_reach_the_screen_as_localized_keys() {
-        for key in ["integrity", "scripts", "native", "host", "size", "tree", "digest", "uvMissing", "space", "vram"] {
+        for key in ["integrity", "scripts", "native", "host", "size", "tree"] {
             let key = format!("error.tools.{key}");
             assert_eq!(install_error(InstallError::Failed(key.clone())), key);
         }
@@ -92,12 +88,6 @@ pub(crate) struct ToolRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     claude_plugins_available: Option<bool>,
     requires_node: bool,
-    runtime: Option<faber_engine::tools::runtime::Runtime>,
-    uv_available: bool,
-    runtime_available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    runtime_fits: Option<bool>,
-    runtime_download_size: u64,
 }
 
 #[derive(Serialize)]
@@ -116,12 +106,6 @@ pub(crate) async fn tools_list(h: &Host) -> Res<Vec<ToolRow>> {
         let statuses = store.checked_statuses();
         let installed = store.installed();
         let node_available = faber_engine::cli::find_cli("node").is_some();
-        let uv_available = faber_engine::tools::runtime::uv().is_some();
-        let vram = if catalog().iter().any(|item| item.runtime.as_ref().is_some_and(|runtime| runtime.min_vram_mb.is_some())) {
-            if cfg!(test) { None } else { faber_winproc::available_vram_mb() }
-        } else {
-            None
-        };
         catalog()
             .iter()
             .map(|i| ToolRow {
@@ -145,11 +129,6 @@ pub(crate) async fn tools_list(h: &Host) -> Res<Vec<ToolRow>> {
                     .map(|plugin| plugin.parts.iter().map(|part| PluginPartRow { id: part.id.clone(), kind: part.kind }).collect()),
                 claude_plugins_available: store.plugin_definition(&i.id).and(claude_plugins_available),
                 requires_node: store.requires_node(i),
-                runtime: i.runtime.clone(),
-                uv_available,
-                runtime_available: i.runtime.is_none() || faber_engine::tools::runtime::available(i),
-                runtime_fits: i.runtime.as_ref().map(|runtime| runtime.fits(vram)),
-                runtime_download_size: faber_engine::tools::runtime::download_size(i),
             })
             .collect()
     })

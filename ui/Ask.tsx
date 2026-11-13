@@ -4,7 +4,7 @@ import { PermissionChip } from './Composer.tsx';
 import { Markdown, openLinks } from './markdown.tsx';
 import { motion } from './appearance.ts';
 import { Icon } from './Glyphs.tsx';
-import { catalogLicenseNotices, catalogName, fromEngine, t } from './i18n.ts';
+import { catalogName, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { millis } from './motion.ts';
 import { answerOutcome } from './running.ts';
@@ -28,14 +28,13 @@ function selfInstall(tool: string, input: unknown): { title: string; what: strin
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const id = text(i.id);
-  const kind = ['skill', 'plugin', 'server', 'runtime'].includes(text(i.kind)) ? text(i.kind) : 'skill';
+  const kind = ['skill', 'plugin', 'server'].includes(text(i.kind)) ? text(i.kind) : 'skill';
   const purpose = `tools.${id}`;
-  const notices = catalogLicenseNotices(text(i.license), text((i.runtime as { weights_license?: unknown } | undefined)?.weights_license));
   return {
     title: t(updating ? 'ask.self.update' : repairing ? 'ask.self.repair' : removing ? 'ask.self.remove' : switching ? (i.enabled === true ? 'ask.self.enable' : 'ask.self.disable') : 'ask.self.install', { name: catalogName(id) }),
     what: purpose in en ? t(purpose as Key) : '',
     effect: replacing ? t('ask.self.replaceEffect') : removing ? t('ask.self.removeEffect') : switching ? t('ask.self.newConversations') : '',
-    line: [t('ask.self.line', { kind: t(`catalog.kind.${kind}` as Key), version: replacing ? t('ask.self.replaceLine', { from: text(i.from), version: text(i.version) }) : text(i.version), repo: text(i.repo), licence: text(i.license) }), ...notices.map((key) => t(key))].join(' '),
+    line: t('ask.self.line', { kind: t(`catalog.kind.${kind}` as Key), version: replacing ? t('ask.self.replaceLine', { from: text(i.from), version: text(i.version) }) : text(i.version), repo: text(i.repo), licence: text(i.license) }),
     // A tool server, or a plugin that brings one, runs code on this computer: said once, calmly.
     code: !removing && i.code === true ? t('ask.self.code') : '',
   };

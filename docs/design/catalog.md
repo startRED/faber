@@ -4,18 +4,14 @@ Stageshow adds optional demos in More; [delivery and the Faber scene](../product
 use existing controls and keep the kit outside the app.
 
 Faber's own frontend and media skills ride its guide, not the catalog: no cards, switches or layout; third-party
-skills keep their own rules ([frontend](../product/frontend.md), [media](../product/media.md)).
+skills keep their own rules ([frontend](../product/frontend.md), [media](../product/media.md)). Audio runtimes are
+[planned](../research/audio-runtimes.md).
 
 An installed browser tool can match a browser performance request without its name being mentioned. This adds no
 screen control and preserves the existing project, permission and on/off boundaries.
 
 A browsing and management tab beside Chat and Projects (R344). It extends the pinned skill/server store, moving its
 controls out of Settings > Projects. It is not a work area: no conversation, composer, project instructions or AI picker.
-
-## Audio runtimes
-
-Cards show licences, size, memory and uv needs. [Runtime contract](audio-runtimes.md): integrity, install,
-delivery and recovery.
 
 ## Browsing
 

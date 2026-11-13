@@ -62,7 +62,6 @@ struct ReadyData {
 
 #[derive(Debug, Default)]
 pub(super) struct ReadyCache {
-    pub(super) vram: OnceLock<u64>,
     data: Mutex<ReadyData>,
     building: AtomicBool,
     runtime: Mutex<Option<tokio::runtime::Handle>>,
@@ -278,14 +277,7 @@ impl Delivery {
                 continue;
             }
             let path = root.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
-            let runtime_intact = item.runtime.is_none()
-                || self
-                    .catalog_root
-                    .as_ref()
-                    .is_some_and(|store| super::runtime::verify_cached(&store.join("runtimes").join(&item.id), item));
-            let actual = if !runtime_intact {
-                Ok(String::new())
-            } else if [root.clone(), path.parent().unwrap_or(root).to_path_buf(), path.clone()]
+            let actual = if [root.clone(), path.parent().unwrap_or(root).to_path_buf(), path.clone()]
                 .iter()
                 .all(|path| std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()))
             {
@@ -520,12 +512,6 @@ fn description_index(
     let fixed = text.len() + records.iter().map(|(_, prefix, suffix)| prefix.len() + suffix.len()).sum::<usize>();
     let description_limit = (DISCOVERY_BUDGET.checked_sub(fixed)? / records.len()).min(DESCRIPTION_LIMIT);
     for (item, prefix, suffix) in records {
-        if item.runtime.is_some() {
-            if let Some((line, _)) = texts.get(&item.id) {
-                text.push_str(line);
-            }
-            continue;
-        }
         let description = texts.get(&item.id).map(|(_, description)| description.as_str()).unwrap_or_else(|| item_capability(&item.id));
         text.push_str(&prefix);
         // The loaded native plugin already supplies descriptions; only fallback discovery needs them here.
@@ -742,14 +728,6 @@ impl Store {
         let mut remaining = CONTEXT_BUDGET.saturating_sub(256);
         let mut count = 0;
         items.retain(|item| {
-            if item.runtime.is_some() {
-                let cost = entry.texts.get(&item.id).map_or(usize::MAX, |text| text.0.len());
-                if cost > remaining {
-                    return false;
-                }
-                remaining -= cost;
-                return true;
-            }
             let cost = if item.server.is_some() {
                 SERVER_COST
             } else if vendor == Vendor::Claude {
@@ -767,7 +745,7 @@ impl Store {
         let mut delivery = entry.delivery.clone();
         delivery.catalog_ready = true;
         let description_items: Vec<_> = if vendor == Vendor::Claude {
-            entry.items.iter().filter(|item| item.server.is_none() && (item.runtime.is_none() || items.contains(item))).collect()
+            entry.items.iter().filter(|item| item.server.is_none()).collect()
         } else {
             items.iter().copied().filter(|item| item.server.is_none()).collect()
         };
@@ -808,9 +786,6 @@ impl Store {
             },
             description_ids: if area == Area::Project {
                 discovery_ids
-                    .into_iter()
-                    .filter(|id| entry.items.iter().any(|item| item.id == *id && (item.runtime.is_none() || items.contains(&item))))
-                    .collect()
             } else {
                 description_items.iter().map(|item| item.id.clone()).collect()
             },
@@ -999,11 +974,6 @@ impl Store {
     }
 
     fn prepare_catalog(&self) {
-        let has_gpu = self.resource_catalog().iter().any(|item| {
-            item.runtime.as_ref().is_some_and(|runtime| runtime.min_vram_mb.is_some()) && self.installed().contains_key(&item.id)
-        });
-        let vram =
-            if has_gpu { read_vram(&self.ready.vram, || if cfg!(test) { None } else { faber_winproc::available_vram_mb() }) } else { None };
         {
             let _store = lock();
             if self.recover_replacements().is_err() {
@@ -1021,11 +991,7 @@ impl Store {
             let items: Vec<_> = self
                 .resource_catalog()
                 .iter()
-                .filter(|item| {
-                    data.installed.contains_key(&item.id)
-                        && !data.selection.disabled.contains(&item.id)
-                        && item.runtime.as_ref().is_none_or(|runtime| runtime.fits(vram))
-                })
+                .filter(|item| data.installed.contains_key(&item.id) && !data.selection.disabled.contains(&item.id))
                 .cloned()
                 .collect();
             if data.attempted.as_ref().is_some_and(|(generation, previous)| *generation == data.generation && previous == &items) {
@@ -1066,10 +1032,6 @@ impl Store {
             if failed.contains(&item.id) {
                 continue;
             }
-            if item.runtime.is_some() && !super::runtime::verify(&self.root.join("runtimes").join(&item.id), item) {
-                failed.insert(item.id.clone());
-                continue;
-            }
             match source_digest(&self.root, item) {
                 Ok(actual) if actual == item.digest => checked.push(item),
                 Ok(_) => {
@@ -1101,9 +1063,7 @@ impl Store {
                         .ok_or_else(|| io::Error::other("Unreadable catalog instructions"))?;
                     let body = std::str::from_utf8(&bytes).map_err(io::Error::other)?;
                     let path = root.join(&item.id);
-                    let instructions = if item.runtime.is_some() {
-                        super::runtime::line(item, &self.dir(item))
-                    } else if bytes.len() <= CONTEXT_BUDGET {
+                    let instructions = if bytes.len() <= CONTEXT_BUDGET {
                         format!("\nCatalog skill {} (supporting files: {}):\n{}\n", item.id, path.display(), body)
                     } else {
                         "x".repeat(CONTEXT_BUDGET + 1)
@@ -1443,7 +1403,7 @@ impl Store {
                 let mut remaining = SNAPSHOT_LIMIT;
                 for item in &picked {
                     let target = staging.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
-                    copy_checked(&self.resource_source(item), &target, &mut remaining, item.server.is_none() && item.runtime.is_none())?;
+                    copy_checked(&self.resource_source(item), &target, &mut remaining, item.server.is_none())?;
                     if digest(&target)? != item.digest {
                         if source_digest(&self.root, item)? != item.digest {
                             return Err(io::Error::other(InvalidItem(item.id.clone())));
@@ -1540,24 +1500,7 @@ fn server_key(items: &[&Item]) -> String {
     format!("servers:{}", uuid::Uuid::from_bytes(bytes))
 }
 
-fn read_vram(cache: &OnceLock<u64>, probe: impl FnOnce() -> Option<u64>) -> Option<u64> {
-    cache.get().copied().or_else(|| {
-        let value = probe();
-        if let Some(value) = value {
-            let _ = cache.set(value);
-        }
-        value
-    })
-}
-
 fn source_digest(root: &Path, item: &Item) -> io::Result<String> {
-    if item.runtime.is_some() {
-        let dir = root.join("runtimes").join(&item.id);
-        if !super::runtime::verify_cached(&dir, item) {
-            return Ok(String::new());
-        }
-        return digest(&dir.join("instructions"));
-    }
     if let Some(path) = super::plugins::resource_source(root, item) {
         let relative = path.strip_prefix(root).map_err(io::Error::other)?;
         let mut parent = root.to_path_buf();
@@ -1717,77 +1660,6 @@ fn copy_file(source: &Path, target: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn audio_unknown_gpu_memory_is_retried_instead_of_cached_forever() {
-        let cache = std::sync::OnceLock::new();
-        assert_eq!(super::read_vram(&cache, || None), None);
-        assert_eq!(super::read_vram(&cache, || Some(4096)), Some(4096));
-        assert_eq!(super::read_vram(&cache, || panic!("known value is cached")), Some(4096));
-    }
-
-    #[test]
-    fn audio_kit_delivers_processor_runtimes_and_filters_gpu_memory() {
-        for vram in [None, Some(2048), Some(4096)] {
-            let temp = tempfile::tempdir().unwrap();
-            let source = temp.path().join("audio");
-            std::fs::write(&source, b"audio fixture").unwrap();
-            let processor = super::super::runtime::fixture("processor-audio", b"audio fixture", None);
-            let gpu = super::super::runtime::fixture("gpu-audio", b"audio fixture", Some(4096));
-            let store = super::Store::with_catalog(temp.path(), vec![processor.clone(), gpu.clone()]);
-            if let Some(vram) = vram {
-                store.ready.vram.set(vram).unwrap();
-            }
-            store.install_from(&processor, &source).unwrap();
-            store.install_from(&gpu, &source).unwrap();
-            let (kit, report) =
-                store.kit("Create podcast narration", None, crate::model::Area::Project, crate::model::Permissions::Ask, &[]);
-            assert!(report.ids.contains(&processor.id));
-            assert_eq!(report.ids.contains(&gpu.id), vram == Some(4096));
-            let text = kit.skill_instructions().unwrap();
-            assert!(text.contains("Installed audio runtime processor-audio: qa;") && text.contains("MIT"));
-            assert!(text.contains(&store.dir(&processor).display().to_string().replace('\\', "\\\\")));
-            assert!(
-                !store
-                    .kit("A plain hello", None, crate::model::Area::Project, crate::model::Permissions::Ask, &[])
-                    .1
-                    .ids
-                    .contains(&processor.id)
-            );
-        }
-    }
-
-    #[test]
-    fn audio_runtime_changed_after_preparation_is_excluded_before_launch() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("audio");
-        std::fs::write(&source, b"audio fixture").unwrap();
-        let item = super::super::runtime::fixture("local-audio", b"audio fixture", None);
-        let store = super::Store::with_catalog(temp.path(), vec![item.clone()]);
-        store.install_from(&item, &source).unwrap();
-        let (kit, _) = store.kit("Create podcast narration", None, crate::model::Area::Project, crate::model::Permissions::Ask, &[]);
-        std::fs::write(store.dir(&item).join("payload/audio.dat"), "different audio").unwrap();
-        let (checked, damaged, _) = kit.verified_for_launch(crate::model::Vendor::Codex);
-        assert_eq!(damaged, [item.id]);
-        assert!(checked.skill_instructions().is_none());
-    }
-
-    #[test]
-    fn audio_runtime_same_length_mutation_cannot_reuse_restored_timestamps() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("audio");
-        std::fs::write(&source, b"original").unwrap();
-        let item = super::super::runtime::fixture("local-audio", b"original", None);
-        let store = super::Store::with_catalog(temp.path(), vec![item.clone()]);
-        store.install_from(&item, &source).unwrap();
-        let (kit, _) = store.kit("Create podcast narration", None, crate::model::Area::Project, crate::model::Permissions::Ask, &[]);
-        let path = store.dir(&item).join("payload/audio.dat");
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::fs::write(&path, b"tampered").unwrap();
-        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
-        let (checked, damaged, _) = kit.verified_for_launch(crate::model::Vendor::Codex);
-        assert_eq!(damaged, [item.id]);
-        assert!(checked.skill_instructions().is_none());
-    }
     use super::*;
 
     #[test]
@@ -1897,8 +1769,7 @@ mod tests {
     #[test]
     fn every_shipped_description_fits_its_own_cap_without_instruction_bodies() {
         let items = super::super::catalog();
-        let ids =
-            items.iter().filter(|item| item.server.is_none() && item.runtime.is_none()).map(|item| item.id.clone()).collect::<Vec<_>>();
+        let ids = items.iter().filter(|item| item.server.is_none()).map(|item| item.id.clone()).collect::<Vec<_>>();
         let texts = items
             .iter()
             .map(|item| {
@@ -1917,7 +1788,7 @@ mod tests {
         .unwrap();
         assert!(index.len() <= DISCOVERY_BUDGET, "catalog descriptions need {} bytes", index.len());
         assert!(index.len() > CONTEXT_BUDGET, "discovery does not consume selected instructions or server budget");
-        for item in items.iter().filter(|item| item.server.is_none() && item.runtime.is_none()) {
+        for item in items.iter().filter(|item| item.server.is_none()) {
             assert!(index.contains(&format!("{}/SKILL.md", item.id)), "{}", item.id);
             assert!(index.contains(&format!("Checked description for {}:", item.id)));
         }
@@ -1944,7 +1815,7 @@ mod tests {
     #[test]
     fn all_shipped_skills_leave_budget_for_selected_pinned_and_retained_servers() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut items: Vec<_> = super::super::catalog().iter().filter(|item| item.runtime.is_none()).cloned().collect();
+        let mut items = super::super::catalog().to_vec();
         let root = tmp.path().join("tools");
         for item in &mut items {
             let folder = root.join(if item.server.is_some() { "servers" } else { "plugin/skills" }).join(&item.id);
@@ -2856,7 +2727,6 @@ mod tests {
                     digest: digest(&skill).unwrap(),
                     server: None,
                     chat_safe: false,
-                    runtime: None,
                 }
             })
             .collect();

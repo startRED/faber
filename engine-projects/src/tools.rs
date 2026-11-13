@@ -18,7 +18,6 @@ mod plugin_delivery;
 pub mod replacement;
 pub use replacement::ReplacementPlan;
 pub mod plugins;
-pub mod runtime;
 
 /// One skill of the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,8 +49,6 @@ pub struct Item {
     /// Only reviewed servers that touch no PC files and need no setup may opt into Chat.
     #[serde(default)]
     pub chat_safe: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<runtime::Runtime>,
 }
 
 /// A pinned npm server and its curated runtime tree that Node runs and the CLIs speak to over
@@ -79,9 +76,6 @@ pub enum Tier {
 impl Item {
     /// The repository's archive at the pinned commit (github.com redirects it to codeload.github.com), or a server's package.
     pub fn archive_url(&self) -> String {
-        if let Some(runtime) = &self.runtime {
-            return runtime.source.clone();
-        }
         format!(
             "https://{}",
             self.archive_path(match self.server {
@@ -98,26 +92,17 @@ impl Item {
     }
     /// Where a person reads the skill before installing it.
     pub fn home(&self) -> String {
-        if self.runtime.is_some() {
-            if let Some(pack) = self.repo.strip_prefix("kenney.nl/") {
-                return format!("https://kenney.nl/assets/{pack}");
-            }
-            return format!("https://github.com/{}", self.repo);
-        }
         format!("https://github.com/{}/tree/{}/{}", self.repo, self.commit, self.path)
     }
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct CatalogFile {
     skills: Vec<Item>,
     #[serde(default)]
     servers: Vec<Item>,
     #[serde(default)]
     plugins: Vec<plugins::Definition>,
-    #[serde(default, deserialize_with = "runtime::catalog_items")]
-    runtimes: Vec<Item>,
 }
 
 /// The catalog that ships with this version of Faber: its skills, then its servers.
@@ -131,7 +116,6 @@ pub fn catalog() -> &'static [Item] {
                 .filter(|i| i.server.is_none())
                 .chain(c.servers.into_iter().filter(|i| i.server.is_some()))
                 .chain(c.plugins.into_iter().map(|p| p.item))
-                .chain(c.runtimes)
                 .collect()
         })
         .unwrap_or_default()
@@ -274,9 +258,7 @@ impl Store {
         self.root.join("disabled")
     }
     fn dir(&self, item: &Item) -> PathBuf {
-        if item.runtime.is_some() {
-            self.root.join("runtimes").join(&item.id)
-        } else if self.plugin_definition(&item.id).is_some() {
+        if self.plugin_definition(&item.id).is_some() {
             self.root.join("plugins").join(&item.id)
         } else {
             match item.server {
@@ -298,9 +280,7 @@ impl Store {
                 let marker = if self.plugin_definition(&i.id).is_some() {
                     "source"
                 } else {
-                    i.runtime
-                        .as_ref()
-                        .map_or_else(|| i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str()), |_| "instructions/SKILL.md")
+                    i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str())
                 };
                 [self.dir(i), self.disabled().join(id)]
                     .iter()
@@ -343,9 +323,7 @@ impl Store {
                 let marker = if self.plugin_definition(&i.id).is_some() {
                     "source"
                 } else {
-                    i.runtime
-                        .as_ref()
-                        .map_or_else(|| i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str()), |_| "instructions/SKILL.md")
+                    i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str())
                 };
                 if self.plugin_definition(&i.id).is_some() { self.dir(i).join(marker).is_dir() } else { self.dir(i).join(marker).is_file() }
             })
@@ -367,7 +345,6 @@ impl Store {
     }
 
     fn check_agent_switch_locked(&self, id: &str) -> Result<(), &'static str> {
-        self.replacement_roots().map_err(|_| crate::toolbox::REINSTALL)?;
         let item = self.items.iter().find(|item| item.id == id).ok_or(crate::toolbox::UNKNOWN)?;
         let installed = self.installed();
         let commit = installed.get(id).ok_or("The tool is not installed. Install it first.")?;
@@ -401,8 +378,7 @@ impl Store {
         let active = self.dir(item);
         let disabled = self.disabled().join(id);
         if enabled && disabled.exists() && !self.verify_item(&disabled, item) {
-            let inconclusive = item.runtime.is_some() && runtime::verify_state(&disabled, item) == runtime::Integrity::CannotCheck;
-            if !agent && !inconclusive {
+            if !agent {
                 self.discard(&disabled).map_err(|e| e.to_string())?;
             }
             return Err("The disabled tool does not match the catalog".into());
@@ -436,7 +412,7 @@ impl Store {
         }
         let selection = self.selection();
         let on = |i: &&Item| checked.contains(&i.id) && installed.contains_key(&i.id) && !selection.disabled.contains(&i.id);
-        let skill = self.items.iter().filter(on).any(|i| i.server.is_none() && i.runtime.is_none());
+        let skill = self.items.iter().filter(on).any(|i| i.server.is_none());
         let mut servers = self.items.iter().filter(on).filter_map(|i| Some((i, i.server.as_ref()?))).peekable();
         // A server needs Node; without it the CLIs get no server rather than one that fails at every start.
         // A relative PATH entry would resolve against whatever folder the CLI runs in.
@@ -475,18 +451,9 @@ impl Store {
     fn prune(&self) -> Option<std::collections::HashSet<String>> {
         // The store's own folders must be folders: a link there would point the CLIs at files the check never saw.
         let linked = |p: PathBuf| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir());
-        if [
-            self.root.clone(),
-            self.plugin(),
-            self.skills(),
-            self.servers(),
-            self.root.join("plugins"),
-            self.root.join("runtimes"),
-            self.disabled(),
-            self.removed(),
-        ]
-        .into_iter()
-        .any(linked)
+        if [self.root.clone(), self.plugin(), self.skills(), self.servers(), self.root.join("plugins"), self.disabled(), self.removed()]
+            .into_iter()
+            .any(linked)
         {
             return None;
         }
@@ -494,13 +461,9 @@ impl Store {
         let ledger = self.installed();
         let mut clean = true;
         let mut checked = std::collections::HashSet::new();
-        for (parent, server) in [
-            (self.skills(), Some(false)),
-            (self.servers(), Some(true)),
-            (self.root.join("plugins"), Some(false)),
-            (self.root.join("runtimes"), Some(false)),
-            (self.disabled(), None),
-        ] {
+        for (parent, server) in
+            [(self.skills(), Some(false)), (self.servers(), Some(true)), (self.root.join("plugins"), Some(false)), (self.disabled(), None)]
+        {
             // A folder that cannot be listed could hide a changed tool: nothing is handed over.
             let entries = entries(&parent)?;
             for entry in entries {
@@ -515,28 +478,15 @@ impl Store {
                         && (server.is_none()
                             || (i.server.is_some() == server.unwrap_or(false)
                                 && (parent == self.root.join("plugins")) == self.plugin_definition(&i.id).is_some()))
-                        && (server.is_none() || (parent == self.root.join("runtimes")) == i.runtime.is_some())
                 });
                 // Only an explicit replacement may consume an older installed pin and its recovery copy.
                 if item.is_some_and(|i| ledger.get(&name).is_some_and(|commit| *commit != i.commit)) {
                     continue;
                 }
-                let verified = if server.is_none() {
-                    true
-                } else if let Some(item) = item {
-                    if item.runtime.is_some() {
-                        match runtime::verify_state(&entry.path(), item) {
-                            runtime::Integrity::Intact => true,
-                            runtime::Integrity::Tampered => false,
-                            runtime::Integrity::CannotCheck => continue,
-                        }
-                    } else {
-                        self.verify_item(&entry.path(), item)
-                    }
-                } else {
-                    false
-                };
-                if ledger.contains_key(&name) && (server.is_none() || !self.disabled().join(&name).exists()) && verified {
+                if ledger.contains_key(&name)
+                    && (server.is_none() || !self.disabled().join(&name).exists())
+                    && item.is_some_and(|i| server.is_none() || self.verify_item(&entry.path(), i))
+                {
                     if server.is_some() {
                         checked.insert(name);
                     }
@@ -615,25 +565,12 @@ impl Store {
         if !valid_id(&item.id) {
             return Err(format!("Invalid skill id: {}", item.id));
         }
-        // Extraction may run uv for minutes; only publication holds the shared store lock.
-        {
-            let _store = lock();
-            self.recover_replacements()?;
-            if agent && let Some((_, why)) = self.held(item) {
-                return Err(why.into());
-            }
-            if self.occupied_install(item)? {
-                return Err("The stored copy needs confirmation in Catalog".into());
-            }
-            self.initial_ledger()?;
-        }
-        let temporary = self.stage_sources(item, zip, packages)?;
-        let staging = &temporary.path;
+        // One change to the store at a time, from unpacking to the ledger: what goes live is what was checked.
         let _store = lock();
-        self.recover_replacements()?;
         if agent && let Some((_, why)) = self.held(item) {
             return Err(why.into());
         }
+        self.recover_replacements()?;
         if self.occupied_install(item)? {
             return Err("The stored copy needs confirmation in Catalog".into());
         }
@@ -645,7 +582,6 @@ impl Store {
             self.skills(),
             self.servers(),
             self.root.join("plugins"),
-            self.root.join("runtimes"),
             self.disabled(),
             self.removed(),
             self.plugin().join(".claude-plugin"),
@@ -657,47 +593,40 @@ impl Store {
         }
         let dest = if selection.disabled.contains(&item.id) { self.disabled().join(&item.id) } else { self.dir(item) };
         std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
-        if self.plugin_definition(&item.id).is_none() && item.server.is_none() && item.runtime.is_none() {
-            self.write_manifest().map_err(|e| e.to_string())?;
-        }
-        retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
-        ledger.insert(item.id.clone(), item.commit.clone());
-        // A failed ledger write takes the files back out so no incomplete install can launch.
-        self.write_ledger(&ledger).map_err(|e| {
-            let _ = self.discard(&dest);
-            format!("Could not publish the catalog ledger: {e}")
-        })?;
-        self.refresh_ready_after_install();
-        Ok(())
-    }
-
-    fn stage_sources(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<kits::TemporaryCopy, String> {
-        self.replacement_roots()?;
-        std::fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
-        #[cfg(test)]
-        TEST_STAGE.with(|hook| {
-            if let Some(hook) = hook.borrow_mut().as_mut() {
-                hook();
-            }
-        });
         let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
         let staging = &temporary.path;
-        if let Some(plugin) = self.plugin_definition(&item.id) {
+        let definition = self.plugin_definition(&item.id);
+        let extracted = if let Some(plugin) = definition {
             self.validate_plugin_aliases(plugin)?;
-            plugins::extract(plugin, zip, packages, staging)?;
-        } else if item.runtime.is_some() {
-            runtime::extract(item, zip, packages, staging)?;
-        } else if let Some(server) = &item.server {
-            npm::extract_tree(server, zip, packages, staging)?;
+            plugins::extract(plugin, zip, packages, staging)
         } else {
-            extract_skill(zip, &item.path, staging)?;
-            let skill = std::fs::read_to_string(staging.join("SKILL.md")).map_err(|_| format!("{} has no SKILL.md", item.id))?;
-            standalone_skill(&skill).map_err(|why| format!("{} {why}", item.id))?;
+            match &item.server {
+                Some(server) => npm::extract_tree(server, zip, packages, staging),
+                None => extract_skill(zip, &item.path, staging),
+            }
+        };
+        let result = extracted.and_then(|()| {
+            if !self.verify_item(staging, item) {
+                return Err(format!("The files of {} do not match the catalog", item.id));
+            }
+            if definition.is_none() && item.server.is_none() {
+                let skill = std::fs::read_to_string(staging.join("SKILL.md")).map_err(|_| format!("{} has no SKILL.md", item.id))?;
+                standalone_skill(&skill).map_err(|why| format!("{} {why}", item.id))?;
+                self.write_manifest().map_err(|e| e.to_string())?;
+            }
+            retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
+            ledger.insert(item.id.clone(), item.commit.clone());
+            // A ledger that cannot be written takes the files back out: the install failed, so nothing of it is loaded.
+            self.write_ledger(&ledger).map_err(|e| {
+                let _ = self.discard(&dest);
+                format!("Could not publish the catalog ledger: {e}")
+            })
+        });
+        let _ = std::fs::remove_dir_all(staging);
+        if result.is_ok() {
+            self.refresh_ready_after_install();
         }
-        if !self.verify_item(staging, item) {
-            return Err(format!("The files of {} do not match the catalog", item.id));
-        }
-        Ok(temporary)
+        result
     }
 
     pub fn check_agent_remove(&self, id: &str) -> Result<(), &'static str> {
@@ -1394,7 +1323,6 @@ pub struct Downloaded {
     files: Vec<PathBuf>,
     packages: BTreeMap<String, PathBuf>,
     slot: Option<AgentSlot>,
-    temporary: Option<kits::TemporaryCopy>,
 }
 
 impl Drop for Downloaded {
@@ -1426,9 +1354,6 @@ pub async fn download_replacement(store: &Store, plan: &ReplacementPlan, source:
 }
 
 async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) -> Result<Downloaded, String> {
-    if item.runtime.is_some() {
-        return runtime::download(store, item, loopback).await;
-    }
     if let Some(definition) = store.plugin_definition(&item.id) {
         definition.validate()?;
         if definition.item != *item {
@@ -1441,7 +1366,7 @@ async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) ->
     };
     let loopback = loopback.as_deref();
     std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
-    let mut downloaded = Downloaded { files: Vec::new(), packages: BTreeMap::new(), slot: None, temporary: None };
+    let mut downloaded = Downloaded { files: Vec::new(), packages: BTreeMap::new(), slot: None };
     let mut sources = vec![(None, item.clone())];
     if let Some(definition) = store.plugin_definition(&item.id) {
         sources.extend(definition.parts.iter().filter_map(|part| part.server.clone().map(|server| (Some(part.id.clone()), server))));
@@ -1585,7 +1510,6 @@ mod tests {
             digest: digest.into(),
             server: None,
             chat_safe: false,
-            runtime: None,
         }
     }
 
@@ -1918,7 +1842,6 @@ mod tests {
             path: String::new(),
             digest: digest(d.path()).unwrap(),
             chat_safe: false,
-            runtime: None,
             server: Some(Server {
                 tree: vec![],
                 package: "measure".into(),
@@ -2062,11 +1985,6 @@ mod tests {
 
     #[test]
     fn the_catalog_that_ships_is_well_formed() {
-        let file = serde_json::from_str::<CatalogFile>(include_str!("tools.json")).expect("the complete strict catalog parses");
-        assert_eq!(file.runtimes.len(), 11, "all required audio tools are listed");
-        for runtime in &file.runtimes {
-            runtime.runtime.as_ref().unwrap().validate().unwrap();
-        }
         let items = catalog();
         assert!(!items.is_empty(), "tools.json parses and lists skills");
         let mut ids = std::collections::HashSet::new();
@@ -2113,9 +2031,4 @@ mod tests {
             assert!(!item.id.contains("guide") && item.cli_name.as_deref().is_none_or(|name| !name.contains("faber-guide")), "{}", item.id);
         }
     }
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_STAGE: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
 }

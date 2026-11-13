@@ -524,7 +524,6 @@ mod tests {
                 commit: "1234".into(),
                 path: format!("skills/{id}"),
                 digest: digest(skill.path()).unwrap(),
-                runtime: None,
                 server: None,
                 chat_safe: false,
                 cli_name: None,
@@ -565,7 +564,6 @@ mod tests {
             chat_safe,
             cli_name: None,
             tier: Default::default(),
-            runtime: None,
             server: Some(crate::tools::Server {
                 tree: vec![],
                 package: "browser-fixture".into(),
@@ -596,7 +594,6 @@ mod tests {
                     commit: "1234".into(),
                     path: format!("skills/{id}"),
                     digest: digest(&path).unwrap(),
-                    runtime: None,
                     server: None,
                     chat_safe: false,
                     cli_name: None,

@@ -56,12 +56,6 @@ export function catalogName(id: string): string {
   return part ? `${catalogName(plugin)} · ${part.replaceAll('-', ' ')}` : id.replaceAll('-', ' ');
 }
 
-export function catalogLicenseNotices(license: string, weightsLicense = ''): Key[] {
-  const licences = `${license} ${weightsLicense}`;
-  return [/-NC(?:-|\b)/i.test(licences) ? 'catalog.license.nonCommercial' : undefined,
-    /CC-BY(?:-|\b)/i.test(licences) ? 'catalog.license.attribution' : undefined].filter((key): key is Key => !!key);
-}
-
 /** Whether `n` takes the singular form. Zero counts as plural everywhere ("0 steps"), though Portuguese and French grammar put it
  * with the singular. */
 const one = (n: number) => n !== 0 && new Intl.PluralRules(lang()).select(n) === 'one';

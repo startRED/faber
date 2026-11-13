@@ -569,9 +569,7 @@ impl Store {
     }
 
     pub(super) fn verify_item(&self, dir: &Path, item: &Item) -> bool {
-        if item.runtime.is_some() {
-            super::runtime::verify(dir, item)
-        } else if let Some(definition) = self.plugin_definition(&item.id) {
+        if let Some(definition) = self.plugin_definition(&item.id) {
             definition.item == *item && verify(definition, dir).is_ok()
         } else {
             digest(dir).is_ok_and(|actual| actual == item.digest)
@@ -596,9 +594,6 @@ impl Store {
     }
 
     pub fn resource_source(&self, item: &Item) -> PathBuf {
-        if item.runtime.is_some() {
-            return self.dir(item).join("instructions");
-        }
         resource_source(&self.root, item).unwrap_or_else(|| self.dir(item))
     }
 

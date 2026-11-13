@@ -4,7 +4,7 @@ import { api, type Project, type ToolRow, type Vendor } from './api.ts';
 import { Toggle } from './controls.tsx';
 import { Icon, type GlyphName } from './Glyphs.tsx';
 import { StateGlyph } from './icons/kinds.tsx';
-import { catalogLicenseNotices, catalogName, failureText, fromEngine, t } from './i18n.ts';
+import { catalogName, failureText, fromEngine, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { CatalogInventory } from './CatalogInventory.tsx';
 import { McpServers } from './McpServers.tsx';
@@ -25,27 +25,16 @@ const glyphs: Record<string, GlyphName> = {
   design: 'palette', plan: 'list', database: 'database', payments: 'card', platform: 'cloud', auth: 'lock', measure: 'gauge',
   mobile: 'phone', documents: 'sheet', marketing: 'megaphone', games: 'gamepad', 'game-design': 'dice', code: 'terminal', services: 'cloud',
 };
-type Filter = 'all' | 'skills' | 'plugins' | 'servers' | 'runtimes' | 'installed';
+type Filter = 'all' | 'skills' | 'plugins' | 'servers' | 'installed';
 const words = (key: string, fallback: string) => key in en ? t(key as Key) : fallback;
 const plugin = (row: ToolRow) => !!row.pluginParts?.length;
 const needsNode = (row: ToolRow) => (row.server || row.requiresNode) && row.nodeAvailable === false;
-const needsUv = (row: ToolRow) => row.runtime?.kind === 'python' && row.uvAvailable === false;
-const unavailable = (row: ToolRow) => needsNode(row) || needsUv(row) || row.runtimeAvailable === false || row.runtimeFits === false;
-function RuntimeInfo(props: { row: ToolRow }) {
-  return <>
-    <Show when={props.row.runtime}>{(runtime) => <span class="catalog-description catalog-runtime-line" data-runtime-info>{t('catalog.runtimeSize', { n: Math.ceil((props.row.runtimeDownloadSize ?? runtime().size) / 1024 / 1024) })}<Show when={runtime().min_vram_mb}>{(memory) => <> · {t('catalog.runtimeMemory', { n: memory() })}</>}</Show> · {runtime().weights_license}</span>}</Show>
-    <For each={catalogLicenseNotices(props.row.license, props.row.runtime?.weights_license)}>{(key) => <span class="catalog-description catalog-runtime-line" data-license-notice={key}>{t(key)}</span>}</For>
-    <Show when={needsUv(props.row)}><span class="catalog-description catalog-runtime-line">{t('catalog.uvHelp')}</span></Show>
-    <Show when={props.row.runtimeAvailable === false}><span class="catalog-description catalog-runtime-line">{t('catalog.runtimeUnavailable')}</span></Show>
-    <Show when={props.row.runtimeFits === false}><span class="catalog-description catalog-runtime-line" data-runtime-memory-unavailable>{t('catalog.runtimeMemoryUnavailable')}</span></Show>
-  </>;
-}
 const glyph = (row: ToolRow): GlyphName => plugin(row) ? 'puzzle' : row.server ? 'globe' : glyphs[row.job] ?? 'wand';
-const tone = (row: ToolRow) => row.status || unavailable(row) ? 'warn' : !row.installed ? 'none' : row.enabled === false ? 'off' : 'on';
+const tone = (row: ToolRow) => row.status || needsNode(row) ? 'warn' : !row.installed ? 'none' : row.enabled === false ? 'off' : 'on';
 const hasCopy = (row: ToolRow) => row.hasCopy ?? !!(row.installed || row.status);
 const removedCopy = (row: ToolRow) => typeof row.removedEnabled === 'boolean';
 type Batch = 'install' | 'on' | 'off' | 'remove';
-const fits = (row: ToolRow, action: Batch) => action === 'install' ? !unavailable(row) && !hasCopy(row) && !removedCopy(row)
+const fits = (row: ToolRow, action: Batch) => action === 'install' ? !needsNode(row) && !hasCopy(row) && !removedCopy(row)
   : action === 'remove' ? row.installed : row.installed && !row.status && (row.enabled === false) === (action === 'on');
 const partsSummary =(row: ToolRow) => (['skill', 'command', 'agent', 'server'] as const).flatMap((kind) => {
   const n = row.pluginParts?.filter((part) => part.kind === kind).length ?? 0;
@@ -119,7 +108,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     } finally { if (!gone) setLoading(false); }
   };
   // The screen's optimistic rows and the engine's replies differ in shape (absent or null status, the flag of a removed item): compare what the screen shows.
-  const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, hasCopy(r), r.removedEnabled ?? null, r.version ?? null, r.nodeAvailable ?? null, r.uvAvailable ?? null, r.runtimeAvailable ?? null, r.runtimeFits ?? null]));
+  const same = (list: readonly ToolRow[]) => JSON.stringify(list.map((r) => [r.id, r.installed, r.installed ? r.enabled !== false : true, r.status ?? null, hasCopy(r), r.removedEnabled ?? null, r.version ?? null, r.nodeAvailable ?? null]));
   const rememberRemoved = (list: readonly ToolRow[]) => {
     const row = list.find((row) => !row.installed && typeof row.removedEnabled === 'boolean');
     if (row) setRemoved({ id: row.id, enabled: row.removedEnabled! });
@@ -174,8 +163,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const matching = createMemo(() => {
     const text = query().trim().toLocaleLowerCase();
     const list = filter() === 'all' && !text ? [...starters(), ...rows.filter((row) => !starters().includes(row))] : rows;
-    return list.filter((row) => (filter() !== 'skills' || (!row.server && !plugin(row) && !row.runtime)) && (filter() !== 'servers' || row.server)
-      && (filter() !== 'runtimes' || !!row.runtime)
+    return list.filter((row) => (filter() !== 'skills' || (!row.server && !plugin(row))) && (filter() !== 'servers' || row.server)
       && (filter() !== 'plugins' || plugin(row))
       && (filter() !== 'installed' || row.installed || row.status)
       && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
@@ -342,7 +330,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
           </header>
           <div class="catalog-bar">
             <div class="catalog-filters" role="group" aria-label={t('catalog.filter')}>
-              <For each={['all', 'skills', ...(rows.some(plugin) ? ['plugins' as const] : []), 'servers', ...(rows.some((row) => row.runtime) ? ['runtimes' as const] : []), 'installed'] as const}>{(kind) => <button class="pill" aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{t(`catalog.${kind}`)}</button>}</For>
+              <For each={['all', 'skills', ...(rows.some(plugin) ? ['plugins' as const] : []), 'servers', 'installed'] as const}>{(kind) => <button class="pill" aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{t(`catalog.${kind}`)}</button>}</For>
             </div>
           </div>
           <Show when={loading()}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
@@ -352,14 +340,11 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
               <span class="catalog-icon"><Icon name={glyph(row)} /></span>
               <span class="catalog-name">{catalogName(row.id)}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span>
               <Show when={plugin(row)}><span class="catalog-description">{partsSummary(row)}</span><PluginLimits row={row} claude={props.vendors.includes('claude')} /></Show>
-              <span class="catalog-origin">{row.repo} · {row.license}</span>
-              <RuntimeInfo row={row} />
-              <span class="catalog-state">{state(row)}</span>
+              <span class="catalog-origin">{row.repo} · {row.license}</span><span class="catalog-state">{state(row)}</span>
             </button>
             <input type="checkbox" class="catalog-pick" aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
             <button class="iconbtn catalog-site" aria-label={t('catalog.openSite', { repo: row.repo })} title={t('catalog.openSite', { repo: row.repo })} onClick={() => site(row)}><Icon name="external" small /></button>
             <Show when={fits(row, 'install')}><button class="btn secondary catalog-quick" aria-label={t('catalog.installName', { name: catalogName(row.id) })} onClick={() => void change(row.id, 'install').then((done) => done && focusCard(row.id))}><Icon name="download" small />{t('catalog.install')}</button></Show>
-            <Show when={needsUv(row)}><button class="link catalog-quick" onClick={() => void api.openLink('https://docs.astral.sh/uv/getting-started/installation/').catch((e) => setError(failureText(e)))}>{t('catalog.getUv')}</button></Show>
             <Show when={hasCopy(row) && !!row.status && !removedCopy(row)}><button class="btn secondary catalog-quick" disabled={busy()} onClick={(e) => open(row, e.currentTarget)}>{t('catalog.replace')}</button></Show>
             <Show when={row.installed && !row.status}><input type="checkbox" role="switch" class="sw2 catalog-quick" aria-label={t('catalog.switchName', { name: catalogName(row.id) })} checked={row.enabled !== false} onChange={async (e) => { const box = e.currentTarget; if (!(await change(row.id, 'toggle', box.checked))) box.checked = row.enabled !== false; }} /></Show>
           </div>}</For></div></section>}</For>
@@ -391,12 +376,10 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             </header>
             <Show when={row().cliName && row().cliName !== row().id}><p>{t('catalog.cliName', { name: row().cliName! })}</p></Show>
             <section class="catalog-gain"><h2>{t('catalog.gain')}</h2><p class="catalog-description">{words(`tools.${row().id}`, row().id)}</p></section>
-            <RuntimeInfo row={row()} />
-            <Show when={needsUv(row())}><button class="link" onClick={() => void api.openLink('https://docs.astral.sh/uv/getting-started/installation/').catch((e) => setError(failureText(e)))}>{t('catalog.getUv')}</button></Show>
             <Show when={needsNode(row())}><p>{t(plugin(row()) ? 'catalog.pluginNodeHelp' : 'catalog.nodeHelp')}</p><button class="link" onClick={() => void api.openLink('https://nodejs.org/en/download').catch((e) => setError(failureText(e)))}>{t('catalog.getNode')}</button></Show>
             <div class="catalog-actions">
               <Show when={!removedCopy(row())}>
-                <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!unavailable(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}><Show when={busy()}><StateGlyph state="working" small /></Show>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
+                <Show when={replacement()} fallback={<button class="btn primary big" disabled={busy() || !!needsNode(row())} onClick={() => hasCopy(row()) ? void prepareReplacement(row().id) : void change(row().id, 'install')}><Show when={busy()}><StateGlyph state="working" small /></Show>{t(busy() ? 'catalog.working' : hasCopy(row()) ? 'catalog.replace' : 'catalog.install')}</button>}>
                   {(prepared) => <div class="catalog-notice" data-catalog-replacement>
                     <div><p>{t('catalog.confirmReplace')}</p><dl><dt>{t('catalog.replaceFrom')}</dt><dd class="catalog-version">{prepared().from}</dd><dt>{t('catalog.replaceTo')}</dt><dd class="catalog-version">{prepared().to}</dd></dl><p>{t('catalog.replaceKeeps')}</p></div>
                     <button class="btn" ref={(el) => (cancelReplacement = el)} disabled={busy()} onClick={() => { ++preparation; setReplacement(undefined); queueMicrotask(focusDetail); }}>{t('catalog.cancel')}</button>

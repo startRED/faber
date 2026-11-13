@@ -23,17 +23,6 @@ const OFFICIAL_HOSTS: &[&str] = &[
     "release-assets.githubusercontent.com",
     "objects.githubusercontent.com",
     "registry.npmjs.org",
-    "files.pythonhosted.org",
-    "download.pytorch.org",
-    "download-r2.pytorch.org",
-    "pypi.nvidia.com",
-    "huggingface.co",
-    "cdn-lfs.huggingface.co",
-    "cdn-lfs-us-1.hf.co",
-    "us.aws.cdn.hf.co",
-    "cas-bridge.xethub.hf.co",
-    "kenney.nl",
-    "ftp.osuosl.org",
 ];
 
 /// Verifies that a network URL uses HTTPS and points to an approved official host.

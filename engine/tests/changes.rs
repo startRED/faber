@@ -568,8 +568,7 @@ fn listing_file_and_byte_caps_keep_found_changes_and_continue_without_losing_nam
             }
             assert_ne!(page.next, cursor, "continuation advances");
             cursor = page.next;
-            // Contention can split a time-budgeted page; cursor progress and the record count bound the loop.
-            assert!(pages <= total);
+            assert!(pages < 10);
         }
         assert_eq!(found.len(), total);
         assert!(pages >= 2);
