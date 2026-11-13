@@ -643,6 +643,8 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
     let engine = Engine::begin(opts, wiring.emitter())?;
     faber_engine::startup::mark("engine");
     engine.measure_unix_worker_memory();
+    // A project's first request gets one cheap read before its agent starts (R574).
+    engine.enable_ask_judge();
     if let Some(dir) = installed_data_dir {
         engine.set_installed_data(dir);
     }

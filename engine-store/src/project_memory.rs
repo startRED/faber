@@ -1217,6 +1217,150 @@ pub fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String
     if kept.is_empty() {
         return Ok(vec![]);
     }
+    let (_, mut kept) = kept_entries(project, kept, true)?;
+    // E3 (2026-11-13 harness study): the card's room is capped, and a project's many AI decisions pushed out the person's own
+    // older words ("no extra libraries"). Theirs come first, each group newest first.
+    kept.sort_by_key(|(_, author)| *author != Some("person"));
+    Ok(kept
+        .into_iter()
+        .map(|(body, author)| if author == Some("person") { body.strip_suffix(STALE).unwrap_or(&body).to_owned() } else { body })
+        .collect())
+}
+
+/// What a "never touch" rule says, in each language the screen speaks. Matched in lowercase words of the person's own kept
+/// decision; a decision of any other shape protects nothing.
+const NEVER_TOUCH: [&str; 58] = [
+    "never touch",
+    "do not touch",
+    "don't touch",
+    "never edit",
+    "do not edit",
+    "don't edit",
+    "never change",
+    "do not change",
+    "don't change",
+    "never modify",
+    "do not modify",
+    "don't modify",
+    "nunca mexa",
+    "nunca mexer",
+    "não mexa",
+    "não mexer",
+    "nunca altere",
+    "nunca alterar",
+    "não altere",
+    "não alterar",
+    "nunca edite",
+    "nunca editar",
+    "não edite",
+    "não editar",
+    "nunca modifique",
+    "não modifique",
+    "nunca toques",
+    "no toques",
+    "nunca toque",
+    "no toque",
+    "nunca tocar",
+    "no tocar",
+    "nunca modifiques",
+    "no modifiques",
+    "nunca edites",
+    "no edites",
+    "nunca cambies",
+    "no cambies",
+    "ne jamais toucher",
+    "ne touche pas",
+    "ne touchez pas",
+    "touche jamais",
+    "touchez jamais",
+    "ne jamais modifier",
+    "ne modifie pas",
+    "ne modifiez pas",
+    "modifie jamais",
+    "modifiez jamais",
+    "nie anfassen",
+    "nicht anfassen",
+    "niemals anfassen",
+    "nie ändern",
+    "nicht ändern",
+    "niemals ändern",
+    "nie bearbeiten",
+    "nicht bearbeiten",
+    "niemals bearbeiten",
+    "nicht verändern",
+];
+
+/// Item 10 (decided 2026-11-13): the files and folders the person's own kept decisions say never to touch, as paths relative to
+/// the project. Only a decision the person both wrote (`[by person]`) and kept counts, so an agent's note never adds or removes
+/// one; each backticked name must be a safe relative path that exists and is no link, and never the whole project.
+pub fn kept_protected(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String>, &'static str> {
+    if kept.is_empty() {
+        return Ok(vec![]);
+    }
+    // A rule stays a rule while its words are kept, even when one of its paths is gone: each path is checked on its own.
+    let (root, entries) = kept_entries(project, kept, false)?;
+    // The deny rules carry the whole absolute path, so a project folder with pattern characters would protect something else.
+    let folder = project.to_string_lossy();
+    let folder = folder.strip_prefix(r"\\?\").unwrap_or(&folder);
+    if folder.contains(GLOB) {
+        return Ok(vec![]);
+    }
+    let mut paths: Vec<String> = entries
+        .into_iter()
+        .filter(|(body, author)| {
+            let words = body.to_lowercase().replace('’', "'").split_whitespace().collect::<Vec<_>>().join(" ");
+            *author == Some("person") && NEVER_TOUCH.iter().any(|rule| words.contains(rule))
+        })
+        .flat_map(|(body, _)| {
+            Parser::new(&body)
+                .filter_map(|event| if let Event::Code(name) = event { Some(name.replace('\\', "/")) } else { None })
+                .collect::<Vec<_>>()
+        })
+        .filter_map(|name| {
+            let name = name.trim().trim_start_matches("./").trim_end_matches('/').to_string();
+            // A name a deny rule would read as a pattern protects nothing rather than something else.
+            if name.contains(GLOB) {
+                return None;
+            }
+            let path = adopted_relative(&name).ok()?;
+            // No link or junction anywhere on the way, and the real place stays inside the project.
+            let mut walked = root.clone();
+            for part in path.components() {
+                walked.push(part);
+                if std::fs::symlink_metadata(&walked).ok()?.file_type().is_symlink() {
+                    return None;
+                }
+            }
+            let real = walked.canonicalize().ok()?;
+            real.starts_with(root.canonicalize().ok()?).then_some(name)
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths.truncate(MAX_PROTECTED);
+    // Each path becomes four rules on the command line, beside the project's own folder: a budget on their whole length.
+    let base = folder.chars().count() + 1;
+    let mut used = 0;
+    paths.retain(|name| {
+        used += base + name.chars().count();
+        used <= PROTECTED_CHARS
+    });
+    Ok(paths)
+}
+
+/// Characters a Claude Code permission rule reads as a pattern.
+const GLOB: [char; 8] = ['*', '?', '[', ']', '{', '}', '(', ')'];
+/// Each path adds four rules to a command line Windows caps near 32 KB.
+const MAX_PROTECTED: usize = 32;
+/// The most characters of protected absolute paths, so their rules stay far under that cap.
+const PROTECTED_CHARS: usize = 2048;
+
+/// A kept decision's text and its mark's author.
+type KeptEntry = (String, Option<&'static str>);
+
+/// The person's kept decisions still in `.faber/decisions.md`, newest first, with their marks' authors.
+/// `whole` keeps only entries whose recorded files all still exist and are not stale, as the start card wants.
+fn kept_entries(project: &Path, kept: &[KeptDecision], whole: bool) -> Result<(PathBuf, Vec<KeptEntry>), &'static str> {
     let protected = resolved_private(&private_roots());
     let (root, directory) = project_directory(project, &protected)?;
     if private(&root.join(".faber/decisions.md"), &protected) {
@@ -1228,7 +1372,7 @@ pub fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String
     if file.too_large {
         return Err(READ);
     }
-    Ok(file
+    let kept: Vec<_> = file
         .entries
         .into_iter()
         .rev()
@@ -1237,15 +1381,16 @@ pub fn kept_for_card(project: &Path, kept: &[KeptDecision]) -> Result<Vec<String
             let item = KeptDecision::of(body);
             let mut matching = kept.iter().filter(|record| record.matches(&item)).peekable();
             matching.peek().is_some()
-                && matching.all(|record| match record {
-                    KeptDecision::Item { files, stale, .. } => {
-                        !stale && files.iter().all(|name| reference_exists(&directory, &root, name, &protected))
-                    }
-                    KeptDecision::Legacy(_) => true,
-                })
+                && (!whole
+                    || matching.all(|record| match record {
+                        KeptDecision::Item { files, stale, .. } => {
+                            !stale && files.iter().all(|name| reference_exists(&directory, &root, name, &protected))
+                        }
+                        KeptDecision::Legacy(_) => true,
+                    }))
         })
-        .map(|(body, author)| if author == Some("person") { body.strip_suffix(STALE).unwrap_or(&body).to_owned() } else { body })
-        .collect())
+        .collect();
+    Ok((root, kept))
 }
 
 fn list_with_private(project: &Path, protected: &[String]) -> Result<MemoryList, &'static str> {
@@ -1635,6 +1780,32 @@ mod tests {
         assert_eq!(restored.entries[0].text, file.entries[0].text, "Keep protects the exact source, including a prior machine mark");
         assert!(!restored.entries[0].stale);
         assert_eq!(kept_for_card(project.path(), &kept).unwrap(), ["- Mine `src/lib.rs`."]);
+    }
+
+    #[test]
+    fn only_the_persons_own_kept_never_touch_rules_protect_existing_paths() {
+        let text = "- Nunca mexa em `legacy/` nem em `config/prod.toml`. [by person]\n\
+- Never touch `src/` [by AI]\n\
+- Use `docs/` for notes. [by person]\n\
+- Don\u{2019}t edit `../outside`, `missing/`, `.`, `src/*` or `link`. [by person]\n\
+- Never change `docs/`. [by person]\n";
+        let (project, file) = decisions_file(text);
+        for dir in ["legacy", "config", "src", "docs"] {
+            std::fs::create_dir(project.path().join(dir)).unwrap();
+        }
+        std::fs::write(project.path().join("config/prod.toml"), "").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(project.path().join("docs"), project.path().join("link")).unwrap();
+        let file = listed(project.path(), &file.path, &[]);
+        assert!(kept_protected(project.path(), &[]).unwrap().is_empty(), "nothing kept, nothing protected");
+        let kept: Vec<_> = (0..4).map(|i| keep(project.path(), &file, i).unwrap().unwrap()).collect();
+        assert_eq!(
+            kept_protected(project.path(), &kept).unwrap(),
+            ["config/prod.toml", "legacy"],
+            "an AI's rule, a rule of another shape, unsafe or missing paths and links protect nothing; an unkept rule neither"
+        );
+        std::fs::remove_file(project.path().join("config/prod.toml")).unwrap();
+        assert_eq!(kept_protected(project.path(), &kept).unwrap(), ["legacy"], "one path gone leaves the rule's other paths");
     }
 
     #[test]
@@ -2197,6 +2368,28 @@ mod tests {
         for name in ["plans", "recipes", "learning", "memory"] {
             assert!(list.files.iter().any(|file| file.path == format!(".faber/{name}.md")), "{name}");
         }
+    }
+
+    /// E3: the card keeps about 2 KB of decisions; a person's own old line comes before the AI's newer ones, so it is the
+    /// last to fall off.
+    #[test]
+    fn the_persons_own_kept_decisions_come_first_on_the_card() {
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path().join(".faber");
+        std::fs::create_dir(&dir).unwrap();
+        let mut text = String::from("- No extra libraries. [by person]\n");
+        let mut kept = vec![KeptDecision::of("- No extra libraries.")];
+        for n in 0..3 {
+            text.push_str(&format!("- AI choice {n}. [by AI]\n"));
+            kept.push(KeptDecision::of(&format!("- AI choice {n}.")));
+        }
+        text.push_str("- Portuguese only. [by person]\n");
+        kept.push(KeptDecision::of("- Portuguese only."));
+        std::fs::write(dir.join("decisions.md"), text).unwrap();
+        assert_eq!(
+            kept_for_card(project.path(), &kept).unwrap(),
+            ["- Portuguese only.", "- No extra libraries.", "- AI choice 2.", "- AI choice 1.", "- AI choice 0."]
+        );
     }
 
     #[test]

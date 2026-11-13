@@ -108,6 +108,12 @@ final check, or a previously opened writer on Unix, remains the accepted normal 
 
 ### Separate copies
 
+A person's short first request in a project conversation waits for one cheap read before it reaches the agent (R574,
+`engine/src/engine/clarify.rs`): at most 12 s, beside Auto's routing, while the reply shows its usual typing state. A choice
+that would waste the work if guessed wrong becomes one question on a card in the agent's first reply; a request about looks
+that names no look gets two or three one-line directions there instead. Nothing else on screen changes, and a Stop during the
+read starts nothing. Cost: one small model call per new project conversation, no process kept.
+
 Copies and registered projects share the [portable Git workflow](../product/git-workflow.md): idle, rate-limited
 housekeeping and safe retirement at startup and turn boundaries, with no extra screen, timer or permanent process.
 

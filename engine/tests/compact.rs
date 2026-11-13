@@ -217,6 +217,25 @@ async fn a_compaction_the_cli_reports_resets_the_meter_to_the_summary() {
     until(&engine, &id, |c| idle(c) && c.context.is_some_and(|c| c.used == 205_002)).await;
     agent.say(json!({ "type": "system", "subtype": "compact_boundary", "compact_metadata": { "trigger": "auto", "pre_tokens": 205_002, "post_tokens": 1_200 } })).await;
     until(&engine, &id, |c| c.context == Some(ContextFill { used: 1_200, window: 1_000_000 })).await;
+    // E1: the CLI compacted by itself, so the next message carries the person's first request again, once.
+    let say = |text: &str| SendRequest {
+        conversation_id: Some(id.clone()),
+        area: Area::Project,
+        project_id: None,
+        text: text.into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+    };
+    engine.send(say("Now the footer")).unwrap();
+    until_turns(&agent, 2).await;
+    let pinned = &turns(&agent)[1];
+    assert!(pinned.contains("> Fix the login page, then the rest of the list") && pinned.ends_with("Now the footer"), "{pinned}");
+    answers(&mut agent, "Footer done.", true).await;
+    until(&engine, &id, idle).await;
+    engine.send(say("And the header")).unwrap();
+    until_turns(&agent, 3).await;
+    assert_eq!(turns(&agent)[2], "And the header", "the words go back once, not on every message");
     engine.shutdown();
 }
 
@@ -255,7 +274,13 @@ async fn the_agent_compacts_itself_when_its_turn_ends_and_gets_its_own_next_word
 
     compacts(&mut agent, 1_166).await;
     until_turns(&agent, 3).await;
-    assert_eq!(turns(&agent)[2], "Also the footer", "the person's waiting message goes first");
+    // E1: the summary may have lost the person's own words, so the first message after it carries them again.
+    let pinned = &turns(&agent)[2];
+    assert!(pinned.ends_with("---\n\nAlso the footer"), "the person's waiting message goes first: {pinned}");
+    assert!(
+        pinned.starts_with("Your context was just compacted.") && pinned.contains("> Fix the login page, then the rest of the list"),
+        "{pinned}"
+    );
     let c = engine.open(&id).unwrap();
     assert_eq!(c.queued.len(), 1);
     assert_eq!(c.queued[0].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
@@ -349,7 +374,12 @@ async fn a_process_that_compacts_is_neither_closed_as_idle_nor_evicted_for_a_new
     assert!(!agent.closed.load(std::sync::atomic::Ordering::SeqCst), "a change of settings closed the process that was compacting");
     compacts(&mut agent, 900).await;
     until_turns(&agent, 3).await;
-    assert_eq!(turns(&agent)[2], "The conversation was compacted. Continue: Go on with the footer.");
+    let after = &turns(&agent)[2];
+    assert!(
+        after.starts_with("Your context was just compacted.")
+            && after.ends_with("---\n\nThe conversation was compacted. Continue: Go on with the footer."),
+        "{after}"
+    );
     engine.shutdown();
 }
 
@@ -528,7 +558,13 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
     let compact = seen.lock().unwrap().iter().find(|m| m["method"] == "thread/compact/start").cloned().unwrap();
     assert_eq!(compact["params"]["threadId"], "thread-1");
     let second = seen.lock().unwrap().iter().filter(|m| m["method"] == "turn/start").nth(1).cloned().expect("a turn after the compaction");
-    assert_eq!(second["params"]["input"][0]["text"], "The conversation was compacted. Continue: Write the lexer section.");
+    // E1: Codex, too, gets the person's first request again ahead of the agent's own next.
+    let text = second["params"]["input"][0]["text"].as_str().unwrap();
+    assert!(
+        text.starts_with("Your context was just compacted.")
+            && text.ends_with("---\n\nThe conversation was compacted. Continue: Write the lexer section."),
+        "{text}"
+    );
     assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
     // The meter followed: 40000 before, what was left after, against the window Codex names.
     let seen = context_events(&mut rx);
@@ -758,7 +794,9 @@ async fn keep_going_compacts_a_large_context_between_tasks_before_its_next_turn(
     assert_eq!(turns(&agent)[3], compact_line());
     compacts(&mut agent, 9_000).await;
     until_turns(&agent, 5).await;
-    assert!(keep_going(&turns(&agent)[4]), "{:?}", turns(&agent));
+    // E1: the person's words go back first after Faber's own compaction under Keep going.
+    let (pin, turn) = turns(&agent)[4].split_once("---\n\n").map(|(a, b)| (a.to_string(), b.to_string())).unwrap();
+    assert!(pin.starts_with("Your context was just compacted.") && keep_going(&turn), "{:?}", turns(&agent));
     assert_eq!(engine.open(&id).unwrap().context.map(|c| c.used), Some(9_000));
 
     // A compaction that fails goes on with the turn, and is not asked again in a loop.

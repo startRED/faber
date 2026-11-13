@@ -46,6 +46,8 @@ mod cache_health;
 mod carry_on;
 #[path = "changes.rs"]
 mod changes;
+#[path = "clarify.rs"]
+mod clarify;
 #[path = "claude_session.rs"]
 mod claude_session;
 #[path = "claude_sessions.rs"]

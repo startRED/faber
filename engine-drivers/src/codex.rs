@@ -974,6 +974,13 @@ fn refresh_native(threads: &mut HashMap<u64, Thread>, key: u64, server: Option<&
 impl Thread {
     fn open_params(&self, area: Area) -> (&'static str, Value) {
         let (mut method, mut params) = thread_params(area, &self.params);
+        // The person's "never touch" rules (decided 2026-11-13): a guarded sandbox keeps them read-only, for commands too.
+        if self.params.permissions.guarded()
+            && self.params.instructions.is_none()
+            && let Some(config) = params["config"].as_object_mut()
+        {
+            crate::permissions::keep_read_only(config, &self.params.tuning.protected);
+        }
         if let Some(fork) = &self.native_fork {
             method = "thread/fork";
             params["threadId"] = fork.point.session.clone().into();
@@ -1208,6 +1215,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             }
             if t.progress {
                 words.push_str(crate::persona::BIGGER_OFFER);
+            }
+            if t.progress && t.tuning.assumptions {
+                words.push_str(crate::persona::ASSUMPTIONS);
             }
             if t.leads {
                 words.push_str(crate::persona::LEADS);
@@ -2231,6 +2241,7 @@ async fn serve(
                                 // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
                                 // refusal is always safe, so it is written here instead of racing the engine's mode.
                                 if crate::permissions::touches_credentials(&action, params["cwd"].as_str(), &|name| std::env::var(name).ok())
+                                    || crate::permissions::names_protected(method, &action, params["cwd"].as_str().or_else(|| t.params.cwd.to_str()), &t.params.tuning.protected)
                                     || crate::permissions::denies_data_write(
                                         t.params.permissions,
                                         method,
@@ -3136,6 +3147,29 @@ mod rewind_tests {
         })
         .await
         .expect("shared identity handshake stalled");
+    }
+
+    /// Item 10 (decided 2026-11-13): a guarded thread's sandbox keeps the person's "never touch" paths read-only, for commands
+    /// too; Full access has no sandbox to hold them (its approvals, when Codex asks, are refused by `names_protected`).
+    #[test]
+    fn a_guarded_thread_keeps_the_never_touch_paths_read_only() {
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().canonicalize().unwrap();
+        for permissions in [Permissions::Auto, Permissions::AcceptEdits, Permissions::Ask, Permissions::FullAccess] {
+            let mut t = thread(Arc::new(|_| {}));
+            t.params.cwd = root.clone();
+            t.params.permissions = permissions;
+            t.params.tuning.protected = vec![root.join("legacy")];
+            let (_, params) = t.open_params(Area::Project);
+            let config = &params["config"];
+            let profile = config["default_permissions"].as_str().map(|id| &config[&format!("permissions.{id}")]["filesystem"]);
+            let kept = root.join("legacy").to_string_lossy().replace('\\', "/");
+            let kept = kept.strip_prefix("//?/").unwrap_or(&kept).to_string();
+            match permissions {
+                Permissions::FullAccess => assert!(profile.is_none(), "{params}"),
+                _ => assert_eq!(profile.unwrap()[&kept], "read", "{permissions:?} {params}"),
+            }
+        }
     }
 
     #[test]

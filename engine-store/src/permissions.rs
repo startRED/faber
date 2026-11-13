@@ -415,6 +415,17 @@ fn protect_data(profile: &mut Value, root: &Path) {
 }
 
 /// Keep guarded modes' disk reads and native approvals, adding only the Store's write exclusion.
+/// Marks each path read-only in the sandbox profile a config names (`default_permissions`), so writes there fail for commands
+/// too. Item 10 (decided 2026-11-13): the person's "never touch" rules.
+pub fn keep_read_only(config: &mut Map<String, Value>, paths: &[PathBuf]) {
+    let Some(id) = config.get("default_permissions").and_then(Value::as_str).map(str::to_owned) else { return };
+    let Some(profile) = config.get_mut(&format!("permissions.{id}")) else { return };
+    for path in paths {
+        let path = path.canonicalize().unwrap_or_else(|_| path.clone());
+        profile["filesystem"][unified(&path.to_string_lossy())] = "read".into();
+    }
+}
+
 pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
     let mut profile = json!({ "extends": ":workspace", "filesystem": {
@@ -428,10 +439,81 @@ pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     json!({ "default_permissions": id, format!("permissions.{id}"): profile }).as_object().unwrap().clone()
 }
 
+/// The tools that only read or ask, never write.
+const READS: [&str; 6] = ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"];
+const SHELLS: [&str; 3] = ["Bash", "PowerShell", "item/commandExecution/requestApproval"];
+
+/// A command line that only prints the folder or reads files (`pwd`, `cat`, `type`, `Get-Content`, `ls` without options).
+fn plain_read(tool: &str, input: &Value) -> bool {
+    if !SHELLS.contains(&tool) {
+        return false;
+    }
+    let command = input.as_str().or_else(|| input["command"].as_str()).unwrap_or_default();
+    words(&command.replace("\\\\?\\", ""), true).is_some_and(|args| {
+        let program = args[0].to_ascii_lowercase();
+        (program == "pwd" && args.len() == 1)
+            || (["cat", "type", "get-content", "ls"].contains(&program.as_str()) && args.iter().skip(1).all(|arg| !arg.starts_with('-')))
+    })
+}
+
+/// Item 10 (decided 2026-11-13): does this request write or run something naming a path of the person's "never touch" rules?
+/// Reads and the plain reading commands pass. The engine refuses such a request wherever it sees one; the file tools are also
+/// refused by Claude Code's own deny rules, and Codex's guarded sandboxes keep the paths read-only. Best effort for a command
+/// line, as `touches_credentials` says.
+pub fn names_protected(tool: &str, input: &Value, cwd: Option<&str>, paths: &[PathBuf]) -> bool {
+    if paths.is_empty() || READS.contains(&tool) || plain_read(tool, input) {
+        return false;
+    }
+    let text = |p: &Path| p.to_string_lossy().into_owned();
+    let roots: Vec<String> = paths.iter().map(|p| normal(&p.canonicalize().map_or_else(|_| text(p), |real| text(&real)))).collect();
+    let cwd = cwd.map(|c| unified(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| text(&p))));
+    let shell = SHELLS.contains(&tool);
+    if shell && cwd.as_deref().is_some_and(|cwd| inside_any(&normal(cwd), &roots)) {
+        return true;
+    }
+    // Only what names a target is read: a command line, a file change, or a path-shaped field. A description, a commit
+    // message field, a search query or a prompt that mentions the folder's name never refuses the call.
+    let targets = if shell {
+        if input.is_string() || input.is_array() { input.clone() } else { input["command"].clone() }
+    } else if tool == "item/fileChange/requestApproval" {
+        input.clone()
+    } else {
+        path_fields(input)
+    };
+    names(&targets, cwd.as_deref(), &roots)
+}
+
+/// The values under path-shaped keys (`file_path`, `path`, `notebook_path`, `paths`, `source`, `destination`, ... and inside
+/// `edits`), wherever they sit.
+fn path_fields(input: &Value) -> Value {
+    let mut found = vec![];
+    fn walk(value: &Value, found: &mut Vec<Value>) {
+        match value {
+            Value::Object(map) => {
+                for (key, v) in map {
+                    let key = key.to_ascii_lowercase();
+                    if key.ends_with("path")
+                        || key.ends_with("paths")
+                        || ["source", "destination", "target", "from", "to", "file", "files", "dir", "directory"].contains(&key.as_str())
+                    {
+                        found.push(v.clone());
+                    } else if v.is_object() || v.is_array() {
+                        walk(v, found);
+                    }
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|v| walk(v, found)),
+            _ => {}
+        }
+    }
+    walk(input, &mut found);
+    Value::Array(found)
+}
+
 /// File reads remain available; requests naming approval records or engine-owned notes are refused in every mode.
 /// Command text is best effort; Full access can bypass the refusal and change the records.
 pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Value, cwd: Option<&str>) -> bool {
-    if ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"].contains(&tool) {
+    if READS.contains(&tool) {
         return false;
     }
     if names_record(input) {
@@ -445,70 +527,64 @@ pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Va
         return false;
     }
     let cwd = cwd.map(|c| unified(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
-    let shell = ["Bash", "PowerShell", "item/commandExecution/requestApproval"].contains(&tool);
-    if shell {
-        let command = input.as_str().or_else(|| input["command"].as_str()).unwrap_or_default();
-        if words(&command.replace("\\\\?\\", ""), true).is_some_and(|args| {
-            let program = args[0].to_ascii_lowercase();
-            (program == "pwd" && args.len() == 1)
-                || (["cat", "type", "get-content", "ls"].contains(&program.as_str())
-                    && args.iter().skip(1).all(|arg| !arg.starts_with('-')))
-        }) {
-            return false;
-        }
+    let shell = SHELLS.contains(&tool);
+    if plain_read(tool, input) {
+        return false;
     }
     if shell && cwd.as_deref().is_some_and(|cwd| inside_any(&normal(cwd), &roots)) {
         return true;
     }
-    fn names(value: &Value, cwd: Option<&str>, roots: &[String]) -> bool {
-        match value {
-            Value::String(text) => {
-                let matches = |token: &str| {
-                    let token = unified(token);
-                    let path = if absolute(&token) {
-                        let (base, tail) = token.split_once('/').unwrap_or((&token, ""));
-                        let path = resolve(base, tail);
-                        if token.starts_with("//") { format!("/{path}") } else { path }
-                    } else {
-                        resolve(cwd.unwrap_or(""), &token)
-                    };
-                    if inside_any(&normal(&path), roots) {
-                        return true;
-                    }
-                    // Resolve short names and junctions even when the requested file does not exist yet.
-                    if !absolute(&path) || path.starts_with("//") {
-                        return false;
-                    }
-                    Path::new(&path)
-                        .ancestors()
-                        .find_map(|parent| match parent.canonicalize() {
-                            Ok(real) => Some(inside_any(&normal(&real.to_string_lossy()), roots)),
-                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                            Err(_) => Some(false),
-                        })
-                        .unwrap_or(false)
-                };
-                let normalized = normal(text);
-                matches(text)
-                    || roots.iter().any(|root| {
-                        normalized.match_indices(root).any(|(at, _)| {
-                            let before = &normalized[..at];
-                            let after = &normalized[at + root.len()..];
-                            (before.is_empty() || before.ends_with(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
-                                && (after.is_empty()
-                                    || after.starts_with(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
-                        })
-                    })
-                    || text.split(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).chain(text.split(['"', '\''])).any(matches)
-            }
-            Value::Array(items) => items.iter().any(|v| names(v, cwd, roots)),
-            Value::Object(map) => map.iter().any(|(key, v)| {
-                !["content", "old_string", "new_string", "diff", "new_source"].contains(&key.as_str()) && names(v, cwd, roots)
-            }),
-            _ => false,
-        }
-    }
     names(input, cwd.as_deref(), &roots)
+}
+
+/// Does this request name a path inside one of `roots` (normalized), wherever it sits in the input (a path, a command line)?
+fn names(value: &Value, cwd: Option<&str>, roots: &[String]) -> bool {
+    match value {
+        Value::String(text) => {
+            let matches = |token: &str| {
+                let token = unified(token);
+                let path = if absolute(&token) {
+                    let (base, tail) = token.split_once('/').unwrap_or((&token, ""));
+                    let path = resolve(base, tail);
+                    if token.starts_with("//") { format!("/{path}") } else { path }
+                } else {
+                    resolve(cwd.unwrap_or(""), &token)
+                };
+                if inside_any(&normal(&path), roots) {
+                    return true;
+                }
+                // Resolve short names and junctions even when the requested file does not exist yet.
+                if !absolute(&path) || path.starts_with("//") {
+                    return false;
+                }
+                Path::new(&path)
+                    .ancestors()
+                    .find_map(|parent| match parent.canonicalize() {
+                        Ok(real) => Some(inside_any(&normal(&real.to_string_lossy()), roots)),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                        Err(_) => Some(false),
+                    })
+                    .unwrap_or(false)
+            };
+            let normalized = normal(text);
+            matches(text)
+                || roots.iter().any(|root| {
+                    normalized.match_indices(root).any(|(at, _)| {
+                        let before = &normalized[..at];
+                        let after = &normalized[at + root.len()..];
+                        (before.is_empty() || before.ends_with(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                            && (after.is_empty()
+                                || after.starts_with(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)))
+                    })
+                })
+                || text.split(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).chain(text.split(['"', '\''])).any(matches)
+        }
+        Value::Array(items) => items.iter().any(|v| names(v, cwd, roots)),
+        Value::Object(map) => map
+            .iter()
+            .any(|(key, v)| !["content", "old_string", "new_string", "diff", "new_source"].contains(&key.as_str()) && names(v, cwd, roots)),
+        _ => false,
+    }
 }
 
 pub fn prepare_tmp(root: &Path) -> bool {
@@ -1606,6 +1682,48 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_never_touch_path_is_refused_to_writes_and_commands_but_not_to_reads() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("legacy")).unwrap();
+        std::fs::write(root.join("legacy/old.rs"), "").unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        let kept = [root.join("legacy")];
+        let cwd = root.to_str();
+        let inside = root.join("legacy/old.rs").to_string_lossy().into_owned();
+        let refused = |tool: &str, input: serde_json::Value| super::names_protected(tool, &input, cwd, &kept);
+        assert!(refused("Edit", json!({"file_path": inside, "old_string": "a", "new_string": "b"})));
+        assert!(refused("Write", json!({"file_path": root.join("legacy/new.rs").to_string_lossy()})));
+        assert!(refused("Bash", json!({"command": "rm -rf legacy"})));
+        assert!(refused("mcp__fs__move_file", json!({"source": inside, "destination": root.join("src/old.rs").to_string_lossy()})));
+        assert!(refused("Bash", json!({"command": "echo x > ./legacy/old.rs"})));
+        assert!(refused("item/commandExecution/requestApproval", json!("git checkout -- legacy/old.rs")));
+        assert!(!refused("Read", json!({"file_path": inside})), "reading is not touching");
+        assert!(!refused("Bash", json!({"command": "cat legacy/old.rs"})));
+        assert!(!refused("Edit", json!({"file_path": root.join("src/lib.rs").to_string_lossy(), "new_string": "legacy"})));
+        assert!(!refused("Bash", json!({"command": "rm -rf legacy-copy"})), "a neighbour with the same start is not the folder");
+        assert!(!refused("Bash", json!({"command": "cargo test", "description": "run the legacy tests"})), "a description names nothing");
+        assert!(!refused("Agent", json!({"prompt": "look at legacy and report"})), "a prompt names nothing");
+        assert!(refused("MultiEdit", json!({"edits": [{"file_path": inside, "new_string": "x"}]})));
+        let inside_folder = root.join("legacy").to_string_lossy().into_owned();
+        assert!(super::names_protected("Bash", &json!({"command": "rm -rf ."}), Some(&inside_folder), &kept), "a command run inside it");
+        assert!(!super::names_protected("Bash", &json!({"command": "rm -rf legacy"}), cwd, &[]));
+    }
+
+    #[test]
+    fn a_never_touch_path_is_read_only_in_the_sandbox_profile() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("legacy")).unwrap();
+        let mut config = super::data_sandbox_config(&root, true);
+        super::keep_read_only(&mut config, &[root.join("legacy")]);
+        let id = config["default_permissions"].as_str().unwrap().to_string();
+        let filesystem = &config[&format!("permissions.{id}")]["filesystem"];
+        assert_eq!(filesystem[super::unified(&root.join("legacy").to_string_lossy())], "read");
+        assert_eq!(filesystem[":workspace_roots"]["."], "write", "the rest of the project stays writable");
+    }
+
     #[test]
     fn size_boundary_round3_filesystem_roots_remain_absolute() {
         use crate::model::PlanSize::{Normal, Small};

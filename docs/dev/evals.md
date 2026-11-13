@@ -18,4 +18,6 @@ ones (`engine/examples/persona_text.rs`), on the same model, each in a fresh emp
 `codex exec` turn can hold. The grader is plain functions with unit tests (`scripts/persona-eval.test.mjs`, in
 `npm run test:scripts`); the run prints passes per case and side and the cost (Claude Code's figure, both CLIs' tokens),
 and keeps every answer in `target/persona-eval/`. Claude Code adds the signed-in account's email to every run, and a name in it can pull an answer
-toward another language with either version, so compare the two sides, never one side's count alone. A change to the persona runs it before landing and names the result.
+toward another language with either version, so compare the two sides, never one side's count alone. A change to the persona runs it before landing and names the result. The largest prompt Faber appends (a project lead's)
+has a byte budget in `engine/tests/claude_session.rs` (E2 of the 2026-11-13 harness study): raising it is a change
+with this evaluation's number, never a silent growth.
