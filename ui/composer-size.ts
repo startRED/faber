@@ -40,9 +40,16 @@ export function resizeComposer(field: HTMLTextAreaElement | undefined, text: str
   if (!field?.isConnected) return;
   const previous = field.getBoundingClientRect().height;
   const style = getComputedStyle(field);
+  // Collapsing the field shortens every scrolled box around it, and the browser clamps their scroll to the shorter page;
+  // put each one back so the page does not jump while the person types.
+  const scrolled: [Element, number][] = [];
+  for (let box = field.parentElement; box; box = box.parentElement) if (box.scrollTop) scrolled.push([box, box.scrollTop]);
+  const page = document.scrollingElement;
+  if (page?.scrollTop && !scrolled.some(([box]) => box === page)) scrolled.push([page, page.scrollTop]);
   field.style.height = '0px';
   const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), text ? field.scrollHeight : 0));
   field.style.height = `${height}px`;
+  for (const [box, top] of scrolled) if (box.scrollTop !== top) box.scrollTop = top;
   growing.get(field)?.cancel();
   const card = field.closest<HTMLElement>('.composer');
   const animation = card && height > previous + 1 ? reveal(card, height - previous) : undefined;

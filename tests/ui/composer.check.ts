@@ -229,6 +229,41 @@ check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after se
   }
 });
 
+check('composer: typing in a tall draft keeps the scrolled page where it is', async () => {
+  const page = document.createElement('div');
+  page.style.cssText = 'position:fixed;left:0;top:0;width:500px;height:300px;overflow-y:auto';
+  for (const [key, value] of Object.entries(themes.css.base)) page.style.setProperty(`--${key}`, value);
+  page.dataset.motion = 'none';
+  const root = document.createElement('div');
+  const below = document.createElement('div');
+  below.style.height = '120px';
+  page.append(root, below);
+  document.body.append(page);
+  let fill!: (text: string) => void;
+  const dispose = render(() => createComponent(Composer, {
+    vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: '',
+    onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+    onReady: (ready) => { fill = ready; },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    const text = 'A long prompt with several words. '.repeat(14);
+    fill(text);
+    await settle();
+    ok(page.scrollHeight > page.clientHeight, 'the draft makes the page scroll');
+    page.scrollTop = page.scrollHeight;
+    const top = page.scrollTop;
+    ok(top > 0, 'the page is scrolled down');
+    fill(`${text}x`);
+    await settle();
+    equal(page.scrollTop, top, 'one more letter must not move the page');
+  } finally {
+    dispose();
+    page.remove();
+  }
+});
+
 check('composer: typed text survives a reload and is forgotten once sent', async () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
   let sent = '';
