@@ -58,6 +58,40 @@ fn plain(path: &Path, directory: bool) -> Result<(), String> {
     }
     Ok(())
 }
+// These uv links are data in receipts: never follow them while fingerprinting or copying.
+fn runtime_link(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
+    #[cfg(not(unix))]
+    let _ = root;
+    if !std::fs::symlink_metadata(path).map_err(|e| e.to_string())?.file_type().is_symlink() {
+        return Ok(None);
+    }
+    #[cfg(unix)]
+    for venv in path.ancestors().take_while(|ancestor| ancestor.starts_with(root)) {
+        if venv.file_name().is_none_or(|name| name != ".venv") {
+            continue;
+        }
+        let runtime = venv.parent().ok_or("Invalid runtime link")?;
+        if !runtime.join("instructions/SKILL.md").is_file() || !runtime.join("source").is_file() {
+            break;
+        }
+        let target = std::fs::read_link(path).map_err(|e| e.to_string())?;
+        let interpreter = path.parent() == Some(venv.join("bin").as_path())
+            && path.file_name().is_some_and(|name| python_link_name(&name.to_string_lossy()))
+            && (target.is_absolute() || target.components().count() == 1)
+            && target.file_name().is_some_and(|name| python_link_name(&name.to_string_lossy()));
+        if (path == venv.join("lib64") && target == Path::new("lib")) || interpreter {
+            return Ok(Some(target));
+        }
+        break;
+    }
+    Err("The stored copy contains an unsupported link".into())
+}
+
+#[cfg(unix)]
+fn python_link_name(name: &str) -> bool {
+    name.strip_prefix("python").is_some_and(|suffix| suffix.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'))
+}
+
 fn exists(path: &Path) -> Result<bool, String> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -81,7 +115,12 @@ fn checked_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
     Ok(Some(bytes))
 }
 fn fingerprint(path: &Path) -> Result<String, String> {
-    fingerprint_bounded(path, SERVER_LIMIT, 20000, 64)
+    let (bytes, paths) = if path.join("instructions/SKILL.md").is_file() && path.join("source").is_file() {
+        (24 * 1024 * 1024 * 1024, 120_000)
+    } else {
+        (SERVER_LIMIT, 20000)
+    };
+    fingerprint_bounded(path, bytes, paths, 64)
 }
 
 fn fingerprint_bounded(path: &Path, byte_limit: u64, path_limit: usize, depth_limit: usize) -> Result<String, String> {
@@ -91,7 +130,10 @@ fn fingerprint_bounded(path: &Path, byte_limit: u64, path_limit: usize, depth_li
             *remaining_paths = remaining_paths.checked_sub(1).ok_or("Catalog copy has too many paths")?;
             let entry = entry.map_err(|e| e.to_string())?;
             let is_dir = entry.file_type().map_err(|e| e.to_string())?.is_dir();
-            plain(&entry.path(), is_dir)?;
+            let link = runtime_link(root, &entry.path())?;
+            if link.is_none() {
+                plain(&entry.path(), is_dir)?;
+            }
             if is_dir {
                 walk(
                     root,
@@ -113,6 +155,13 @@ fn fingerprint_bounded(path: &Path, byte_limit: u64, path_limit: usize, depth_li
     let mut total = 0u64;
     let mut hash = Sha256::new();
     for relative in files {
+        if let Some(target) = runtime_link(path, &path.join(&relative))? {
+            hash.update(relative.as_bytes());
+            hash.update(b"\0link\0");
+            hash.update(target.as_os_str().as_encoded_bytes());
+            hash.update([0]);
+            continue;
+        }
         let file = faber_winproc::open_catalog_file(path, Path::new(&relative)).map_err(|e| e.to_string())?;
         let length = file.metadata().map_err(|e| e.to_string())?.len();
         total = total.checked_add(length).ok_or("Catalog copy is too large")?;
@@ -141,7 +190,7 @@ fn fingerprint_bounded(path: &Path, byte_limit: u64, path_limit: usize, depth_li
     Ok(crate::hex(&hash.finalize()))
 }
 
-fn copy_original(source: &Path, dest: &Path, remaining: &mut u64, paths: &mut usize, depth: usize) -> Result<(), String> {
+fn copy_original(root: &Path, source: &Path, dest: &Path, remaining: &mut u64, paths: &mut usize, depth: usize) -> Result<(), String> {
     plain(source, true)?;
     if depth > 64 {
         return Err("The retained copy is too deeply nested".into());
@@ -151,8 +200,13 @@ fn copy_original(source: &Path, dest: &Path, remaining: &mut u64, paths: &mut us
         *paths = paths.checked_sub(1).ok_or("The retained copy has too many paths")?;
         let entry = entry.map_err(|e| e.to_string())?;
         let target = dest.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_original(&entry.path(), &target, remaining, paths, depth + 1)?;
+        if let Some(link) = runtime_link(root, &entry.path())? {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(link, &target).map_err(|e| e.to_string())?;
+            #[cfg(not(unix))]
+            let _ = link;
+        } else if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            copy_original(root, &entry.path(), &target, remaining, paths, depth + 1)?;
         } else {
             let source = faber_winproc::open_catalog_file(source, Path::new(&entry.file_name())).map_err(|e| e.to_string())?;
             let permissions = source.metadata().map_err(|e| e.to_string())?.permissions();
@@ -183,6 +237,7 @@ impl Store {
             self.skills(),
             self.servers(),
             self.root.join("plugins"),
+            self.root.join("runtimes"),
             self.disabled(),
             self.removed(),
             self.root.join("replacements"),
@@ -228,12 +283,14 @@ impl Store {
             return Err("The replacement does not match the catalog".into());
         }
         let copy = if plan.disabled_location { self.disabled().join(&item.id) } else { self.dir(item) };
-        // Trusted direct callers can repeat an already complete installation without replacing its files or receipt.
+        drop(_store);
+        // Trusted direct callers can repeat a complete installation without replacing its receipt.
         if plan.old_commit == item.commit && self.verify_item(&copy, item) {
+            self.check_replacement(&plan)?;
             self.refresh_ready_after_install();
             return Ok(true);
         }
-        self.replace_sources_locked(&plan, zip, packages, || true)?;
+        self.replace_sources_if(&plan, zip, packages, || true)?;
         Ok(true)
     }
     fn replacement_snapshot(&self, id: &str) -> Result<ReplacementPlan, String> {
@@ -266,7 +323,12 @@ impl Store {
             selection,
             // A recovery receipt can hold both old and rejected copies, plus its atomic metadata.
             previous_receipt: if exists(&self.root.join("replacements").join(id))? {
-                Some(fingerprint_bounded(&self.root.join("replacements").join(id), 2 * SERVER_LIMIT + 2 * 1024 * 1024, 40064, 65)?)
+                let (bytes, paths) = if item.runtime.is_some() {
+                    (48 * 1024 * 1024 * 1024 + 2 * 1024 * 1024, 240_064)
+                } else {
+                    (2 * SERVER_LIMIT + 2 * 1024 * 1024, 40064)
+                };
+                Some(fingerprint_bounded(&self.root.join("replacements").join(id), bytes, paths, 65)?)
             } else {
                 None
             },
@@ -300,34 +362,10 @@ impl Store {
         packages: &BTreeMap<String, PathBuf>,
         authorized: impl FnOnce() -> bool,
     ) -> Result<(), String> {
-        let _store = lock();
-        self.replace_sources_locked(plan, zip, packages, authorized)
-    }
-
-    fn replace_sources_locked(
-        &self,
-        plan: &ReplacementPlan,
-        zip: &Path,
-        packages: &BTreeMap<String, PathBuf>,
-        authorized: impl FnOnce() -> bool,
-    ) -> Result<(), String> {
-        self.recover_replacements()?;
-        self.check_replacement_locked(plan)?;
-        let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
+        self.check_replacement(plan)?;
+        let temporary = self.stage_sources(&plan.item, zip, packages)?;
         let staging = &temporary.path;
-        if let Some(plugin) = &plan.plugin {
-            self.validate_plugin_aliases(plugin)?;
-            plugins::extract(plugin, zip, packages, staging)?;
-        } else if plan.item.server.is_some() {
-            npm::extract_tree(plan.item.server.as_ref().ok_or("error.tools.tree")?, zip, packages, staging)?;
-        } else {
-            extract_skill(zip, &plan.item.path, staging)?;
-            let text = std::fs::read_to_string(staging.join("SKILL.md")).map_err(|e| e.to_string())?;
-            standalone_skill(&text)?;
-        }
-        if !self.verify_item(staging, &plan.item) {
-            return Err("The replacement files do not match the catalog".into());
-        }
+        let _store = lock();
         self.check_replacement_locked(plan)?;
         if !authorized() {
             return Err("The catalog request is no longer active".into());
@@ -430,9 +468,9 @@ impl Store {
                 }
                 if !exists(&dest)? {
                     let recovery = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
-                    let mut remaining = SERVER_LIMIT;
-                    let mut paths = 20000;
-                    copy_original(&old, &recovery.path, &mut remaining, &mut paths, 0)?;
+                    let (mut remaining, mut paths) =
+                        if plan.item.runtime.is_some() { (24 * 1024 * 1024 * 1024, 120_000) } else { (SERVER_LIMIT, 20000) };
+                    copy_original(&old, &old, &recovery.path, &mut remaining, &mut paths, 0)?;
                     if fingerprint(&recovery.path)? != plan.old_digest {
                         return Err("The retained copy changed during recovery".into());
                     }
@@ -455,6 +493,119 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[test]
+    fn initial_and_replacement_staging_do_not_hold_the_global_store_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let item = runtime::fixture("staged-audio", b"audio", None);
+        let source = temp.path().join("source");
+        std::fs::write(&source, b"audio").unwrap();
+        let store = Store::with_catalog(temp.path(), vec![item.clone()]);
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let observed = calls.clone();
+        TEST_STAGE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _store = lock();
+                    let _ = tx.send(());
+                });
+                rx.recv_timeout(std::time::Duration::from_secs(10)).expect("staging must leave catalog switches available");
+                observed.set(observed.get() + 1);
+            }))
+        });
+        store.install_from(&item, &source).unwrap();
+        store.wait_prepared_for_test();
+        std::fs::write(store.dir(&item).join("payload/audio.dat"), b"changed").unwrap();
+        store.install_from(&item, &source).unwrap();
+        TEST_STAGE.with(|hook| hook.borrow_mut().take());
+        assert_eq!(calls.get(), 2, "both publication paths stage without the global lock");
+        assert!(store.verify_item(&store.dir(&item), &item));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn python_replacement_recovery_preserves_and_fingerprints_interpreter_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut item = runtime::fixture("linked-python", b"python", None);
+        item.runtime.as_mut().unwrap().kind = runtime::Kind::Python;
+        let store = Store::with_catalog(temp.path(), vec![item.clone()]);
+        let dest = store.dir(&item);
+        std::fs::create_dir_all(dest.join("instructions")).unwrap();
+        std::fs::create_dir_all(dest.join(".venv/bin")).unwrap();
+        std::fs::create_dir_all(dest.join(".venv/lib")).unwrap();
+        std::fs::write(dest.join("source"), b"python").unwrap();
+        std::fs::write(dest.join("instructions/SKILL.md"), b"old instructions").unwrap();
+        std::os::unix::fs::symlink("/usr/bin/python3.12", dest.join(".venv/bin/python")).unwrap();
+        std::os::unix::fs::symlink("python", dest.join(".venv/bin/python3")).unwrap();
+        std::os::unix::fs::symlink("lib", dest.join(".venv/lib64")).unwrap();
+        store.write_ledger(&BTreeMap::from([(item.id.clone(), "older-pin".into())])).unwrap();
+        let plan = store.capture_replacement(&item.id).unwrap();
+        let receipt = store.root.join("replacements").join(&item.id);
+        std::fs::create_dir_all(&receipt).unwrap();
+        super::Journal { plan: plan.clone(), finished: false, rolled_back: false }.write(&receipt).unwrap();
+        std::fs::rename(&dest, receipt.join("old")).unwrap();
+        store.recover_replacements().unwrap();
+        assert_eq!(std::fs::read_link(dest.join(".venv/bin/python")).unwrap(), Path::new("/usr/bin/python3.12"));
+        assert_eq!(std::fs::read_link(dest.join(".venv/bin/python3")).unwrap(), Path::new("python"));
+        assert_eq!(std::fs::read_link(dest.join(".venv/lib64")).unwrap(), Path::new("lib"));
+        assert_eq!(super::fingerprint(&dest).unwrap(), plan.old_digest);
+        std::fs::remove_file(dest.join(".venv/bin/python")).unwrap();
+        std::os::unix::fs::symlink("/opt/python3.12", dest.join(".venv/bin/python")).unwrap();
+        assert_ne!(super::fingerprint(&dest).unwrap(), plan.old_digest);
+        std::os::unix::fs::symlink("/tmp/outside", dest.join(".venv/lib/foreign")).unwrap();
+        assert!(super::fingerprint(&dest).is_err(), "arbitrary links remain rejected");
+    }
+
+    #[test]
+    fn runtime_replacement_receipts_and_recovery_accept_files_above_the_server_cap() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("large-audio");
+        let size = 65 * 1024 * 1024;
+        std::fs::File::create(&source).unwrap().set_len(size).unwrap();
+        let mut hash = Sha256::new();
+        let zeros = [0u8; 65536];
+        for _ in 0..size / zeros.len() as u64 {
+            hash.update(zeros);
+        }
+        let mut item = runtime::fixture("large-audio", b"fixture", None);
+        let descriptor = item.runtime.as_mut().unwrap();
+        descriptor.size = size;
+        descriptor.sha256 = crate::hex(&hash.finalize());
+        for recovery in [false, true] {
+            let store = Store::with_catalog(&temp.path().join(if recovery { "recovery" } else { "receipt" }), vec![item.clone()]);
+            store.install_from(&item, &source).unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(store.dir(&item).join("payload/audio.dat"))
+                .unwrap()
+                .write_all(b"changed")
+                .unwrap();
+            let plan = store.capture_replacement(&item.id).unwrap();
+            if recovery {
+                let journal = store.root.join("replacements").join(&item.id);
+                std::fs::create_dir_all(&journal).unwrap();
+                super::Journal { plan, finished: false, rolled_back: false }.write(&journal).unwrap();
+                retry_busy(|| std::fs::rename(store.dir(&item), journal.join("old"))).unwrap();
+                store.recover_replacements().unwrap();
+                assert_eq!(std::fs::metadata(store.dir(&item).join("payload/audio.dat")).unwrap().len(), size);
+                assert!(journal.join("old/source").is_file());
+            } else {
+                store.replace_sources(&plan, &source, &BTreeMap::new()).unwrap();
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(store.dir(&item).join("payload/audio.dat"))
+                    .unwrap()
+                    .write_all(b"changed again")
+                    .unwrap();
+                assert!(
+                    store.capture_replacement(&item.id).is_ok(),
+                    "a retained runtime receipt may exceed the server's 128 MiB receipt cap"
+                );
+            }
+        }
+    }
     #[test]
     fn replacement_detects_changed_copy_before_consent_is_applied() {
         let tmp = tempfile::tempdir().unwrap();

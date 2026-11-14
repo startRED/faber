@@ -54,7 +54,20 @@ are calibrated on known good and bad examples. `report.md` lists each problem wi
 
 Requests about narration, voice-over, music, sound effects, podcasts or audiobooks in the five screen languages carry
 the `audio` job (`engine-projects/src/tools/kits/matching.rs`), so catalog items of that job join the kit on their own.
-A video or page without sound does not. Audio runtimes in the catalog are the [next step](../research/audio-runtimes.md).
+A video or page without sound does not. Audio runtimes are installed on demand through Catalog, from their original
+sources with exact sizes and SHA-256 pins. The session kit lists each selected capability, absolute command and licence;
+the skills use the installed one first. Processor tools join audio jobs; CUDA tools join only when the cached available
+video memory fits. Unknown memory keeps them out. See [catalog design](../design/catalog.md#audio-runtimes).
+
+The processor tier offers faster-whisper with a local multilingual tiny model and int8 processing, official Windows
+FluidSynth, MuseScore General SF2, four recorded Kenney CC0 packs, and DNSMOS through speechmos. The CUDA tier offers
+UTMOSv2, Audiobox Aesthetics and Chatterbox Multilingual with a built-in voice. Scorers emit advisory results until
+calibrated. Audiobox weights require CC-BY-4.0 attribution, carried in both the kit and the score output.
+
+Python tools use the person's uv and Python 3.12. Faber never installs uv or Python: an absent uv opens its own installation
+page. Dependencies are downloaded and checked before an offline, hash-locked uv installation in the item's private,
+relocatable environment. No shell, build backend or model service runs. Weights and auxiliary files are pinned individually;
+launchers load the checked local files and disable automatic model downloads. No voice sample or other material is requested.
 
 ## Memory and limits
 
