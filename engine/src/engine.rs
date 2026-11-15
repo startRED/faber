@@ -78,6 +78,7 @@ mod pr_watch;
 mod quiet_child;
 mod quota_watch;
 mod recovery;
+mod reply_language;
 mod report_hold;
 mod research;
 mod resume_cut;
@@ -4191,7 +4192,8 @@ impl Core {
             return;
         }
         item.sending = true;
-        let turn = UserTurn { text: self.model_text(id, item), images: item.images.clone().unwrap_or_default() };
+        let text = reply_language::with_note(self.model_text(id, item), &item.text, Some(self.screen_code()));
+        let turn = UserTurn { text, images: item.images.clone().unwrap_or_default() };
         self.rewind.bump(id);
         if let Some(l) = self.live.get_mut(id) {
             l.steering.push(item.id.clone());
@@ -4937,6 +4939,7 @@ impl Core {
         let repinned = !text.starts_with('/');
         let text = if kit_reset { text } else { self.goal_pin(id, text) };
         let text = self.judged_text(id, reply_id, text);
+        let text = self.language_kept(id, text);
         let rewind_notice = self.convs.get_mut(id).and_then(|c| c.rewind_notice.take());
         let tool_kit = self.live.get_mut(id).and_then(|l| std::mem::replace(&mut l.kit_pending, false).then(|| l.tool_kit.clone()));
         let tool_kit = tool_kit.and_then(|kit| self.session_tool_report(id, reply_id, kit));

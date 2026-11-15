@@ -52,13 +52,14 @@ impl Core {
                 core.finish(&conv, Some(reply));
                 return;
             }
+            let words = core.language_kept(&conv, CONTINUATION.into());
             let started = core.secs();
             if let Some(l) = core.live.get_mut(&conv) {
                 l.overload_wait = None;
                 l.started = started;
                 l.settled = false;
                 l.break_pending = true;
-                l.session.send(UserTurn::text(CONTINUATION));
+                l.session.send(UserTurn::text(words));
             }
             core.listen(&conv);
         });

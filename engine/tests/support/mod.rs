@@ -155,10 +155,19 @@ pub fn claude_two_turns(request: &str) -> Vec<Entry> {
     vec![user("first"), init, ask("a.txt"), allowed("a.txt"), result(), user("second"), ask("b.txt"), allowed("b.txt"), result()]
 }
 
-/// The person's own text of a first input: the line that points to the guide, which Faber puts ahead of it, is not part of it.
+/// The person's own text of an input: the line that points to the guide, which Faber puts ahead of it, and the note naming the
+/// reply's language after it are not part of it.
 fn person_text(content: &Value) -> Value {
     let strip = |text: &str| {
         let rest = faber_engine::guide::without_note(text);
+        // The note naming the reply's language that Faber adds after a non-English person's words is not theirs either.
+        let rest = rest
+            .split_once(
+                "
+
+(From Faber, not the person: the person writes in ",
+            )
+            .map_or(rest, |(words, _)| words);
         (rest.len() != text.len()).then(|| rest.to_string())
     };
     match content {

@@ -66,7 +66,7 @@ pub fn persona(p: &PersonaInput<'_>) -> String {
 }
 
 /// The English name of a language of Faber's screen (`ui/i18n.ts`), for the persona.
-fn language_name(code: &str) -> Option<&'static str> {
+pub fn language_name(code: &str) -> Option<&'static str> {
     Some(match code {
         "en" => "English",
         "pt-BR" => "Brazilian Portuguese",
