@@ -42,7 +42,6 @@ export const de: Messages = {
 
   'team.answering': "Beantwortet die Frage zu {piece}",
   'team.handed': {"one":"Hat {n} Aufgabe verteilt","other":"Hat {n} Aufgaben verteilt"},
-  'team.answered': {"one":"{n} Frage beantwortet","other":"{n} Fragen beantwortet"},
   'team.finished': "Team fertig",
   'team.pieces': {"one":"{n} Aufgabe","other":"{n} Aufgaben"},
   'team.messagesLabel': "Nachrichten ({n})",
@@ -236,6 +235,7 @@ export const de: Messages = {
   "act.why": "weil {why}",
   "act.router": "{name}, KI Auswahl",
   "act.helper": "{name}, Hilfe",
+  "act.helper.group": {"one":"Faber hat {n} Aufgabe an eine weitere KI gegeben","other":"Faber hat {n} Aufgaben an weitere KIs gegeben"},
   "tools.marketing-aso.needs": "Benötigt Webzugriff zum Prüfen der Store-Seiten.",
   "catalog.cliName": "Name im KI-Werkzeug: {name}",
   "catalog.pluginRecord": "Plugin-Eintrag",
@@ -1015,6 +1015,7 @@ export const de: Messages = {
   'review.kind': "Prüfung",
   'review.round': "Runde {n}: {total} von 25",
   'review.running': "Runde {n}: Prüfung läuft",
+  'review.ended': "Runde {n}",
   'review.summary': "Prüfung: {total} von 25",
   'review.line.asked': "Erfüllt den Auftrag",
   'review.line.correct': "Korrekt",

@@ -25,7 +25,7 @@ and a useful file location is allowed when the person needs to find or open an a
   (`ChangedLines`, up to 40 lines, then "N more lines"); otherwise the full command or path (`code.step-what`) and what
   it returned (`pre.step-out`, up to 30 lines, then "N more lines"). Long input text may show a short preview; commands and file paths stay whole.
 - Thinking (`Thought`, `div.step.thought`) is a quiet row in its place among the steps: the shared thought icon (or the working ring
-  while thinking), "Thought" (or "Thinking" while live) in bold, and its first line (or latest line while live) in one
+  while thinking), "Thought" (or "Thinking" while live) in the regular weight and the muted ink, so the answer's words lead the column, and its first line (or latest line while live) in one
   middle-cut line. A click opens `div.step-detail.thought-text` with all of its paragraphs (`thinkingParts`).
 - One step or thought between two stretches of words stands directly as its own row (`div.steps.one`). Two or more steps
   or thoughts between two stretches of words fold into one counted line (`div.steps` > `button.steps-head`): a right
@@ -90,3 +90,16 @@ round details exist in the page only while their view is open. No timer or new p
 
 A Codex item that completes with no status of its own, such as `imageView` when the agent looks at a picture, is a
 finished step (`engine-drivers/src/codex.rs`): until 2026-11-12 every picture an agent looked at showed as a failed step.
+
+## A quiet trail
+
+A long working reply reads as the AI's words with the work between them as quiet one-line rows (the owner, 2026-11-14:
+"mais clean pro usuário não ficar confuso com muita informação"). A team folds to one receipt line as soon as all its
+members end, even while the lead's reply goes on: a single piece is named by its title ("Review the change · 1 min"), a
+team of several is counted, a count of zero messages is left out, and a failed piece replaces the check with the failed
+drawing. Helpers handed out together show as one Faber line ("Faber gave 9 jobs to helpers"), from the first helper on so the
+line keeps its place and open state as more join, that opens to each helper and what Faber told it; what Faber said to an AI opens from a quiet word under its line, not from a
+full-width box. Messages between AIs in a working team are one muted line each, opened by a click. A review round that
+ended without a score reads "Round 2", never "reviewing" beside its failed state. A helper's machine report (JSON) is no
+outcome sentence. Only CSS, the existing details element and the already-held messages: no process, timer or state
+(`tests/ui/team.check.ts`, "folds once its members end").

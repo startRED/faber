@@ -396,7 +396,8 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = '', numbers = hel
     if (call.name === 'Review') {
       const n = reviews.indexOf(call) + 1;
       const round = rounds.find((r) => r.call === call.id);
-      return round ? t('review.round', { n, total: round.total }) : t('review.running', { n });
+      // A round that ended without a score never reads "reviewing" next to its failed state.
+      return round ? t('review.round', { n, total: round.total }) : call.ok === undefined && !call.interrupted ? t('review.running', { n }) : t('review.ended', { n });
     }
     if (call.team?.name) return call.team.name;
     const named = namedOf(call);

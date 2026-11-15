@@ -42,7 +42,6 @@ export const ptBR: Messages = {
 
   'team.answering': "Respondendo sobre {piece}",
   'team.handed': {"one":"Distribuiu {n} parte","other":"Distribuiu {n} partes"},
-  'team.answered': {"one":"respondeu {n} pergunta","other":"respondeu {n} perguntas"},
   'team.finished': "Equipe terminou",
   'team.pieces': {"one":"{n} parte","other":"{n} partes"},
   'team.messagesLabel': "Mensagens ({n})",
@@ -236,6 +235,7 @@ export const ptBR: Messages = {
   "act.why": "porque {why}",
   "act.router": "{name}, escolha de IA",
   "act.helper": "{name}, ajudante",
+  "act.helper.group": {"one":"Faber deu {n} tarefa a uma IA ajudante","other":"Faber deu {n} tarefas a IAs ajudantes"},
   "tools.marketing-aso.needs": "Precisa de acesso à web pra examinar as páginas das lojas.",
   "catalog.cliName": "Nome na ferramenta de IA: {name}",
   "catalog.job.code": "Programar",
@@ -1174,6 +1174,7 @@ export const ptBR: Messages = {
   'review.kind': "Revisão",
   'review.round': "Rodada {n}: {total} de 25",
   'review.running': "Rodada {n}: revisando",
+  'review.ended': "Rodada {n}",
   'review.summary': "Revisão: {total} de 25",
   'review.line.asked': "Fez o que foi pedido",
   'review.line.correct': "Correto",

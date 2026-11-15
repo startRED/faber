@@ -42,7 +42,6 @@ export const fr: Messages = {
 
   'team.answering': "Répond à {piece}",
   'team.handed': {"one":"A confié {n} tâche","other":"A confié {n} tâches"},
-  'team.answered': {"one":"a répondu à {n} question","other":"a répondu à {n} questions"},
   'team.finished': "L’équipe a terminé",
   'team.pieces': {"one":"{n} tâche","other":"{n} tâches"},
   'team.messagesLabel': "Messages ({n})",
@@ -236,6 +235,7 @@ export const fr: Messages = {
   "act.why": "parce que {why}",
   "act.router": "{name}, choix de l’IA",
   "act.helper": "{name}, renfort",
+  "act.helper.group": {"one":"Faber a confié {n} tâche à une IA de renfort","other":"Faber a confié {n} tâches à des IA de renfort"},
   "tools.marketing-aso.needs": "Nécessite un accès web pour examiner les pages des boutiques.",
   "catalog.cliName": "Nom dans l’outil d’IA : {name}",
   "catalog.pluginRecord": "Registre du plugin",
@@ -1015,6 +1015,7 @@ export const fr: Messages = {
   'review.kind': "Révision",
   'review.round': "Tour {n} : {total} sur 25",
   'review.running': "Tour {n} : révision en cours",
+  'review.ended': "Tour {n}",
   'review.summary': "Révision : {total} sur 25",
   'review.line.asked': "Répond à la demande",
   'review.line.correct': "Correct",

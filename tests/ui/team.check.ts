@@ -185,24 +185,24 @@ check('team block: tally updates do not repeat a helper transition', () => {
   } finally { dispose(); root.remove(); }
 });
 
-check('team block: folds only after reply and members end, reopens at rest, background stays open', async () => {
+check('team block: folds once its members end, even while the reply goes on, and reopens at rest', async () => {
   const restore = keepRoot(); applyLook(sala({ motion: 'none' }));
   const root = document.createElement('div'); document.body.append(root);
   const [message, setMessage] = createSignal(teamFixture());
   const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'team', options: [], onBranch: () => {} }), root);
   try {
-    setMessage({ ...ended(message()), status: 'streaming' });
-    equal(root.querySelectorAll('.team-member').length, 3, 'lead still working');
+    equal(root.querySelectorAll('.team-member').length, 3, 'members still working');
     const firstCard = root.querySelector<HTMLButtonElement>('.team-member')!;
     firstCard.focus();
     equal(document.activeElement, firstCard, `focus before folding: inert ${firstCard.closest('[inert]')?.className}, active ${document.activeElement?.tagName}.${document.activeElement?.className}`);
-    setMessage(ended(message())); await frames();
+    setMessage({ ...ended(message()), status: 'streaming' }); await frames();
     const head = root.querySelector<HTMLButtonElement>('.team-fold')!;
     equal(document.activeElement, head, 'automatic folding preserves the reader keyboard position');
     equal(head.getAttribute('aria-expanded'), 'false');
     equal(root.querySelectorAll('.team-member').length, 0, 'folded cards leave the DOM');
     ok(head.textContent!.includes('Team finished · 3 pieces · 2 messages · 6 s'));
     ok(head.querySelector('.team-failure')!.textContent!.includes('Build screen: failed'));
+    ok(head.querySelector('.st-failed'), 'a team with a failed piece shows no check mark');
     head.focus(); head.click();
     equal(head.getAttribute('aria-expanded'), 'true'); equal(root.querySelectorAll('.team-member').length, 3);
     equal(getComputedStyle(root.querySelector('.team-member')!).animationName, 'none');
@@ -301,7 +301,7 @@ const looks = () => Object.values(themes.css.themes).flatMap((theme) => [{}, ...
 const answer: TeamMessage = { id: 'a', from: 'lead', to: 'h1', fromName: 'lead', toName: 'Read config', kind: 'answer', text: 'Keep it compatible.', at: 1400, question: 'q' };
 const answered = (message: Message): Message => ({ ...message, tools: message.tools!.map((tool, i) => i ? tool : { ...tool, team: { ...tool.team!, state: 'running', messages: [{ ...ask, state: 'answered' }, answer] } }) });
 
-check('team block: lead names its real model and uses urgent, running and ended sentences', () => {
+check('team block: lead names its real model, uses urgent and running sentences, and folds when its members end', () => {
   const root = document.createElement('div'); document.body.append(root);
   const [message, setMessage] = createSignal(teamFixture());
   const dispose = render(() => createComponent(Team, { get members() { return members(message()); }, streaming: true, lead: 'claude', leadModel: 'claude-sonnet-5-5', conversationId: 'team', messageId: 'team-reply' }), root);
@@ -312,10 +312,11 @@ check('team block: lead names its real model and uses urgent, running and ended 
     equal(root.querySelector<HTMLElement>('.team-lead')!.tabIndex, -1);
     equal(sentence(), 'Answering Read config');
     setMessage(answered(message())); equal(sentence(), 'Handed out 3 pieces');
-    setMessage(ended(message())); equal(sentence(), 'Handed out 3 pieces · answered 1 question');
-    setMessage(ended(teamFixture())); equal(sentence(), 'Handed out 3 pieces');
+    setMessage(ended(message())); equal(root.querySelector('.team-lead'), null, 'members ended: the team folds while the lead streams');
     const one = answered(teamFixture()); one.tools = one.tools!.slice(0, 1);
-    setMessage(ended(one)); equal(sentence(), 'Handed out 1 piece · answered 1 question');
+    setMessage(ended(one));
+    ok(root.querySelector('.team-fold')!.textContent!.startsWith('Read config · 2 messages · '), 'one piece is named, not counted');
+    ok(root.querySelector('.team-fold .st-failed') === null && root.querySelector('.team-fold svg + svg'), 'a team that did its work shows the check');
   } finally { dispose(); root.remove(); }
 });
 
@@ -375,6 +376,8 @@ check('team block: outcomes are plain first sentences, with no invented report',
   equal(teamOutcome('**Kept** [old files](https://example.test). A second sentence.'), 'Kept old files.');
   equal(teamOutcome('Supports version 2.5. Next sentence.'), 'Supports version 2.5.');
   equal(teamOutcome('<script>bad()</script>Safe text. Next sentence.'), 'Safe text.');
+  equal(teamOutcome('{"lines":[4,4,3,5,4],"rows":[]}'), '', 'a machine report is no sentence');
+  equal(teamOutcome('[Draft] Kept the files. Next sentence.'), '[Draft] Kept the files.');
   equal(teamOutcome('`config.ts` is compatible.\n\nMore details.'), 'config.ts is compatible.');
 });
 
@@ -608,7 +611,7 @@ check('team block: rail leaves the lead mark and ends at the last drop, working 
     const working = root.querySelector('[data-call=h1]')!;
     equal(getComputedStyle(working).borderTopColor, getComputedStyle(reference).borderTopColor);
     equal(getComputedStyle(working.querySelector('.team-drop')!).borderLeftColor, getComputedStyle(reference).borderTopColor);
-    setMessage({ ...message(), tools: message().tools!.map((tool) => ({ ...tool, ok: true })) });
+    setMessage({ ...message(), tools: message().tools!.map((tool, i) => i ? tool : { ...tool, ok: true }) });
     reference.style.borderColor = 'var(--line)';
     equal(getComputedStyle(root.querySelector('[data-call=h1]')!).borderTopColor, getComputedStyle(reference).borderTopColor, 'finished edge is plain');
   } finally { dispose(); root.remove(); restore(); }
@@ -669,7 +672,7 @@ check('team block: finished deliveries show a named check and duration beside th
   } finally { dispose(); root.remove(); restore(); }
 });
 
-check('team block: message text follows names inline and wraps naturally, using first and second inks', () => {
+check('team block: message text follows names inline and wraps naturally, quieter than the answer: second and third inks', () => {
   const restore = keepRoot(); applyLook(sala({ motion: 'none' }));
   const root = document.createElement('div'); document.body.append(root);
   const message = teamFixture();
@@ -683,14 +686,14 @@ check('team block: message text follows names inline and wraps naturally, using 
     const text = wire.querySelector('.team-wire-text')!;
     root.style.width = '660px';
     equal(address.getBoundingClientRect().top, text.getBoundingClientRect().top, 'names and short text share a line');
-    reference.style.color = 'var(--ink)'; equal(getComputedStyle(text).color, getComputedStyle(reference).color);
-    reference.style.color = 'var(--ink-2)'; equal(getComputedStyle(address).color, getComputedStyle(reference).color);
+    reference.style.color = 'var(--ink-2)'; equal(getComputedStyle(text).color, getComputedStyle(reference).color);
+    reference.style.color = 'var(--ink-3)'; equal(getComputedStyle(address).color, getComputedStyle(reference).color);
     for (const width of [280, 180]) {
       root.style.width = `${width}px`; wire.click();
       const range = document.createRange(); range.selectNodeContents(text);
       ok([...range.getClientRects()].every((rect) => rect.right <= root.getBoundingClientRect().right + 1), 'wrapped text fits');
       equal(getComputedStyle(wire.querySelector('.team-wire-body')!).webkitLineClamp, 'none', 'expanded text is complete');
-      wire.click(); equal(getComputedStyle(wire.querySelector('.team-wire-body')!).webkitLineClamp, '2', 'collapsed exchange stays bounded');
+      wire.click(); equal(getComputedStyle(wire.querySelector('.team-wire-body')!).webkitLineClamp, '1', 'collapsed exchange stays one line');
     }
   } finally { dispose(); root.remove(); restore(); }
 });

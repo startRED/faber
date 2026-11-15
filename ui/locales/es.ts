@@ -42,7 +42,6 @@ export const es: Messages = {
 
   'team.answering': "Respondiendo sobre {piece}",
   'team.handed': {"one":"Repartió {n} parte","other":"Repartió {n} partes"},
-  'team.answered': {"one":"respondió {n} pregunta","other":"respondió {n} preguntas"},
   'team.finished': "El equipo terminó",
   'team.pieces': {"one":"{n} parte","other":"{n} partes"},
   'team.messagesLabel': "Mensajes ({n})",
@@ -236,6 +235,7 @@ export const es: Messages = {
   "act.why": "porque {why}",
   "act.router": "{name}, selección de IA",
   "act.helper": "{name}, apoyo",
+  "act.helper.group": {"one":"Faber dio {n} tarea a una IA de apoyo","other":"Faber dio {n} tareas a IA de apoyo"},
   "tools.marketing-aso.needs": "Necesita acceso web para revisar las páginas de las tiendas.",
   "catalog.cliName": "Nombre en la herramienta de IA: {name}",
   "catalog.job.code": "Programar",
@@ -1176,6 +1176,7 @@ export const es: Messages = {
   'review.kind': "Revisión",
   'review.round': "Ronda {n}: {total} de 25",
   'review.running': "Ronda {n}: revisando",
+  'review.ended': "Ronda {n}",
   'review.summary': "Revisión: {total} de 25",
   'review.line.asked': "Cumple lo pedido",
   'review.line.correct': "Correcto",

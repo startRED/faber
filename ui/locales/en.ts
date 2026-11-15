@@ -42,7 +42,6 @@ export const en = {
 
   'team.answering': "Answering {piece}",
   'team.handed': {"one":"Handed out {n} piece","other":"Handed out {n} pieces"},
-  'team.answered': {"one":"answered {n} question","other":"answered {n} questions"},
   'team.finished': "Team finished",
   'team.pieces': {"one":"{n} piece","other":"{n} pieces"},
   'team.messagesLabel': "Messages ({n})",
@@ -236,6 +235,7 @@ export const en = {
   "act.why": "because {why}",
   "act.router": "{name} router",
   "act.helper": "{name} helper",
+  "act.helper.group": {"one":"Faber gave {n} job to helpers","other":"Faber gave {n} jobs to helpers"},
   "tools.marketing-aso.needs": "Needs web access to inspect store listings.",
   "catalog.cliName": "Name in the AI tool: {name}",
   "catalog.job.code": "Working on code",
@@ -1175,6 +1175,7 @@ export const en = {
   'review.kind': "Review",
   'review.round': "Round {n}: {total} of 25",
   'review.running': "Round {n}: reviewing",
+  'review.ended': "Round {n}",
   'review.summary': "Review: {total} of 25",
   'review.line.asked': "Does what was asked",
   'review.line.correct': "Correct",

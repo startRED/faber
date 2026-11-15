@@ -117,16 +117,18 @@ export function Team(props: { members: AgentStep[]; streaming: boolean; lead?: V
   const leadSentence = () => {
     const waiting = props.members.find((step) => agentState(step, props.streaming) === 'waitingLead');
     if (waiting) return t('team.answering', { piece: pieceTitle(waiting) });
-    const handed = t('team.handed', { n: props.members.length });
-    const answered = messages().filter((line) => line.kind === 'answer' && line.from === 'lead').length;
-    return !counts().working && answered ? `${handed} · ${t('team.answered', { n: answered })}` : handed;
+    return t('team.handed', { n: props.members.length });
   };
+  // One piece is named by its title; a message count of zero says nothing.
+  const one = () => props.members.length === 1 ? props.members[0] : undefined;
   const summary = () => {
     const time = teamTime(props.members);
     const took = time ? elapsed(time.start, time.end) : undefined;
-    return [t('team.finished'), t('team.pieces', { n: props.members.length }), t('team.messages', { n: messages().length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
+    const head = one() ? [pieceTitle(one()!)] : [t('team.finished'), t('team.pieces', { n: props.members.length })];
+    return [...head, messages().length && t('team.messages', { n: messages().length }), took && t(took.key, { n: took.n })].filter(Boolean).join(' · ');
   };
   const failures = () => props.members.filter((step) => ['failed', 'stopped', 'declined'].includes(agentState(step, props.streaming)));
+  const failure = (step: AgentStep) => one() ? t(agentWord(step, props.streaming)) : `${pieceTitle(step)}: ${t(agentWord(step, props.streaming))}`;
   return <section ref={root} class="team" role="group" aria-labelledby={heading} data-rest={rest()}>
     <Show when={counts().ended} fallback={<div class="team-head" id={heading}>
       <span>{t('team.label')}</span>
@@ -134,7 +136,7 @@ export function Team(props: { members: AgentStep[]; streaming: boolean; lead?: V
       <span class="team-count">{[counts().working && t('team.working', { n: counts().working }), counts().done && t('team.done', { n: counts().done }), counts().waiting && t('team.questions', { n: counts().waiting })].filter(Boolean).join(' · ')}</span>
     </div>}>
       <button ref={focusFold} type="button" class="team-head team-fold" id={heading} aria-expanded={open()} onClick={() => setExpanded(!expanded())}>
-        <Icon name="down" small /><Icon name="check" small /><span>{summary()}<For each={failures()}>{(step) => <span class="team-failure"> · {pieceTitle(step)}: {t(agentWord(step, props.streaming))}</span>}</For></span>
+        <Icon name="down" small /><Show when={failures().length} fallback={<Icon name="check" small />}><StateGlyph state="failed" small /></Show><span>{summary()}<For each={failures()}>{(step) => <span class="team-failure"> · {failure(step)}</span>}</For></span>
       </button>
     </Show>
     <Collapse open={open()}>

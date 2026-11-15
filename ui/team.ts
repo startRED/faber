@@ -8,6 +8,8 @@ export interface WireLine { message: TeamMessage; replies: TeamMessage[] }
 /** Use the reply's safe Markdown reader, then keep only the first sentence as text. */
 export function teamOutcome(report: string): string {
   if (!report.trim()) return '';
+  // A reviewer's machine report (its findings as JSON) is no sentence for a person; the card keeps its state and time.
+  if (/^[[{]/.test(report.trim())) try { JSON.parse(report); return ''; } catch { /* prose that starts with a bracket */ }
   const template = document.createElement('template');
   template.innerHTML = html(report);
   template.content.querySelectorAll('button').forEach((button) => button.remove());
@@ -29,7 +31,8 @@ export function teamCounts(members: AgentStep[], streaming: boolean) {
   const states = members.map((step) => agentState(step, streaming));
   const working = states.filter((state) => state === 'running' || state === 'background' || state === 'stuck' || state === 'waiting').length;
   const waiting = states.filter((state) => state === 'waitingLead').length;
-  return { working, waiting, done: members.length - working - waiting, ended: !streaming && !working && !waiting };
+  // A team folds when its own members end, even while the reply goes on: a long reply keeps one line per finished team.
+  return { working, waiting, done: members.length - working - waiting, ended: !working && !waiting };
 }
 
 export function teamTime(members: AgentStep[]): { start: number; end: number } | undefined {
