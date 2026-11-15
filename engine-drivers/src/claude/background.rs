@@ -2,6 +2,9 @@
 //! turn the CLI starts by itself, with a `result` of its own that names the subagent's run (`origin.runId`), and the answer
 //! the person waits for is in the last of them (`tests/fixtures/claude/background.jsonl`). So a reply ends at the first
 //! `result` that no background subagent still owes a turn to, and the turns before it count as parts of the same reply.
+//! A subagent that ends while the main thread still works is not always given a turn: the CLI hands its notice to the next
+//! request of the turn in progress (a `queued_command`), and no `result` ever names its run. Its end (`task_notification`)
+//! followed by a new request of the main thread (`status: requesting`) before any `result` is that case, so nothing is owed.
 
 use crate::events::EngineEvent;
 use crate::proc::ProcessIdentity;
@@ -167,6 +170,8 @@ impl Writers {
 pub(super) struct Background {
     /// Runs of the background subagents the main agent started whose turn has not come back yet.
     owed: BTreeSet<String>,
+    /// Owed runs that said they ended since the last `result`: the next request of the main thread carries their notice.
+    ended: BTreeSet<String>,
     /// What the turns already held back counted, added to the reply's own `Done`.
     held: Option<EngineEvent>,
 }
@@ -187,12 +192,31 @@ impl Background {
                 }
                 false
             }
+            Some("system")
+                if msg["subtype"] == "task_notification"
+                    && matches!(msg["status"].as_str(), Some("completed" | "failed" | "stopped" | "cancelled")) =>
+            {
+                if let Some(run) = msg["run_id"].as_str().filter(|run| self.owed.contains(*run)) {
+                    self.ended.insert(run.into());
+                }
+                false
+            }
+            // The turn in progress asks again: the notices of runs that ended meanwhile went into it, not into turns of their own.
+            Some("system") if msg["subtype"] == "status" && msg["status"] == "requesting" => {
+                for run in std::mem::take(&mut self.ended) {
+                    self.owed.remove(&run);
+                }
+                false
+            }
             Some("result") => {
+                // A notice that came before the turn's last request is still owed its own turn.
+                self.ended.clear();
                 if let Some(run) = msg["origin"]["runId"].as_str() {
                     self.owed.remove(run);
                 }
                 if stopping {
                     self.owed.clear();
+                    self.ended.clear();
                 }
                 self.owed.is_empty()
             }
@@ -306,6 +330,45 @@ mod tests {
         assert!(b.owes(), "its turn is still to come");
         b.ends_reply(&result(Some("a")), false);
         assert!(!b.owes());
+    }
+
+    fn notice(run: &str) -> Value {
+        json!({ "type": "system", "subtype": "task_notification", "run_id": run, "status": "completed", "parent_tool_use_id": null })
+    }
+    fn requesting() -> Value {
+        json!({ "type": "system", "subtype": "status", "status": "requesting", "parent_tool_use_id": null })
+    }
+
+    /// The order of `tests/fixtures/claude/background.jsonl`: both subagents end during the main thread's last request, so
+    /// each still gets a turn of its own and the answer is in the last one.
+    #[test]
+    fn a_notice_during_the_last_request_still_waits_for_its_own_turn() {
+        let mut b = Background::default();
+        b.ends_reply(&started("a", true, "local_agent"), false);
+        b.ends_reply(&started("b", true, "local_agent"), false);
+        b.ends_reply(&requesting(), false);
+        b.ends_reply(&notice("a"), false);
+        b.ends_reply(&notice("b"), false);
+        assert!(!b.ends_reply(&result(None), false));
+        assert!(!b.ends_reply(&result(Some("a")), false));
+        b.ends_reply(&requesting(), false);
+        assert!(b.ends_reply(&result(Some("b")), false));
+    }
+
+    /// A subagent that ends while the main thread still has requests to make is folded into that turn: no `result` will
+    /// name its run, and waiting for one held every later reply of the process open until the silence stop cut it.
+    #[test]
+    fn a_notice_folded_into_the_turn_in_progress_owes_nothing() {
+        let mut b = Background::default();
+        b.ends_reply(&started("a", true, "local_agent"), false);
+        b.ends_reply(&notice("a"), false);
+        assert!(b.owes(), "its notice may still get a turn of its own");
+        b.ends_reply(&requesting(), false);
+        assert!(!b.owes(), "the next request carried its notice");
+        assert!(b.ends_reply(&result(None), false));
+        b.ends_reply(&notice("gone"), false);
+        b.ends_reply(&requesting(), false);
+        assert!(!b.owes(), "a notice for a run never owed changes nothing");
     }
 
     fn call(id: &str, tool: &str, background: bool) -> Value {
