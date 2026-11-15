@@ -22,6 +22,9 @@ check('faber-act: automatic messages and decisions have their own rows', () => {
     equal(rows.length, 2);
     ok(rows[0]!.textContent!.includes(t('act.faber')));
     ok(rows[0]!.textContent!.includes(t('act.why', { why: t('reason.autoDefault') })));
+    // The effort reads in the screen's language, mid-sentence: "Aufwand mittel", never the raw "medium".
+    ok(rows[1]!.textContent!.includes(t('act.route.chose', { model: 'A', effort: t('effort.medium').toLocaleLowerCase('de') })), rows[1]!.textContent!);
+    ok(!rows[1]!.textContent!.includes('medium'));
     rows[0]!.querySelector('button')!.click(); equal(changed[0], 'keepGoing');
     const disclosure = rows[0]!.querySelector('details')!; ok(!disclosure.open); disclosure.open = true;
     equal(disclosure.querySelector('.faber-act-sent')!.textContent, wake.sent);

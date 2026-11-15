@@ -1,15 +1,21 @@
 import { Index, Show } from 'solid-js';
 import type { FaberAct } from './api.ts';
 import { ActorMark } from './icons/kinds.tsx';
-import { fromEngine, t } from './i18n.ts';
+import { fromEngine, lang, t } from './i18n.ts';
+import { en, type Key } from './locales/en.ts';
 import { prettyModel, vendorName } from './models.ts';
 
-/** The engine sends plain ids; the sentence names the AI and the model as the rest of the screen does. */
-const named = (params: Record<string, string> = {}) => ({
-  ...params,
-  ...(params.vendor === 'claude' || params.vendor === 'codex' ? { vendor: vendorName(params.vendor) } : {}),
-  ...(params.model ? { model: prettyModel(params.model) } : {}),
-});
+/** The engine sends plain ids; the sentence names the AI, the model and the effort as the rest of the screen does. */
+const named = (params: Record<string, string> = {}) => {
+  const effort = `effort.${params.effort}`;
+  return {
+    ...params,
+    ...(params.vendor === 'claude' || params.vendor === 'codex' ? { vendor: vendorName(params.vendor) } : {}),
+    ...(params.model ? { model: prettyModel(params.model) } : {}),
+    // Mid-sentence: "chose Sonnet, medium effort", not "Medium" or the raw "medium" in another language.
+    ...(effort in en ? { effort: t(effort as Key).toLocaleLowerCase(lang()) } : {}),
+  };
+};
 
 /** `named`: inside a group whose line already says what happened, the row only names the helper. Reads `act` live: a row
  * keeps its place (and an open disclosure) while the reply's acts update. */
