@@ -526,9 +526,10 @@ fn autostart_has_no_window(ctx: &mut Ctx) -> Result {
     let out = ctx.sb.data.join("startup.json");
     let launch = Launch { args: vec!["--autostart".into()], checks_out: Some(out.clone()), ..claude_chat(ctx) };
     let id = ctx.spawn(launch)?;
-    eventually("autostart setup to finish", crate::app::startup(), || out.exists())?;
-    let report: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(out).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    // The app's `fs::write` creates the file before it writes it: wait for a whole report, not for the file.
+    let read = || std::fs::read_to_string(&out).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    eventually("autostart setup to finish", crate::app::startup(), || read().is_some())?;
+    let report = read().ok_or("the autostart report went away")?;
     same(report["windowCount"].as_u64(), Some(0), "autostart webview windows")?;
     ensure(ctx.exited(id).is_none(), || "autostart exited instead of staying in the tray".into())?;
     ctx.close(id)
