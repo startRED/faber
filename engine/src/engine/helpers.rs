@@ -476,12 +476,10 @@ impl Core {
 
     /// The helper can take messages now: what the person wrote before goes in, in order.
     fn flush_early(&mut self, call: &str) {
-        let screen = Some(self.screen_code());
         let Some(h) = self.helpers.get_mut(call) else { return };
         if h.ready || h.vendor == Vendor::Claude {
             for (id, text) in std::mem::take(&mut h.early) {
-                let text = if id.starts_with("team:") { text } else { from_person(&text, screen) };
-                h.session.steer(UserTurn::text(text), &id);
+                h.session.steer(UserTurn::text(if id.starts_with("team:") { text } else { helper::from_person(&text) }), &id);
             }
         }
     }
@@ -508,11 +506,10 @@ impl Core {
         self.rewind.bump(conv);
         let id = new_id();
         let starting = self.helper_starting(conv, call);
-        let screen = Some(self.screen_code());
         match self.helpers.get_mut(call).filter(|h| h.conv == conv) {
             Some(h) if h.ready => {
                 h.waiting.push(id.clone());
-                h.session.steer(UserTurn::text(from_person(text, screen)), &id);
+                h.session.steer(UserTurn::text(helper::from_person(text)), &id);
             }
             Some(h) => {
                 h.waiting.push(id.clone());
@@ -838,11 +835,6 @@ impl Core {
             }
         }
     }
-}
-
-/// The person's words to a helper, framed as theirs, with the note naming the language the helper writes back in.
-fn from_person(text: &str, screen: Option<&str>) -> String {
-    super::reply_language::with_note(helper::from_person(text), text, screen)
 }
 
 #[cfg(test)]

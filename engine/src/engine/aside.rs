@@ -199,8 +199,7 @@ impl Core {
             ),
         };
         self.worker_memory.registry.register(session.owned_tree());
-        // A quick question's answer is read by the person too: it keeps the language of the question's own words.
-        session.send(UserTurn::text(super::reply_language::with_note(text, question, Some(self.screen_code()))));
+        session.send(UserTurn::text(text));
         let asked = self.secs();
         let shown = model.clone().unwrap_or_else(|| vendor.name().to_string());
         self.asking.insert(
