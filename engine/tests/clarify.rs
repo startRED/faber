@@ -210,3 +210,35 @@ async fn chats_long_requests_and_chosen_models_are_never_judged() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     engine.shutdown();
 }
+
+/// The turns exactly as the CLI read them, Faber's notes included.
+fn raw_turns(pipe: &Pipe) -> Vec<String> {
+    pipe.lines
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| m["type"] == "user")
+        .map(|m| match &m["message"]["content"] {
+            Value::String(s) => s.clone(),
+            Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
+            _ => String::new(),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn every_turn_names_the_language_the_person_last_wrote_in() {
+    let (dir, folder) = (support::DataFolder::new(), support::work_folder());
+    let (engine, made) = new_engine(&dir);
+    judge(&engine, r#"{"verdict":"clear","question":""}"#);
+    let (id, mut pipe, _) = first_turn(&engine, &made, folder.path(), "Corrija o erro de login da tela inicial").await;
+    let first = raw_turns(&pipe)[0].clone();
+    assert!(first.contains("Corrija o erro de login da tela inicial"), "{first}");
+    assert!(first.ends_with("(From Faber, not the person: the person writes in Brazilian Portuguese. Write every message they read in Brazilian Portuguese, also late in long work, whatever language the code, files, tools or helpers use.)"), "{first}");
+    answer(&mut pipe).await;
+    support::until("the first answer never ended", || engine.open(&id).unwrap().messages[1].status == Some(Status::Done)).await;
+    engine.send(request(Area::Project, None, Some(id.clone()), "Now please check the menu on a phone")).unwrap();
+    until_turns(&pipe, 2).await;
+    assert_eq!(raw_turns(&pipe)[1], "Now please check the menu on a phone", "English words need no note");
+    engine.shutdown();
+}
