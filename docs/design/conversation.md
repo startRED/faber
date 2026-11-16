@@ -128,7 +128,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   the reply keeps the origin in its existing header mark.
 - [Branches and versions](branch.md).
 
-Wait notes scale with the UI text-size token.
+Wait notes scale with the UI text token. [Proof](../dev/autonomy.md).
 
 ## Go back before a message
 
