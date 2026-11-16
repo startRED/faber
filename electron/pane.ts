@@ -35,7 +35,6 @@ export type PaneNote =
 export type PaneHost = {
   /** The window the views live in, when one is open. */
   window: () => BrowserWindow | null;
-  appControl?: (conversation: string, input: unknown) => Promise<unknown>;
   /** Tells the host something. */
   note: (note: PaneNote) => void;
 };
@@ -197,11 +196,6 @@ export class Pane {
       case 'load':
         return Promise.resolve(this.load(order.view, order.url));
       case 'call':
-        if (order.method === 'Faber.appControl') {
-          const p = order.params as {conversation: string; input: unknown};
-          if (!this.host.appControl) throw new Error('app control unavailable');
-          return this.host.appControl(p.conversation, p.input);
-        }
         return this.call(order.view, order.method, order.params);
       case 'clear':
         return this.clear(order.view);

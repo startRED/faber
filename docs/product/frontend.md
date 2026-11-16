@@ -37,12 +37,6 @@ The file bodies are embedded as static text. Session discovery grows by two desc
 the complete skill text is read only when the agent uses it. There is no resident frontend service. This describes
 the allocation model, not a measured whole-app RAM/CPU result or proof that every model will follow instructions.
 
-UI proof targets the latest running app, using isolated data by default or the live app for authorized diagnosis of
-its actual state. The agent uses available app-scoped controls or an existing hidden harness, interacts through real
-flows, critiques and fixes in-scope visible defects, then rechecks. Web and desktop apps are covered when an appropriate
-adapter exists; missing tools, adapters or sign-in are reported. Screenshots and mocks alone do not prove behavior.
-Screen control does not extend permissions or require new infrastructure.
-
 ## The workflow
 
 1. Identify the task and extend existing routes, controls and tokens. Match the deliverable: marketing composition,

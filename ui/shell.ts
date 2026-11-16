@@ -1,6 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 // The one place the screen reaches the shell that draws it (R459): Tauri until the move, Electron after. Electron's
@@ -36,17 +35,7 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
 /** Tauri's shape, `{ payload }`, so every listener in `api.ts` stays as it is. */
 export function listen<T>(event: string, listener: (event: { payload: T }) => void): Promise<Unlisten> {
   if (electron) return Promise.resolve(electron.listen(event, (payload) => listener({ payload: payload as T })));
-  return tauriListen<T>(event, (message) => {
-    if (import.meta.env.MODE === 'test') {
-      const proof = globalThis as typeof globalThis & { __appEventProof?: { canaries: string[]; settings: number } };
-      const observed = proof.__appEventProof ||= { canaries: [], settings: 0 };
-      const payload = message.payload as { __appCanary?: string; type?: string };
-      if (event !== 'faber:event' && observed.canaries.length < 100) observed.canaries.push(event);
-      if (payload.__appCanary && observed.canaries.length < 100) observed.canaries.push(payload.__appCanary);
-      if (payload.type === 'settings') observed.settings++;
-    }
-    listener(message);
-  }, { target: { kind: 'Webview', label: getCurrentWebview().label } });
+  return tauriListen<T>(event, listener);
 }
 
 /** The window's buttons: minimize, maximize or restore, close, and whether it is maximized. */

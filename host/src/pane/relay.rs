@@ -128,10 +128,7 @@ impl Relay {
                 if link.waiting.is_none() {
                     return Err(GONE.into());
                 }
-                if !matches!(op, PaneOp::Open { .. })
-                    && !matches!(&op, PaneOp::Call { method, .. } if method == "Faber.appControl")
-                    && !link.open.contains(&view)
-                {
+                if !matches!(op, PaneOp::Open { .. }) && !link.open.contains(&view) {
                     return Err("not open".into());
                 }
                 let generation = if matches!(op, PaneOp::Open { .. }) {

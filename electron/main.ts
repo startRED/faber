@@ -7,8 +7,6 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { AppControl, appControlSession } from './app-control.ts';
-import { isolatedTestData } from './app-control-data.ts';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
@@ -75,8 +73,7 @@ if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.fabe
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
 /** Faber's browser pane: the views the host orders (`electron/pane.ts`). */
-const apps = new AppControl(testmode.testing && isolatedTestData(process.env.FABER_DATA_DIR, path.join(app.getPath('appData'), 'Faber')), ORIGIN);
-const pane = new Pane({ window: () => win, note: (note) => host?.note(note), appControl: (conversation, input) => apps.act(conversation, input) });
+const pane = new Pane({ window: () => win, note: (note) => host?.note(note) });
 
 /**
  * The hashes of the inline scripts dist/index.html ships: only the fixed loader that starts the screen's modules
@@ -125,7 +122,7 @@ function screenFile(address: string): string | null {
 function serveScreen(): void {
   // Keep internal file reads outside the default session's fail-closed visual-page guard.
   const assets = session.fromPartition('screen-assets');
-  for (const target of [session.defaultSession, appControlSession()]) target.protocol.handle(SCHEME, async (request) => {
+  protocol.handle(SCHEME, async (request) => {
     if (request.url === `${ORIGIN}/__draft_import__` || (testmode.testing && request.url === `${ORIGIN}/__test_blank__`)) {
       return new Response('', { headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP } });
     }
@@ -295,19 +292,13 @@ function relay(): void {
   });
   ipcMain.handle('faber:invoke', async (event, command: unknown, args: unknown) => {
     // Any other page (a future browser pane, a frame) is refused before a command runs.
-    const agent = apps.owner(event);
-    if (!agent && !fromScreen(event)) return { err: 'error.host.notScreen' };
+    if (!fromScreen(event)) return { err: 'error.host.notScreen' };
     if (typeof command !== 'string') return { err: 'error.host.badRequest' };
     if (args !== undefined && (args === null || typeof args !== 'object' || Array.isArray(args))) return { err: 'error.host.badArgs' };
     const given = (args ?? {}) as Record<string, unknown>;
     // The answer travels as `{ok}` or `{err}`: a failure is an ordinary answer the screen reads (as Tauri's), not an
     // error Electron would log with a stack for every refused call.
     try {
-      if (agent) {
-        if ((command === 'screen_ready' || command === 'set_clock')) return {ok:null};
-        if (!host) throw new Error('error.host.notReady');
-        return {ok: await apps.dispatch(event, command, given, (name, input) => host!.call(name, input))};
-      }
       const own = windowCommands.get(command);
       if (own) return { ok: (await own(given)) ?? null };
       if (!host) throw new Error('error.host.notReady');
@@ -349,7 +340,6 @@ app.on('before-quit', (event) => {
   void host.stop(HOST_STOP_MS).then(() => {
     host = null;
     release();
-    apps.closeAll();
     pane.closeAll();
     app.quit();
   }, (failure) => {
@@ -427,7 +417,6 @@ function startHost(window: Parameters<typeof apply>[1]): Sidecar {
     },
     event: (event) => {
       // Recovery reaches the live screen too: reloading here would lose drafts whose storage writes failed.
-      apps.tell('faber:event', event);
       const type = (event as { type?: unknown } | null)?.type;
       if (type === 'pane') {
         // What the browser pane tells the screen, on the channel the host names (only the pane's own channels reach it).

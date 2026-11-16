@@ -433,7 +433,7 @@ fn report(app: &AppHandle, status: Status) {
 }
 
 fn announce(app: &AppHandle) {
-    let _ = app.emit_to(tauri::EventTarget::webview("main"), "faber:update", status(app));
+    let _ = app.emit("faber:update", status(app));
 }
 
 /// Everything the start and the idle install need from the world, so the order of the steps is tested without a network, a

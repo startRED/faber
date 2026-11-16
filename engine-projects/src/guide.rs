@@ -139,7 +139,7 @@ impl Guide {
     pub fn note(&self) -> Option<String> {
         match self {
             Guide::Text(language) => Some(format!(
-                "{}\nFrontend fallback (frontend-craft and frontend-proof): for anything a person will look at in a browser (a page, screen, form or explainer, even one HTML file), extend the project's existing design system, or with none choose a layout, type and palette from the subject instead of a centered card on a gradient; verify every taught fact; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Look at the result yourself at a desktop and a phone size without a visible window (an installed Chromium browser run headless takes the pictures), inspect the latest actual running build, use isolated data by default or the live app within the person's request or existing authorization, interact through affected flows, fix visible defects and recheck until no reproducible in-scope user-visible defect remains. Report missing tools or access and anything unverified. This does not authorize new tools or external actions.\nMedia fallback (media-craft and media-proof): for narration, music or sound effects, make it alone without asking for a voice or recording; generate speech per paragraph at natural speed with no forced duration or time-stretch, short fades and soxr resampling, and time visuals to word timestamps; make music from instruments (MIDI and a SoundFont) and effects from recorded CC0 sounds, never raw oscillators; duck music about 10 dB on the words and normalize in two passes to -14 LUFS and -1 dBTP. Measure loudness, clipping, clicks and gaps inside sentences in .faber/verify/listen, skip any check that cannot run, and report what stayed unmeasured.",
+                "{}\nFrontend fallback (frontend-craft and frontend-proof): for anything a person will look at in a browser (a page, screen, form or explainer, even one HTML file), extend the project's existing design system, or with none choose a layout, type and palette from the subject instead of a centered card on a gradient; verify every taught fact; establish the main task and a coherent visual direction; implement relevant empty, loading, success and recoverable error states. Preserve input and reading position. Use semantic controls, keyboard/focus behavior, responsive layout and reduced motion. Look at the result yourself at a desktop and a phone size without a visible window (an installed Chromium browser run headless takes the pictures), fix what you see, test the affected flow and report evidence and anything unverified. This does not authorize new tools or external actions.\nMedia fallback (media-craft and media-proof): for narration, music or sound effects, make it alone without asking for a voice or recording; generate speech per paragraph at natural speed with no forced duration or time-stretch, short fades and soxr resampling, and time visuals to word timestamps; make music from instruments (MIDI and a SoundFont) and effects from recorded CC0 sounds, never raw oscillators; duck music about 10 dB on the words and normalize in two passes to -14 LUFS and -1 dBTP. Measure loudness, clipping, clicks and gaps inside sentences in .faber/verify/listen, skip any check that cannot run, and report what stayed unmeasured.",
                 text_for(*language)
             )),
             Guide::Index { language, .. } => {
@@ -265,13 +265,6 @@ mod tests {
         let fallback = Guide::Text(Language::En).note().unwrap();
         assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));
         assert!(fallback.contains("media-craft") && fallback.contains("media-proof"));
-        let proof = ORIGINAL_SKILLS.iter().find(|(name, _)| *name == "frontend-proof").unwrap().1;
-        for rule in
-            ["isolated data by default", "latest actual running build", "Screen control grants no extra", "no reproducible in-scope"]
-        {
-            assert!(proof.contains(rule), "missing UI proof contract: {rule}");
-        }
-        assert!(fallback.contains("isolated data by default"));
     }
 
     /// Videos of 2026-11-13 had stretched narration (one forced-duration call per sentence) and chiptune effects (sine
