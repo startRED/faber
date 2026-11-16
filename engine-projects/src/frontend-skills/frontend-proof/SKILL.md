@@ -6,8 +6,7 @@ description: Use before saying a page or screen is done, or for a UI audit: look
 # Frontend proof
 
 Prove the requested task, then judge the visible result. A passing compilation, accessibility scan or screenshot alone
-cannot establish that the interface works. Choose the checks affected by the change; do not run every check below on
-an unrelated one-line edit. Respect the project's stronger proof and review rules.
+cannot establish that the interface works. Choose checks affected by the change and respect stronger project proof and review rules.
 
 ## Look at it before you say it is done
 
@@ -52,8 +51,12 @@ Locate the existing checks and run them. Use the project's browser or hidden app
 a visible window when the host forbids it. If there is no runtime, missing sign-in or another blocked prerequisite,
 state that limitation and perform the checks still possible. Never invent a running preview or test result.
 
-Keep commands, runtime errors, screenshots and measurements in the project's existing evidence location. Do not put
-secrets, private pages or personal inputs in screenshots or logs. Synthetic fixtures should be visibly synthetic.
+Inspect the latest actual running build and interact as a user, using isolated data by default. Use live app only as requested or authorized; never repeat granted approval or infer real-data change permission. Prefer app/browser controls, stable or semantic refs, app-scoped trusted input. Screen control grants no extra permissions.
+Localhost dev servers and browser tools/checks need no hidden harness. No OS-wide automation, bypassing
+restrictions, proof-only wrappers or unsafe machine-wide debugging. Report missing tools, adapters or sign-in.
+Pictures and mocks do not prove a functioning app.
+
+Keep evidence in the project location. Exclude secrets, private pages and personal inputs; label synthetic fixtures.
 
 ## Walk the affected task
 
@@ -71,11 +74,11 @@ remained intact. For a changed asynchronous flow, include relevant cases from th
 | Reload or restart | Durable state restored from confirmed storage; memory-only state described honestly |
 | New output while reading | Read line stays in place; new output remains discoverable without forced scrolling |
 
-Do not perform destructive or external operations just to test them. Use approved fixtures or a sandbox. A persistence
+Do not perform destructive or external operations just to test them. Prefer isolated fixture writes or a sandbox within the authorization already given. A persistence
 check that never reloads proves only in-memory continuity; a retry check must also inspect the resulting record count.
 For a slow asynchronous path designed to finish, exercise its actual completion as well as waiting and cancellation.
-A separate instant-success mode does not prove that the slow operation finishes, releases controls or preserves the
-right result. A deliberately indefinite wait is checked against its own contract, including cancellation or recovery.
+An instant-success mode does not prove the slow operation finishes correctly. Check an indefinite wait against its
+contract, including cancellation or recovery.
 
 ## Keyboard and accessibility
 
@@ -111,26 +114,22 @@ adjectives or an unsupported score:
 5. Does it use imagery and motion purposefully without obstructing the work?
 6. Do the empty, waiting, error and populated states all remain usable?
 
-Apply the project's numeric rubric if it has one. The writer must not invent an independent reviewer or approve their
-own visual work. An optional preference is not a defect. Report a blocker only with a reproducible user problem or a
-written requirement it breaks. A scoped fix is not permission to redesign neighboring screens.
+Use the project rubric. The writer cannot approve their own work or invent an independent reviewer. Report
+reproducible problems and violations of written requirements, not preferences; do not redesign neighboring screens.
 
 ## Performance and resource evidence
 
 Illustrated demos use three to five short beats, real product tokens and recognizable controls. Label synthetic
 content; scene clicks never prove product behavior. Use an installed Stageshow skill only for these demos. Copy needed
 kit/examples into the task workspace before edits or dependency installation; never modify a verified Catalog snapshot.
-Keep demo dependencies outside the app. Compose narrow layouts separately and provide a complete reduced-motion still.
-Illustration crops and word limits must not hide real app information or controls.
+Keep demo dependencies outside the app; provide narrow layouts and a reduced-motion still.
+Crops and word limits must not hide app information or controls.
 
-For a changed transition or animated demonstration, retain a visual rehearsal of the actual interaction: its opening,
-intermediate images, settled outcome and, for a loop, the return to its opening. Include a narrow supported layout,
-reduced motion, interruption and replay where relevant. Pair images with the sampling trace so a reviewer can locate
-a jump instead of guessing from one settled screenshot.
+For changed animation, retain images of the opening, intermediate states, settled outcome and loop return. Include
+narrow layouts, reduced motion, interruption and replay where relevant. Pair images with the sampling trace.
 
 Treat missing images, missing samples, sampling gaps or a timeout before settling as incomplete evidence. Inspect the
-structured report, coverage and command exit status together; a printed approval line alone is insufficient. A clean
-automated report still needs visual judgment. Report the browser and build actually exercised, and distinguish
+structured report, coverage and command exit status together; a printed approval line alone is insufficient. Automated results still need visual judgment. Report the browser and build actually exercised, and distinguish
 illustrated scene checks from clicks through the real application.
 
 - For affected hot paths, measure interaction-to-next-paint and frame times on the same hardware, fixture and build
@@ -148,9 +147,11 @@ illustrated scene checks from clicks through the real application.
 
 ## Report and stop
 
-Say what works, the evidence that supports it and what was not exercised. Fix a demonstrated in-scope defect and rerun
-the checks it affects. Report adjacent issues separately. Ask only for decisions or prerequisites that change the
-result; neither this skill nor a screenshot grants authority to publish, install or send anything.
+Say what works, the evidence that supports it and what was not exercised. Fix the most consequential in-scope defect
+first and recheck affected flows. Stop when requested behavior and relevant checks hold and no reproducible in-scope
+user-visible defect remains; do not continue polishing preferences. Report blockers and adjacent issues separately.
+Ask only for decisions or prerequisites that change the result; neither this skill nor a screenshot grants authority
+to publish, install or send anything.
 
 ## Primary references
 
