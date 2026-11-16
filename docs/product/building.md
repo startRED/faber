@@ -23,6 +23,7 @@ layout and resource evidence. They complement installed design skills and never 
 on another project. Delivery checks do not establish a measured gain in generated interface quality.
 Work with sound gets `media-craft` and `media-proof` the same way ([contract](media.md)): the voice sets the clock,
 music and effects come from instruments and recorded sounds, and the result is measured, not assumed.
+The workflow exercises the latest running UI with isolated data by default, or the live app for authorized actual-state diagnosis, then fixes and rechecks visible defects. It reports unavailable app controls or access without claiming a mock proves the real flow.
 
 Normal mode feels like Claude Code: the user talks only to Faber. Behind it, Claude and Codex sessions work in
 parallel, each on what it does best, and the result must read as if one careful team made it.

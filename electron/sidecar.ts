@@ -63,14 +63,13 @@ export class Sidecar {
       FABER_VERSION: app.getVersion(),
       FABER_SHELL_PID: String(process.pid),
       FABER_AUTOSTART: app.isPackaged && startsWithSystem() ? '1' : '0',
-      // Faber's own browser pane: the shell has views for it, except in a test or automated run (hidden), which shows none.
-      ...(process.env.FABER_HIDDEN === '1' ? {} : { FABER_PANE: '1' }),
+      // The private shell wire also serves named app control in hidden test runs.
+      FABER_PANE: '1',
       // Self-updates (`faber-update`) run only in the installed app, which says where its program is for the installer.
       ...(app.isPackaged ? { FABER_UPDATES: '1', FABER_INSTALL_DIR: path.dirname(process.execPath) } : {}),
     };
     // No shell, no console window: the host is a plain child of the app.
-    // A hidden run never has a pane, whatever the environment it was started in says.
-    if (process.env.FABER_HIDDEN === '1') delete env.FABER_PANE;
+    // Hidden runs also offer session-owned app control; no window is shown.
     const child = spawn(program(), [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, shell: false, env });
     let ended: () => void = () => {};
     const sidecar = new Sidecar(

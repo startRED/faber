@@ -15,6 +15,7 @@
 //! or a payment it may read and scroll but never click or type.
 
 pub(crate) use faber_host::pane::firefox;
+pub(crate) mod app;
 pub(crate) mod native;
 
 use base64::Engine as _;
@@ -1462,6 +1463,7 @@ impl Pane {
             _ if crate::lock(&self.state).owner.as_deref() != Some(conversation.as_str()) => {
                 return Err("the page open in Faber's browser is not this conversation's; open yours again with its address".into());
             }
+            Request::App(_) => return Err("app requests must use the app adapter".into()),
             Request::Read | Request::Controls | Request::Watch(_) => None,
             Request::Click(target) => Some(json!({ "kind": "click", "target": target, "at": bound(reported.as_deref())? })),
             Request::Type { target, text, submit } => {
@@ -1802,6 +1804,9 @@ impl Pane {
 impl Browser for PaneBrowser {
     fn act(&self, conversation: String, tab: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>> {
         let pane = self.0.clone();
+        if let Request::App(input) = request {
+            return Box::pin(app::act(pane.app.clone(), conversation, input));
+        }
         // Making the webview waits for the window's thread, so it runs off the engine's.
         Box::pin(async move {
             let mut task = Abort(tauri::async_runtime::spawn(pane.agent_act(conversation, tab, request)));

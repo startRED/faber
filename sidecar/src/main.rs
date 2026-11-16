@@ -23,7 +23,7 @@
 //!   of a start that only finishes an install). The status of the update is the event `{"type":"update",...}`; the end of the
 //!   app, which the installer is about to replace, is the order `quit`. Without them nothing updates.
 //!
-//! - `FABER_PANE`: `1` when the shell has views for Faber's own browser pane, set only for a visible app. Then this process
+//! - `FABER_PANE`: `1` when the shell has browser views or named app control, including hidden Electron test runs. Then this process
 //!   holds the pane's rules (`faber_host::pane`), orders the views with `{"order":{"kind":"pane",...}}` lines, and the window
 //!   commands `site_*` and `cookie_*` reach that pane; what the screen should hear of it comes as events
 //!   `{"type":"pane","channel":...,"payload":...}`. Without it those commands answer `error.host.noWindow`.
@@ -117,7 +117,7 @@ async fn run() -> ExitCode {
     let update_data = data_dir.clone();
     // Faber's own browser pane, when the shell has views for it: the pane is made before the engine, which is handed its browser.
     // Its events go out through `orders`, which is emptied at the end, so the pane never keeps the writer open.
-    let pane = (!hidden && std::env::var("FABER_PANE").is_ok_and(|v| v == "1")).then(|| {
+    let pane = (std::env::var("FABER_PANE").is_ok_and(|v| v == "1")).then(|| {
         let home = EngineHome::new({
             let orders = orders.clone();
             move |event| {
@@ -239,7 +239,26 @@ async fn run() -> ExitCode {
                 let (host, out) = (host.clone(), out.clone());
                 running.spawn(async move {
                     // The sidecar serves the screen, so its calls use the screen dispatcher.
-                    let result = host.dispatch(&request.cmd, request.args).await;
+                    let result = if request.cmd == "__app_agent" {
+                        let a = request.args;
+                        match (a["conversation"].as_str(), a["command"].as_str()) {
+                            (Some(conversation), Some(command)) => {
+                                host.dispatch_as(
+                                    &faber_host::Caller::Agent { conversation: Some(conversation.to_string()) },
+                                    match command {
+                                        "state" => "app_control_state",
+                                        "open" => "app_control_open",
+                                        other => other,
+                                    },
+                                    a["args"].clone(),
+                                )
+                                .await
+                            }
+                            _ => Err("error.host.badRequest".into()),
+                        }
+                    } else {
+                        host.dispatch(&request.cmd, request.args).await
+                    };
                     let _ = out.send((wire::line(&Reply::of(request.id, result)), None));
                 });
             }

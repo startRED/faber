@@ -49,7 +49,11 @@ impl Core {
             .flatten();
         // The agent acts only in its own tab: a new page opens there (a new tab unless the one in front is blank), and every
         // other action needs the page it opened, never the one the person is on.
-        let Some(tab) = self.agent_tab(conv, matches!(request, browser::Request::Open(_))) else {
+        let Some(tab) = (if matches!(request, browser::Request::App(_)) {
+            Some(String::new())
+        } else {
+            self.agent_tab(conv, matches!(request, browser::Request::Open(_)))
+        }) else {
             let text = "Faber's browser did not do it: no page of yours is open; open one with its address first.".to_string();
             return self.answer_browse(conv, sid, &call, false, text, Vec::new());
         };

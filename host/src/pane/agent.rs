@@ -262,6 +262,7 @@ impl Pane {
             _ if crate::lock(&self.state).owner.as_deref() != Some(conversation.as_str()) => {
                 return Err("the page open in Faber's browser is not this conversation's; open yours again with its address".into());
             }
+            Request::App(_) => return Err("app control must use its session renderer".into()),
             Request::Read | Request::Controls | Request::Watch(_) | Request::Shot(_) => None,
             Request::At { x, y, to } => {
                 self.touch();
@@ -730,6 +731,23 @@ impl Browser for PaneBrowser {
         let pane = self.0.clone();
         // The call runs as a task of its own on the pane's runtime, so the engine giving up on it is what ends it.
         Box::pin(async move {
+            if let Request::App(input) = request {
+                use base64::Engine as _;
+                let target = input["app"].as_str().unwrap_or_default().to_string();
+                let value = pane.driver.call(pane.view, "Faber.appControl", json!({"conversation":conversation,"input":input})).await?;
+                let picture = value["picture"]
+                    .as_str()
+                    .map(|s| base64::engine::general_purpose::STANDARD.decode(s))
+                    .transpose()
+                    .map_err(|_| "invalid app picture")?;
+                return Ok(Page {
+                    url: format!("app:{target}"),
+                    title: value["title"].as_str().unwrap_or_default().into(),
+                    text: value["text"].as_str().unwrap_or_default().into(),
+                    picture,
+                    ..Page::default()
+                });
+            }
             let mut task = Abort(pane.runtime.spawn(pane.clone().agent_act(conversation, tab, request)));
             (&mut task.0).await.map_err(|e| e.to_string())?
         })
