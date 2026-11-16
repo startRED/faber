@@ -21,28 +21,10 @@ pub(super) struct Watch {
     ticker: u64,
     delay: Duration,
     fails: u32,
-    /// A push was seen and no reading has shown a new commit since.
-    pushed: bool,
 }
 
 /// A window this full leaves the rest of it to the person.
 const NEAR: f64 = 0.9;
-
-/// Whether a reading answers a declared wait: an end always does, a green result only when newer than the wait's baseline.
-/// A wait on conversations returns on their reports instead.
-fn answers(w: &WaitingOn, number: u64, look: &Look) -> bool {
-    if !w.ids.is_empty() {
-        return false;
-    }
-    match look.state {
-        remote::PrState::Merged | remote::PrState::Closed => true,
-        remote::PrState::Open if look.ci.state == remote::CiState::Passing && !look.conflict => match &w.pr {
-            Some(b) if b.number == number => b.head.as_deref() != Some(&look.head) || (!b.pushed && b.state != FollowState::Passing),
-            _ => true,
-        },
-        remote::PrState::Open => false,
-    }
-}
 
 /// The errors after which looking again cannot help.
 fn hopeless(key: &str) -> bool {
@@ -50,58 +32,6 @@ fn hopeless(key: &str) -> bool {
 }
 
 impl Core {
-    /// The followed pull request as last read, for a wait starting now.
-    pub(super) fn wait_pr(&self, conv: &str) -> Option<WaitPr> {
-        let f = self.convs.get(conv)?.messages.get(self.followed(conv)?)?.follow.as_ref()?;
-        let pushed = self.follows.get(conv).is_some_and(|w| w.pushed);
-        Some(WaitPr { number: f.number, head: f.head.clone(), state: f.state, pushed })
-    }
-
-    pub(super) fn refresh_wait_pr(&mut self, conv: &str) {
-        if self.followed(conv).and_then(|at| self.convs.get(conv)?.messages[at].follow.as_ref()).is_some_and(|f| f.state.watched()) {
-            // A new wait invalidates even a manual read already in flight, without requiring a recognized push.
-            self.look_later(conv, follow::FIRST);
-        }
-        self.wait_on_ended_pr(conv);
-    }
-
-    pub(super) fn restore_wait_pr(&mut self, conv: &str) {
-        // A wait saved before baselines existed starts from what was read before the restart, never from an old green.
-        if let Some(pr) = self.convs.get(conv).filter(|c| c.waiting_on.as_ref().is_some_and(|w| w.pr.is_none())).and(self.wait_pr(conv)) {
-            self.convs.get_mut(conv).and_then(|c| c.waiting_on.as_mut()).expect("checked above").pr = Some(pr);
-            self.save(conv);
-        }
-        if !self.follows.contains_key(conv)
-            && self.followed(conv).and_then(|at| self.convs.get(conv)?.messages[at].follow.as_ref()).is_some_and(|f| f.state.watched())
-        {
-            self.look_later(conv, follow::FIRST);
-        }
-        self.wait_on_ended_pr(conv);
-    }
-
-    /// No reading comes after a merge or close, so a wait declared later returns on it at once, once per pull request end.
-    fn wait_on_ended_pr(&mut self, conv: &str) {
-        let Some(at) = self.followed(conv) else { return };
-        let Some(c) = self.convs.get_mut(conv) else { return };
-        if !c.waiting_on.as_ref().is_some_and(|w| w.ids.is_empty()) {
-            return;
-        }
-        let Some(f) = c.messages[at].follow.as_mut().filter(|f| matches!(f.state, FollowState::Merged | FollowState::Closed)) else {
-            return;
-        };
-        let key = format!("wait-end-{:?}-{}", f.state, f.head.as_deref().unwrap_or_default());
-        if f.woke.as_deref() == Some(&key) {
-            return;
-        }
-        (f.woke, f.kept) = (Some(key), true);
-        let cause = format!(
-            "Pull request #{} ({}) is already {:?}. Read the actual result and continue your saved work.",
-            f.number, f.repo, f.state
-        );
-        self.save(conv);
-        self.return_from_wait(conv, &cause);
-    }
-
     fn now_ms(&self) -> u64 {
         (self.secs() * 1000.0) as u64
     }
@@ -204,7 +134,6 @@ impl Core {
         (f.state, f.kept, f.since) = (FollowState::Pending, false, self.now_ms());
         self.place_follow(conv, Some(from), &reply, f);
         self.look_later(conv, follow::FIRST);
-        self.follows.get_mut(conv).expect("just armed").pushed = true;
     }
 
     /// The person stops following the conversation's pull request.
@@ -223,8 +152,8 @@ impl Core {
     fn look_later(&mut self, conv: &str, delay: Duration) {
         let ticker = self.next_sid;
         self.next_sid += 1;
-        let (fails, pushed) = self.follows.get(conv).map_or((0, false), |w| (w.fails, w.pushed));
-        self.follows.insert(conv.to_string(), Watch { ticker, delay, fails, pushed });
+        let fails = self.follows.get(conv).map_or(0, |w| w.fails);
+        self.follows.insert(conv.to_string(), Watch { ticker, delay, fails });
         let (me, conv, runtime) = (self.me.clone(), conv.to_string(), self.opts.runtime.clone());
         self.opts.runtime.spawn(async move {
             tokio::time::sleep(delay).await;
@@ -269,33 +198,7 @@ impl Core {
         };
         let Some((from, mut f)) = self.take_follow(conv) else { return };
         let now = self.now_ms();
-        let head_before = f.head.clone();
         let (next, changed) = follow::step(&mut f, &look, now);
-        if f.head != head_before {
-            self.follows.get_mut(conv).expect("read while followed").pushed = false;
-        }
-        // Successful/terminal readings only return a conversation that explicitly declared a wait.
-        // Use the actual remote reading: quiet/no-checks timeouts are not a successful result.
-        if let Some(w) = self.convs.get(conv).and_then(|c| c.waiting_on.as_ref()).filter(|w| answers(w, f.number, &look)) {
-            let ended = look.state != remote::PrState::Open;
-            // An end is one event whatever wait sees it; a green result is news only against the wait's own baseline.
-            let key = if ended {
-                format!("wait-end-{:?}-{}", f.state, look.head)
-            } else {
-                format!("wait-{}-{}-{:?}-{}", w.since, w.until, look.state, look.head)
-            };
-            if f.woke.as_deref() != Some(&key) {
-                f.woke = Some(key);
-                f.kept = true;
-                self.return_from_wait(
-                    conv,
-                    &format!(
-                        "Pull request #{} ({}) is now {:?}, checks {:?}. Read the actual result and continue your saved work.",
-                        f.number, f.repo, look.state, look.ci.state
-                    ),
-                );
-            }
-        }
         // While open, the line sits under the latest reply; a reply since the person was told means they have seen it.
         let to = self.latest_reply(conv).unwrap_or_else(|| from.clone());
         if to != from {
@@ -341,7 +244,7 @@ impl Core {
 
     /// Whether Auto's pacing lets Faber spend a turn of its own here: the vendor the conversation runs on is usable without
     /// the person's say and none of its windows is nearly used up. A "no" goes to the person instead (R92).
-    pub(super) fn may_spend(&self, conv: &str) -> bool {
+    fn may_spend(&self, conv: &str) -> bool {
         let Some(c) = self.convs.get(conv) else { return false };
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let fallback = pick_model(&choice, &self.vendors(), self.codex_recommended.as_deref());
@@ -373,15 +276,11 @@ impl Engine {
     /// Reads a followed pull request now and acts on what it finds. `ticker` names the timer that asked, so an older one
     /// does nothing; tests pass none to look at once.
     async fn look_at_pr(&self, conv: &str, ticker: Option<u64>) {
-        let Some(((repo, number), observed, reader)) =
-            self.with(|c| Some((c.to_read(conv, ticker)?, c.follows.get(conv)?.ticker, c.pr_reader.clone())))
-        else {
-            return;
-        };
+        let Some(((repo, number), reader)) = self.with(|c| Some((c.to_read(conv, ticker)?, c.pr_reader.clone()))) else { return };
         let read = tokio::task::spawn_blocking(move || reader(&repo, number)).await.unwrap_or(Err("reason.remote.unreachable"));
         self.with(|c| {
             // The person may have stopped following, or another pull request taken its place, while gh ran.
-            if c.to_read(conv, Some(observed)).is_some_and(|(_, n)| n == number) {
+            if c.to_read(conv, ticker).is_some_and(|(_, n)| n == number) {
                 c.read_pr(conv, read);
             }
         });
@@ -430,232 +329,5 @@ impl Engine {
                 }
             }
         })
-    }
-}
-
-#[cfg(test)]
-mod durable_wait_tests {
-    use super::*;
-    use crate::events::Session;
-
-    fn look(state: remote::PrState, ci: remote::CiState, head: &str) -> Look {
-        Look {
-            state,
-            head: head.into(),
-            ci: remote::Ci { state: ci, head: head.into(), failed: vec![], total: 1 },
-            conflict: false,
-            failures: vec![],
-        }
-    }
-
-    fn follow_synthetic(core: &mut Core, id: &str, number: u64) {
-        let found = Found { repo: "synthetic/repository".into(), number, url: format!("https://example.invalid/{number}") };
-        core.convs.get_mut(id).unwrap().messages.last_mut().unwrap().follow = Some(follow::start(found, 1));
-        core.look_later(id, follow::FIRST);
-    }
-
-    /// A return was attempted: with no AI connected it stays as a visible problem instead of spending.
-    fn returned(core: &Core, id: &str) -> bool {
-        core.convs[id].waiting_on.as_ref().is_none_or(|w| w.problem.is_some())
-    }
-
-    #[tokio::test]
-    async fn durable_wait_pr_return_needs_a_reading_newer_than_the_wait() {
-        use remote::{CiState::*, PrState::*};
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        engine.with_saves(false, |core| {
-            follow_synthetic(core, &id, 136);
-            core.read_pr(&id, Ok(look(Open, Passing, "aaa")));
-            core.session_wait(&id, vec![], Some("Await CI".into())).unwrap();
-            let saved = serde_json::to_value(core.convs[&id].waiting_on.clone()).unwrap();
-            assert_eq!(saved["pr"], serde_json::json!({"number": 136, "head": "aaa", "state": "passing"}), "the baseline is saved");
-            core.convs.get_mut(&id).unwrap().waiting_on.as_mut().unwrap().pr = Option::None;
-            core.restore_wait_pr(&id);
-            assert_eq!(
-                core.convs[&id].waiting_on.as_ref().unwrap().pr.as_ref().unwrap().head.as_deref(),
-                Some("aaa"),
-                "a legacy wait gets one"
-            );
-            core.read_pr(&id, Ok(look(Open, Passing, "aaa")));
-            assert!(!returned(core, &id), "a green reading already seen before the wait is not news");
-            core.pr_pushed(&id);
-            core.session_wait(&id, vec![], Some("Await CI of the update".into())).unwrap();
-            core.read_pr(&id, Ok(look(Open, Passing, "aaa")));
-            assert!(!returned(core, &id), "after a push, the previous commit's green result is not the update's");
-            core.read_pr(&id, Ok(look(Open, Pending, "bbb")));
-            assert!(!returned(core, &id));
-            core.read_pr(&id, Ok(look(Open, Passing, "bbb")));
-            assert!(returned(core, &id), "the new commit's green result returns the wait");
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_pr_pending_then_green_on_the_same_commit_returns() {
-        use remote::{CiState::*, PrState::*};
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        engine.with_saves(false, |core| {
-            follow_synthetic(core, &id, 137);
-            core.read_pr(&id, Ok(look(Open, Pending, "aaa")));
-            core.session_wait(&id, vec![], Some("Await CI".into())).unwrap();
-            core.read_pr(&id, Ok(look(Open, Passing, "aaa")));
-            assert!(returned(core, &id), "checks observed running when the wait began, now green");
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_on_children_ignores_pr_readings() {
-        use remote::{CiState::*, PrState::*};
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        engine.with_saves(false, |core| {
-            follow_synthetic(core, &id, 138);
-            let wait = serde_json::from_value(serde_json::json!({"ids": ["child"], "note": "review", "since": 1})).unwrap();
-            core.convs.get_mut(&id).unwrap().waiting_on = Some(wait);
-            core.read_pr(&id, Ok(look(Open, Passing, "aaa")));
-            core.read_pr(&id, Ok(look(Merged, Passing, "aaa")));
-            assert!(!returned(core, &id), "a wait on conversations returns on their reports, not on the pull request");
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_on_an_already_merged_pr_returns_once() {
-        use remote::{CiState::*, PrState::*};
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        engine.with_saves(false, |core| {
-            follow_synthetic(core, &id, 139);
-            core.read_pr(&id, Ok(look(Merged, Passing, "aaa")));
-            core.session_wait(&id, vec![], Some("Await merge".into())).unwrap();
-            assert!(returned(core, &id), "a pull request already merged answers the wait at once");
-            core.session_wait(&id, vec![], Some("Await merge again".into())).unwrap();
-            assert!(!returned(core, &id), "the same merge never returns a second wait");
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_new_wait_discards_an_inflight_manual_read_of_the_same_pr() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let started = Mutex::new(Some(started));
-        let (release, released) = std::sync::mpsc::channel();
-        let released = Mutex::new(released);
-        engine.with_saves(false, |core| {
-            let found = Found { repo: "synthetic/repository".into(), number: 134, url: "https://example.invalid/134".into() };
-            core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().follow = Some(follow::start(found, 1));
-            core.look_later(&id, follow::FIRST);
-            core.pr_reader = Arc::new(move |_, _| {
-                started.lock().unwrap().take().unwrap().send(()).unwrap();
-                released.lock().unwrap().recv().unwrap();
-                Ok(Look {
-                    state: remote::PrState::Open,
-                    head: "old-head".into(),
-                    ci: remote::Ci { state: remote::CiState::Passing, head: "old-head".into(), failed: vec![], total: 2 },
-                    conflict: false,
-                    failures: vec![],
-                })
-            });
-        });
-        let (reader, conv) = (engine.clone(), id.clone());
-        let read = tokio::spawn(async move { reader.look_at_pr(&conv, None).await });
-        tokio::time::timeout(Duration::from_secs(5), ready).await.unwrap().unwrap();
-        engine.session_wait(&id, vec![], Some("Await CI of the update".into())).unwrap();
-        release.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(5), read).await.unwrap().unwrap();
-        let wait = engine.open(&id).unwrap().waiting_on.unwrap();
-        assert!(wait.problem.is_none(), "the stale passing read must not attempt a return");
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_same_pr_new_head_gets_a_new_return_and_invalidates_old_reads() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-        engine.with_saves(false, |core| {
-            core.opts.clis.insert(Vendor::Claude, Cli { command: "never-spawn".into(), prefix: vec![] });
-            core.ledger.of_mut(Vendor::Claude).billing = Billing::Subscription;
-            core.convs.get_mut(&id).unwrap().choice = Some(Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None });
-            let found = Found { repo: "synthetic/repository".into(), number: 135, url: "https://example.invalid/135".into() };
-            core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().follow = Some(follow::start(found, 1));
-            core.look_later(&id, follow::FIRST);
-            for (at, head) in [(2000.0, "first-head"), (2001.0, "updated-head")] {
-                core.clock = Some(Arc::new(move || at));
-                let old = core.follows[&id].ticker;
-                core.pr_pushed(&id);
-                assert!(core.to_read(&id, Some(old)).is_none(), "a previous update's in-flight read is discarded");
-                core.session_wait(&id, vec![], Some("Await CI of the update".into())).unwrap();
-                let mut look = Look {
-                    state: remote::PrState::Open,
-                    head: head.into(),
-                    ci: remote::Ci { state: remote::CiState::Pending, head: head.into(), failed: vec![], total: 2 },
-                    conflict: false,
-                    failures: vec![],
-                };
-                core.read_pr(&id, Ok(look.clone()));
-                assert!(core.convs[&id].waiting_on.is_some());
-                assert!(core.convs[&id].queued.is_empty());
-                look.ci.state = remote::CiState::Passing;
-                core.read_pr(&id, Ok(look.clone()));
-                assert!(core.convs[&id].waiting_on.is_none());
-                assert_eq!(core.convs[&id].queued.len(), 1, "each updated head must return exactly once");
-                core.read_pr(&id, Ok(look));
-                assert_eq!(core.convs[&id].queued.len(), 1);
-                core.convs.get_mut(&id).unwrap().queued.clear();
-            }
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn durable_wait_real_pr_results_return_waiters_but_not_ordinary_conversations() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        for state in [remote::PrState::Open, remote::PrState::Merged, remote::PrState::Closed] {
-            for waiting in [false, true] {
-                let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("answer", &[])]);
-                if waiting {
-                    engine.session_wait(&id, vec![], Some("synthetic checks".into())).unwrap();
-                }
-                engine.with_saves(false, |core| {
-                    let found = Found { repo: "synthetic/repository".into(), number: 1, url: "https://example.invalid/1".into() };
-                    core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().follow = Some(follow::start(found, core.now_ms()));
-                    core.follows.insert(id.clone(), Watch { ticker: 0, delay: follow::FIRST, fails: 0, pushed: false });
-                    let look = Look {
-                        state,
-                        head: "aaa".into(),
-                        ci: remote::Ci { state: remote::CiState::Passing, head: "aaa".into(), failed: vec![], total: 1 },
-                        conflict: false,
-                        failures: vec![],
-                    };
-                    core.read_pr(&id, Ok(look.clone()));
-                    assert!(core.convs[&id].queued.is_empty(), "no connected AI: no spending");
-                    if waiting {
-                        assert!(core.convs[&id].waiting_on.as_ref().unwrap().problem.is_some());
-                        assert!(core.convs[&id].messages.last().unwrap().follow.as_ref().unwrap().kept);
-                        if state == remote::PrState::Open {
-                            core.convs.get_mut(&id).unwrap().waiting_on.as_mut().unwrap().problem = Some("sentinel".into());
-                            core.read_pr(&id, Ok(look));
-                            assert_eq!(core.convs[&id].waiting_on.as_ref().unwrap().problem.as_deref(), Some("sentinel"));
-                        }
-                    } else {
-                        assert!(core.convs[&id].waiting_on.is_none());
-                        assert!(core.convs[&id].messages.last().unwrap().follow.as_ref().unwrap().woke.is_none());
-                    }
-                });
-            }
-        }
-        engine.shutdown();
     }
 }

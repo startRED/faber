@@ -909,16 +909,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
         let mut job = p.contained;
         let no_process = child.is_none() && job.is_none();
         let mut shutdown_confirmed = false;
-        // A torn line poisons the whole process stream, including writes without an acknowledgement.
-        macro_rules! write_checked {
-            ($msg:expr) => {{
-                let result = proc::write_line(&mut *stdin, $msg).await;
-                if result.is_err_and(|e| e.torn) {
-                    shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
-                }
-                result
-            }};
-        }
         let mut pending: HashMap<String, (String, Value)> = HashMap::new();
         // Helper calls waiting for their report: tool call id to the control request and the JSON-RPC id that carried it.
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
@@ -974,7 +964,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                     on_event(writers.snapshot());
                     control_id += 1;
                     let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
-                    let _ = write_checked!(&msg);
+                    let _ = proc::write_line(&mut *stdin, &msg).await;
                 }
                 line = lines.next_line() => {
                     let Ok(Some(line)) = line else {
@@ -1012,7 +1002,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                             control_id += 1;
                                             let id = format!("faber-{control_id}");
                                             let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
-                                            if write_checked!(&request).is_ok() { command_reads.insert(id, (task, false)); }
+                                            if proc::write_line(&mut *stdin, &request).await.is_ok() { command_reads.insert(id, (task, false)); }
                                         }
                                         continue;
                                     }
@@ -1032,7 +1022,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     control_id += 1;
                                     let id = format!("faber-{control_id}");
                                     let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
-                                    if write_checked!(&request).is_ok() { command_reads.insert(id, (task, false)); }
+                                    if proc::write_line(&mut *stdin, &request).await.is_ok() { command_reads.insert(id, (task, false)); }
                                 }
                             }
                             writers.observe(&msg);
@@ -1095,7 +1085,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     crate::helper::Mcp::Answer(answer) => {
                                         let reply = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": msg["request_id"],
                                             "response": { "mcp_response": answer } } });
-                                        let _ = write_checked!(&reply);
+                                        let _ = proc::write_line(&mut *stdin, &reply).await;
                                     }
                                     crate::helper::Mcp::Call { tool, id, rpc, input } => {
                                         // Both answers come back as a `HelperReply` for the call's id.
@@ -1146,7 +1136,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                         };
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "deny", "message": message } } });
-                                        if write_checked!(&msg).is_err() {
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
                                             shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
                                             break 'driver;
@@ -1165,7 +1155,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });
-                                        let _ = write_checked!(&msg);
+                                        let _ = proc::write_line(&mut *stdin, &msg).await;
                                         continue;
                                     }
                                     // Only the isolated mode answers for itself. Full access hands the request to the engine, which
@@ -1181,7 +1171,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                         };
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": response } });
-                                        if write_checked!(&msg).is_err() {
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
                                             shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
                                             break 'driver;
@@ -1212,7 +1202,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     on_event(writers.snapshot());
                                     turn_sent_ms = unix_ms();
                                     if replay { unread.push_back((None, turn.text.clone())); }
-                                    let _ = write_checked!(&user_message(&turn));
+                                    let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
                         }
@@ -1231,7 +1221,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                         control_id += 1;
                         let id = format!("faber-{control_id}");
                         let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"stop_task","task_id":task}});
-                        if write_checked!(&request).is_ok() { command_stops.insert(id, ack); }
+                        if proc::write_line(&mut *stdin, &request).await.is_ok() { command_stops.insert(id, ack); }
                         else { let _ = ack.send(Delivery::WriteFailed); }
                     }
                     Some(SessionCommand::Send(turn)) => {
@@ -1241,7 +1231,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
-                        let _ = write_checked!(&user_message(&turn));
+                        let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // What fills the context, counted from the last response and local estimates: no turn, no token-count request.
                     Some(SessionCommand::ContextUsage) => {
@@ -1249,7 +1239,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                         let id = format!("faber-{control_id}");
                         let msg = json!({ "type": "control_request", "request_id": id, "request": { "subtype": "get_context_usage", "detail": "summary" } });
                         usage_request = Some(id);
-                        let _ = write_checked!(&msg);
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     // The CLI's own command, as a line of its own: it compacts and answers with a result like any turn.
                     Some(SessionCommand::Compact) => {
@@ -1260,13 +1250,13 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
-                        let _ = write_checked!(&user_message(&turn));
+                        let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // A line written mid-turn is folded into a turn that uses tools at its next step, and becomes a turn of its
                     // own after a plain reply or a stop (fixtures `steer*`, `queued*`, `helper-told*`). Its echo says which turn
                     // took it in.
                     Some(SessionCommand::Steer { turn, tag }) => {
-                        if replay && watch.active() && !watch.stopping() && write_checked!(&user_message(&turn)).is_ok() {
+                        if replay && watch.active() && !watch.stopping() && proc::write_line(&mut *stdin, &user_message(&turn)).await.is_ok() {
                             unread.push_back((Some(tag), turn.text.clone()));
                         } else {
                             on_event(EngineEvent::SteerFailed { tag });
@@ -1284,34 +1274,29 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                     }
                                 } else if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
-                                match write_checked!(&msg) {
+                                match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
                                         pending.remove(&request_id);
                                         Delivery::Delivered
                                     }
-                                    Err(_) => Delivery::WriteFailed,
+                                    Err(e) => {
+                                        // A half-written or unflushed line cannot be sent again: end the process, and the
+                                        // end of its output tells the engine.
+                                        if e.torn {
+                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                        }
+                                        Delivery::WriteFailed
+                                    }
                                 }
                             }
                         };
                         let _ = ack.send(delivery);
                     }
-                    Some(SessionCommand::HelperReply { id, ok, text, pictures, mut ack }) => {
-                        // A call no longer pending drops `ack`: the engine then resumes the caller another way.
-                        if ack.as_ref().is_some_and(|a| a.is_closed()) { continue; }
+                    Some(SessionCommand::HelperReply { id, ok, text, pictures }) => {
                         let Some((request_id, rpc)) = helpers.remove(&id) else { continue };
                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                             "response": { "mcp_response": crate::helper::mcp_result(&rpc, ok, &text, &pictures) } } });
-                        let written = tokio::select! {
-                            biased;
-                            _ = async { match ack.as_mut() { Some(a) => a.closed().await, None => std::future::pending().await } } => {
-                                shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
-                                Err(proc::WriteError { torn: true })
-                            },
-                            written = async { write_checked!(&msg) } => written,
-                        };
-                        if let (Some(ack), Ok(())) = (ack, written) {
-                            let _ = ack.send(Delivery::Delivered);
-                        }
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Interrupt) => {
                         if !writers.should_interrupt(watch.active(), watch.stopping()) { continue; }
@@ -1320,7 +1305,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                         on_event(writers.snapshot());
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
-                        let _ = write_checked!(&msg);
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Retire) => retiring = true,
                     Some(SessionCommand::Close) | None => {
@@ -1332,7 +1317,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>)
                                 on_event(writers.snapshot());
                                 control_id += 1;
                                 let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
-                                let _ = write_checked!(&msg);
+                                let _ = proc::write_line(&mut *stdin, &msg).await;
                             }
                             close_deadline = Some(watch.deadline().unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(5)));
                         } else {

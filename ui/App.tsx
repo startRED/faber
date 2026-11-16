@@ -29,7 +29,6 @@ import {
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem, windowHidden } from './appearance.ts';
 import { useClock } from './clock.ts';
-import { tickWhile } from './foot.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { dirtyCount, forgetDraft, protectDraftClose, queuedDrafts, recoverQueuedDraft, retryDraftRemovals } from './unsent.ts';
 import { ContextMeter } from './Context.tsx';
@@ -119,7 +118,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
-  tickWhile(() => state().conversations.some((c) => c.waitingOn !== undefined && !c.waitingOn.problem));
   // The area, the project and the conversation the user is in, changed together so no screen ever shows a conversation
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId, groupId: saved?.groupId });
@@ -2252,7 +2250,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     until={until()}
                                     searchIndex={searchIndex()}
                                     conversationId={c().id}
-                                    waitingOn={state().conversations.find((conversation) => conversation.id === c().id)?.waitingOn}
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}

@@ -44,15 +44,11 @@ pub fn state(running: Option<RunState>, last_reply: Option<&Message>) -> &'stati
 pub struct WaitingOn {
     pub ids: Vec<String>,
     pub note: String,
-    pub since: u64,
-    pub until: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub problem: Option<String>,
 }
 
 impl From<&faber_engine::model::WaitingOn> for WaitingOn {
     fn from(w: &faber_engine::model::WaitingOn) -> Self {
-        Self { ids: w.ids.clone(), note: w.note.clone(), since: w.since, until: w.until, problem: w.problem.clone() }
+        Self { ids: w.ids.clone(), note: w.note.clone() }
     }
 }
 

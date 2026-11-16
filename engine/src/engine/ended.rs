@@ -351,14 +351,7 @@ mod tests {
             reply.status = Some(Status::Done);
             core.live.get_mut(&id).unwrap().turn = None;
             assert!(core.can_request_conclusion(&id), "a turn that ended with no conclusion is asked for one");
-            let wait = crate::model::WaitingOn {
-                ids: vec!["child".into()],
-                note: "Both lanes report".into(),
-                since: 1,
-                until: 300001,
-                problem: None,
-                pr: None,
-            };
+            let wait = crate::model::WaitingOn { ids: vec!["child".into()], note: "Both lanes report".into(), since: 1 };
             core.convs.get_mut(&id).unwrap().waiting_on = Some(wait.clone());
             assert!(!core.can_request_conclusion(&id), "its members' reports wake it; a conclusion now would end the wait");
             core.conclusion_memory_ready(&id, None, &[]);

@@ -507,20 +507,15 @@ pub struct WriteError {
 pub async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg: &serde_json::Value) -> Result<(), WriteError> {
     let mut line = msg.to_string();
     line.push('\n');
-    tokio::time::timeout(Duration::from_secs(30), async {
-        let mut done = 0;
-        while done < line.len() {
-            match stdin.write(&line.as_bytes()[done..]).await {
-                Ok(n) if n > 0 => done += n,
-                _ => return Err(WriteError { torn: done > 0 }),
-            }
+    let mut done = 0;
+    while done < line.len() {
+        match stdin.write(&line.as_bytes()[done..]).await {
+            Ok(n) if n > 0 => done += n,
+            _ => return Err(WriteError { torn: done > 0 }),
         }
-        // A flush that fails may still have let the whole line through.
-        stdin.flush().await.map_err(|_| WriteError { torn: true })
-    })
-    .await
-    // Cancellation leaves the stream untrustworthy, even if no progress was observed.
-    .unwrap_or(Err(WriteError { torn: true }))
+    }
+    // A flush that fails may still have let the whole line through.
+    stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
 /// The owned job or dedicated process group, retained until every member is confirmed gone.
@@ -1053,14 +1048,6 @@ mod lifecycle_tests {
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test(start_paused = true)]
-    async fn stalled_input_write_has_a_finite_deadline() {
-        let (mut writer, _reader) = tokio::io::duplex(1);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_secs(31), write_line(&mut writer, &serde_json::json!({"reply":"result"}))).await;
-        assert_eq!(result.expect("the write itself must time out"), Err(WriteError { torn: true }));
-    }
-
     use super::*;
 
     #[test]

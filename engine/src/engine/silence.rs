@@ -107,10 +107,6 @@ impl Core {
         {
             return Some(Wait::Other);
         }
-        // The wrapper can have a result while its actual worker or admission is still live.
-        if self.helpers_in(conv) {
-            return Some(Wait::Subagent);
-        }
         let mut open = m.tools.iter().flatten().filter(|t| t.ok.is_none()).peekable();
         open.peek()?;
         let mut command = false;
@@ -265,22 +261,6 @@ mod tests {
 
     fn stops(n: &Arc<Mutex<u32>>) -> u32 {
         *n.lock().unwrap()
-    }
-
-    #[tokio::test]
-    async fn admitted_helper_without_an_open_tool_is_not_silenced() {
-        let (engine, id, n, clock, _dir) = running();
-        engine.with(|c| {
-            c.worker_memory.admitted.insert("helper:pending".into(), id.clone());
-        });
-        walk(&engine, &clock, BOUND + 60.0);
-        assert_eq!(stops(&n), 0, "engine admission must protect work even without an open wrapper");
-        engine.with(|c| {
-            c.worker_memory.admitted.clear();
-        });
-        walk(&engine, &clock, 2.0 * BOUND + 60.0);
-        assert_eq!(stops(&n), 1, "completed admission must not hide subsequent silence");
-        engine.shutdown();
     }
 
     #[tokio::test]

@@ -80,7 +80,7 @@ impl Team {
                         told: vec![],
                         held: None,
                         earlier_turn: false,
-                        stopping: None,
+                        stopping: false,
                         ready: true,
                         early: vec![],
                         lead_call: Some(call),
@@ -329,76 +329,10 @@ async fn team_stop_close_dead_process_and_reply_end_release_every_waiter() {
                 ),
             });
             assert_eq!(t.first.lock().unwrap().replies.last().unwrap().2, helper::NO_ANSWER);
-            assert_eq!(t.first.lock().unwrap().closed, path != 3);
-            t.engine.with(|core| {
-                assert_eq!(core.helpers.contains_key("h0"), path == 3, "a healthy finished lead keeps its actual helper alive");
-                if path == 3 {
-                    let wait = core.convs[&t.conv].waiting_on.as_ref().expect("surviving helpers must remain visible as a finite wait");
-                    assert!(wait.note.contains("Piece 0"));
-                    assert!(wait.until > wait.since);
-                    assert!(core.wait_timers.contains_key(&t.conv));
-                }
-            });
+            assert!(t.first.lock().unwrap().closed);
+            t.engine.with(|core| assert!(!core.helpers.contains_key("h0")));
         }
     }
-}
-
-#[tokio::test]
-async fn team_delivery_fallback_preserves_peers_unless_the_person_stopped() {
-    for stopped in [false, true] {
-        let t = Team::new(Vendor::Codex, 2);
-        t.engine.with(|core| core.end_helper("h0", true, None, Some(0.0), false));
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
-        t.engine.with(|core| {
-            assert!(core.convs[&t.conv].queued.iter().any(|q| q.id.starts_with("helper-report-h0-")));
-            core.convs.get_mut(&t.conv).unwrap().stopped = stopped;
-            core.handle(
-                &t.conv,
-                1,
-                EngineEvent::Done {
-                    ok: false,
-                    reason: "interrupted".into(),
-                    cost_total_usd: Some(0.0),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                    cache_write_1h_tokens: 0,
-                    incomplete: false,
-                },
-            );
-            assert_eq!(core.helpers.contains_key("h1"), !stopped, "a delivery fallback must not throw away its peer's work");
-        });
-    }
-}
-
-#[tokio::test(start_paused = true)]
-async fn team_helper_wait_rechecks_live_work_and_returns_when_the_worker_is_gone() {
-    let t = Team::new(Vendor::Codex, 1);
-    t.engine.set_keep_going_pace(0.001);
-    let before = t.engine.with(|core| {
-        core.turn(&t.conv).unwrap().status = Some(Status::Done);
-        core.finish(&t.conv, Some("turn".into()));
-        core.convs[&t.conv].waiting_on.as_ref().unwrap().until
-    });
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(1)).await;
-    tokio::task::yield_now().await;
-    t.engine.with(|core| {
-        let wait = core.convs[&t.conv].waiting_on.as_ref().unwrap();
-        assert!(wait.until > before && wait.problem.is_none());
-        assert!(core.convs[&t.conv].queued.is_empty());
-        core.helpers.remove("h0");
-    });
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(1)).await;
-    tokio::task::yield_now().await;
-    t.engine.with(|core| {
-        assert!(!core.wait_timers.contains_key(&t.conv));
-        assert!(core.convs[&t.conv].waiting_on.as_ref().is_none_or(|w| w.problem.is_some()));
-    });
 }
 
 #[tokio::test]

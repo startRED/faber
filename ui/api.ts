@@ -396,16 +396,7 @@ export interface VisualPiece {
   data: PieceData;
   value: PieceValue;
 }
-export interface WaitingOn {
-  ids?: string[];
-  note?: string;
-  since?: number;
-  until?: number;
-  problem?: string;
-}
-
 export interface Conversation {
-  waitingOn?: WaitingOn;
   temporary?: boolean;
   id: string;
   title: string;
@@ -473,7 +464,7 @@ export interface Summary {
   pinnedAt?: number;
   /** The conversation whose agent started this one, which the sidebar shows it under. */
   startedBy?: string;
-  waitingOn?: WaitingOn;
+  waitingOn?: { ids?: string[]; note?: string };
   childState?: 'working' | 'waiting' | 'stopped' | 'done' | 'failed';
   childChoice?: Choice;
   childLine?: string;
@@ -696,7 +687,7 @@ export interface RunningItem {
   keepWait?: { why: 'retry' | 'rest' | 'command' | 'busy' | 'start' | 'question' | 'account'; until: number };
   /** The agent said it waits for the conversations it started (`ids`) or for a reason of its own (`note`): its turn ended, yet
    * the work is not over. `since` is in milliseconds. */
-  waitingOn?: WaitingOn;
+  waitingOn?: { ids?: string[]; note?: string; since: number };
   /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
   keepProgress?: { turns: number; since: number; last?: string };
   /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */

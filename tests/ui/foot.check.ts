@@ -73,7 +73,7 @@ check('running: a finished reply leaves what the screen shows as running and the
 check('foot: a finished reply whose conversation still waits says what it waits for, never "Done"', () => {
   const finished = reply({ status: 'done', movedAt: START + 12 * MIN, finishedAt: START + 12 * MIN });
   const waiting = row({ waitingOn: { ids: ['a', 'b'], since: START + 12 * MIN } });
-  equal(footText(finished, true, START + 72 * MIN, waiting), `${t('run.waitingOn', { n: 2 })} · ${t('wait.noDeadline')} · ${t('foot.since', { time: '1 h' })}`);
+  equal(footText(finished, true, START + 72 * MIN, waiting), `${t('run.waitingOn', { n: 2 })} · ${t('foot.since', { time: '1 h' })}`);
   equal(footText(finished, true, START + 72 * MIN, row({ keepGoing: true, keepWait: { why: 'rest', until: 0 } })), t('run.kg.wait.rest'));
   equal(footText(finished, false, START + 72 * MIN, waiting), `${t('foot.done')} · ${t('foot.work', { time: '12 min' })}`, 'an older reply is what it was');
   ok(footText(finished, true, START + 72 * MIN).startsWith(t('foot.done')), 'no row: the work is over');
@@ -84,5 +84,5 @@ check('running: a row that waits between turns counts as waiting, one answering 
   ok(isWaiting(row({ keepWait: { why: 'retry', until: 0 } })));
   ok(!isWaiting(row()));
   ok(!isWaiting(row({ state: 'needsYou', waitingOn: { since: 0 } })), 'a question is the person’s, not a wait');
-  equal(waitingOnWords({ note: 'the two lanes to land', since: 0 }), `the two lanes to land · ${t('wait.noDeadline')}`);
+  equal(waitingOnWords({ note: 'the two lanes to land', since: 0 }), t('run.waitingNote', { note: 'the two lanes to land' }));
 });

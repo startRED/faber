@@ -1980,11 +1980,8 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .proj-missing p, .project-missing-card p, .crash-note p { margin: 0; line-height: 1.5; }
 .proj-missing-actions, .project-missing-actions, .crash-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.child-conversation { display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 100%; height: auto; min-height: var(--h-md); padding-block: 6px; white-space: normal; }
-.child-conversation :is(b, span) { min-width: 0; overflow-wrap: anywhere; }
-.conversation-wait { margin: 6px 0; color: var(--ink-2); font-size: max(14px, var(--fs-sm)); line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
-.item:has(.conversation-wait) { height: auto; min-height: calc(var(--h-sm) + 2px * var(--dens)); padding-block: 7px; align-items: flex-start; }
-.item .conversation-wait { display: block; margin: 3px 0 0; }
+.child-conversation { display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 100%; white-space: normal; }
+.child-conversation span { overflow-wrap: anywhere; }
 .faber-act { min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .faber-act-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
 .faber-act-line .i { flex: none; }

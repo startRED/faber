@@ -1,6 +1,5 @@
 import type { CheckResult, QuotaReading, RunningItem, Vendor, VendorUsage } from './api.ts';
 import type { Key } from './locales/en.ts';
-import { isWaiting } from './running.ts';
 
 // The data behind the sidebar: how the chats are grouped, which quota reading each vendor shows, and what the tail of a
 // project says. Pure functions, so the screen's checks run them with a fixed clock.
@@ -156,7 +155,7 @@ export function accountLine(check: CheckResult | 'failed' | undefined): AccountL
 /** What a project's row says about its running conversations: how many wait for the user, and whether any runs. */
 export function tailOf(items: RunningItem[], projectId: string): { needs: number; running: boolean } {
   const mine = items.filter((i) => i.area === 'project' && i.projectId === projectId);
-  return { needs: mine.filter((i) => i.state === 'needsYou').length, running: mine.some((item) => item.state === 'working' && !isWaiting(item)) };
+  return { needs: mine.filter((i) => i.state === 'needsYou').length, running: mine.length > 0 };
 }
 
 /** The conversation `step` rows from the open one in the sidebar's order (pinned, today, this week, earlier) within the

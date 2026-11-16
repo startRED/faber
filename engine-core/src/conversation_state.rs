@@ -126,12 +126,7 @@ pub fn unanswered_question(m: &Message) -> bool {
 }
 /// Where a conversation stands; `busy` is whether its CLI runs a turn now.
 pub fn state_of(busy: bool, c: &Conversation) -> State {
-    let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-    if !busy && c.stopped && c.waiting_on.is_some() {
-        return if last.is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped };
-    }
-    let failed = last.is_some_and(|m| m.error.is_some());
-    if !busy && c.waiting_on.is_some() && !failed {
+    if !busy && c.waiting_on.is_some() {
         return State::Waiting;
     }
     let state = run_state(c, busy);
@@ -203,30 +198,5 @@ pub fn line(text: &str, most: usize) -> String {
     match one.char_indices().nth(most) {
         Some((at, _)) => format!("{}…", one[..at].trim_end()),
         None => one,
-    }
-}
-
-#[cfg(test)]
-mod stop_precedence_tests {
-    use super::*;
-
-    #[test]
-    fn stop_preserves_finished_results_and_person_questions() {
-        let mut c: Conversation = serde_json::from_value(serde_json::json!({
-            "id":"child","title":"Work","area":"project","createdAt":0,"updatedAt":0,"messages":[]
-        }))
-        .unwrap();
-        let mut reply = Message::new("reply".into(), Role::Assistant, "Done".into(), 0);
-        reply.status = Some(Status::Done);
-        c.messages.push(reply);
-        c.stopped = true;
-        assert_eq!(state_of(false, &c), State::Concluded);
-        c.messages[0].status = Some(Status::Error);
-        assert_eq!(state_of(false, &c), State::Failed);
-        c.messages[0].status = Some(Status::Done);
-        c.messages[0].halt = Some("reason.test".into());
-        assert_eq!(state_of(false, &c), State::Waiting);
-        c.waiting_on = Some(serde_json::from_value(serde_json::json!({"since":1000})).unwrap());
-        assert_eq!(state_of(false, &c), State::Stopped);
     }
 }
