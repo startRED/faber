@@ -14,6 +14,7 @@ function shell() {
   let quits = 0;
   let reloads = 0;
   const context = {
+    apps: { tell() {} },
     Date: { now: () => now },
     console: { error() {} },
     quitNow: () => quits++,

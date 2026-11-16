@@ -121,7 +121,9 @@ impl Shell for TauriShell {
         }
         let faber = self.handle.state::<Faber>();
         if main_window(&self.handle).is_some() && faber.revealed.load(std::sync::atomic::Ordering::SeqCst) {
-            self.handle.emit("faber:show-conversation", id).map_err(|_| faber_host::NO_WINDOW.to_string())?;
+            self.handle
+                .emit_to(tauri::EventTarget::webview("main"), "faber:show-conversation", id)
+                .map_err(|_| faber_host::NO_WINDOW.to_string())?;
         } else {
             *lock(&faber.pending_conversation) = Some(id.to_string());
         }
@@ -138,7 +140,9 @@ impl Shell for TauriShell {
     }
 
     fn emit(&self, event: &Value) {
-        let _ = self.handle.emit("faber:event", event);
+        let _ = self.handle.emit_to(tauri::EventTarget::webview("main"), "faber:event", event);
+        #[cfg(windows)]
+        pane::app::emit(&self.handle, event);
     }
 
     fn version(&self) -> String {
@@ -628,6 +632,34 @@ async fn test_site_probe(app: AppHandle, capture: bool, quick: Option<bool>) -> 
     pane.test_probe(capture, quick.unwrap_or(false)).await
 }
 
+/// Exercises the real browse adapter only in isolated test builds.
+#[cfg(all(windows, feature = "test-hooks"))]
+#[tauri::command]
+async fn test_app_control(app: AppHandle, input: Value, owner: Option<String>) -> Res<Value> {
+    use faber_engine::browser::Browser;
+    if !app.state::<Faber>().hidden {
+        return Err("app control proof requires a hidden test instance".into());
+    }
+    if input == "views" {
+        return Ok(serde_json::json!(
+            app.webviews().keys().filter(|label| label.starts_with("app-") && label.as_str() != "app-proof-keeper").count()
+        ));
+    }
+    if input == "palette" {
+        return pane::app::palette_proof(&app).await;
+    }
+    if input == "storage" {
+        return pane::app::storage_proof(&app).await;
+    }
+    if input == "proof" {
+        return pane::app::proof(&app).await;
+    }
+    let pane = app.state::<Arc<pane::Pane>>().inner().clone();
+    let request = faber_engine::browser::checked_request(&input).map_err(str::to_string)?;
+    let page = pane::PaneBrowser(pane).act(owner.unwrap_or_else(|| "app-control-proof".into()), String::new(), request).await?;
+    Ok(serde_json::json!({"text":page.text,"picture":page.picture}))
+}
+
 /// Resizes the real hidden host, rather than emulating the main page's viewport.
 #[cfg(all(windows, feature = "test-hooks"))]
 #[tauri::command]
@@ -662,6 +694,8 @@ fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
 
 /// What Quit does, and what the idle update install does before the installer ends the process.
 pub(crate) fn shut_down(app: &AppHandle) {
+    #[cfg(windows)]
+    pane::app::close_all(app);
     app.state::<Faber>().host.shut_down();
 }
 
@@ -935,12 +969,52 @@ fn main() {
                 #[cfg(all(windows, feature = "test-hooks"))]
                 test_site_probe,
                 #[cfg(all(windows, feature = "test-hooks"))]
+                test_app_control,
+                #[cfg(all(windows, feature = "test-hooks"))]
                 test_host_size,
                 #[cfg(all(windows, feature = "test-hooks"))]
                 test_site_refuse_once
             ];
             // Only the screen calls Faber: a web page in the browser pane (R161 step 7) is refused before any command runs.
             move |invoke: tauri::ipc::Invoke| {
+                #[cfg(windows)]
+                if invoke.message.webview().label().starts_with("app-") {
+                    let view = invoke.message.webview();
+                    let app = view.app_handle();
+                    let Some(owner) = pane::app::owner(app, &view) else {
+                        invoke.resolver.reject("app session revoked");
+                        return true;
+                    };
+                    let command = invoke.message.command();
+                    if matches!(command, "screen_ready" | "set_clock") {
+                        if command == "screen_ready" {
+                            pane::app::ready(app, view.label());
+                        }
+                        invoke.resolver.resolve(Value::Null);
+                        return true;
+                    }
+                    if !Host::kind(command).is_some_and(|kind| kind != Kind::Window) {
+                        invoke.resolver.reject("app control cannot use window commands");
+                        return true;
+                    }
+                    let command = match command {
+                        "state" => "app_control_state",
+                        "open" => "app_control_open",
+                        other => other,
+                    }
+                    .to_string();
+                    let args = match invoke.message.payload() {
+                        tauri::ipc::InvokeBody::Json(args) => args.clone(),
+                        _ => Value::Null,
+                    };
+                    let host = app.state::<Faber>().host.clone();
+                    invoke.resolver.respond_async(async move {
+                        host.dispatch_as(&faber_host::Caller::Agent { conversation: Some(owner) }, &command, args)
+                            .await
+                            .map_err(tauri::ipc::InvokeError::from)
+                    });
+                    return true;
+                }
                 if invoke.message.webview().label() != "main" {
                     invoke.resolver.reject("Faber answers only its own screen");
                     return true;
@@ -968,6 +1042,8 @@ fn main() {
         })
         .setup(move |app| {
             app.manage(visual_page::Pages::default());
+            #[cfg(windows)]
+            app.manage(pane::app::Apps::default());
             let data_dir = data_dir(app.handle())?;
             app.manage(tray::Tray::default());
             // Only the first launch gets here (a second one ends in the single-instance plugin), so only it reads the marker.
