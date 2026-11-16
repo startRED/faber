@@ -201,7 +201,14 @@ mod tests {
                 waiting: Some(crate::model::KeepWait { why: "command".into(), until: 9e12 }),
                 ..Default::default()
             });
-            c.waiting_on = Some(crate::model::WaitingOn { ids: vec!["member".into()], note: String::new(), since: 1 });
+            c.waiting_on = Some(crate::model::WaitingOn {
+                ids: vec!["member".into()],
+                note: String::new(),
+                since: 1,
+                until: 300001,
+                problem: None,
+                pr: None,
+            });
             let before = c.messages.len();
 
             core.handle(&conv, 1, EngineEvent::OwnTurn);

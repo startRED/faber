@@ -1270,7 +1270,7 @@ pub struct QueuedTurn {
 
 /// What an agent that called `wait` waits for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "SavedWaitingOn")]
 pub struct WaitingOn {
     /// The conversations it waits for, all started by it; the marker goes when one of them reports.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1280,6 +1280,53 @@ pub struct WaitingOn {
     pub note: String,
     /// When it started waiting, in milliseconds.
     pub since: u64,
+    /// Finite next check, in Unix milliseconds; never reset on startup.
+    pub until: u64,
+    /// Why an automatic return could not be admitted. No automatic spending retry without a new event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// The followed pull request as last read when the wait began: only a newer reading returns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<WaitPr>,
+}
+
+/// A pull request reading a wait started from (`engine/src/engine/pr_watch.rs`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitPr {
+    pub number: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    pub state: FollowState,
+    /// A push came after that reading: only another commit's result is news.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pushed: bool,
+}
+
+#[derive(Deserialize)]
+struct SavedWaitingOn {
+    #[serde(default)]
+    ids: Vec<String>,
+    #[serde(default)]
+    note: String,
+    since: u64,
+    until: Option<u64>,
+    problem: Option<String>,
+    #[serde(default)]
+    pr: Option<WaitPr>,
+}
+
+impl From<SavedWaitingOn> for WaitingOn {
+    fn from(w: SavedWaitingOn) -> Self {
+        Self {
+            ids: w.ids,
+            note: w.note,
+            since: w.since,
+            until: w.until.unwrap_or_else(|| w.since.saturating_add(300_000)),
+            problem: w.problem,
+            pr: w.pr,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

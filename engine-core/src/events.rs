@@ -377,6 +377,8 @@ pub enum SessionCommand {
         text: String,
         /// JPEG pictures that go with the text, base64, in order: the agent sees them (a check at several screen sizes).
         pictures: Vec<String>,
+        /// Hears `Delivered` once the result is written to the CLI; a dropped sender means it never got there.
+        ack: Option<tokio::sync::oneshot::Sender<Delivery>>,
     },
     /// Compact the conversation's context now (Claude Code: the `/compact` command as the next line; Codex: the thread's
     /// compaction request). It ends like a turn, with a `Done`.
@@ -456,7 +458,13 @@ impl Session {
     }
     /// Like `helper_reply`, with JPEG pictures (base64) the agent sees after the text.
     pub fn helper_reply_with_pictures(&self, id: &str, ok: bool, text: String, pictures: Vec<String>) {
-        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures });
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures, ack: None });
+    }
+    /// Like `helper_reply`, and hears whether the CLI got the result: a session that is gone fails the receiver.
+    pub fn helper_reply_delivered(&self, id: &str, ok: bool, text: String) -> tokio::sync::oneshot::Receiver<Delivery> {
+        let (ack, delivered) = tokio::sync::oneshot::channel();
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text, pictures: Vec::new(), ack: Some(ack) });
+        delivered
     }
     pub fn compact(&self) {
         (self.send)(SessionCommand::Compact);

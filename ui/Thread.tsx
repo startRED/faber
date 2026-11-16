@@ -42,7 +42,7 @@ import { catalogName, bytes, compact, duration, failureText, fromEngine, lang, m
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { windowHidden } from './appearance.ts';
-import { elapsed, warmLeft } from './running.ts';
+import { elapsed, waitWords, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
 import { agentState, agentWord, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
@@ -272,7 +272,7 @@ function ChildCard(props: { child: Summary; running?: RunningItem[]; onOpen: (c:
   const state = () => childStateOf(child(), running());
   return <button type="button" class="btn child-conversation" data-state={state()} onClick={() => props.onOpen(child())}>
     <b>{child().title}</b>
-    <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), t(`child.${state()}`), child().waitingOn?.note, running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
+    <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), state() === 'waiting' && child().waitingOn && !child().waitingOn!.note?.trim() ? '' : t(`child.${state()}`), waitWords(child().waitingOn), running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
   </button>;
 }
 
@@ -439,6 +439,7 @@ function Steps(props: { conversationId: string; conversations?: Summary[]; runni
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
+  waitingOn?: Summary['waitingOn'];
   conversations?: Summary[];
   running?: RunningItem[];
   onOpenChild?: (c: Summary) => void;
@@ -1303,6 +1304,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
         }}
       </For>
       <Show when={props.area === 'project' && props.until === undefined}>
+        <Show when={waitWords(props.waitingOn)}>{(words) => <p class="conversation-wait" role="status">{words()}</p>}</Show>
         <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} background={props.background} />
       </Show>
       <Show when={props.conversationId} keyed>{(conversationId) =>

@@ -99,6 +99,7 @@ mod unbounded;
 mod usage_view;
 mod verifying;
 mod versions;
+mod wait;
 pub use crate::usage::{VendorUsage, WindowUsage};
 pub use pr_watch::{PrReader, gh_reader};
 
@@ -711,6 +712,7 @@ struct Core {
     given: HashMap<String, crate::route::Asked>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
     follows: HashMap<String, pr_watch::Watch>,
+    wait_timers: HashMap<String, (u64, tokio::task::AbortHandle)>,
     pr_reader: PrReader,
     rewind: rewind::State,
     unclean_exit: Option<crate::crash::UncleanExit>,
@@ -897,6 +899,7 @@ impl Engine {
                 draft_routes: HashMap::new(),
                 given: HashMap::new(),
                 follows: HashMap::new(),
+                wait_timers: HashMap::new(),
                 pr_reader,
                 browser: None,
                 verifier: None,
@@ -959,6 +962,11 @@ impl Engine {
             }
         });
         crate::startup::mark("refill");
+        self.with(|c| {
+            for id in &scan.waiting_on {
+                c.restore_wait(id);
+            }
+        });
         scan.keep_going
     }
 
@@ -2159,6 +2167,7 @@ impl Core {
         self.stop_unapproved_paid(vendor, false);
         self.emit_usage();
         self.keep_going_recheck();
+        self.recheck_wait_admission();
     }
 
     /// A whole reading of the account (every window of it noted just now) with room in every vendor-wide window overrules a
@@ -2171,6 +2180,7 @@ impl Core {
             self.save_ledger(true);
             self.emit_usage();
             self.keep_going_recheck();
+            self.recheck_wait_admission();
         }
     }
 
@@ -2201,6 +2211,7 @@ impl Core {
         self.stop_unapproved_paid(vendor, spent);
         self.emit_usage();
         self.keep_going_recheck();
+        self.recheck_wait_admission();
     }
 
     fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
@@ -2921,10 +2932,20 @@ impl Core {
         }
         if by_person && let Some(conv) = self.convs.get_mut(id) {
             conv.stopped = true;
+            if let Some(wait) = conv.waiting_on.as_mut() {
+                wait.problem = Some("reason.wait.stopped".into());
+            }
             conv.send_after_stop = None;
             conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
         }
         if by_person {
+            if let Some((_, timer)) = self.wait_timers.remove(id) {
+                timer.abort();
+            }
+            if self.convs.get(id).is_some_and(|c| c.waiting_on.is_some()) {
+                // The list drops the wait's deadline now, even when no turn runs to announce the Stop.
+                self.list_changed();
+            }
             self.goal_stopped(id);
         }
         self.save(id);
@@ -2949,7 +2970,14 @@ impl Core {
             l.session.interrupt();
         }
         self.rewind_stop_retired(id);
-        self.stop_helpers(id, false);
+        let helper_stop = if self.silenced(id) {
+            "the silence watchdog interrupted the calling conversation"
+        } else if by_person {
+            "an explicit stop request interrupted the calling conversation"
+        } else {
+            "the engine interrupted the calling conversation"
+        };
+        self.stop_helpers_because(id, false, helper_stop);
         if waiting {
             let reply = self.live.get(id).and_then(|l| l.turn.clone());
             if let Some(m) = self.turn(id) {
@@ -3844,7 +3872,25 @@ impl Core {
             self.emit_background();
         }
         self.unwatch(conv);
-        self.stop_helpers(conv, true);
+        let finished = self
+            .convs
+            .get(conv)
+            .and_then(|c| c.messages.iter().find(|m| Some(&m.id) == turn_id.as_ref()))
+            .is_some_and(|m| m.status == Some(Status::Done));
+        let helper_return = self.convs.get(conv).is_some_and(|c| {
+            !c.stopped
+                && c.queued.iter().any(|q| q.id.starts_with("helper-report-"))
+                && c.messages
+                    .iter()
+                    .find(|m| Some(&m.id) == turn_id.as_ref())
+                    .is_some_and(|m| m.status == Some(Status::Stopped) && m.error.is_none())
+        });
+        // A completed wrapper or delivery fallback keeps its actual workers until their own reports arrive.
+        if (!finished && !helper_return) || self.closing {
+            self.stop_helpers(conv, true);
+        } else {
+            self.finish_helper_calls(conv);
+        }
         // Claude Code takes a line handed to its turn at the turn's next step; one still unread when the turn ends is the next
         // turn by itself, after a stop too (fixture `steer-stopped`). The conversation stays busy until that turn takes it in, so
         // nothing starts before it: not the queue or Keep going, and a plan limit there still continues it. The
@@ -6376,7 +6422,7 @@ fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     // A reply that ended to wait for its own background command waits like Keep going does (`command_wait.rs`).
     let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone()).or_else(|| command_wait::waiting_command(c, live));
     // An agent that waits for the conversations it started is not done: the row stays while it waits.
-    let waiting_on = c.waiting_on.clone().filter(|_| reply.status != Some(Status::Streaming));
+    let waiting_on = c.waiting_on.clone().filter(|_| reply.status != Some(Status::Streaming) && !c.stopped);
     let approved_work = reply.status == Some(Status::Done)
         && live.is_some_and(|l| l.turn.as_deref() == Some(reply.id.as_str()))
         && c.queued.iter().any(|q| {
