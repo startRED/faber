@@ -1,5 +1,5 @@
-import { createMemo, createResource, createSignal, For, Show, type ComponentProps } from 'solid-js';
-import { api, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
+import { createEffect, createMemo, createResource, createSignal, For, on, Show, type ComponentProps } from 'solid-js';
+import { api, errorText, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
 import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { CommandStop } from './Commands.tsx';
@@ -13,14 +13,14 @@ import { LiveText } from './Background.tsx';
 
 // Faber's own checks of a reply that changed files (R146): one quiet line while they run and once they ended, the failed
 // checks' first failures behind a disclosure. Checks that still fail after Faber's fixes wait for the person, in amber.
-export function ChecksLine(props: { c: Checks }) {
+export function ChecksLine(props: { c: Checks; open?: boolean }) {
   const failed = () => props.c.failed ?? [];
   const words = () => t(`checks.${props.c.state}` as Parameters<typeof t>[0], { n: props.c.passed, checks: failed().map((f) => f.command).join(', ') });
   return (
     <div class="pace checks" classList={{ need: props.c.state === 'needsYou' }} data-state={props.c.state}>
       <p>{words()}</p>
       <Show when={props.c.state !== 'running' && failed().length}>
-        <details class="disclosure">
+        <details class="disclosure" open={props.open}>
           <summary>{t('checks.why')}</summary>
           <For each={failed()}>
             {(f) => (
@@ -59,7 +59,7 @@ export function FollowLine(props: { conversationId: string; f: Follow }) {
 }
 
 
-const [opened, setOpened] = createSignal<string>();
+const [opened, setOpened] = createSignal<string | undefined>(undefined, { equals: false });
 export const openedDetails = opened;
 export const showDetails = (conversationId?: string) => setOpened(conversationId);
 
@@ -155,7 +155,18 @@ function BackgroundList(props: { rows: BackgroundWork[]; conversationId: string;
   }}</For></ul>;
 }
 
-/** A view of facts in the existing column, mounted only while open. Task 019 extends the live running list here. */
+function ReasonText(props: { text: string }) {
+  const [open, setOpen] = createSignal(false);
+  const preview = createMemo(() => Array.from(props.text.slice(0, 720)).slice(0, 360).join(''));
+  return <>
+    <Show when={!open() || preview().length >= props.text.length}><p>{preview()}{preview().length < props.text.length ? '…' : ''}</p></Show>
+    <Show when={preview().length < props.text.length}><details class="disclosure" open={open()} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>{t('details.open')}</summary><Show when={open()}><p>{props.text}</p></Show>
+    </details></Show>
+  </>;
+}
+
+/** A view of facts in the existing column, mounted only while open. */
 export function DetailsPane(props: {
   conversationId: string; messages: Message[]; background: BackgroundCommand[]; copy?: WorkCopy;
   changes: ComponentProps<typeof ChangesFiles>;
@@ -170,7 +181,28 @@ export function DetailsPane(props: {
   const omitted = (text: string, kind: string) => Number(text.split('\n').find((line) => line.endsWith(` ${kind}; search them with memory_search.`))?.match(/^And (\d+) /)?.[1] ?? 0);
   const work = createMemo(() => backgroundOf(props.messages, props.background, props.conversationId, cache));
   const follows = createMemo(() => followedIn(props.messages));
-  const checks = () => d().replies.filter((m) => m.checks && !work().some((row) => row.id === `${m.id}:checks`));
+  const attention = createMemo(() => {
+    const m = props.messages.at(-1);
+    return m?.role === 'assistant' && (m.needsYou || m.checks?.state === 'needsYou' || m.checks?.state === 'failed'
+      || m.follow?.state === 'failing' || m.follow?.state === 'conflict' || m.error || m.status === 'error'
+      || m.status === 'stopped' || m.wrapUp?.done === false) ? m : undefined;
+  });
+  const attentionChecks = () => attention()?.checks && ['failed', 'needsYou'].includes(attention()!.checks!.state) ? attention()!.checks : undefined;
+  const attentionFollow = () => attention()?.follow && ['failing', 'conflict'].includes(attention()!.follow!.state) ? attention()!.follow : undefined;
+  const shownWork = () => work().filter((row) => row.messageId !== attention()?.id || !(row.checks && attentionChecks() || row.follow && attentionFollow()));
+  const [checksOpen, setChecksOpen] = createSignal(false);
+  const ready = createMemo(() => props.messages.length > 0);
+  let currentDetail: HTMLElement | undefined;
+  createEffect(on([openedDetails, ready], ([id, loaded]) => {
+    if (id !== props.conversationId || !loaded) return;
+    queueMicrotask(() => {
+      if (openedDetails() !== props.conversationId || !currentDetail?.isConnected) return;
+      setChecksOpen(false);
+      currentDetail.scrollIntoView({ block: 'start' });
+      currentDetail.focus({ preventScroll: true });
+    });
+  }));
+  const checks = () => d().replies.filter((m) => m.checks && !(m.id === attention()?.id && attentionChecks()) && !work().some((row) => row.id === `${m.id}:checks`));
   const checkTools = () => d().checks.filter((tool) => !work().some((row) => row.id === tool.id));
   const reviews = () => d().reviews.filter((step) => !work().some((row) => row.id === step.call.id));
   const finishedFollows = () => follows().filter((f) => !work().some((row) => row.follow?.repo.toLowerCase() === f.repo.toLowerCase() && row.follow.number === f.number));
@@ -182,24 +214,37 @@ export function DetailsPane(props: {
       <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={props.onClose}><Icon name="close" /></button>
     </div>
     <div class="rc-body side-body details-view">
+      <Show when={attention()}>{(m) => <section class="det-g" data-testid="current-detail" ref={(el) => { currentDetail = el; }} tabindex="-1" aria-labelledby="current-detail-title">
+        <h3 id="current-detail-title">{t(m().needsYou || m().checks?.state === 'needsYou' ? 'run.needsYou' : 'details.unfinished')}</h3>
+        <Show when={m().wrapUp}>{(box) => <>
+          <ReasonText text={box().summary?.notDone || box().recap} />
+          <Show when={!box().answered && box().ask !== (box().summary?.notDone || box().recap) ? box().ask : undefined}>{(ask) => <p>{ask()}</p>}</Show>
+        </>}</Show>
+        <Show when={m().error}>{(error) => <p>{errorText(error())}</p>}</Show>
+        <Show when={attentionChecks()}>{(checks) => <ChecksLine c={checks()} open />}</Show>
+        <Show when={attentionFollow()}>{(follow) => <FollowLine conversationId={props.conversationId} f={follow()} />}</Show>
+        <Show when={!m().wrapUp && !m().error && !attentionChecks() && !attentionFollow()}><ReasonText text={m().text} /></Show>
+      </section>}</Show>
       {/* The copy's branch and folder stay here, for people who look, instead of in the topbar. */}
       <Show when={props.copy}>{(copy) => <p class="det-copy" data-testid="details-copy">{t('details.copy', { branch: copy().branch })}<span>{copy().path}</span></p>}</Show>
       <Show when={cardText()}>{(text) => <section class="det-g"><details class="disclosure" data-testid="start-card" onToggle={(e) => setCardOpen(e.currentTarget.open)}>
         <summary>{t('details.startCard')}</summary>
         <Show when={cardOpen()}><p class="side-meta" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '4px 12px' }}><span>{bytes(new TextEncoder().encode(text()).length)}</span><Show when={omitted(text(), 'more rule lines')}><span>{t('details.cardRules', { n: omitted(text(), 'more rule lines') })}</span></Show><Show when={omitted(text(), 'older decisions')}><span>{t('details.cardDecisions', { n: omitted(text(), 'older decisions') })}</span></Show><Show when={omitted(text(), 'more taste lines')}><span>{t('details.cardTaste', { n: omitted(text(), 'more taste lines') })}</span></Show></p><pre class="command-output" style={{ 'font-family': 'var(--font-mono)', padding: '8px', border: '1px solid var(--line)', 'border-radius': 'var(--r-xs)' }}>{text()}</pre></Show>
       </details></section>}</Show>
-      <Show when={work().length}><section class="det-g"><h3>{t('background.title')}</h3>
-        <BackgroundList rows={work()} conversationId={props.conversationId} follows={follows()} />
+      <Show when={shownWork().length}><section class="det-g"><h3>{t('background.title')}</h3>
+        <BackgroundList rows={shownWork()} conversationId={props.conversationId} follows={follows()} />
       </section></Show>
       <Show when={d().saved.length || finishedFollows().length}><section class="det-g saved-changes"><h3>{t('details.group.saved')}</h3>
         <Facts tools={d().saved} follows={follows()} />
         <For each={finishedFollows().map((f) => `${f.repo.toLowerCase()}#${f.number}`)}>{(id) => <FollowLine conversationId={props.conversationId} f={finishedFollows().find((f) => `${f.repo.toLowerCase()}#${f.number}` === id)!} />}</For>
       </section></Show>
       <Show when={references().length}><section class="det-g reply-references"><h3>{t('background.references')}</h3><details class="disclosure" onToggle={(e) => setReferencesOpen(e.currentTarget.open)}><summary>{t('details.open')}</summary><Show when={referencesOpen()}><For each={references()}>{(line) => <p class="technical-reference"><LiveText text={line} follows={follows()} /></p>}</For></Show></details></section></Show>
-      <Show when={checkTools().length || checks().length}><section class="det-g"><h3>{t('details.group.checks')}</h3>
+      <Show when={checkTools().length || checks().length}><section class="det-g"><details class="disclosure" data-testid="checks-history" open={checksOpen()} onToggle={(e) => setChecksOpen(e.currentTarget.open)}><summary>{t('details.group.checks')}</summary>
+        <Show when={checksOpen()}>
         <Facts tools={checkTools()} follows={follows()} />
         <For each={checks().map((m) => m.id)}>{(id) => <ChecksLine c={checks().find((m) => m.id === id)!.checks!} />}</For>
-      </section></Show>
+        </Show>
+      </details></section></Show>
       <section class="det-g changes-view"><h3>{t('details.group.files')}</h3><ChangesFiles {...props.changes} /></section>
       <Show when={reviews().length}><section class="det-g"><h3>{t('details.group.reviews')}</h3><Facts tools={reviews().map((step) => ({ ...step.call, output: step.report }))} follows={follows()} conversationId={props.conversationId} /></section></Show>
     </div>

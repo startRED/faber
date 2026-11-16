@@ -17,6 +17,60 @@ const messages: Message[] = [{ id: 'a1', role: 'assistant', text: 'The greeting 
 ] }];
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
+check('details: current attention comes before folded history and clears after a new reply', async () => {
+  const { DetailsPane } = await import('../../ui/Details.tsx');
+  const before = api.startCard;
+  api.startCard = async () => null;
+  const old = { ...messages[0]!, id: 'old', checks: { state: 'failed' as const, passed: 0, failed: [{ command: 'old check', lines: ['old failure'] }] } };
+  const current: Message = { id: 'current', role: 'assistant', at: 2, text: 'The update is ready.', status: 'done', needsYou: true,
+    wrapUp: { recap: 'Update ready.', outcome: 'needsYou', done: false, ask: 'Can you install the update?', summary: { did: 'Published.', result: 'Ready.', notDone: 'Install the updated application.' } } };
+  const [list, setList] = createSignal<Message[]>([]);
+  showDetails('project');
+  const host = document.createElement('div'); document.body.append(host);
+  const dispose = render(() => createComponent(DetailsPane, { conversationId: 'project', get messages() { return list(); }, background: [], changes: { id: 'project', files: [], loading: false }, onBack: () => {}, onClose: () => {} }), host);
+  try {
+    await settle();
+    setList([old, current]);
+    await settle();
+    const issue = host.querySelector('[data-testid=current-detail]');
+    ok(issue, 'details explains the current attention instead of opening on old checks');
+    equal(host.querySelector('.details-view')!.firstElementChild, issue);
+    equal(document.activeElement, issue, 'a request made before messages load focuses the current cause when ready');
+    equal(issue.getAttribute('aria-labelledby'), issue.querySelector('h3')!.id, 'the focus target has its visible name');
+    ok(issue.textContent?.includes('Install the updated application.'), 'the pending action is visible');
+    ok(issue.textContent?.includes('Can you install the update?'), 'the actual question is visible as words');
+    ok(!issue.textContent?.includes('old failure'));
+    equal(host.querySelector<HTMLDetailsElement>('[data-testid=checks-history]')?.open, false);
+    setList([old, { ...current, wrapUp: undefined, text: 'Install the update before continuing.', checks: { state: 'passed', passed: 3 } }]);
+    await settle();
+    ok(host.querySelector('[data-testid=current-detail]')?.textContent?.includes('Install the update before continuing.'), 'unrelated passing checks cannot hide the current request');
+    const longReason = 'Synthetic pending action. '.repeat(80);
+    setList([old, { ...current, wrapUp: undefined, text: longReason }]);
+    await settle();
+    ok(host.querySelector('[data-testid=current-detail] p')!.textContent!.length <= 361, 'long replies do not dominate the opening');
+    const fullReason = host.querySelector<HTMLDetailsElement>('[data-testid=current-detail] details')!;
+    fullReason.open = true; fullReason.dispatchEvent(new Event('toggle')); await settle();
+    ok(fullReason.textContent?.includes(longReason), 'the complete reason remains available');
+    setList([old, { ...current, id: 'next', wrapUp: undefined, text: 'Choose the next action.' }]);
+    await settle();
+    ok(host.querySelector('[data-testid=current-detail]')?.textContent?.includes('Choose the next action.'), 'a shorter automatic reply remains visible after the full reason was opened');
+    setList([old, { ...current, id: 'again', wrapUp: undefined, text: longReason }]);
+    await settle();
+    ok(host.querySelector<HTMLDetailsElement>('[data-testid=current-detail] details')?.open, 'returning to a long reason keeps its disclosure and state in sync');
+    ok(host.querySelector('[data-testid=current-detail]')?.textContent?.includes(longReason), 'the returning full reason stays visible');
+    setList([old, { ...current, needsYou: false, wrapUp: undefined, checks: { state: 'failed', passed: 0, failed: [{ command: 'current check', lines: ['current failure'] }] } }]);
+    await settle();
+    ok(host.querySelector('[data-testid=current-detail] .checks-failed')?.textContent?.includes('current failure'));
+    ok(host.querySelector<HTMLDetailsElement>('[data-testid=current-detail] details')?.open, 'current failed evidence opens automatically');
+    const history = host.querySelector<HTMLDetailsElement>('[data-testid=checks-history]')!;
+    history.open = true; history.dispatchEvent(new Event('toggle')); await settle();
+    equal([...host.querySelectorAll('.checks-failed')].filter((el) => el.textContent?.includes('current failure')).length, 1, 'opening history does not duplicate the current failure');
+    setList([old, { ...current, needsYou: false, wrapUp: undefined }]);
+    await settle();
+    equal(host.querySelector('[data-testid=current-detail]'), null, 'resolved attention does not survive the latest reply');
+  } finally { showDetails(undefined); dispose(); host.remove(); api.startCard = before; }
+});
+
 check('details: parsed facts are newest first, refused work and prose are not saved changes', () => {
   const newer: Message = { ...messages[0]!, id: 'a2', commits: ['save'], tools: [
     { id: 'save', name: 'commandExecution', input: 'git commit -m "Document greeting"', ok: true },
@@ -260,6 +314,11 @@ check('details: the project thread opens the real column, sharing changes, check
     await settle();
     equal(openedDetails(), c.id);
     equal(host.querySelector('#running-title')!.textContent, t('details.title'));
+    ok(host.querySelector('[data-testid=current-detail] .checks-failed'), 'the footer opens directly on the current failed check');
+    ok(host.querySelector<HTMLDetailsElement>('[data-testid=current-detail] details')!.open, 'its failure evidence is already expanded');
+    const history = host.querySelector<HTMLDetailsElement>('[data-testid=checks-history]')!;
+    equal(history.open, false, 'the older verification list starts folded');
+    history.open = true; history.dispatchEvent(new Event('toggle')); await settle();
     equal(host.querySelector('.crumb')!.textContent!.includes('faber/'), false, 'the topbar keeps the title only');
     const copy = host.querySelector('[data-testid=details-copy]')!;
     equal(copy.firstChild!.textContent, t('details.copy', { branch: 'faber/fix-the-greeting-ab12' }), 'the separate copy is named in the details');
@@ -289,6 +348,10 @@ check('details: the project thread opens the real column, sharing changes, check
     hear({ type: 'message', conversationId: c.id, message: next });
     await settle();
     ok(host.querySelector<HTMLDetailsElement>('.details-view .checks .disclosure')!.open, 'a text update keeps open evidence and focus');
+    host.querySelector<HTMLButtonElement>('.det-line button')!.click();
+    await settle();
+    equal(document.activeElement, host.querySelector('[data-testid=current-detail]'), 'a repeated Details click focuses the current cause');
+    equal(host.querySelector<HTMLDetailsElement>('[data-testid=checks-history]')!.open, false, 'an explicit Details click folds the historical list again');
     showAside({ conversationId: c.id });
     await settle();
     equal(host.querySelector('.details-view'), null, 'side views exclude each other');

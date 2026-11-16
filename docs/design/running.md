@@ -1,5 +1,7 @@
 # The running column
 
+Details opens on the latest attention reason, with failed evidence expanded and older checks folded.
+
 What runs now, on the right: rows, questions, done cards, Technical details' chips and when it opens by itself (the
 engine's side is the Running column row of [product-map.md](../product-map.md)). The window widths it shares with the
 rest of the shell are in [layout.md](layout.md).
