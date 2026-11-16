@@ -5,7 +5,8 @@ description: Use before writing anything a person sees in a browser (page, scree
 
 # Frontend craft
 
-The deliverable is an interface a person can use. More components or effects do not prove a better result. Preserve the request, the project's identity and its existing design system.
+The deliverable is an interface a person can use. More components, fashionable effects or a higher checklist count
+are not evidence of a better result. Preserve the request, the project's identity and its existing design system.
 
 ## Start with the task and the existing product
 
@@ -140,7 +141,6 @@ Use the sibling `frontend-proof` skill for the affected flows before claiming th
 result yourself at a desktop and a phone size, which needs no visible window. Fix the most consequential
 observed defect, inspect again, and stop when the requested behavior and its relevant quality checks hold. Name
 anything unverified. A beautiful screenshot never proves persistence, accessibility or a successful operation.
-Use isolated data by default and the latest actual running build; interact through affected flows and recheck until no reproducible in-scope user-visible defect remains. Avoid preference polishing.
 
 ## Original sources, read only when relevant
 

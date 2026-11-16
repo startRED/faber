@@ -153,21 +153,6 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[tokio::test]
-    async fn reading_a_window_preserves_the_persons_shown_temporary_chat() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let owner = engine.with(|core| core.blank(Area::Chat, None));
-        let person = engine.start_temporary_chat().unwrap();
-        engine.read_window(&owner, 40).unwrap();
-        engine.with(|core| {
-            assert_eq!(core.shown.as_deref(), Some(person.as_str()));
-            assert!(core.convs.contains_key(&person));
-            assert!(!core.convs[&person].stopped);
-        });
-        engine.shutdown();
-    }
-
-    #[tokio::test]
     async fn temporary_chat_startup_preserves_an_orphan_workspace_used_by_an_ordinary_chat() {
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);

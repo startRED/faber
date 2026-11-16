@@ -721,10 +721,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     el.dataset.exiting = 'true';
     autoOpen.seen(allWaitingKeys());
     clearTimeout(retry);
-    const exit = leaveColumn(el);
     // Release the modal trap before returning focus; retain the actual pane until it has left.
     setByUser(false);
     runButton?.focus();
+    const exit = leaveColumn(el);
     if (!exit) return finishColumnClose();
     columnExit = exit;
     el.inert = true;

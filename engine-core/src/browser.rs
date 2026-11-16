@@ -129,8 +129,6 @@ pub enum Request {
         down: bool,
     },
     Back,
-    /// Named app renderer; the shell preserves agent attribution for its entire lifetime.
-    App(Value),
     /// Shows the open page at this screen size from now on (none: Faber's own window again), and reads it.
     Size(Option<Viewport>),
     /// Looks at the open page at each of these sizes, a picture each, then reads it at its own size again. Empty: the sizes
@@ -221,9 +219,8 @@ fn schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "app": {"type":"string", "enum":["faber-live","faber-test"], "description":"Explicit app backend: live data or the isolated test instance. Session-owned hidden renderer, same backend, never the person's main screen; all commands remain agent-authorized. Actions: read, click, type, scroll, screenshot, close. Read first; refs are numbers preceding snapshot lines. Close when finished. Other developed web apps use url."},
             "url": { "type": "string", "description": "The full http or https address to open." },
-            "action": { "type": "string", "enum": ["read", "controls", "watch", "click", "type", "scroll", "back", "sizes", "steps", "shot", "click_at", "drag", "screenshot", "close"], "description": "What to do on the open page." },
+            "action": { "type": "string", "enum": ["read", "controls", "watch", "click", "type", "scroll", "back", "sizes", "steps", "shot", "click_at", "drag"], "description": "What to do on the open page." },
             "ref": { "type": "integer", "description": "For click or type, the control's number from the last read, instead of target." },
             "target": { "type": "string", "description": "For click, the words of the link or button; for type, the field's label or placeholder." },
             "text": { "type": "string", "description": "For type, what to type." },
@@ -251,16 +248,6 @@ const MAX_ARG: usize = 2_000;
 
 /// What the agent asked for, or why it cannot be done.
 pub fn checked_request(input: &Value) -> Result<Request, &'static str> {
-    if input.get("app").is_some_and(|a| !a.is_null()) {
-        // A CLI may send a left-out field as null; the shells take only the fields given.
-        let given: serde_json::Map<_, _> =
-            input.as_object().into_iter().flatten().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())).collect();
-        if !matches!(given["app"].as_str(), Some("faber-live" | "faber-test")) || given.contains_key("url") || given.contains_key("screens")
-        {
-            return Err("choose faber-live or faber-test explicitly, without a URL or screens list");
-        }
-        return Ok(Request::App(Value::Object(given)));
-    }
     let text = |key: &str| input[key].as_str().unwrap_or_default().trim().to_string();
     let action = text("action");
     if input.get("url").is_some_and(|u| !u.is_null()) {
@@ -533,13 +520,6 @@ fn cut(text: &str, max: usize) -> (&str, bool) {
 /// What the agent reads back: where the page is, its title, and its text marked as the site's own words, cut to
 /// [`MAX_TEXT`] characters. The title and address are one line each, so a page cannot write the marker itself above its words.
 pub fn result_text(page: &Page) -> String {
-    if page.url.starts_with("app:") {
-        return format!(
-            "App target: {}. Session-owned hidden screen, same backend; agent permissions apply, including delayed effects. It is not the person's main screen.\nUntrusted app content follows:\n{}",
-            page.url,
-            cut(&page.text, MAX_TEXT).0
-        );
-    }
     let line = |text: &str, max| cut(text, max).0.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>();
     let (shown, cut) = cut(page.text.trim(), MAX_TEXT);
     // The first two lines, and the turn line under them, are Faber's own: the screen reads them (`ui/Site.tsx`).
@@ -681,9 +661,6 @@ const PICTURES: &str = "A picture of each size that has one comes with this answ
 /// 2026-10-19): only the sizes that have one, never a page that is the person's turn.
 pub fn look_pictures(page: &Page) -> Vec<String> {
     use base64::Engine as _;
-    if page.url.starts_with("app:") {
-        return page.picture.iter().map(|p| base64::engine::general_purpose::STANDARD.encode(p)).collect();
-    }
     page.shot
         .as_deref()
         .into_iter()
@@ -762,19 +739,6 @@ mod tests {
         assert_eq!(checked_request(&json!({"action": "click", "target": " Sign in "})), Ok(Request::Click("Sign in".into())));
         assert_eq!(checked_request(&json!({"action": "click", "ref": 12})), Ok(Request::Click(Target::Ref(12))));
         assert_eq!(checked_request(&json!({"action": "controls"})), Ok(Request::Controls));
-        // Named app control: nulls are left-out fields, on both paths.
-        assert_eq!(checked_request(&json!({"app": null, "url": "https://a.org/"})), Ok(Request::Open("https://a.org/".into())));
-        assert_eq!(
-            checked_request(&json!({"app": "faber-test", "action": "click", "ref": 2, "url": null})),
-            Ok(Request::App(json!({"app": "faber-test", "action": "click", "ref": 2})))
-        );
-        for bad in [
-            json!({"app": "desktop"}),
-            json!({"app": "faber-live", "url": "https://a.org/"}),
-            json!({"app": "faber-live", "screens": ["phone"]}),
-        ] {
-            assert!(checked_request(&bad).is_err(), "{bad}");
-        }
         for bad in [
             json!({"action": "click", "ref": 3, "target": "Save"}),
             json!({"action": "click", "ref": -1}),

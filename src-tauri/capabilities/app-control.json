@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "app-control",
-  "description": "Conversation-owned app renderers listen to host events without window authority.",
-  "webviews": ["app-*"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
-}

@@ -168,52 +168,6 @@
     "about": "The settings as Settings shows them."
   },
   {
-    "name": "app_control_state",
-    "args": [
-      [
-        "by",
-        "Option<String>"
-      ]
-    ],
-    "inputSchema": {
-      "properties": {
-        "by": {
-          "type": "string"
-        }
-      },
-      "required": [],
-      "type": "object"
-    },
-    "kind": "read",
-    "reach": "own",
-    "conversation": "/by",
-    "about": "Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed."
-  },
-  {
-    "name": "app_control_open",
-    "args": [
-      [
-        "id",
-        "String"
-      ]
-    ],
-    "inputSchema": {
-      "properties": {
-        "id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "kind": "read",
-    "reach": "own",
-    "conversation": "/id",
-    "about": "A session renderer may open only its own conversation family, without screen privileges."
-  },
-  {
     "name": "create_chat_group",
     "args": [
       [

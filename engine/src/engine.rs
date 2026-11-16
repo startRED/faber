@@ -1200,10 +1200,6 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|core| core.opened(id))
     }
-    /// A bounded screen-ready read without changing the person's selection or closing temporary chats.
-    pub fn read_window(&self, id: &str, newest: usize) -> Option<Conversation> {
-        self.with(|core| core.opened_window(id, newest).map(Conversation::for_screen))
-    }
     /// The exact card bound to the current native session, only when the screen asks for it.
     pub fn start_card(&self, id: &str) -> Option<String> {
         self.with(|core| {

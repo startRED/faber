@@ -24,13 +24,6 @@ struct FullState {
     version: String,
 }
 
-fn scope_app_state(state: &mut AppState, by: Option<&str>, family: impl Fn(&str) -> Option<String>) {
-    let owner = by.and_then(&family);
-    let allowed = |id: &str| owner.as_ref().is_some_and(|root| family(id).as_ref() == Some(root));
-    state.background.items.retain(|item| allowed(&item.conversation_id));
-    state.running.items.retain(|item| allowed(&item.conversation_id));
-}
-
 /// What `save_settings` answers: the settings as stored, and the look computed from the stored appearance.
 #[derive(Serialize)]
 struct SavedSettings {
@@ -185,20 +178,6 @@ table! {
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
         Ok(FullState { state, look, models: lock(&h.models).clone(), version: h.shell.version() })
-    }
-    /// Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed.
-    Read Own("/by") fn app_control_state(h, by: Option<String>) -> FullState {
-        let mut state = h.engine.state();
-        let starters: std::collections::HashMap<_, _> =
-            state.conversations.iter().map(|c| (c.id.clone(), c.started_by.clone())).collect();
-        scope_app_state(&mut state, by.as_deref(), |id| reach::root(id, |at| starters.get(at).cloned()));
-        state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
-        let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), version: h.shell.version() })
-    }
-    /// A session renderer may open only its own conversation family, without screen privileges.
-    Read Own("/id") fn app_control_open(h, id: String) -> Option<Conversation> {
-        Ok(h.engine.read_window(&id, 40))
     }
     Write Free fn create_chat_group(h, name: String) -> faber_engine::engine::ChatGroup {
         h.engine.create_chat_group(&name)
@@ -1103,174 +1082,6 @@ table! {
 
 #[cfg(test)]
 mod revoke_tests {
-    struct Quiet;
-    impl Shell for Quiet {}
-    async fn host() -> (Host, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let data = dir.path().join("data");
-        std::fs::create_dir_all(&data).unwrap();
-        let wiring = Wiring::new(Arc::new(Quiet));
-        let opts = EngineOptions {
-            data_dir: data.clone(),
-            // Private Chat work lives beside the data folder, never inside it (#383).
-            #[cfg(windows)]
-            chat_dir: dir.path().join("chat-work"),
-            clis: std::collections::BTreeMap::new(),
-            spawn: real_spawner(),
-            windows: false,
-            claude_env_billed: false,
-            max_warm: 3,
-            idle: Duration::from_secs(120),
-            runtime: Handle::current(),
-            ask: None,
-        };
-        let engine = Engine::new(opts, wiring.emitter()).unwrap();
-        (wiring.host(engine, data, true, Handle::current()), dir)
-    }
-
-    #[tokio::test]
-    async fn app_bootstrap_and_refresh_hide_foreign_command_output_and_running_details() {
-        use faber_engine::model::{RunState, RunningItem, Vendor};
-        let (host, _dir) = host().await;
-        let mut original = host.engine.state();
-        for id in ["owner", "child", "other"] {
-            original.background.items.push(faber_engine::background::Command {
-                id: id.into(),
-                conversation_id: id.into(),
-                vendor: Vendor::Codex,
-                command: "private command".into(),
-                started: 1,
-                output: format!("{id} secret output"),
-                state: faber_engine::background::State::Running,
-                stoppable: true,
-            });
-            original.running.items.push(RunningItem {
-                conversation_id: id.into(),
-                turn_id: "turn".into(),
-                title: id.into(),
-                area: Area::Chat,
-                project_id: None,
-                vendor: None,
-                model: None,
-                state: RunState::Working,
-                since: 1,
-                permissions: vec![],
-                parked: vec![],
-                parked_more: 0,
-                stuck: vec![],
-                stall: None,
-                wait_until: None,
-                held: None,
-                keep_going: false,
-                keep_wait: None,
-                waiting_on: None,
-                keep_progress: None,
-                settled: false,
-                plan: None,
-                now: Some(format!("{id} private activity")),
-            });
-        }
-        for by in [Some("owner"), None, Some("missing")] {
-            for _ in 0..2 {
-                // Bootstrap and the state refresh following a list event use the same filter.
-                let mut state = original.clone();
-                scope_app_state(&mut state, by, |id| match id {
-                    "owner" | "child" => Some("owner".into()),
-                    "other" => Some("other".into()),
-                    _ => None,
-                });
-                let expected = if by == Some("owner") { vec!["owner", "child"] } else { vec![] };
-                assert_eq!(state.background.items.iter().map(|i| i.conversation_id.as_str()).collect::<Vec<_>>(), expected);
-                assert_eq!(state.running.items.iter().map(|i| i.conversation_id.as_str()).collect::<Vec<_>>(), expected);
-                assert!(!serde_json::to_string(&state).unwrap().contains("other secret output"));
-            }
-        }
-        let caller = Caller::Agent { conversation: Some("owner".into()) };
-        assert_eq!(with_by(&caller, json!({"by":"other"}))["by"], "owner");
-        assert!(with_by(&Caller::Agent { conversation: None }, json!({"by":"other"})).get("by").is_none());
-    }
-
-    #[tokio::test]
-    async fn app_control_open_preserves_the_persons_temporary_chat() {
-        let (host, dir) = host().await;
-        let store = faber_engine::store::Store::new(&dir.path().join("data"));
-        let mut person: Conversation = serde_json::from_value(json!({
-            "id":"person", "title":"Private draft", "area":"chat", "createdAt":1, "updatedAt":1,
-            "temporary":true, "messages":[{"id":"draft", "role":"user", "text":"Keep my draft", "at":1}],
-            "queued":[{"id":"pending", "text":"Keep pending work", "choice":{"vendor":"auto"}, "at":1}]
-        }))
-        .unwrap();
-        store.save_checked(&person).unwrap();
-        let mut owner = person.clone();
-        owner.id = "owner".into();
-        owner.temporary = false;
-        owner.queued.clear();
-        owner.messages = (0..45)
-            .map(|i| {
-                let mut message = person.messages[0].clone();
-                message.id = format!("message-{i}");
-                message
-            })
-            .collect();
-        store.save_checked(&owner).unwrap();
-        host.engine.open_for_screen_window("person", 40).unwrap();
-        let caller = Caller::Agent { conversation: Some("owner".into()) };
-        let opened = host.dispatch_as(&caller, "app_control_open", json!({"id":"owner"})).await.unwrap();
-        person = host.engine.open("person").expect("agent reads must preserve the person's temporary chat");
-        assert!(!person.stopped);
-        assert_eq!(person.messages[0].text, "Keep my draft");
-        assert_eq!(person.queued[0].text, "Keep pending work");
-        assert!(store.get("person").is_some());
-        assert_eq!(opened["messages"].as_array().unwrap().len(), 40);
-        assert_eq!(opened["earlier"], 5);
-        host.engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn app_agent_send_preserves_temporary_chats() {
-        let (host, dir) = host().await;
-        let store = faber_engine::store::Store::new(&dir.path().join("data"));
-        for (id, messages, queued) in [
-            (
-                "person",
-                json!([{"id":"draft", "role":"user", "text":"Keep my draft", "at":1}]),
-                json!([{"id":"pending", "text":"Keep pending work", "choice":{"vendor":"auto"}, "at":1}]),
-            ),
-            ("blank", json!([]), json!([])),
-        ] {
-            let chat: Conversation = serde_json::from_value(json!({
-                "id":id, "title":"Draft", "area":"chat", "createdAt":1, "updatedAt":1,
-                "temporary":true, "messages":messages, "queued":queued
-            }))
-            .unwrap();
-            store.save_checked(&chat).unwrap();
-        }
-        host.engine.open_for_screen_window("person", 40).unwrap();
-        let before_person = serde_json::to_value(host.engine.open("person").unwrap()).unwrap();
-        let before_blank = serde_json::to_value(host.engine.open("blank").unwrap()).unwrap();
-        let caller = Caller::Agent { conversation: Some("owner".into()) };
-        for req in [json!({"text":"Injected", "conversationId":"owner"}), json!({"text":"Injected"})] {
-            assert!(host.dispatch_as(&caller, "send", json!({"req":req})).await.is_err());
-            assert_eq!(serde_json::to_value(host.engine.open("person").unwrap()).unwrap(), before_person);
-            assert_eq!(serde_json::to_value(host.engine.open("blank").unwrap()).unwrap(), before_blank);
-            assert!(store.get("person").is_some());
-            assert!(store.get("blank").is_some());
-        }
-        host.engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn app_renderer_reads_bootstrap_but_cannot_gain_screen_authority() {
-        let (host, _dir) = host().await;
-        let caller = Caller::Agent { conversation: Some("app-owner".into()) };
-        assert!(host.dispatch_as(&caller, "app_control_state", json!({})).await.unwrap()["settings"].is_object());
-        assert!(host.dispatch_as(&caller, "app_control_state", json!(["other"])).await.is_err());
-        assert!(host.dispatch_as(&caller, "app_control_state", json!({"by":"other"})).await.is_err());
-        for command in ["state", "answer_ask", "open_folders", "screen_ready"] {
-            assert!(host.dispatch_as(&caller, command, json!({})).await.is_err(), "{command}");
-        }
-    }
-
     #[test]
     fn t515a_failed_workspace_copy_preserves_existing_destination() {
         use std::io::{self, Read};
