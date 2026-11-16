@@ -570,6 +570,15 @@ impl Core {
             let text = reply.map(Message::said).unwrap_or_default();
             format!("No confirmed conclusion. Latest output: {text}")
         });
+        // The exact end reason travels even after delivered work; Faber's stop of a silent reply is not the person's.
+        let error = reply.and_then(|m| m.error.as_deref());
+        let state = if state == State::Stopped && !c.stopped && error.is_some() { State::Failed } else { state };
+        let last = error.map_or(last.clone(), |key| {
+            format!(
+                "{last}
+Failure reason: {key}"
+            )
+        });
         let record = crate::results::record_line(c);
         let title = c.title.clone();
         // A piece that ended twice with nothing changed: the report names the step up, or the move (`stronger.rs`).
@@ -878,26 +887,37 @@ impl Core {
         if on.is_empty() && note.trim().is_empty() {
             return Ok("Those conversations already reported; read their reports and continue.".into());
         }
+        let since = (self.secs() * 1000.0) as u64;
+        let until = since.saturating_add((300_000.0 * self.keep_pace).max(1.0) as u64);
+        let pr = self.wait_pr(by);
         let c = self.load(by).ok_or("the conversation is gone")?;
-        let previous = c.waiting_on.replace(crate::model::WaitingOn { ids: on.clone(), note, since: now() });
+        // After the person's Stop the wait is only shown; it never returns by itself.
+        let stopped = c.stopped;
+        let problem = stopped.then(|| "reason.wait.stopped".to_string());
+        let previous = c.waiting_on.replace(crate::model::WaitingOn { ids: on.clone(), note, since, until, problem, pr });
         if self.try_save(by).is_err() {
             self.convs.get_mut(by).expect("waiting conversation exists").waiting_on = previous;
             return Err("the wait could not be saved".into());
         }
         self.list_changed();
+        if stopped {
+            return Ok("The person stopped this conversation: Faber will not return it by itself. End your turn now.".into());
+        }
+        self.arm_wait(by);
+        self.refresh_wait_pr(by);
         for id in on {
             self.tell_parent(&id);
         }
-        // Helpers stop when their lead's turn ends (`stop_helpers`): a lead told to end its turn here lost a review two
-        // minutes in (the owner's project, 2026-11-11). The wait stands; the turn ends after they report.
         let helpers = self.working_helpers(by);
         if !helpers.is_empty() {
             return Ok(format!(
-                "The wait is set, but do not end your turn yet: {} still working for you, and a helper stops when your turn ends.                  Get each report with helper({{\"to\":name,\"wait\":true}}), then end your turn; Faber wakes you when one of these                  conversations reports.",
+                "The wait is saved; do not end your turn yet if you need these reports now: {} still working. Use helper({{\"to\":name,\"wait\":true}}) for each report. If your turn ends, the actual workers keep running and can return you. This wait also has a state check at Unix milliseconds {until}.",
                 helpers.join(", ")
             ));
         }
-        Ok("End your turn now; Faber wakes you when one of these conversations reports.".into())
+        Ok(format!(
+            "End your turn now; Faber wakes you on a report or checks this wait at Unix milliseconds {until}, including after restart. A blocked return stays visible; do not poll."
+        ))
     }
 }
 
@@ -905,6 +925,80 @@ impl Core {
 mod tests {
     use super::*;
     use crate::model::Permission;
+
+    /// A finished child whose latest reply has `status` and `error`, started by a parent that can take a report.
+    fn child_report(status: Status, error: Option<&str>, stopped: bool) -> (State, String) {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let parent = super::super::answer::tests::seed(&engine, crate::events::Session::from_fn(|_| {}), &[("answer", &[])]);
+        let out = engine.with_saves(false, |core| {
+            core.opts.clis.insert(Vendor::Claude, crate::engine::Cli { command: "never-spawn".into(), prefix: vec![] });
+            core.ledger.of_mut(Vendor::Claude).billing = crate::budget::Billing::Subscription;
+            core.convs.get_mut(&parent).unwrap().choice =
+                Some(Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None });
+            let child = core.blank(Area::Project, None);
+            let c = core.convs.get_mut(&child).unwrap();
+            (c.started_by, c.title, c.stopped) = (Some(parent.clone()), "Ship PR".into(), stopped);
+            // A wait declared in the turn stays saved; it never hides a Stop or a failure.
+            let problem = stopped.then_some("reason.wait.stopped");
+            c.waiting_on = serde_json::from_value(serde_json::json!({"note": "CI", "since": 1, "problem": problem})).unwrap();
+            let mut reply = Message::new("r1".into(), Role::Assistant, "Pushed pull request #135.".into(), 2);
+            (reply.status, reply.error) = (Some(status), error.map(str::to_string));
+            reply.wrap_up = Some(
+                crate::progress::wrap_up(
+                    &serde_json::json!({"outcome": "done", "did": "Pushed #135.", "result": "PR open.", "verified": "tests"}),
+                )
+                .unwrap(),
+            );
+            c.messages.push(reply);
+            let state = state_of(false, &core.convs[&child]);
+            core.tell_parent(&child);
+            let p = &core.convs[&parent];
+            let report =
+                p.queued.iter().map(|q| q.text.clone()).chain(p.messages.iter().map(|m| m.text.clone())).find(|t| t.contains("Ship PR"));
+            (state, report.expect("the parent got the report"))
+        });
+        engine.shutdown();
+        out
+    }
+
+    #[tokio::test]
+    async fn a_child_cut_by_silence_after_delivering_reports_the_exact_reason() {
+        for (status, key) in [(Status::Error, "reason.silent.unconfirmed"), (Status::Stopped, "reason.silent")] {
+            let (_, report) = child_report(status, Some(key), false);
+            assert!(report.contains(&format!("Failure reason: {key}")), "{report}");
+            assert!(!report.contains("stopped by the person"), "Faber's silence stop is not the person's: {report}");
+            assert!(report.contains("PR open."), "the delivered work stays in the report: {report}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_persons_stop_outranks_a_declared_wait() {
+        let (state, report) = child_report(Status::Stopped, None, true);
+        assert_eq!(state, State::Stopped);
+        assert!(report.contains("stopped by the person"), "{report}");
+    }
+
+    #[tokio::test]
+    async fn a_wait_declared_after_the_persons_stop_never_arms_a_return() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = super::super::answer::tests::seed(&engine, crate::events::Session::from_fn(|_| {}), &[("answer", &[])]);
+        engine.with_saves(false, |core| {
+            core.convs.get_mut(&id).unwrap().stopped = true;
+            core.session_wait(&id, vec![], Some("CI".into())).unwrap();
+            assert_eq!(core.convs[&id].waiting_on.as_ref().unwrap().problem.as_deref(), Some("reason.wait.stopped"));
+            assert!(!core.wait_timers.contains_key(&id), "no timer after the person's Stop");
+        });
+        engine.shutdown();
+    }
+
+    #[test]
+    fn durable_wait_legacy_deadline_survives_serialization() {
+        let wait: crate::model::WaitingOn = serde_json::from_value(serde_json::json!({"since":1000,"note":"build"})).unwrap();
+        let saved = serde_json::to_value(wait).unwrap();
+        assert_eq!(saved["until"], 301000, "legacy waits must have a finite persisted deadline");
+    }
 
     #[test]
     fn session_control_stopped_with_queued_messages_is_not_working() {
@@ -995,7 +1089,14 @@ mod tests {
             assert_eq!(crate::conversation_state::child_state(c), "working");
             c.messages.last_mut().unwrap().status = Some(Status::Error);
             assert_eq!(crate::conversation_state::child_state(c), "failed");
-            c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "Waiting for review".into(), since: 0 });
+            c.waiting_on = Some(crate::model::WaitingOn {
+                ids: vec![],
+                note: "Waiting for review".into(),
+                since: 0,
+                until: 300_000,
+                problem: None,
+                pr: None,
+            });
             assert_eq!(crate::conversation_state::child_state(c), "waiting");
         });
         engine.shutdown();
@@ -1010,7 +1111,14 @@ mod tests {
             let c = core.convs.values_mut().find(|c| c.started_by.is_some()).unwrap();
             c.messages.last_mut().unwrap().status = Some(Status::Done);
             assert!(crate::engine::running_item(c, None).is_none(), "a finished turn with nothing pending leaves the list");
-            let wait = crate::model::WaitingOn { ids: vec!["child".into()], note: "Waiting for the two lanes to land".into(), since: 7 };
+            let wait = crate::model::WaitingOn {
+                ids: vec!["child".into()],
+                note: "Waiting for the two lanes to land".into(),
+                since: 7,
+                until: 300_007,
+                problem: None,
+                pr: None,
+            };
             c.waiting_on = Some(wait.clone());
             let item = crate::engine::running_item(c, None).expect("a waiting conversation is still at work");
             assert_eq!(item.state, crate::model::RunState::Working);
@@ -1049,7 +1157,14 @@ mod tests {
             turn.status = Some(Status::Streaming);
             let p = core.convs.get_mut(&parent).unwrap();
             p.messages.push(turn);
-            p.waiting_on = Some(crate::model::WaitingOn { ids: vec![child.clone()], note: String::new(), since: 1 });
+            p.waiting_on = Some(crate::model::WaitingOn {
+                ids: vec![child.clone()],
+                note: String::new(),
+                since: 1,
+                until: 300001,
+                problem: None,
+                pr: None,
+            });
             let c = core.convs.get_mut(&child).unwrap();
             c.started_by = Some(parent.clone());
             c.title = "Sidebar".into();
@@ -1067,7 +1182,8 @@ mod tests {
             c.messages.push(reply);
             assert_eq!(state_of(false, c), State::Waiting);
             assert!(!reports_later(false, c), "nothing else will ever wake its lead");
-            c.waiting_on = Some(crate::model::WaitingOn { ids: vec![], note: "review".into(), since: 2 });
+            c.waiting_on =
+                Some(crate::model::WaitingOn { ids: vec![], note: "review".into(), since: 2, until: 300002, problem: None, pr: None });
             assert!(reports_later(false, c), "a member that waits for its own conversations reports when they do");
             c.waiting_on = None;
 

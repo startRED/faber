@@ -1,6 +1,23 @@
 import { createSignal } from 'solid-js';
 import { type Area, errorText, type RunningItem, type RunningList, type RunStateName, type Summary } from './api.ts';
-import { t } from './i18n.ts';
+import { lang, t } from './i18n.ts';
+import { ageNow } from './foot.ts';
+import { en, type Key } from './locales/en.ts';
+
+/** The saved return contract, shared by the sidebar, open thread and child rows. */
+export function waitWords(wait: Summary['waitingOn']): string | undefined {
+  if (!wait) return undefined;
+  const note = wait.note?.trim() || (wait.ids?.length ? t('run.waitingOn', { n: wait.ids.length }) : t('child.waiting'));
+  if (wait.problem) {
+    const why = Object.hasOwn(en, wait.problem) ? t(wait.problem as Key) : t('wait.unknownProblem');
+    return wait.problem === 'reason.budget.other' ? `${note} · ${why}` : `${note} · ${t('wait.blocked', { why })}`;
+  }
+  if (!wait.until || !Number.isFinite(wait.until) || !Number.isFinite(new Date(wait.until).getTime())) {
+    return `${note} · ${t('wait.noDeadline')}`;
+  }
+  const when = new Intl.DateTimeFormat(lang(), { dateStyle: 'short', timeStyle: 'medium' }).format(wait.until);
+  return `${note} · ${t(wait.until <= Math.max(Date.now(), ageNow()) ? 'wait.overdue' : 'wait.until', { when })}`;
+}
 
 // The running list on the screen (docs/design/layout.md, "Running column"). The engine builds and orders the list; the screen
 // keeps the newest one it has seen, groups it into blocks and decides when the column opens by itself.
@@ -73,9 +90,7 @@ export const isWaiting = (i: RunningItem): boolean => i.state === 'working' && !
 
 /** What a row that waits for the conversations its agent started says: how many, else its agent's own words. */
 export function waitingOnWords(w: NonNullable<RunningItem['waitingOn']>): string {
-  if (w.ids?.length) return t('run.waitingOn', { n: w.ids.length });
-  const note = w.note?.trim();
-  return note ? t('run.waitingNote', { note: note.length > 80 ? `${note.slice(0, 79)}…` : note }) : t('run.waitingOn', { n: 1 });
+  return waitWords(w)!;
 }
 
 /** What the screen shows as running: a reply whose agent finished, with only the CLI's turn still closing, is done for the person. The

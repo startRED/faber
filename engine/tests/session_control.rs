@@ -57,9 +57,9 @@ async fn waiting_stops_keep_going_and_prevents_automatic_archiving() {
         .unwrap();
     let mut agent = support::next_pipe(&made).await;
     agent.say(json!({"type":"system","subtype":"init","session_id":"lead","model":"haiku"})).await;
-    engine.set_keep_going_pace(0.001);
     engine.keep_going(&id, true).unwrap();
     engine.session_wait(&id, vec![], Some("review".into())).unwrap();
+    engine.set_keep_going_pace(0.001);
     agent.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
     support::until("turn ends", || {
         engine.open(&id).unwrap().messages.last().is_some_and(|m| m.status == Some(faber_engine::model::Status::Done))

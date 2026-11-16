@@ -1,15 +1,16 @@
 # Subagent steps
 
-A helper whose process dies immediately returns a failed report and any words received. It leaves the live count, even with a message in flight; missing cost keeps the approximate-cost mark.
+A dead helper immediately returns a failure and received words. It leaves the live count; unknown cost stays approximate.
+Silence checks use workers and admission. Stops retain cause and partial words. Failed delivery or caller closure saves `wake.childDone`, held behind Stop; shutdown retains a bounded wait. Past causes are unknown.
 
 ## Current activity
 
-A running helper row shows its latest unfinished tool under its task name, using the existing translated tool label
-and a bounded one-line detail. Between tools, the last observed step stays with its explicit result, so the row
-does not collapse and grow again. This is observed activity, not a progress estimate. Waiting and stuck helpers retain
+Waiting buttons fit title, status, reason and return time.
+
+A running helper row shows its latest unfinished tool under its task name, using the translated tool label and bounded detail. Between tools, the last observed step stays with its explicit result, so the row
+does not collapse and grow again. This is observed activity. Waiting and stuck helpers retain
 the observed action so the person can see what needs attention; a known result precedes a clipped detail. Stopped,
-declined and completed helpers do not keep an activity line. The existing row still opens the full helper view; no new
-reader, timer or stored value is added. `tests/ui/agents.check.ts` covers arrival and removal of this line.
+declined and completed helpers do not keep an activity line. `tests/ui/agents.check.ts` covers arrival and removal of this line.
 
 Nested tasks have independent rows and the same reader route (R450), with a small inset and a parent-name tooltip.
 Each task owns its tools; its parent keeps the delegation as a button that opens the child. The child's reader names
@@ -23,7 +24,7 @@ regressions live in `tests/ui/agents.check.ts`.
 Calls without a known outcome are marked interrupted when no running CLI owns the restored or copied reply.
 The existing stopped label replaces the live mark, including nested background tasks under a completed answer.
 Known results, saved briefs and history remain intact; no completion time or result is invented, and no call is replayed.
-This reuses the same rows and reader in Chat and Projects, without a new control, timer or process.
+Chat and Projects reuse the same rows and reader.
 
 ## Retained visible history
 

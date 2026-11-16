@@ -522,7 +522,14 @@ async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_co
         &host,
         "c1",
         None,
-        Some(faber_engine::model::WaitingOn { ids: vec!["c2".into()], note: "waiting for child".into(), since: 5 }),
+        Some(faber_engine::model::WaitingOn {
+            ids: vec!["c2".into()],
+            note: "waiting for child".into(),
+            since: 5,
+            until: 300_005,
+            problem: None,
+            pr: None,
+        }),
     );
     seed_conversation(&host, "c2", Some("c1"), None);
 
@@ -530,14 +537,14 @@ async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_co
     let list = rows.as_array().unwrap();
     let r1 = list.iter().find(|r| r["id"] == "c1").unwrap();
     assert_eq!(r1["state"], "waiting");
-    assert_eq!(r1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child" }));
+    assert_eq!(r1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child", "since": 5, "until": 300_005 }));
     let r2 = list.iter().find(|r| r["id"] == "c2").unwrap();
     assert_eq!(r2["state"], "idle");
     assert!(r2.get("waitingOn").is_none(), "{r2}");
 
     let c1 = host.dispatch("conversation", json!({ "id": "c1" })).await.unwrap();
     assert_eq!(c1["state"], "waiting");
-    assert_eq!(c1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child" }));
+    assert_eq!(c1["waitingOn"], json!({ "ids": ["c2"], "note": "waiting for child", "since": 5, "until": 300_005 }));
     let c2 = host.dispatch("conversation", json!({ "id": "c2" })).await.unwrap();
     assert_eq!(c2["state"], "new");
     assert!(c2.get("waitingOn").is_none(), "{c2}");

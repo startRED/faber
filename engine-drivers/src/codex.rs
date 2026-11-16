@@ -1543,6 +1543,16 @@ async fn serve(
     let no_process = child.is_none() && job.is_none();
     let server_tree = job.as_ref().and_then(proc::Containment::owned_tree);
     let mut shutdown_confirmed = false;
+    // A torn line poisons the whole process stream, including writes without an acknowledgement.
+    macro_rules! write_checked {
+        ($msg:expr) => {{
+            let result = proc::write_line(&mut *stdin, $msg).await;
+            if result.is_err_and(|e| e.torn) {
+                shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+            }
+            result
+        }};
+    }
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     // Late output from a closed thread must not expose its revoked token to a peer.
     let mut tokens = HashSet::<String>::new();
@@ -1563,7 +1573,7 @@ async fn serve(
         ($method:expr, $params:expr, $kind:expr) => {{
             next_id += 1;
             waiting.insert(next_id.to_string(), $kind);
-            let _ = proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
+            let _ = write_checked!(&json!({ "id": next_id, "method": $method, "params": $params }));
         }};
     }
     macro_rules! stop {
@@ -1616,14 +1626,14 @@ async fn serve(
                     // A subscribed loaded thread ignores resume overrides, including a newly minted token.
                     let request_id = format!("faber-unsubscribe-{}", $key);
                     waiting.insert(request_id.clone(), Waiting::Unsubscribe($key));
-                    if proc::write_line(&mut *stdin, &json!({"id":request_id,"method":"thread/unsubscribe","params":{"threadId":id}})).await.is_err() {
+                    if write_checked!(&json!({"id":request_id,"method":"thread/unsubscribe","params":{"threadId":id}})).is_err() {
                         stop!();
                     }
                 }
             } else if $t.params.permissions == Permissions::Isolated || $t.params.instructions.is_some() {
                 exposure_pending.insert($key);
-                if proc::write_line(&mut *stdin, &json!({"id":format!("faber-config-{}", $key), "method":"config/read",
-                    "params":{"includeLayers":false,"cwd":$t.params.cwd}})).await.is_err() {
+                if write_checked!(&json!({"id":format!("faber-config-{}", $key), "method":"config/read",
+                    "params":{"includeLayers":false,"cwd":$t.params.cwd}})).is_err() {
                     stop!();
                 }
             } else {
@@ -1744,7 +1754,7 @@ async fn serve(
                     if !result.confirmed { (t.sink)(EngineEvent::Error { message: "error.rewind.stopUnconfirmed".into(), fatal: false }); }
                 }
                 if !retry {
-                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":result.success,"contentItems":[{"type":"inputText","text":result.text}]}})).await;
+                    let _ = write_checked!(&json!({"id":id,"result":{"success":result.success,"contentItems":[{"type":"inputText","text":result.text}]}}));
                 }
             }
             () = proc::wait_deadline(deadline) => {
@@ -1956,11 +1966,11 @@ async fn serve(
                                 }
                             }
                             Waiting::Initialize => {
-                                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                                let _ = write_checked!(&json!({ "method": "initialized" }));
                                 // The catalog's skills (`crate::tools`), before any thread opens; its answer needs nothing.
                                 if let Some(root) = &tools.skills {
                                     let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": [root] } });
-                                    let _ = proc::write_line(&mut *stdin, &set).await;
+                                    let _ = write_checked!(&set);
                                 }
                                 ready = true;
                                 for key in std::mem::take(&mut pending) {
@@ -2008,11 +2018,11 @@ async fn serve(
                                 t.id = Some(id.clone());
                                 if t.params.instructions.is_none() && let Some(title) = t.params.title.take() {
                                     // An untracked reply keeps older app-servers' unsupported-method errors silent.
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-name-{key}"), "method":"thread/name/set",
-                                        "params":{"threadId":id,"name":title.chars().take(60).collect::<String>()}})).await;
+                                    let _ = write_checked!(&json!({"id":format!("faber-name-{key}"), "method":"thread/name/set",
+                                        "params":{"threadId":id,"name":title.chars().take(60).collect::<String>()}}));
                                 }
-                                let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
-                                    "params":{"cwds":[t.params.cwd]}})).await;
+                                let _ = write_checked!(&json!({"id":format!("faber-commands-{key}"), "method":"skills/list",
+                                    "params":{"cwds":[t.params.cwd]}}));
                                 if std::mem::take(&mut t.compact) {
                                     t.watch.begin();
                                     t.publish_writers(key, &subagents);
@@ -2056,7 +2066,7 @@ async fn serve(
                                     t.helpers.insert(call.clone(), id.clone());
                                     (t.sink)(EngineEvent::ReviewCall { id: call, input: params["arguments"].clone() });
                                 }
-                                None => { let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":crate::helper::dynamic_result(false, "Review is not available here.", &[])})).await; }
+                                None => { let _ = write_checked!(&json!({"id":id,"result":crate::helper::dynamic_result(false, "Review is not available here.", &[])})); }
                             }
                             continue;
                         }
@@ -2072,7 +2082,7 @@ async fn serve(
                                     t.helpers.insert(call.clone(), id.clone());
                                     (t.sink)(EngineEvent::TeamCall { id: call, input: params["arguments"].clone() });
                                 }
-                                None => { let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":crate::helper::dynamic_result(false, refusal, &[])})).await; }
+                                None => { let _ = write_checked!(&json!({"id":id,"result":crate::helper::dynamic_result(false, refusal, &[])})); }
                             }
                             continue;
                         }
@@ -2085,7 +2095,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::HelperCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"No helper is available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"No helper is available here."}]}}));
                                 }
                             }
                             continue;
@@ -2099,7 +2109,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::ConversationCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Starting a conversation is not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Starting a conversation is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2113,7 +2123,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::MapCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's project map is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2127,7 +2137,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::ToolboxCall { id: call, tool, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2141,7 +2151,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::ProgressCall { id: call, tool, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"This tool is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2155,7 +2165,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::VerifyCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's checks are not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's checks are not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2169,7 +2179,7 @@ async fn serve(
                                     (t.sink)(EngineEvent::BrowseCall { id: call, input: params["arguments"].clone() });
                                 }
                                 None => {
-                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's browser is not available here."}]}})).await;
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's browser is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -2207,7 +2217,7 @@ async fn serve(
                                 }
                             }
                             if !accepted {
-                                let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"The working-folder policy declined this command."}]}})).await;
+                                let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"The working-folder policy declined this command."}]}}));
                             }
                             continue;
                         }
@@ -2230,7 +2240,7 @@ async fn serve(
                                             && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method))) =>
                             {
                                 if t.blocked || t.closing {
-                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    let _ = write_checked!(&json!({ "id": id, "result": { "decision": "decline" } }));
                                     continue;
                                 }
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
@@ -2250,7 +2260,7 @@ async fn serve(
                                     )
                                 {
                                     t.approvals.remove(&key);
-                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    let _ = write_checked!(&json!({ "id": id, "result": { "decision": "decline" } }));
                                     continue;
                                 }
                                 let input = if let Some(cwd) = params["cwd"].as_str().filter(|cwd| Some(Path::new(cwd)) != Some(t.params.cwd.as_path())) {
@@ -2270,7 +2280,7 @@ async fn serve(
                                     && !t.closing =>
                             {
                                 let Some((card, asked)) = question_card(params) else {
-                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": question_answers(&[], None) })).await;
+                                    let _ = write_checked!(&json!({ "id": id, "result": question_answers(&[], None) }));
                                     continue;
                                 };
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
@@ -2280,15 +2290,15 @@ async fn serve(
                             }
                             // Nobody can answer it (a run with its own instructions, a reply that is over): it goes on unanswered.
                             (false, _) if method == "item/tool/requestUserInput" => {
-                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": question_answers(&[], None) })).await;
+                                let _ = write_checked!(&json!({ "id": id, "result": question_answers(&[], None) }));
                             }
                             // No live conversation or approvals disabled: fail closed without a card.
                             (true, _) => {
-                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                let _ = write_checked!(&json!({ "id": id, "result": { "decision": "decline" } }));
                             }
                             (false, _) => {
                                 let error = json!({ "id": id, "error": { "code": -32601, "message": format!("Faber does not handle {method} yet") } });
-                                let _ = proc::write_line(&mut *stdin, &error).await;
+                                let _ = write_checked!(&error);
                             }
                         }
                     }
@@ -2372,7 +2382,7 @@ async fn serve(
                                             Some(_) => question_answers(&[], None),
                                             None => json!({ "decision": "decline" }),
                                         };
-                                        let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": result })).await;
+                                        let _ = write_checked!(&json!({ "id": id, "result": result }));
                                     }
                                     t.turn = None;
                                     t.watch.finish();
@@ -2497,7 +2507,7 @@ async fn serve(
                                     Some(asked) => question_answers(asked, reply.as_ref().filter(|_| allow)),
                                     None => json!({ "decision": if allow { "accept" } else { "decline" } }),
                                 };
-                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": result })).await {
+                                match write_checked!(&json!({ "id": id, "result": result })) {
                                     Ok(()) => {
                                         if let Some(t) = threads.get_mut(&key) {
                                             t.approvals.remove(&request_id);
@@ -2505,24 +2515,30 @@ async fn serve(
                                         }
                                         Delivery::Delivered
                                     }
-                                    Err(e) => {
-                                        // A half-written or unflushed line cannot be sent again: end the process, and the
-                                        // end of its output tells the engine.
-                                        if e.torn {
-                                            shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
-                                        }
-                                        Delivery::WriteFailed
-                                    }
+                                    Err(_) => Delivery::WriteFailed,
                                 }
                             }
                             Some(_) => Delivery::Unknown,
                         };
                         let _ = ack.send(delivery);
                     }
-                    SessionCommand::HelperReply { id, ok, text, pictures } => {
+                    SessionCommand::HelperReply { id, ok, text, pictures, mut ack } => {
+                        // A call no longer pending drops `ack`: the engine then resumes the caller another way.
+                        if ack.as_ref().is_some_and(|a| a.is_closed()) { continue; }
                         let Some(t) = threads.get_mut(&key) else { continue };
                         let Some(request) = t.helpers.remove(&id) else { continue };
-                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)})).await;
+                        let msg = json!({"id":request,"result":crate::helper::dynamic_result(ok, &text, &pictures)});
+                        let written = tokio::select! {
+                            biased;
+                            _ = async { match ack.as_mut() { Some(a) => a.closed().await, None => std::future::pending().await } } => {
+                                shutdown_confirmed |= proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                Err(proc::WriteError { torn: true })
+                            },
+                            written = async { write_checked!(&msg) } => written,
+                        };
+                        if let (Some(ack), Ok(())) = (ack, written) {
+                            let _ = ack.send(Delivery::Delivered);
+                        }
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) {
@@ -2598,7 +2614,7 @@ async fn serve(
                     // Before `initialized`, the first set carries the new value by itself.
                     if changed && ready {
                         let set = json!({ "id": "faber-skills", "method": "skills/extraRoots/set", "params": { "extraRoots": tools.skills.iter().collect::<Vec<_>>() } });
-                        let _ = proc::write_line(&mut *stdin, &set).await;
+                        let _ = write_checked!(&set);
                     }
                 }
                 Some(ServerCommand::Retire) => {
