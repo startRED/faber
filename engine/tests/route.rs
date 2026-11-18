@@ -132,6 +132,16 @@ fn all() -> Vec<Profile> {
     candidates(&BOTH, &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()])
 }
 
+#[test]
+fn an_account_that_lists_gpt_6_2_gets_it_and_one_that_does_not_keeps_gpt_6_1_sol() {
+    let models = ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
+    let newer = candidates(&[Vendor::Codex], &models);
+    assert_eq!(picked("code", "hard", 0.9, &newer), ("gpt-6.2-sol", "medium"));
+    assert!(newer.iter().any(|p| p.model == "gpt-6.2-astra"));
+    let older = candidates(&[Vendor::Codex], &models[2..]);
+    assert_eq!(picked("code", "hard", 0.9, &older).0, "gpt-6.1-sol");
+}
+
 fn picked(kind: &'static str, level: &'static str, confidence: f64, from: &[Profile]) -> (&'static str, &'static str) {
     let r = choose(kind, level, "glance", confidence, from).unwrap();
     (r.profile.model, r.profile.effort)

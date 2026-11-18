@@ -927,13 +927,13 @@ mod mixing_tests {
         let l = lead(Vendor::Claude);
         let tight = select(piece("build", "hard", "tight"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
         let open = select(piece("build", "hard", "open"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
-        assert_eq!((tight.iq, tight.agent), (46, 39));
+        assert_eq!((tight.model, tight.effort), ("gpt-6.2-sol", "medium"));
         assert!(open.iq >= 50 && open.agent >= 42);
         // A well-defined medium piece runs on the smaller model; an open one gets the everyday model's bar, except in economy.
         let medium =
             |scope, economy| select(piece("build", "medium", scope), Some(l), l.vendor, &PROFILES, BOTH, &neutral, economy).unwrap();
         assert_eq!((medium("tight", false).model, medium("tight", false).effort), ("gpt-6.1-terra", "medium"));
-        assert_eq!((medium("open", false).model, medium("open", false).effort), ("gpt-6.1-sol", "medium"));
+        assert_eq!((medium("open", false).model, medium("open", false).effort), ("gpt-6.2-sol", "medium"));
         assert_eq!(medium("open", true), medium("tight", true));
         assert_eq!(
             select(piece("build", "easy", "open"), Some(l), l.vendor, &PROFILES, BOTH, &neutral, false),
@@ -982,8 +982,8 @@ mod mixing_tests {
         assert_eq!(select(task, Some(l), l.vendor, &PROFILES, BOTH, &cheaper, false).unwrap().model, "claude-opus-5-5");
         let expert = select(task, Some(l), l.vendor, &PROFILES, BOTH, &neutral, false).unwrap();
         let hard = select(task, Some(l), l.vendor, &PROFILES, BOTH, &neutral, true).unwrap();
-        assert_eq!((expert.iq, expert.agent), (50, 43));
-        assert_eq!((hard.iq, hard.agent), (46, 39));
+        assert_eq!((expert.model, expert.effort), ("gpt-6.2-sol", "medium"));
+        assert_eq!((hard.model, hard.effort), ("gpt-6.2-sol", "medium"));
         let strongest = lead(Vendor::Claude);
         assert!(select(task, Some(strongest), strongest.vendor, &PROFILES, BOTH, &neutral, false).is_none());
         assert!(select(task, None, Vendor::Claude, &PROFILES, BOTH, &neutral, false).is_none());

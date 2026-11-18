@@ -119,7 +119,7 @@ mod tests {
     }
 }
 
-/// API-equivalent USD from the reported token kinds, at published standard prices checked on 2026-10-12.
+/// API-equivalent USD from the reported token kinds, at published standard prices checked on 2026-10-12 (GPT-6.2 on 2026-11-17).
 /// Sources: https://developers.openai.com/api/docs/pricing and
 /// https://platform.claude.com/docs/en/about-claude/pricing. Input includes both cache categories.
 pub fn api_price(model: &str, input: u64, output: u64, read: u64, write: u64, write_1h: u64) -> Option<f64> {
@@ -130,6 +130,8 @@ pub fn api_price(model: &str, input: u64, output: u64, read: u64, write: u64, wr
 pub fn api_price_for_prompt(model: &str, input: u64, output: u64, read: u64, write: u64, write_1h: u64, prompt: u64) -> Option<f64> {
     let (mut base, mut hit, mut creation, mut hour, mut answer) = match model {
         m if m.starts_with("gpt-6-astra") => (10.0, 1.0, 12.5, 12.5, 50.0),
+        m if m.starts_with("gpt-6.2-astra") => (8.0, 0.4, 10.0, 10.0, 40.0),
+        m if m.starts_with("gpt-6.2-sol") => (2.0, 0.1, 2.5, 2.5, 10.0),
         m if m.starts_with("gpt-6.1-sol") => (2.0, 0.1, 2.5, 2.5, 10.0),
         m if m.starts_with("gpt-6.1-terra") => (1.0, 0.05, 1.25, 1.25, 5.0),
         m if m.starts_with("gpt-6-luna") => (0.1, 0.01, 0.125, 0.125, 0.5),
@@ -198,6 +200,9 @@ mod price_tests {
         assert!((short - 0.196).abs() < 1e-9);
         let terra = api_price("gpt-6.1-terra", 1_000_000, 100_000, 600_000, 200_000, 0).unwrap();
         assert!((terra - 1.71).abs() < 1e-9);
+        let astra = api_price("gpt-6.2-astra", 100_000, 10_000, 60_000, 0, 0).unwrap();
+        assert!((astra - 0.744).abs() < 1e-9);
+        assert_eq!(api_price("gpt-6.2-sol", 100_000, 10_000, 60_000, 20_000, 0), Some(short));
         let haiku = api_price("claude-haiku-5-5", 3120, 73, 535, 2583, 2583).unwrap();
         assert!((haiku - 0.00055865).abs() < 1e-9);
         assert_eq!(api_price("unknown", 100, 10, 0, 0, 0), None);

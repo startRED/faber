@@ -9,7 +9,7 @@ export interface Option {
 
 const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
 // shortcut: Auto profile ids are mirrored here; share metadata when the account model list exposes profiles.
-const AUTO_MODELS = new Set(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra']);
+const AUTO_MODELS = new Set(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6.2-astra']);
 
 // Claude Code has no model list, so its aliases are fixed; ChatGPT's list comes from the account.
 export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {

@@ -399,7 +399,8 @@ mod tests {
             (Vendor::Claude, "claude-opus-5-5", "xhigh", "claude-fable-5-2", "high"),
             (Vendor::Claude, "claude-fable-5-2", "medium", "claude-fable-5-2", "high"),
             (Vendor::Codex, "gpt-6.1-terra", "high", "gpt-6.1-sol", "medium"),
-            (Vendor::Codex, "gpt-6.1-sol", "high", "gpt-6.1-sol", "xhigh"),
+            (Vendor::Codex, "gpt-6.1-sol", "high", "gpt-6.2-sol", "medium"),
+            (Vendor::Codex, "gpt-6.2-sol", "high", "gpt-6.2-sol", "xhigh"),
             (Vendor::Claude, "claude-haiku-5-5", "high", "claude-haiku-5-5", "xhigh"),
         ] {
             assert_eq!(rung(vendor, model, effort), to(next_model, next_effort), "{model} {effort}");
@@ -434,7 +435,7 @@ mod tests {
     #[test]
     fn the_strongest_pick_of_a_vendor_and_a_pick_the_table_does_not_know_have_no_rung() {
         assert_eq!(rung(Vendor::Claude, "claude-fable-5-2", "high"), None);
-        assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "xhigh"), None);
+        assert_eq!(rung(Vendor::Codex, "gpt-6.2-astra", "xhigh"), None);
         assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "max"), None);
         assert_eq!(rung(Vendor::Claude, "sonnet", "medium"), None);
         assert_eq!(next_rung(&Pick { model: None, ..pick(Vendor::Codex, "x", "medium") }, &PROFILES), None);

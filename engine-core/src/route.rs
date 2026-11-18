@@ -14,6 +14,11 @@ use serde::Deserialize;
 /// Intelligence Index (`iq`) and the coding sub-index (`agent`) are rounded to whole numbers; `secs` is seconds per
 /// task and `cost` US$ per task, all from the same run and scale. No `max`: its extra quota and time are outside Auto's
 /// ladder. Fable starts at medium; Luna high is the maker's starting effort when only Luna is available.
+/// GPT-6.2 Sol and Astra (artificialanalysis.ai, 2026-11-17, launch day) are estimates until that run lists them: `iq` as
+/// printed; `agent`, `secs` and `cost` scaled from GPT-6.1 Sol at the same effort by index, task time and output tokens,
+/// with `cost` anchored on the one printed per-task price (max: Sol US$1.01, Astra US$4.00). No Astra low: Sol medium
+/// beats it for less. GPT-6.1 Sol stays, and stays first (the model a start names before the account lists any), for
+/// accounts that do not list GPT-6.2.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
     pub vendor: Vendor,
@@ -30,7 +35,7 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 }
 
 // shortcut: compiled in until the live manifest lets measured models join without a release.
-pub const PROFILES: [Profile; 24] = [
+pub const PROFILES: [Profile; 31] = [
     p(Vendor::Claude, "claude-fable-5-2", "high", 62, 53, 1059.0, 9.078),
     p(Vendor::Claude, "claude-fable-5-2", "medium", 56, 47, 497.0, 3.803),
     p(Vendor::Claude, "claude-opus-5-5", "xhigh", 57, 50, 976.0, 6.047),
@@ -49,6 +54,13 @@ pub const PROFILES: [Profile; 24] = [
     p(Vendor::Codex, "gpt-6.1-sol", "high", 50, 43, 394.0, 0.591),
     p(Vendor::Codex, "gpt-6.1-sol", "medium", 46, 39, 229.0, 0.359),
     p(Vendor::Codex, "gpt-6.1-sol", "low", 35, 24, 106.0, 0.161),
+    p(Vendor::Codex, "gpt-6.2-astra", "xhigh", 62, 53, 355.0, 1.897),
+    p(Vendor::Codex, "gpt-6.2-astra", "high", 60, 52, 261.0, 1.459),
+    p(Vendor::Codex, "gpt-6.2-astra", "medium", 57, 48, 197.0, 0.9),
+    p(Vendor::Codex, "gpt-6.2-sol", "xhigh", 56, 48, 292.0, 0.636),
+    p(Vendor::Codex, "gpt-6.2-sol", "high", 55, 47, 224.0, 0.452),
+    p(Vendor::Codex, "gpt-6.2-sol", "medium", 53, 45, 165.0, 0.289),
+    p(Vendor::Codex, "gpt-6.2-sol", "low", 41, 28, 78.0, 0.118),
     p(Vendor::Codex, "gpt-6.1-terra", "xhigh", 45, 41, 364.0, 0.401),
     p(Vendor::Codex, "gpt-6.1-terra", "high", 42, 39, 241.0, 0.259),
     p(Vendor::Codex, "gpt-6.1-terra", "medium", 38, 34, 156.0, 0.169),
