@@ -2717,6 +2717,7 @@ export const en = {
   'notes.449.better': 'A project’s separate copy now starts in about 2 seconds instead of 100 on a large project, and takes almost no extra disk space.',
   'notes.450.new': 'You can add Stageshow product demos from the Catalog to make illustrated demos of your app in its own look.',
   'notes.451.fixed': 'Your account limits now show as soon as Faber opens, instead of waiting for your first message.',
+  'notes.452.new': 'You can choose GPT-6.2 Sol and GPT-6.2 Astra in the model picker when your account has them, and Auto can now use them.',
   'update.checking': 'Looking for an update…',
   'set.updateCheck': "Check for updates",
   'set.updateCheckHint': "Looks for a new version now.",

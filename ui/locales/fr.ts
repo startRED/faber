@@ -2837,6 +2837,7 @@ export const fr: Messages = {
   'notes.449.better': 'La copie séparée d’un gros projet est maintenant prête en 2 secondes environ au lieu de 100, et n’occupe presque pas d’espace disque en plus.',
   'notes.450.new': 'Vous pouvez ajouter Démonstrations avec Stageshow depuis le Catalogue pour créer des démonstrations illustrées de votre app, avec son propre style.',
   'notes.451.fixed': 'Les limites de votre compte s’affichent maintenant dès l’ouverture de Faber, sans attendre votre premier message.',
+  'notes.452.new': 'Vous pouvez choisir GPT-6.2 Sol et GPT-6.2 Astra dans le choix du modèle si votre compte les propose, et Auto peut désormais les utiliser.',
   'update.checking': 'Recherche d’une mise à jour…',
   'set.updateCheck': "Rechercher des mises à jour",
   'set.updateCheckHint': "Cherche une nouvelle version maintenant.",
