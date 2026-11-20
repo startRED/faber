@@ -42,12 +42,12 @@ function workspace(name, run) {
     mkdirSync(pristine); mkdirSync(folder);
     for (const dest of [pristine, folder]) execFileSync(process.execPath, [join(root, 'bench/fixtures', `${name}.mjs`), dest], { windowsHide: true });
     const answer = join(base, 'answer.md'); writeFileSync(answer, 'Completed.');
-    const proof = () => {
+    const proof = (...extra) => {
       const started = Date.now();
       // Above the sales proof's ten summarize runs at 15 s each (bench/proofs/sales.mjs): those bound a hang, this only a
       // proof that never ends. At 15 s, ten Node starts on a loaded macOS runner met it (queue/pr-462, run 41071854644),
       // and at 5 s each, one start on a PC running three test builds met the inner limit.
-      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer], { encoding: 'utf8', windowsHide: true, timeout: 180000 });
+      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer, ...extra], { encoding: 'utf8', windowsHide: true, timeout: 180000 });
       assert.equal(result.status, 0, result.signal ? `the proof was stopped by ${result.signal} after ${Date.now() - started} ms` : result.stderr);
       const parsed = JSON.parse(result.stdout);
       assert.ok(parsed.checks.length > 0);
@@ -80,6 +80,42 @@ test('invoice proof rejects the zero-quantity bug despite a passing ordinary exa
   writeFileSync(join(folder, 'invoice.mjs'), 'export const total = lines => lines.reduce((sum, x) => sum + (x.quantity || 1) * x.unitCents, 0);');
   assert.equal(proof(), false);
 }));
+
+test('invoice proof requires the separate scratch folder declared by the runner', () => workspace('invoice', ({ folder, proof }) => {
+  complete('invoice', folder);
+  const scratch = join(folder, '..', 'scratch');
+  assert.equal(proof(scratch), false, 'an unavailable scratch folder cannot silently fall back to the inputs');
+  mkdirSync(scratch);
+  assert.equal(proof(scratch), true);
+}));
+
+for (const [name, assertion] of [
+  ['ordinary quantity', 'assert.equal(total([{quantity: 1, unitCents: 100}]), 100)'],
+  ['invalid input', 'assert.throws(() => total([{quantity: -1, unitCents: 100}]))'],
+]) {
+  test(`invoice proof rejects a test that only covers ${name}`, () => workspace('invoice', ({ folder, proof }) => {
+    complete('invoice', folder);
+    writeFileSync(join(folder, 'invoice.test.mjs'), `import assert from 'node:assert/strict'; import { total } from './invoice.mjs'; ${assertion};`);
+    assert.equal(proof(), false, 'the submitted test must catch the zero-quantity bug');
+    assert.equal(readFileSync(join(folder, 'invoice.mjs'), 'utf8'), valid.invoice[1]);
+  }));
+}
+
+for (const [name, extraExport, binding] of [
+  ['named export', 'export const cents = 100;', 'import { cents } from "./invoice.mjs";'],
+  ['default export', 'export default 100;', 'import cents from "./invoice.mjs";'],
+]) {
+  test(`invoice proof preserves a ${name} unrelated to the bug`, () => workspace('invoice', ({ folder, proof }) => {
+    complete('invoice', folder);
+    writeFileSync(join(folder, 'invoice.mjs'), `${valid.invoice[1]}\n${extraExport}\n`);
+    const testFile = join(folder, 'invoice.test.mjs');
+    const setup = `import assert from 'node:assert/strict'; import { total } from './invoice.mjs'; ${binding}`;
+    writeFileSync(testFile, `${setup} assert.equal(total([{quantity: 1, unitCents: cents}]), 100);`);
+    assert.equal(proof(), false, 'an unrelated import failure must not count as detecting the zero-quantity bug');
+    writeFileSync(testFile, `${setup} assert.equal(total([{quantity: 0, unitCents: cents}]), 0);`);
+    assert.equal(proof(), true, 'a valid regression can use other exports from the invoice');
+  }));
+}
 
 test('settings proof rejects a migrator that discards unknown preferences', () => workspace('settings', ({ folder, proof }) => {
   complete('settings', folder);

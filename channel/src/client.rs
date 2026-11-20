@@ -9,8 +9,10 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinSet;
 
 /// The requests waiting for their answer; `None` once Faber closed the channel, so a later request fails at once.
 type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, wire::Error>>>>>>;
@@ -18,12 +20,15 @@ type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, wire:
 /// Events kept for a slow reader, such as `faber mcp` between two chats. Past this many, newer ones are dropped and the
 /// reader is told it lagged, as Faber tells a slow connection.
 pub const EVENTS_KEPT: usize = 256;
+const HELLO_WAIT: Duration = Duration::from_secs(5);
 
 pub struct Client {
     tx: mpsc::Sender<String>,
     pending: Pending,
     next: AtomicU64,
     events: Mutex<Option<mpsc::Receiver<Value>>>,
+    // Dropping the client or cancelling hello stops both halves of the stream.
+    _io_tasks: JoinSet<()>,
     /// What Faber answered to `hello`: its version, protocol and command table.
     pub offer: Value,
 }
@@ -51,7 +56,8 @@ impl Client {
     pub async fn over<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, hello: Hello) -> io::Result<Client> {
         let (read, mut write) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::channel::<String>(64);
-        tokio::spawn(async move {
+        let mut io_tasks = JoinSet::new();
+        io_tasks.spawn(async move {
             while let Some(line) = rx.recv().await {
                 if write.write_all(line.as_bytes()).await.is_err() || write.write_all(b"\n").await.is_err() {
                     break;
@@ -61,7 +67,7 @@ impl Client {
         let pending: Pending = Arc::new(Mutex::new(Some(HashMap::new())));
         let (events_tx, events_rx) = mpsc::channel(EVENTS_KEPT);
         let waiting = pending.clone();
-        tokio::spawn(async move {
+        io_tasks.spawn(async move {
             let mut reader = BufReader::new(read);
             let mut buffer = Vec::new();
             let mut lagging = false;
@@ -95,9 +101,13 @@ impl Client {
             // Every request still waiting, and every one sent from now on, learns that Faber is gone.
             waiting.lock().unwrap_or_else(|e| e.into_inner()).take();
         });
-        let mut client = Client { tx, pending, next: AtomicU64::new(1), events: Mutex::new(Some(events_rx)), offer: Value::Null };
+        let mut client =
+            Client { tx, pending, next: AtomicU64::new(1), events: Mutex::new(Some(events_rx)), _io_tasks: io_tasks, offer: Value::Null };
         let hello = serde_json::to_value(hello).map_err(io::Error::other)?;
-        client.offer = client.call("hello", hello).await?.map_err(io::Error::other)?;
+        client.offer = tokio::time::timeout(HELLO_WAIT, client.call("hello", hello))
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::TimedOut, e))??
+            .map_err(io::Error::other)?;
         Ok(client)
     }
 
@@ -116,9 +126,18 @@ impl Client {
 
     /// Starts the events on this connection; they arrive in order until Faber closes it. Only the first call has them.
     pub async fn subscribe(&self) -> io::Result<mpsc::Receiver<Value>> {
+        self.subscribe_with(Value::Null).await
+    }
+
+    /// Asks for state change notices only. An older Faber may still send all events.
+    pub async fn subscribe_state(&self) -> io::Result<mpsc::Receiver<Value>> {
+        self.subscribe_with(serde_json::json!({"stateOnly": true})).await
+    }
+
+    async fn subscribe_with(&self, args: Value) -> io::Result<mpsc::Receiver<Value>> {
         let events = self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
         let events = events.ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "already subscribed"))?;
-        self.call("subscribe", Value::Null).await?.map_err(io::Error::other)?;
+        self.call("subscribe", args).await?.map_err(io::Error::other)?;
         Ok(events)
     }
 }

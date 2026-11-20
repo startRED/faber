@@ -163,7 +163,11 @@ phase.
 5. **Interrupt gracefully before killing, watch for silence, and kill the whole process tree on Windows.** The stop uses
    the CLI's control-protocol interrupt, waits for the result, then kills the tree (a job object on Windows, the process
    group elsewhere). An answer whose CLI says nothing for 15 minutes, with no step running and no question waiting, is
-   stopped the same way and ends with `reason.silent` (`engine/src/engine/silence.rs`, R396).
+   stopped the same way and ends with `reason.silent` (`engine/src/engine/silence.rs`, R396). A native Codex web lookup
+   alone uses that cutoff when its turn is the only known writer and no steering delivery is pending. Its interrupt
+   targets that turn; a shared service that has not confirmed the stop stays open.
+   A lone Claude native search can ask once at the same cutoff, after a fresh process tree check. An acknowledged
+   interrupt with a stopped result follows the usual retry rules. An unanswered interrupt leaves Stop available.
 6. **Read the CLI's start-up capabilities, the result subtype and the terminal reason, and map them to `reason.*`
    keys.** Faber detects features from the `capabilities` list in `system/init`, never by comparing version strings, and never
    shows a raw reason string.
@@ -176,6 +180,10 @@ phase.
 
 A project agent can hand reading, building or review to a helper, and is told to give it building and review. With quota factors in the price, reading gets a low-cost model that clears the reading bar and building the project work bar, preferring one no stronger than the lead (an open piece gets the hard bar, as in Auto, not in economy). Review uses the other connected AI when possible. Economy lowers the build bar one level and the review bar. Helpers use the one AI when only one is connected. The agent's own CLI subagents get the same reading and building picks on its AI (`helper::subagents`); a model named on the call wins. Reply token totals include the helpers' cached input and cache writes.
 
-Rules 1 to 9 hold today (rule 4 wherever work changes vendor: a conversation that moves to the other AI carries its earlier messages, or a summary of them, as text, `engine-core/src/handover.rs`, and the helper gets a written brief; rule 5's silence watch covers an answer; a tool step it reports as running, a helper's own process and a quick question are not watched; rule 7: a project agent gives an estimate in its plan, Faber counts the conversation's spend per turn from it, and past half again the estimate it warns once and switches to economy mode until the job ends, `engine/src/engine/plan.rs`, `engine-drivers/src/progress.rs`. The spend is a running total on the conversation, added to where each cost is written (a turn, a helper, a quick side question, and the same of the conversations its agent started), so it is read in one step; a cost with no known price counts 0 and a rewind takes no spend back, so the warning can come late; only an estimate sent after a costly first stretch of a turn counts that whole turn. The estimate ends only when `wrap_up` reports done). Every session start passes its mode, model and effort (the CLI probes that start no
-session carry no model: Codex's lists of models, quota and threads, and Claude Code's `--help` and its `/usage` read), the engine keeps each session's start-up
-`capabilities`, and every result becomes a `reason.*` key.
+These rules hold today. When work changes vendor, the conversation carries its earlier messages or their summary
+(`engine-core/src/handover.rs`), and a helper gets a brief. The silence cutoff protects commands, other tools, helper
+processes and quick questions. A project plan gives an estimate. Past 150% of it, Faber warns once and switches to economy
+until `wrap_up` reports done (`engine/src/engine/plan.rs`, `engine-drivers/src/progress.rs`). The running total covers turns,
+helpers and quick questions in the conversation and those it started. Unpriced work counts as zero and a rewind restores
+no spend. An estimate first given after a costly stretch counts the whole turn. Each session starts with its mode, model
+and effort. CLI probes without sessions carry no model. Faber keeps startup `capabilities` and maps results to `reason.*`.

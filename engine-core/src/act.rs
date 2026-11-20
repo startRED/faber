@@ -132,6 +132,7 @@ mod tests {
             ("wake.asked", Some("act.why.asked")),
             ("wake.childDone", Some("act.why.childDone")),
             ("wake.commandDone", None),
+            ("wake.nativeContinuation", None),
             ("wake.carryOn", None),
             ("wake.unknown", None),
         ] {

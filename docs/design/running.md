@@ -107,7 +107,9 @@ rest of the shell are in [layout.md](layout.md).
   docked and full-stage views keep their layouts (`tests/ui/changes.check.ts`).
   If the user closes it
   while questions are waiting, those questions never reopen it. Only the button stays amber.
-- Declared waits show their reason, local return deadline, overdue status or retained blocker in the sidebar, running column, open thread and child row. Missing timing is explicit; wrapped waits and wait-only projects have no working spinner.
+- Waits wrap in the sidebar, column, thread and child rows. Missing, overdue or blocked waits are amber.
+  Blockers replace child counts. Account and quota blockers open accounts. Delivery opens accounts or the draft.
+  Stop and archive stay calm. No spinner.
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
 - A reply whose agent has finished, with only the CLI's turn still closing, is not a row: it is done for the person. Keep going,

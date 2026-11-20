@@ -9,6 +9,8 @@ use faber_engine::{
 };
 use serde_json::json;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncBufReadExt;
 fn thread() -> CodexThread {
     CodexThread {
         subagents: None,
@@ -93,7 +95,10 @@ async fn native_branch_codex_validates_the_exact_tail_before_any_turn_and_never_
             let turn = support::expect_method(&mut input, "turn/start").await;
             assert_eq!(turn["params"]["threadId"], "forked");
         } else {
-            assert!(tokio::time::timeout(std::time::Duration::from_millis(1), support::read_message(&mut input)).await.is_err());
+            let mut line = String::new();
+            if let Ok(read) = tokio::time::timeout(std::time::Duration::from_millis(1), input.read_line(&mut line)).await {
+                assert_eq!(read.unwrap(), 0, "a rejected fork may close, but cannot send another request");
+            }
         }
         session.close();
         server.retire();
@@ -136,4 +141,83 @@ fn native_branch_claude_uses_a_new_session_and_an_inclusive_validated_entry_only
     assert!(claude_fork_args(&launch, &NativePoint { session: "bad".into(), ..point }, true).is_err());
     assert!(faber_engine::claude::supports_fork("  --fork-session  Fork history"));
     assert!(!faber_engine::claude::supports_fork("  --resume <id>  Use --fork-session"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_branch_codex_retires_its_fork_when_the_tail_read_is_lost() {
+    abandoned_fork_tail(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_branch_codex_closes_its_fork_without_waiting_for_the_tail_read() {
+    abandoned_fork_tail(true).await;
+}
+
+async fn abandoned_fork_tail(close_early: bool) {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let init = support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":init["id"],"result":{"userAgent":"faber/0.166.0"}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    let peer = server.open(thread(), Arc::new(|_| {}));
+    let opened = support::expect_method(&mut input, "thread/start").await;
+    support::emit(&mut output, json!({"id":opened["id"],"result":{"thread":{"id":"peer"}}})).await;
+    support::expect_method(&mut input, "skills/list").await;
+
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let point = NativePoint { session: "source".into(), cursor: Cursor { entry: None, turn: Some("kept".into()) } };
+    let session = server.open_fork(thread(), point, Arc::new(move |e| drop(tx.send(e))));
+    session.send(UserTurn::text("Never send this to the abandoned fork"));
+    let fork = support::expect_method(&mut input, "thread/fork").await;
+    support::emit(&mut output, json!({"id":fork["id"],"result":{"thread":{"id":"forked"}}})).await;
+    let tail = support::expect_method(&mut input, "thread/turns/list").await;
+    if close_early {
+        session.close();
+    } else {
+        tokio::time::timeout(Duration::from_secs(95), async {
+            loop {
+                match events.recv().await.unwrap() {
+                    EngineEvent::Started { .. } | EngineEvent::TurnStarted => panic!("an unvalidated fork cannot start"),
+                    EngineEvent::WriterExit { .. } => panic!("writer status was not proved"),
+                    EngineEvent::Error { message, fatal: true } => {
+                        assert_eq!(message, "reason.codexThreadOpenTimeout");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("a lost tail read cannot leave the fork waiting indefinitely");
+    }
+    let cleanup = support::expect_method(&mut input, "thread/unsubscribe").await;
+    assert_eq!(cleanup["params"]["threadId"], "forked");
+    support::emit(&mut output, json!({"id":cleanup["id"],"result":{"status":"notLoaded"}})).await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match events.recv().await.unwrap() {
+                EngineEvent::WriterExit { confirmed: true } => break,
+                EngineEvent::Started { .. } | EngineEvent::TurnStarted | EngineEvent::Error { fatal: true, .. } => {
+                    panic!("a discarded fork cannot start or fail again")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the confirmed unloaded fork releases its writers");
+    support::emit(&mut output, json!({"id":tail["id"],"result":{"data":[{"id":"kept","status":"completed"}]}})).await;
+    peer.send(UserTurn::text("Peer continues"));
+    let turn = support::expect_method(&mut input, "turn/start").await;
+    assert_eq!(turn["params"]["threadId"], "peer");
+    assert_eq!(turn["params"]["input"][0]["text"], "Peer continues");
 }

@@ -56,3 +56,12 @@ The message menu's confirmation and its saved-message notice, in Chat and Projec
 - A conversation with an interrupted restore cannot be deleted, even after confirming the loss of its separate copy.
   The existing error display asks the person to finish the restore first, so recovery keeps the conversation it needs.
   Saving ordinary history may briefly delay deletion, but never replaces the question about unsaved work with a busy error.
+
+While idle conversations wait for a shared Codex process tree to clear, Faber samples that tree once per timer tick.
+Each conversation still needs its own commands and helpers to finish before its copy can be sealed or released.
+Windows supplies the process IDs for the owned job. Faber verifies membership on each opened handle and reads the
+process creation time. An incomplete or unavailable reading keeps the copy protected.
+An idle shutdown and a new conversation's submission share one short lock. If shutdown wins, the conversation opens
+on a fresh service with the same settings. An opening already submitted is never sent twice.
+A service warmed before the first opening stays ready. Once it has received an opening, it stops when the last owner
+leaves and its queue drains, including when the last opening is cancelled before resuming its native turn.

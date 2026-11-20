@@ -2,8 +2,9 @@
 //! in plain words, and one conversation's messages without what only the screen draws. The screen keeps its own `state`
 //! and `open`; these are built from the same engine data.
 
-use faber_engine::AppState;
-use faber_engine::model::{Conversation, Message, Role, RunState, Status, Summary};
+use faber_engine::conversation_state::ReplyState;
+use faber_engine::history::{Page, ReplyEnd};
+use faber_engine::model::{Message, Role, RunState, Status, Summary};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,28 +15,42 @@ use std::collections::HashMap;
 /// - `concluded`: its last reply ended with the AI's own conclusion of the whole request (the closing box, marked done).
 /// - `ended`: its last reply ended without such a conclusion.
 /// - `interrupted`: Faber was closed under its last reply; `stopped`: someone stopped it; `failed`: it ended on an error.
-/// - `new`: no reply yet. `idle`: not running, and only the conversation itself says how its last reply ended (a list
-///   leaves the files of conversations that are not running unread).
+/// - `new`: no reply to the latest message. `idle`: not running, with no exact ending selected by the list filter.
 pub const STATES: &[&str] = &["working", "waiting", "concluded", "ended", "interrupted", "stopped", "failed", "new", "idle"];
 
-/// The state a running conversation is in, or that its last reply left it in.
-pub fn state(running: Option<RunState>, last_reply: Option<&Message>) -> &'static str {
+#[derive(serde::Deserialize)]
+#[serde(try_from = "String")]
+pub struct ListState(String);
+
+impl TryFrom<String> for ListState {
+    type Error = &'static str;
+
+    fn try_from(word: String) -> Result<Self, Self::Error> {
+        if word == "running" || STATES.contains(&word.as_str()) { Ok(Self(word)) } else { Err("unknown conversation state") }
+    }
+}
+
+impl From<ListState> for String {
+    fn from(state: ListState) -> Self {
+        state.0
+    }
+}
+
+fn activity(running: Option<RunState>, waiting: bool, last_reply: Option<ReplyState>) -> Option<&'static str> {
     match running {
-        Some(RunState::Working) => return "working",
-        Some(RunState::NeedsYou) => return "waiting",
-        None => {}
+        Some(RunState::Working) => Some("working"),
+        Some(RunState::NeedsYou) => Some("waiting"),
+        None if waiting && !matches!(last_reply, Some(ReplyState::Failed | ReplyState::Stopped | ReplyState::Interrupted)) => {
+            Some("waiting")
+        }
+        None => None,
     }
-    let Some(reply) = last_reply else { return "new" };
-    if reply.closed {
-        return "interrupted";
-    }
-    match reply.status {
-        Some(Status::Stopped) => "stopped",
-        Some(Status::Error) => "failed",
-        _ if reply.error.is_some() => "failed",
-        _ if reply.wrap_up.as_ref().is_some_and(|w| w.done) => "concluded",
-        _ => "ended",
-    }
+}
+
+/// The state a running conversation is in, or that its last reply left it in.
+fn state(running: Option<RunState>, waiting: bool, last_reply: Option<&ReplyEnd>) -> &'static str {
+    let reply = last_reply.map(|r| ReplyState::from_reply(r.status, r.closed, r.error, r.done));
+    activity(running, waiting, reply).unwrap_or_else(|| reply.unwrap_or(ReplyState::New).word())
 }
 
 /// What a conversation that called `mark_waiting` waits for.
@@ -108,15 +123,19 @@ fn families(summaries: &[Summary]) -> impl Fn(&str) -> Option<String> + '_ {
     move |id| crate::reach::root(id, |at| starters.get(at).map(|s| s.map(String::from)))
 }
 
-/// The conversations, running ones first, then pinned, then the newest; a list reads no conversation's file. One that called
-/// `mark_waiting` reads as `waiting` while nothing runs in it.
-pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
-    let running: HashMap<&str, RunState> = state.running.items.iter().map(|i| (i.conversation_id.as_str(), i.state)).collect();
-    let family = families(&state.conversations);
-    let wanted_family = filter.family.as_deref().and_then(&family);
+/// The conversations, running ones first, then pinned, then the newest.
+pub fn rows(summaries: &[Summary], running: &[(String, RunState)], filter: &Filter) -> Vec<Row> {
+    let running: HashMap<&str, RunState> = running.iter().map(|(id, state)| (id.as_str(), *state)).collect();
+    let family = families(summaries);
+    let wanted_family = match filter.family.as_deref() {
+        Some(id) => {
+            let Some(root) = family(id) else { return Vec::new() };
+            Some(root)
+        }
+        None => None,
+    };
     let query = filter.query.as_deref().map(str::to_lowercase);
-    let mut rows: Vec<Row> = state
-        .conversations
+    let mut rows: Vec<Row> = summaries
         .iter()
         .filter(|s| match filter.archived {
             None => !s.archived,
@@ -126,12 +145,9 @@ pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
         .filter(|s| query.as_deref().is_none_or(|q| s.title.to_lowercase().contains(q)))
         .map(|s| {
             let waiting_on = s.waiting_on.as_ref().map(WaitingOn::from);
-            let state = match running.get(s.id.as_str()) {
-                Some(RunState::Working) => "working",
-                Some(RunState::NeedsYou) => "waiting",
-                None if waiting_on.is_some() => "waiting",
-                None => "idle",
-            };
+            let state = activity(running.get(s.id.as_str()).copied(), waiting_on.is_some(), s.reply_state)
+                .or_else(|| s.reply_state.map(ReplyState::word).filter(|word| filter.states.iter().any(|s| s == word)))
+                .unwrap_or("idle");
             Row {
                 id: s.id.clone(),
                 title: s.title.clone(),
@@ -156,7 +172,7 @@ pub fn rows(state: &AppState, filter: &Filter) -> Vec<Row> {
                 || filter.states.iter().any(|s| s == r.state || (s == "running" && matches!(r.state, "working" | "waiting")))
         })
         .collect();
-    rows.sort_by_key(|r| (r.state == "idle", !r.pinned, std::cmp::Reverse(r.updated_at)));
+    rows.sort_by_key(|r| (!matches!(r.state, "working" | "waiting"), !r.pinned, std::cmp::Reverse(r.updated_at)));
     if let Some(limit) = filter.limit {
         rows.truncate(limit);
     }
@@ -179,7 +195,7 @@ pub struct Said {
     pub status: Option<Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Each tool the AI used in it, by name, and whether it worked.
+    /// Each tool's recorded result, including the command's exit code when known.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Step>,
 }
@@ -190,6 +206,12 @@ pub struct Step {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub declined: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
 }
 
 /// The AI's own conclusion, from the closing box of its latest reply that has one.
@@ -217,8 +239,11 @@ pub struct Read {
     pub waiting_on: Option<WaitingOn>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    /// How many messages it has; `messages` holds the last ones asked for.
+    /// How many messages it has; `messages` holds the selected ones.
     pub count: usize,
+    /// Number of the first message returned by a numbered read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first: Option<usize>,
     pub messages: Vec<Said>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conclusion: Option<Conclusion>,
@@ -227,34 +252,27 @@ pub struct Read {
     pub interrupted_turn: Option<String>,
 }
 
-pub fn read(conversation: &Conversation, running: Option<RunState>, last: Option<usize>) -> Read {
-    let messages = &conversation.messages;
-    let last_reply = messages.last().filter(|m| m.role == Role::Assistant);
-    let from = last.map_or(0, |n| messages.len().saturating_sub(n));
-    let conclusion = messages.iter().rev().filter(|m| m.role == Role::Assistant).find_map(|m| {
-        m.wrap_up.as_ref().map(|w| Conclusion {
-            message_id: m.id.clone(),
-            at: m.at,
-            recap: w.recap.clone(),
-            done: w.done,
-            ask: w.ask.clone(),
-        })
+pub fn read(page: Page<'_>, active: Option<RunState>, in_panel: bool, first: Option<usize>) -> Read {
+    let conclusion = page.conclusion.map(|c| Conclusion {
+        message_id: c.id,
+        at: c.at,
+        recap: c.closing.recap,
+        done: c.closing.done,
+        ask: c.closing.ask,
     });
-    let waiting_on = conversation.waiting_on.as_ref().map(WaitingOn::from);
-    let state = match running {
-        None if waiting_on.is_some() => "waiting",
-        _ => state(running, last_reply),
-    };
+    let waiting_on = page.waiting_on.as_ref().map(WaitingOn::from);
+    let state = state(active, waiting_on.is_some(), page.last_reply.as_ref());
     Read {
-        id: conversation.id.clone(),
-        title: conversation.title.clone(),
+        id: page.id,
+        title: page.title,
         state,
         waiting_on,
-        project_id: conversation.project_id.clone(),
-        count: messages.len(),
-        messages: messages[from..].iter().map(said).collect(),
+        project_id: page.project_id,
+        count: page.count,
+        first: first.filter(|_| !page.messages.is_empty()),
+        messages: page.messages.iter().map(said).collect(),
         conclusion,
-        interrupted_turn: last_reply.filter(|m| m.closed && running.is_none()).map(|m| m.id.clone()),
+        interrupted_turn: page.last_reply.filter(|m| m.closed && !in_panel).map(|m| m.id),
     }
 }
 
@@ -268,48 +286,57 @@ fn said(m: &Message) -> Said {
         model: m.model.clone(),
         status: m.status,
         error: m.error.clone(),
-        tools: m.tools.iter().flatten().map(|t| Step { name: t.name.clone(), ok: t.ok }).collect(),
+        tools: m
+            .tools
+            .iter()
+            .flatten()
+            .map(|t| Step { name: t.name.clone(), ok: t.ok, exit_code: t.exit_code, declined: t.declined, interrupted: t.interrupted })
+            .collect(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_engine::model::WrapUp;
 
-    fn reply(status: Status) -> Message {
-        let mut m = Message::new("r1".into(), Role::Assistant, "Here.".into(), 1);
-        m.status = Some(status);
-        m
+    fn reply(status: Status) -> ReplyEnd {
+        ReplyEnd { id: "r1".into(), status: Some(status), closed: false, error: false, done: false }
     }
 
     #[test]
     fn a_reply_is_concluded_only_by_the_ais_own_closing_box_marked_done() {
-        assert_eq!(state(Some(RunState::Working), None), "working");
-        assert_eq!(state(Some(RunState::NeedsYou), Some(&reply(Status::Done))), "waiting");
-        assert_eq!(state(None, None), "new");
-        assert_eq!(state(None, Some(&reply(Status::Done))), "ended", "no conclusion");
+        assert_eq!(state(Some(RunState::Working), false, None), "working");
+        assert_eq!(state(Some(RunState::NeedsYou), false, Some(&reply(Status::Done))), "waiting");
+        assert_eq!(state(None, false, None), "new");
+        assert_eq!(state(None, false, Some(&reply(Status::Done))), "ended", "no conclusion");
+        assert_eq!(state(None, true, Some(&reply(Status::Done))), "waiting", "a saved wait still stands");
         let mut concluded = reply(Status::Done);
-        concluded.wrap_up = Some(WrapUp {
-            recap: "All done.".into(),
-            ask: None,
-            actions: vec![],
-            done: true,
-            answered: None,
-            outcome: None,
-            summary: None,
-            proof: None,
-        });
-        assert_eq!(state(None, Some(&concluded)), "concluded");
-        concluded.wrap_up.as_mut().unwrap().done = false;
-        assert_eq!(state(None, Some(&concluded)), "ended", "a box that is not done concludes nothing");
-        assert_eq!(state(None, Some(&reply(Status::Stopped))), "stopped");
-        assert_eq!(state(None, Some(&reply(Status::Error))), "failed");
+        concluded.done = true;
+        assert_eq!(state(None, false, Some(&concluded)), "concluded");
+        concluded.done = false;
+        assert_eq!(state(None, false, Some(&concluded)), "ended", "a box that is not done concludes nothing");
+        assert_eq!(state(None, false, Some(&reply(Status::Stopped))), "stopped");
+        assert_eq!(state(None, false, Some(&reply(Status::Error))), "failed");
         let mut closed = reply(Status::Stopped);
         closed.closed = true;
-        assert_eq!(state(None, Some(&closed)), "interrupted");
+        assert_eq!(state(None, false, Some(&closed)), "interrupted");
         for word in ["working", "waiting", "concluded", "ended", "interrupted", "stopped", "failed", "new", "idle"] {
             assert!(STATES.contains(&word));
         }
+    }
+
+    #[test]
+    fn an_exact_filter_yields_to_live_activity_and_ignores_rows_without_an_ending() {
+        let mut summary: Summary = serde_json::from_value(serde_json::json!({
+            "id":"test", "title":"Test", "area":"chat", "updatedAt":1, "replyState":"failed"
+        }))
+        .unwrap();
+        let failed = Filter { states: vec!["failed".into()], ..Filter::default() };
+        let running = [("test".into(), RunState::Working)];
+        assert!(rows(std::slice::from_ref(&summary), &running, &failed).is_empty());
+        assert_eq!(rows(std::slice::from_ref(&summary), &running, &Filter::default())[0].state, "working");
+        summary.reply_state = None;
+        assert!(rows(std::slice::from_ref(&summary), &[], &failed).is_empty());
+        assert_eq!(rows(&[summary], &[], &Filter::default())[0].state, "idle");
     }
 }

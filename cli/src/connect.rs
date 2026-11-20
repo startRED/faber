@@ -1,7 +1,9 @@
 //! Reaching the running Faber, and starting it hidden in the tray when nothing answers.
 
 use crate::args::Args;
+use faber_channel::wire::Error;
 use faber_channel::{Client, Hello};
+use serde_json::Value;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -23,6 +25,43 @@ pub fn agent_depth() -> u32 {
 
 pub fn hello(client: &str) -> Hello {
     Hello { client: format!("{client} {}", env!("CARGO_PKG_VERSION")), agent_depth: agent_depth(), ..Default::default() }
+}
+
+/// Uses the connected app's read capabilities for both the terminal and MCP.
+pub async fn call(client: &Client, command: &str, args: Value) -> io::Result<Result<Value, Error>> {
+    if let Some(detail) = ignored_filter(&client.offer, command, &args) {
+        return Ok(Err(Error { key: "cli.error.refused".into(), detail: Some(detail.into()), data: None }));
+    }
+    client.call_detailed(command, args).await
+}
+
+fn ignored_filter(offer: &Value, command: &str, args: &Value) -> Option<&'static str> {
+    let properties = || {
+        offer["commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|entry| entry["name"] == command)
+            .map(|entry| &entry["inputSchema"]["properties"])
+    };
+    match command {
+        // Older hosts ignore unknown arguments and would read the entire history.
+        "conversation" if !args["from"].is_null() || !args["limit"].is_null() => {
+            (!properties().is_some_and(|p| p.get("from").is_some() && p.get("limit").is_some())).then_some("conversation: from, limit")
+        }
+        "conversation_command_results" if !args["runningOnly"].is_null() && args["runningOnly"] != false => {
+            properties().is_none_or(|p| p.get("runningOnly").is_none()).then_some("conversation_command_results: runningOnly")
+        }
+        "conversations" => {
+            let supported = properties().and_then(|p| p["state"]["items"]["enum"].as_array());
+            let ignores_state = args["state"].as_array().into_iter().flatten().filter_map(Value::as_str).any(|state| {
+                !matches!(state, "working" | "waiting" | "idle" | "running")
+                    && !supported.is_some_and(|words| words.iter().any(|word| word == state))
+            });
+            ignores_state.then_some("conversations: state")
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug)]
@@ -59,17 +98,30 @@ pub async fn connect(args: &Args, client: &str) -> Result<Client, Unreached> {
         Err(_) => {}
     }
     start_hidden(&data).map_err(|_| Unreached::NotRunning)?;
-    let started = std::time::Instant::now();
-    while started.elapsed() < START_WAIT {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        match Client::connect(&data, hello(client)).await {
+    wait_for_started(async || Client::connect(&data, hello(client)).await).await
+}
+
+async fn wait_for_started<T>(mut connect: impl AsyncFnMut() -> io::Result<T>) -> Result<T, Unreached> {
+    let deadline = tokio::time::sleep(START_WAIT);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut deadline => return Err(Unreached::NotRunning),
+            _ = tokio::time::sleep(Duration::from_millis(150)) => {}
+        }
+        let result = tokio::select! {
+            biased;
+            _ = &mut deadline => return Err(Unreached::Broken),
+            result = connect() => result,
+        };
+        match result {
             Ok(client) => return Ok(client),
             Err(e) if e.to_string() == "error.channel.revoked" => return Err(Unreached::Revoked),
             Err(e) if !absent(&e) => return Err(Unreached::Broken),
             Err(_) => {}
         }
     }
-    Err(Unreached::NotRunning)
 }
 
 /// Nothing listens: no pipe or socket, or (on macOS and Linux) a socket a crash left behind, which Faber clears when it starts.
@@ -93,18 +145,51 @@ fn app() -> Option<PathBuf> {
 /// when it is not the default one, so a test Faber keeps its own.
 fn start_hidden(data: &Path) -> io::Result<()> {
     let app = app().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Faber's program"))?;
+    #[cfg(windows)]
+    let app = std::path::absolute(app)?;
     let mut command = std::process::Command::new(app);
-    command.arg(HIDDEN_START).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    command.arg(HIDDEN_START);
     if faber_channel::place::data_dir().as_deref() != Some(data) {
         command.env("FABER_DATA_DIR", data);
     }
-    // The agent marker is this terminal's, never Faber's.
-    command.env_remove("FABER_AGENT_DEPTH");
+    // The agent identity is this terminal's, never Faber's.
+    for key in ["FABER_AGENT_DEPTH", "FABER_AGENT_AUTH", "FABER_AGENT_TOKEN", "FABER_CONVERSATION"] {
+        command.env_remove(key);
+    }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: closing this terminal or pressing Ctrl+C here leaves Faber running.
-        command.creation_flags(0x0000_0008 | 0x0000_0200);
+        faber_winproc::spawn_detached(&command)
     }
-    command.spawn().map(drop)
+    #[cfg(not(windows))]
+    {
+        command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(drop)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::Instant;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_start_that_never_opens_the_channel_is_not_running() {
+        let started = Instant::now();
+        let result = wait_for_started(async || Err::<(), _>(io::ErrorKind::NotFound.into())).await;
+        assert!(matches!(result, Err(Unreached::NotRunning)));
+        assert_eq!(started.elapsed(), START_WAIT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_connection_does_not_get_extra_time_after_start() {
+        let started = Instant::now();
+        let result = wait_for_started(async || {
+            if started.elapsed() < Duration::from_secs(9) {
+                return Err(io::ErrorKind::NotFound.into());
+            }
+            std::future::pending::<io::Result<()>>().await
+        })
+        .await;
+        assert!(matches!(result, Err(Unreached::Broken)));
+        assert_eq!(started.elapsed(), START_WAIT);
+    }
 }

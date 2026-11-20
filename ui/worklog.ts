@@ -362,10 +362,18 @@ export function helpersAtWork(messages: Message[] = []): number {
   return open.filter((c) => c.streaming || agentBackground(c.tool, byId)).length;
 }
 
-/** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
- * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
+/** Keeps tool rows steady when only the reply's text grows. A report correction can keep its original length. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
-  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && tool.team?.state === b[i]!.team?.state && tool.team?.name === b[i]!.team?.name && tool.team?.messages.length === b[i]!.team?.messages.length && tool.interrupted === b[i]!.interrupted && tool.wordsChars === b[i]!.wordsChars && tool.transcript?.pages === b[i]!.transcript?.pages && tool.transcript?.failed === b[i]!.transcript?.failed && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+  return a.length === b.length && a.every((tool, i) => {
+    const next = b[i]!;
+    return tool === next || (
+      tool.id === next.id && tool.name === next.name && tool.ok === next.ok && tool.sign === next.sign &&
+      tool.team?.state === next.team?.state && tool.team?.name === next.team?.name && tool.team?.messages.length === next.team?.messages.length &&
+      tool.interrupted === next.interrupted && tool.wordsChars === next.wordsChars &&
+      tool.transcript?.pages === next.transcript?.pages && tool.transcript?.failed === next.transcript?.failed &&
+      (tool.output ?? '') === (next.output ?? '')
+    );
+  });
 }
 
 /** Each helper's place among the agent calls of one reply, from 1: what "Helper 1" counts. A view that reads the steps of

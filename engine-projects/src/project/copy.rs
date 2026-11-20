@@ -67,6 +67,17 @@ fn own_branch(branch: &str) -> bool {
     })
 }
 
+/// Confirm the launch folder belongs to the attached worktree before considering a scoped sandbox grant.
+pub fn sandbox_folder(data: &Path, id: &str, copy: &WorkCopy, cwd: &Path) -> Option<PathBuf> {
+    let expected = home(data).join(id);
+    if !valid_conversation(id) || !own_branch(&copy.branch) || copy.root.is_empty() || Path::new(&copy.path) != expected {
+        return None;
+    }
+    let root = real_path(&expected).ok()?.canonicalize().ok()?;
+    let folder = real_path(&copy.folder()).ok()?.canonicalize().ok()?;
+    (folder.is_dir() && folder.starts_with(&root) && cwd.canonicalize().ok()? == folder).then_some(folder)
+}
+
 fn git(exec: &mut dyn Executor, cwd: &Path, args: &[&str]) -> Option<String> {
     let out = exec.execute(&Invocation::new(cwd, args)).ok()?;
     out.success.then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string())
@@ -489,6 +500,41 @@ mod tests {
             WorkCopy { path: "C:/d/copies/c1".into(), branch: "faber/x-c1".into(), root: "C:/r".into(), sub: "app/web".into(), base: None };
         assert_eq!(copy.folder(), PathBuf::from("C:/d/copies/c1").join("app").join("web"));
         assert_eq!(WorkCopy { sub: String::new(), ..copy }.folder(), PathBuf::from("C:/d/copies/c1"));
+    }
+
+    #[test]
+    fn sandbox_scope_requires_the_attached_copy_and_its_actual_project_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().canonicalize().unwrap().join("data");
+        let path = home(&data).join("one");
+        let copy = WorkCopy {
+            path: path.to_str().unwrap().into(),
+            branch: "faber/example-one".into(),
+            root: temp.path().join("source").to_str().unwrap().into(),
+            sub: "app/web".into(),
+            base: None,
+        };
+        let folder = copy.folder();
+        std::fs::create_dir_all(&folder).unwrap();
+        let peer = home(&data).join("two");
+        std::fs::create_dir_all(&peer).unwrap();
+        assert_eq!(sandbox_folder(&data, "one", &copy, &folder), folder.canonicalize().ok());
+        assert!(sandbox_folder(&data, "two", &copy, &folder).is_none());
+        assert!(sandbox_folder(&data, "one", &copy, &path).is_none());
+        assert!(sandbox_folder(&data, "one", &copy, &peer).is_none());
+        let rebound = WorkCopy { path: peer.to_str().unwrap().into(), sub: String::new(), ..copy.clone() };
+        assert!(sandbox_folder(&data, "one", &rebound, &peer).is_none());
+        let escaped = WorkCopy { sub: "../two".into(), ..copy.clone() };
+        assert!(sandbox_folder(&data, "one", &escaped, &peer).is_none());
+        #[cfg(unix)]
+        {
+            let alias = path.join("alias");
+            std::os::unix::fs::symlink(path.join("app"), &alias).unwrap();
+            let linked = WorkCopy { sub: "alias/web".into(), ..copy.clone() };
+            assert!(sandbox_folder(&data, "one", &linked, &folder).is_none());
+        }
+        let released = WorkCopy { branch: "main".into(), ..copy };
+        assert!(sandbox_folder(&data, "one", &released, &folder).is_none());
     }
 
     /// Answers git by what it was asked, and keeps every call.

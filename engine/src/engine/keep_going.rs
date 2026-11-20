@@ -11,7 +11,7 @@
 use super::*;
 use crate::budget::{Reach, Why};
 pub(super) use crate::conversation_state::{asks, progress_line, unanswered_question};
-use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake};
+use crate::model::{AutoAnswer, Away, KeepCommandLimit, KeepGoing, KeepWait, Wake};
 
 /// What the agent is told at each turn Faber sends. It is for the model, so it is English like every prompt of the engine;
 /// the person sees `wake.keepGoing` in their language instead. It names no project's own tools: the project's
@@ -268,6 +268,9 @@ impl Core {
         if on == c.keep_going.is_some() {
             return Ok(());
         }
+        if on && let Some(intent) = c.codex_goal_intent.as_mut() {
+            intent.hold = false;
+        }
         c.keep_going = on.then(|| KeepGoing { since: now(), ..KeepGoing::default() });
         drop_own_turns(c);
         // A pending compaction owns the continuation until it ends.
@@ -286,6 +289,9 @@ impl Core {
                 cards.map(|p| (m.id.clone(), p.request_id.clone())).collect()
             })
             .unwrap_or_default();
+        if on {
+            self.command_waits.remove(id);
+        }
         self.save(id);
         self.emit_queue(id);
         self.list_changed();
@@ -502,11 +508,15 @@ impl Core {
         if c.queued.is_empty() {
             return self.send_next(conv, &reply_id);
         }
+        let Some(next) = c.queued.iter().position(|q| !wait::needs_send(q)) else { return };
+        if wait::permission_holds_return(c, &c.queued[next]) {
+            return;
+        }
         if let Some(kg) = c.keep_going.as_mut() {
             kg.moves = 0;
             kg.failed_on = None;
         }
-        let waiting = c.queued.remove(0);
+        let waiting = c.queued.remove(next);
         self.save(conv);
         let sent = self.dispatch_queued(conv, waiting);
         self.emit_queue(conv);
@@ -572,6 +582,10 @@ impl Core {
     /// back, and a message the person left goes first. A rest that has not ended yet holds it.
     pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         let Some(c) = self.convs.get(conv) else { return };
+        if !c.queued.is_empty() && c.messages.last().is_some_and(|m| m.error.as_deref() == Some(silence::SHARED_DELIVERY_UNKNOWN)) {
+            self.halt(conv, reply_id, silence::KEEP_GOING_DELIVERY_UNKNOWN);
+            return;
+        }
         if c.waiting_on.is_some()
             || c.keep_going.as_ref().is_some_and(|k| k.waiting.is_some())
             || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
@@ -830,42 +844,84 @@ impl Core {
     /// conversation, so a restart waits out the rest, and shown on its row. Anything newer (the person's message, "keep going"
     /// off, a later wait) makes this timer do nothing when it comes.
     pub(super) fn arm(&mut self, conv: &str, reply_id: &str, secs: f64, why: &'static str) {
+        self.schedule_keep_wait(conv, reply_id, secs, why, None);
+    }
+
+    fn schedule_keep_wait(&mut self, conv: &str, reply_id: &str, secs: f64, why: &'static str, command_limit: Option<KeepCommandLimit>) {
         let until = self.secs() + secs;
         let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) else { return };
+        self.next_wait_timer += 1;
+        let timer_id = self.next_wait_timer;
         kg.wait_until = None;
-        kg.waiting = Some(KeepWait { why: why.into(), until });
-        self.save(conv);
-        self.emit_queue(conv);
-        self.push(conv, Some(reply_id), true);
+        kg.waiting = Some(KeepWait { why: why.into(), until, timer_id, command_limit });
+        self.show_keep_wait(conv, reply_id);
         let (me, conv, reply) = (self.me.clone(), conv.to_string(), reply_id.to_string());
         self.opts.runtime.spawn(async move {
             tokio::time::sleep(Duration::from_secs_f64(secs.max(0.0))).await;
             if let Some(core) = me.upgrade() {
-                core.lock().unwrap_or_else(|e| e.into_inner()).wake_keep_going(&conv, &reply, until);
+                core.lock().unwrap_or_else(|e| e.into_inner()).wake_keep_going(&conv, &reply, timer_id);
             }
         });
+    }
+
+    fn show_keep_wait(&mut self, conv: &str, reply_id: &str) {
+        self.save(conv);
+        self.emit_queue(conv);
+        self.push(conv, Some(reply_id), true);
+    }
+
+    pub(super) fn keep_going_command_wait(&self, conv: &str) -> Option<&KeepWait> {
+        let c = self.convs.get(conv).filter(|c| !c.stopped && c.archived_at.is_none())?;
+        let wait = c.keep_going.as_ref()?.waiting.as_ref()?;
+        (wait.why == "command").then_some(wait)
+    }
+
+    /// A new running command displaces the fallback, but reuses the timer for the original command limit.
+    pub(super) fn command_started(&mut self, conv: &str) {
+        if !self.background.running_in(conv) {
+            return;
+        }
+        self.command_wait_started(conv);
+        if self.keep_going_command_wait(conv).is_none_or(|w| w.command_limit.is_none()) {
+            return;
+        }
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let Some(reply) = c.messages.last().filter(|m| m.role == Role::Assistant).map(|m| m.id.clone()) else { return };
+        let Some(wait) = c.keep_going.as_mut().and_then(|kg| kg.waiting.as_mut()) else { return };
+        let Some(limit) = wait.command_limit.take() else { return };
+        wait.until = limit.until;
+        wait.timer_id = limit.timer_id;
+        if limit.elapsed {
+            self.wake_keep_going(conv, &reply, limit.timer_id);
+        } else {
+            self.show_keep_wait(conv, &reply);
+        }
     }
 
     /// The last background command of a conversation ended while it rested to wait for it: the next turn goes out after
     /// a moment, unless the CLI's own turn about it came first (`COMMAND_OWN`).
     pub(super) fn command_ended(&mut self, conv: &str) {
-        self.command_wait_ended(conv);
+        let own = self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude);
+        self.command_wait_ended(conv, own);
         if self.background.running_in(conv) {
             return;
         }
+        let Some(w) = self.keep_going_command_wait(conv).filter(|w| w.command_limit.is_none()) else { return };
+        let limit = KeepCommandLimit { timer_id: w.timer_id, until: w.until, elapsed: false };
         let Some(c) = self.convs.get(conv) else { return };
-        if c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_none_or(|w| w.why != "command") {
-            return;
-        }
         let Some(reply) = c.messages.last().filter(|m| m.role == Role::Assistant).map(|m| m.id.clone()) else { return };
-        let own = self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Claude);
-        self.arm(conv, &reply, if own { COMMAND_OWN } else { COMMAND_GRACE } * self.keep_pace, "command");
+        self.schedule_keep_wait(conv, &reply, if own { COMMAND_OWN } else { COMMAND_GRACE } * self.keep_pace, "command", Some(limit));
     }
 
     /// A wait ended: the conversation goes on if it still waits for exactly this, with nothing newer in it.
-    fn wake_keep_going(&mut self, conv: &str, reply_id: &str, until: f64) {
+    fn wake_keep_going(&mut self, conv: &str, reply_id: &str, timer_id: u64) {
         let Some(c) = self.convs.get_mut(conv) else { return };
-        let current = c.keep_going.as_ref().and_then(|k| k.waiting.as_ref()).is_some_and(|w| w.until == until);
+        let Some(w) = c.keep_going.as_mut().and_then(|kg| kg.waiting.as_mut()) else { return };
+        if let Some(limit) = w.command_limit.as_mut().filter(|limit| limit.timer_id == timer_id) {
+            limit.elapsed = true;
+            return;
+        }
+        let current = w.timer_id == timer_id;
         // It waits for conversations it started: their reports wake it, and its row must not go on naming a rest that is over.
         if current && c.waiting_on.is_some() {
             if let Some(kg) = c.keep_going.as_mut() {
@@ -1006,6 +1062,113 @@ fn drop_own_turns(c: &mut Conversation) {
 mod tests {
     use super::*;
     use crate::conversation_state::LINE_CHARS;
+
+    fn command_wait_fixture(engine: &Engine) -> String {
+        let conv = super::super::command_wait::tests::turn_ends_with_render(engine, Vendor::Claude, "The render is still running.");
+        engine.with(|core| {
+            core.command_waits.remove(&conv);
+            core.convs.get_mut(&conv).unwrap().keep_going = Some(KeepGoing::default());
+            core.keep_pace = 1.0;
+            core.clock = Some(Arc::new(|| 1000.0));
+            core.arm(&conv, "r1", COMMAND_WAIT, "command");
+        });
+        conv
+    }
+
+    fn command_finished(id: &str) -> EngineEvent {
+        EngineEvent::Background(crate::background::Update::End { id: id.into(), state: crate::background::State::Done })
+    }
+
+    fn late_command() -> EngineEvent {
+        EngineEvent::Background(crate::background::Update::Start {
+            id: "late".into(),
+            command: "render the last scene".into(),
+            stoppable: true,
+            turn_ended: true,
+        })
+    }
+
+    #[tokio::test]
+    async fn a_late_command_cancels_keep_goings_pending_fallback() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let conv = command_wait_fixture(&engine);
+        engine.with(|core| {
+            let limit = core.keep_going_command_wait(&conv).unwrap().clone();
+            core.clock = Some(Arc::new(|| 1100.0));
+            core.handle(&conv, 1, command_finished("render"));
+            let first_fallback = core.keep_going_command_wait(&conv).unwrap().clone();
+            assert!(first_fallback.until < limit.until);
+            core.clock = Some(Arc::new(|| 1110.0));
+            core.handle(&conv, 1, late_command());
+            assert!(core.background.running_in(&conv));
+
+            core.clock = Some(Arc::new(|| 1220.0));
+            core.wake_keep_going(&conv, "r1", first_fallback.timer_id);
+            assert_eq!(core.keep_going_command_wait(&conv), Some(&limit));
+            assert!(core.convs[&conv].queued.is_empty());
+            assert_eq!(core.convs[&conv].messages.last().unwrap().id, "r1");
+
+            core.clock = Some(Arc::new(|| 1230.0));
+            core.handle(&conv, 1, command_finished("late"));
+            let latest = core.keep_going_command_wait(&conv).unwrap().clone();
+            assert_eq!(latest.until, 1350.0);
+            core.wake_keep_going(&conv, "r1", first_fallback.timer_id);
+            assert_eq!(core.keep_going_command_wait(&conv), Some(&latest));
+            core.wake_keep_going(&conv, "r1", latest.timer_id);
+            assert!(core.keep_going_command_wait(&conv).is_none());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn keep_going_does_not_extend_an_expired_limit_when_a_late_command_starts() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let conv = command_wait_fixture(&engine);
+        engine.with(|core| {
+            let limit = core.keep_going_command_wait(&conv).unwrap().clone();
+            core.clock = Some(Arc::new(|| 1780.0));
+            core.handle(&conv, 1, command_finished("render"));
+            let fallback = core.keep_going_command_wait(&conv).unwrap().clone();
+            assert_eq!(fallback.until, limit.until, "a timer can share the original deadline");
+            core.clock = Some(Arc::new(|| 1900.0));
+            core.wake_keep_going(&conv, "r1", limit.timer_id);
+            assert_eq!(core.keep_going_command_wait(&conv).unwrap().timer_id, fallback.timer_id, "the command ended in time");
+
+            core.clock = Some(Arc::new(|| 1910.0));
+            core.handle(&conv, 1, late_command());
+            assert!(core.background.running_in(&conv), "the cap does not stop the command itself");
+            assert!(core.keep_going_command_wait(&conv).is_none());
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn stop_leaves_both_keep_going_command_timers_inert() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let conv = command_wait_fixture(&engine);
+        let (limit, fallback) = engine.with(|core| {
+            let limit = core.keep_going_command_wait(&conv).unwrap().timer_id;
+            core.handle(&conv, 1, command_finished("render"));
+            let fallback = core.keep_going_command_wait(&conv).unwrap().timer_id;
+            core.handle(&conv, 1, late_command());
+            assert_eq!(core.keep_going_command_wait(&conv).unwrap().timer_id, limit);
+            (limit, fallback)
+        });
+        engine.interrupt(&conv);
+        engine.with(|core| {
+            core.handle(&conv, 1, command_finished("late"));
+            core.wake_keep_going(&conv, "r1", fallback);
+            core.wake_keep_going(&conv, "r1", limit);
+            let c = &core.convs[&conv];
+            assert!(c.keep_going.is_none());
+            assert!(c.queued.is_empty());
+            assert_eq!(c.messages.last().unwrap().id, "r1");
+        });
+        engine.shutdown();
+    }
 
     #[tokio::test]
     async fn selected_account_waits_only_for_its_own_outside_use() {

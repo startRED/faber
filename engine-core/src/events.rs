@@ -3,6 +3,11 @@
 use crate::model::Image;
 use serde_json::Value;
 
+/// The persisted tool preview, measured in characters.
+pub const TOOL_OUTPUT_CHARS: usize = 4000;
+/// The largest complete failed result to pass through the diagnostic masker.
+pub const MAX_FAILURE_SCAN_BYTES: usize = 512 * 1024;
+
 /// Startup advertisements are information, never authority to admit an automated role.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Capabilities {
@@ -130,9 +135,16 @@ pub enum EngineEvent {
     },
     /// The CLI accepted a turn on the session. The session may have no saved history until the turn shows output.
     TurnStarted,
-    /// The CLI began a turn nobody sent: Claude Code answers by itself when a background command ends. The engine opens a
-    /// reply for it or has it interrupted (`Core::own_turn`).
+    /// The CLI began a turn nobody sent, such as a background command notice or a native goal continuation. The engine
+    /// opens a reply for it or has it interrupted (`Core::own_turn`).
     OwnTurn,
+    /// The goal ended, or the thread opened after handling the person's rearm request.
+    NativeGoalHoldCleared {
+        session_id: String,
+        after_rearm: bool,
+    },
+    /// The outcome of an explicit compaction the Codex driver requested.
+    CompactFinished(CompactOutcome),
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
     Break {
@@ -159,11 +171,17 @@ pub enum EngineEvent {
         parent: String,
         text: String,
     },
+    /// The tool yielded to the agent while its process is still running. This is not a result.
+    ToolDetached {
+        id: String,
+    },
     ToolResult {
         id: String,
         ok: bool,
         /// The tool was refused before it ran (a declined approval), which is not a failure of the work.
         declined: bool,
+        /// Exit code observed by the driver for a command process.
+        exit_code: Option<i32>,
         text: String,
     },
     /// A subagent finished (Claude Code's `task_notification`): `id` is the agent call that started it. It settles a
@@ -302,7 +320,7 @@ pub enum EngineEvent {
     /// How a turn that did not end well ended, as a `reason.*` key the screen translates. Sent before its `Done`, only when the
     /// CLI named a reason.
     Reason(&'static str),
-    /// `fatal`: the CLI process is gone and the next turn needs a new one.
+    /// `fatal`: the current session cannot serve another turn.
     Error {
         message: String,
         fatal: bool,
@@ -316,10 +334,21 @@ impl EngineEvent {
         match self {
             EngineEvent::Text(_) | EngineEvent::Thinking(_) => Some(true),
             EngineEvent::Tool { parent, .. } => Some(parent.is_none()),
-            EngineEvent::ChildWords { .. } | EngineEvent::ToolResult { .. } | EngineEvent::HelperDone { .. } => Some(false),
+            EngineEvent::ChildWords { .. }
+            | EngineEvent::ToolDetached { .. }
+            | EngineEvent::ToolResult { .. }
+            | EngineEvent::HelperDone { .. } => Some(false),
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactOutcome {
+    Applied,
+    Failed,
+    /// The request may still run. Do not hand more work to this session.
+    Unconfirmed,
 }
 
 /// A user turn: plain text plus optional images.
@@ -344,6 +373,60 @@ pub enum Delivery {
     Unknown,
     /// The write or the flush failed. The session keeps the request, so the same answer can be given again.
     WriteFailed,
+}
+
+/// The driver asks for the engine's final consent only after verifying the native thread is safe to unload.
+pub struct IdleThreadRelease {
+    pub thread: String,
+    finish: Box<dyn FnOnce(bool) -> bool + Send + Sync>,
+}
+
+impl IdleThreadRelease {
+    pub fn accept(self) -> bool {
+        (self.finish)(true)
+    }
+
+    pub fn retry(self) {
+        (self.finish)(false);
+    }
+}
+
+impl std::fmt::Debug for IdleThreadRelease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IdleThreadRelease").field("thread", &self.thread).finish_non_exhaustive()
+    }
+}
+
+/// Permission to interrupt an isolated hosted search, rechecked against the live reply by its driver.
+pub struct QuietSearchInterrupt {
+    pub tool: String,
+    check: Box<dyn Fn(QuietSearchCheck) -> bool + Send + Sync>,
+}
+
+pub enum QuietSearchCheck {
+    Current,
+    Deferred,
+    Confirmed,
+}
+
+impl QuietSearchInterrupt {
+    pub fn current(&self) -> bool {
+        (self.check)(QuietSearchCheck::Current)
+    }
+
+    pub fn defer(self) {
+        (self.check)(QuietSearchCheck::Deferred);
+    }
+
+    pub fn confirmed(self) {
+        (self.check)(QuietSearchCheck::Confirmed);
+    }
+}
+
+impl std::fmt::Debug for QuietSearchInterrupt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QuietSearchInterrupt").field("tool", &self.tool).finish_non_exhaustive()
+    }
 }
 
 /// What the engine can ask of a live CLI session.
@@ -387,8 +470,10 @@ pub enum SessionCommand {
     /// the last response's usage and local estimates). Its answer is an `EngineEvent::ContextParts`; Codex counts no parts.
     ContextUsage,
     Interrupt,
+    InterruptQuietSearch(QuietSearchInterrupt),
     /// A replacement takes future turns; let this session's existing work finish before closing its driver.
     Retire,
+    ReleaseIdle(IdleThreadRelease),
     Close,
 }
 
@@ -407,6 +492,13 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
+    pub fn interrupt_quiet_search(&self, tool: String, check: impl Fn(QuietSearchCheck) -> bool + Send + Sync + 'static) {
+        (self.send)(SessionCommand::InterruptQuietSearch(QuietSearchInterrupt { tool, check: Box::new(check) }));
+    }
+
+    pub fn release_idle(&self, thread: String, finish: impl FnOnce(bool) -> bool + Send + Sync + 'static) {
+        (self.send)(SessionCommand::ReleaseIdle(IdleThreadRelease { thread, finish: Box::new(finish) }));
+    }
     pub fn mcp_status(&self) -> tokio::sync::oneshot::Receiver<Option<Vec<Reported>>> {
         let (reply, receive) = tokio::sync::oneshot::channel();
         (self.send)(SessionCommand::McpStatus { reply });

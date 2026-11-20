@@ -6,12 +6,12 @@
 //! a session is told about it is what its CLI can do, decided once when the session starts, so a conversation's system prompt or
 //! developer instructions never change midway (rule 3 of models.md):
 //! - Claude Code in Projects loads the folder as a plugin of its own (`--plugin-dir`, next to the catalog's), so only the
-//!   skill descriptions ride on each turn and the CLI reads a body when the model decides to. Two original frontend
-//!   skills share this first-party delivery; downloaded catalog skills remain external.
+//!   skill descriptions ride on each turn and the CLI reads a body when the model decides to. Original frontend, media
+//!   and workflow proof skills share this first-party delivery; downloaded catalog skills remain external.
 //! - Every other session that can read a file (Claude Code's Chat and Codex, in both areas) gets one short line that points to
-//!   the help and frontend files (`Guide::Index`), the way the catalog's index points to its skills, read only when relevant.
+//!   the help and skill files (`Guide::Index`), the way the catalog's index points to its skills, read only when relevant.
 //! - Only where the folder cannot be written does the text itself go (`Guide::Text`): the prose, the English words and the
-//!   words of the screen's language, plus a short frontend fallback.
+//!   words of the screen's language, plus short frontend and media fallbacks.
 //!
 //! The line and the text are tracked by their own digest, apart from the catalog kit's, so a kit change never sends them again.
 use std::path::{Path, PathBuf};
@@ -27,11 +27,12 @@ pub const DESCRIPTION: &str = "Use when the person asks how Faber itself works, 
 pub const SKILL_RULE: &str = "Skill(faber-guide:guide)";
 /// Original Faber instructions, lazily loaded alongside the guide; third-party catalog skills stay external. The media pair
 /// covers any work with sound (narration, music, effects) the way the frontend pair covers what is seen in a browser.
-pub const ORIGINAL_SKILLS: [(&str, &str); 4] = [
+pub const ORIGINAL_SKILLS: [(&str, &str); 5] = [
     ("frontend-craft", include_str!("frontend-skills/frontend-craft/SKILL.md")),
     ("frontend-proof", include_str!("frontend-skills/frontend-proof/SKILL.md")),
     ("media-craft", include_str!("frontend-skills/media-craft/SKILL.md")),
     ("media-proof", include_str!("frontend-skills/media-proof/SKILL.md")),
+    ("workflow-proof", include_str!("frontend-skills/workflow-proof/SKILL.md")),
 ];
 const SKILL: &str = "guide";
 const MANIFEST: &str = r#"{"name":"faber-guide","description":"Faber's own guide to itself.","version":"1.0.0"}"#;
@@ -146,7 +147,7 @@ impl Guide {
                 let file = crate::project::git::native_path(&self.file()?);
                 let skills = crate::project::git::native_path(&self.folder()?.join("skills"));
                 Some(format!(
-                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. Whenever the result is something a person will look at in a browser (a page, a screen, a form, a dashboard or an explainer with a diagram, even one HTML file), read \"{skills}/frontend-craft/SKILL.md\" before writing it and \"{skills}/frontend-proof/SKILL.md\" before saying it is done; follow the project's own design system and current permissions. For narration, music or sound effects, read media-craft/SKILL.md in that skills folder before making them and media-proof/SKILL.md before saying they are done. The screen is shown in {}.",
+                    "{NOTE}when the person asks how Faber itself works (its screens, settings, shortcuts, Keep going, accounts and limits), read \"{file}\" and answer from it. Whenever the result is something a person will look at in a browser (a page, screen, form, dashboard, explainer or diagram, even one HTML file), read \"{skills}/frontend-craft/SKILL.md\" before writing it and \"{skills}/frontend-proof/SKILL.md\" before saying it is done; follow the project's own design system and current permissions. For narration, music or sound effects, read media-craft/SKILL.md in that skills folder before making them and media-proof/SKILL.md before saying they are done. For software, Roblox, Blender, UI or thumbnails, see workflow-proof/SKILL.md there as needed. The screen is shown in {}.",
                     language.name()
                 ))
             }
@@ -232,6 +233,10 @@ mod tests {
     fn frontend_skills_reach_native_and_index_sessions_without_catalog_installs() {
         let dir = tempfile::tempdir().unwrap();
         let root = plugin(dir.path(), Language::En).unwrap();
+        let workflow = root.join("skills/workflow-proof");
+        std::fs::remove_dir_all(&workflow).unwrap();
+        assert_eq!(plugin(dir.path(), Language::En), Some(root.clone()));
+        assert!(workflow.join("SKILL.md").is_file(), "an existing guide gains the workflow skill");
         for (name, _) in ORIGINAL_SKILLS {
             let file = root.join(format!("skills/{name}/SKILL.md"));
             let text = std::fs::read_to_string(&file).expect("first-party frontend skill is available");
@@ -250,6 +255,7 @@ mod tests {
         // A one-file page is browser work too, and the agent looks at it itself: the side-by-side test of 2026-11-11 lost on both.
         let note = Guide::Index { dir: root.clone(), language: Language::En }.note().unwrap();
         assert!(note.contains("even one HTML file") && note.contains("before saying it is done"));
+        assert!(note.contains("workflow-proof/SKILL.md") && !note.contains("Khronos"));
         let skill = |name: &str| ORIGINAL_SKILLS.iter().find(|(n, _)| *n == name).unwrap().1;
         assert!(
             skill("frontend-craft").contains("## A new screen with no design system")
@@ -265,6 +271,7 @@ mod tests {
         let fallback = Guide::Text(Language::En).note().unwrap();
         assert!(fallback.contains("frontend-craft") && fallback.contains("frontend-proof"));
         assert!(fallback.contains("media-craft") && fallback.contains("media-proof"));
+        assert!(!fallback.contains("workflow-proof") && !fallback.contains("Khronos"));
         let proof = ORIGINAL_SKILLS.iter().find(|(name, _)| *name == "frontend-proof").unwrap().1;
         for rule in
             ["isolated data by default", "latest actual running build", "Screen control grants no extra", "no reproducible in-scope"]
@@ -348,6 +355,7 @@ mod tests {
             "skills/frontend-proof",
             "skills/media-craft",
             "skills/media-proof",
+            "skills/workflow-proof",
         ] {
             let dir = tempfile::tempdir().unwrap();
             let root = plugin(dir.path(), Language::En).unwrap();

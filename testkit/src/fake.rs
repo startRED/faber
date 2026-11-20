@@ -73,7 +73,12 @@ impl Dispatch {
             Some("initialized") => return Ok(vec![]),
             Some("model/list") => {
                 if let Some(path) = &self.models {
-                    self.entries = load(path)?;
+                    // The app may ask after account reads in the same process, so the recorded answer takes the asked id.
+                    let entries = load(path)?;
+                    if let Some(answer) = entries.iter().find(|e| !e.input && e.msg["result"]["data"].is_array()) {
+                        return Ok(vec![json!({ "id": request["id"], "result": answer.msg["result"] }).to_string()]);
+                    }
+                    self.entries = entries;
                 }
             }
             _ => {}
@@ -462,5 +467,23 @@ mod tests {
         assert!(err.contains("sent user \"unexpected\""), "{err}");
         let (code, _, _) = drive(setup, None, &["--version"], "");
         assert!(code.unwrap_err().to_string().contains("FABER_FAKE_STATE_DIR"));
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+
+    #[test]
+    fn models_answer_the_asked_id_after_account_reads_in_one_process() {
+        let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/codex/models.jsonl");
+        let mut d = Dispatch::new(vec![], Some(models), true, true);
+        d.feed(r#"{"id":1,"method":"initialize","params":{}}"#).unwrap();
+        d.feed(r#"{"method":"initialized"}"#).unwrap();
+        d.feed(r#"{"id":2,"method":"account/rateLimits/read"}"#).unwrap();
+        let out = d.feed(r#"{"id":4,"method":"model/list","params":{}}"#).unwrap();
+        let answer: Value = serde_json::from_str(&out[0]).unwrap();
+        assert_eq!(answer["id"], 4);
+        assert!(answer["result"]["data"].as_array().is_some_and(|m| m.iter().any(|m| m["id"] == "gpt-6.1-sol")));
     }
 }

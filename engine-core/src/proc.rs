@@ -169,6 +169,7 @@ fn creation_flags(background: bool) -> u32 {
 
 pub struct CommandOutput {
     pub success: bool,
+    pub exit_code: Option<i32>,
     pub text: String,
     pub confirmed: bool,
     pub unresolved: Option<OwnedTree>,
@@ -190,7 +191,8 @@ pub async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot::Recei
             }
         }
     }
-    let mut tree_gone = p.child.is_none() && p.contained.is_none();
+    let no_child = p.child.is_none();
+    let mut tree_gone = no_child && p.contained.is_none();
     drop(p.stdin);
     let stderr = p.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty()));
     let (out, err) = (drain(p.stdout), drain(stderr));
@@ -200,7 +202,7 @@ pub async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot::Recei
         tokio::select! {
             result = &mut out, if output.is_none() => output = Some(result),
             result = &mut err, if errors.is_none() => errors = Some(result),
-            result = exit_code(&mut p.child), if code.is_none() => code = Some(result),
+            result = async { wait_code(p.child.as_mut()?).await }, if code.is_none() => code = Some(result),
             _ = &mut cancel, if !interrupted => {
                 interrupted = true;
                 let owned = p.contained.is_some();
@@ -209,6 +211,7 @@ pub async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot::Recei
                     // A held pipe must not hide the retained identity from a subsequent scoped Stop.
                     return CommandOutput {
                         success: false,
+                        exit_code: None,
                         text: format!("{}{}", output.take().and_then(Result::ok).unwrap_or_default(), errors.take().and_then(Result::ok).unwrap_or_default()),
                         confirmed: tree_gone,
                         unresolved: if tree_gone { None } else { p.contained.as_ref().and_then(Containment::owned_tree) },
@@ -222,7 +225,8 @@ pub async fn command_output(mut p: Proc, mut cancel: tokio::sync::oneshot::Recei
         tree_gone = job.finish().await;
     }
     CommandOutput {
-        success: code == "0" && out.is_ok() && err.is_ok() && !interrupted && tree_gone,
+        success: (code == Some(0) || no_child) && out.is_ok() && err.is_ok() && !interrupted && tree_gone,
+        exit_code: if !interrupted && tree_gone { code } else { None },
         text: format!("{}{}", out.unwrap_or_default(), err.unwrap_or_default()),
         confirmed: tree_gone,
         unresolved: if tree_gone { None } else { p.contained.as_ref().and_then(Containment::owned_tree) },
@@ -563,16 +567,18 @@ impl TreeState {
             return probe.members.as_ref().ok_or_else(|| io::Error::other("scripted member query unavailable"))?();
         }
         #[cfg(windows)]
-        let members = self
-            .job
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .as_ref()
-            .ok_or_else(|| io::Error::other("owned job handle is unavailable"))
-            .and_then(|job| faber_winproc::process_tree::job_members(job.handle()))?;
+        {
+            self.job
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .ok_or_else(|| io::Error::other("owned job handle is unavailable"))
+                .and_then(|job| faber_winproc::process_tree::job_members(job.handle()))
+        }
         #[cfg(unix)]
-        let members = faber_winproc::process_tree::group_members(self.pgid)?;
-        Ok(members.into_iter().map(|member| member.identity).collect())
+        {
+            Ok(faber_winproc::process_tree::group_members(self.pgid)?.into_iter().map(|member| member.identity).collect())
+        }
     }
 
     fn descendants(&self) -> io::Result<Vec<ProcessIdentity>> {
@@ -984,12 +990,13 @@ async fn kill_tree(pid: Option<u32>) {
 #[cfg(not(windows))]
 async fn kill_tree(_pid: Option<u32>) {}
 
+async fn wait_code(child: &mut Child) -> Option<i32> {
+    child.wait().await.ok()?.code()
+}
+
 pub async fn exit_code(child: &mut Option<Child>) -> String {
     match child {
-        Some(child) => match child.wait().await {
-            Ok(status) => status.code().map_or("unknown".into(), |c| c.to_string()),
-            Err(_) => "unknown".into(),
-        },
+        Some(child) => wait_code(child).await.map_or("unknown".into(), |code| code.to_string()),
         None => "0".into(),
     }
 }
@@ -1171,6 +1178,7 @@ mod tests {
                 out_read.unwrap();
                 err_read.unwrap();
                 assert!(child.wait().await.unwrap().success(), "{out}\n{err}");
+                assert_eq!(child.id(), None, "a reaped CLI must not be passed to the PID-based fallback on repeated stop");
                 child.start_kill().unwrap();
                 assert!(out.contains("CLI_OUTPUT:Spaces, quotes: \" and Unicode: café."), "{out}");
                 assert!(err.contains("CLI_ERROR"), "{err}");
@@ -1211,6 +1219,9 @@ mod tests {
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
         command.args(["--exact", name, "--nocapture"]).env(MARK, "root");
         let (mut child, _stdin, mut stdout, _stderr) = faber_winproc::spawn_in_job(&command, job.handle(), creation_flags(false)).unwrap();
+        let root = faber_winproc::process_tree::job_process_identity(job.handle(), child.id().unwrap()).unwrap();
+        assert!(faber_winproc::process_tree::job_members(job.handle()).unwrap().contains(&root));
+        assert!(faber_winproc::process_tree::job_process_identity(job.handle(), std::process::id()).is_err());
         child.resume().unwrap();
         let mut words = String::new();
         tokio::time::timeout(Duration::from_secs(2), stdout.read_to_string(&mut words))
@@ -1227,6 +1238,7 @@ mod tests {
         })
         .await
         .expect("root death retires the descendants that inherited its output");
+        assert!(faber_winproc::process_tree::job_members(job.handle()).unwrap().is_empty());
     }
 
     #[test]
@@ -1483,6 +1495,7 @@ mod tests {
         let result = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p, cancel)).await.unwrap();
         assert!(result.confirmed, "the recording started no process");
         assert!(result.success && result.text.ends_with("TAIL_OKSTDERR_OK"));
+        assert_eq!(result.exit_code, None);
         assert!(result.text.len() <= 8192);
     }
 

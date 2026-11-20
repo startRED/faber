@@ -439,6 +439,36 @@ pub fn data_sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     json!({ "default_permissions": id, format!("permissions.{id}"): profile }).as_object().unwrap().clone()
 }
 
+/// Use only for the verified launch folder of an attached copy on Windows MXC. Call off the engine lock.
+pub fn managed_copy_config(root: &Path, writable: bool) -> Option<Map<String, Value>> {
+    let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
+    let access = if writable { "write" } else { "read" };
+    // Default deny lets MXC enter the granted copy without opening its parent or freezing the set of sibling names.
+    let mut profile = json!({"filesystem": {
+        ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny",
+        unified(&root.to_string_lossy()): access,
+        ":workspace_roots": {".git": "read", ".mcp.json": "read", ".faber/verify.local.json": "read",
+            ".claude": "deny", ".codex": "deny", ".gemini": "deny", ".ssh": "deny", ".aws": "deny"}
+    }});
+    unlinked_tree(root, 100_000, |path, relative| {
+        if secret(relative, true) {
+            if relative.parent().is_some_and(|parent| !parent.as_os_str().is_empty() && secret(parent, true)) {
+                return;
+            }
+            profile["filesystem"][unified(&path.to_string_lossy())] = "deny".into();
+            if let Some(first) = relative.components().next() {
+                let ancestor = unified(&root.join(first).to_string_lossy());
+                profile["filesystem"].as_object_mut().expect("filesystem profile").entry(ancestor).or_insert("read".into());
+            }
+        } else if relative.file_name().is_some_and(|name| name.to_string_lossy().trim_end_matches(['.', ' ']).eq_ignore_ascii_case(".git"))
+        {
+            profile["filesystem"][unified(&path.to_string_lossy())] = "read".into();
+        }
+    })?;
+    let config = json!({"default_permissions": id, format!("permissions.{id}"): profile, "allow_login_shell": false});
+    config.as_object().cloned()
+}
+
 /// The tools that only read or ask, never write.
 const READS: [&str; 6] = ["Read", "Glob", "Grep", "LS", "AskUserQuestion", "ExitPlanMode"];
 const SHELLS: [&str; 3] = ["Bash", "PowerShell", "item/commandExecution/requestApproval"];
@@ -588,7 +618,35 @@ fn names(value: &Value, cwd: Option<&str>, roots: &[String]) -> bool {
 }
 
 pub fn prepare_tmp(root: &Path) -> bool {
-    target(root, ".faber/tmp", true, true).is_some_and(|path| std::fs::create_dir_all(path).is_ok())
+    let scratch = ".faber/tmp";
+    #[cfg(windows)]
+    {
+        use faber_winproc::MemoryDirectory;
+        use std::io::ErrorKind;
+        let Some(root) = target(root, ".", false, false).map(plain) else { return false };
+        let Ok(directory) = MemoryDirectory::open(&root, Path::new("")) else { return false };
+        match directory.under(Path::new(scratch)) {
+            Ok(_) => return true,
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(_) => return false,
+        }
+        if target(&root, scratch, true, true).is_none() {
+            return false;
+        }
+        // Keep the existing root in place and create only through physical, checked parents.
+        let path = root.join(scratch);
+        for _ in 0..2 {
+            match MemoryDirectory::open_or_create(&path) {
+                Ok(_) => return true,
+                // Concurrent commands can create each of the two missing components first.
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+                Err(_) => return false,
+            }
+        }
+        directory.under(Path::new(scratch)).is_ok()
+    }
+    #[cfg(not(windows))]
+    target(root, scratch, true, true).is_some_and(|path| std::fs::create_dir_all(path).is_ok())
 }
 
 /// Canonical local roots reuse the file policy's network-link and credential guards.
@@ -666,9 +724,12 @@ fn quoted(value: &str, powershell: bool) -> String {
 
 // Path rules cannot protect a preexisting hardlink outside the Store. An incomplete scan grants nothing.
 fn unlinked_store(data: &Path) -> Option<()> {
+    unlinked_tree(data, 10_000, |_, _| {})
+}
+
+fn unlinked_tree(data: &Path, mut left: usize, mut inspect: impl FnMut(&Path, &Path)) -> Option<()> {
     let held = faber_winproc::rewind::Root::open(data).ok()?;
     let mut pending = vec![data.to_path_buf()];
-    let mut left = 10_000usize;
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(dir).ok()? {
             left = left.checked_sub(1)?;
@@ -677,10 +738,20 @@ fn unlinked_store(data: &Path) -> Option<()> {
             if kind.is_symlink() {
                 return None;
             }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if entry.metadata().ok()?.file_attributes() & 0x400 != 0 {
+                    return None;
+                }
+            }
+            let path = entry.path();
+            let relative = path.strip_prefix(data).ok()?;
+            inspect(&path, relative);
             if kind.is_dir() {
-                pending.push(entry.path());
+                pending.push(path);
             } else if kind.is_file() {
-                held.open_file(entry.path().strip_prefix(data).ok()?.to_str()?).ok()?;
+                held.check_unlinked_file(relative.to_str()?).ok()?;
             } else {
                 return None;
             }
@@ -698,6 +769,18 @@ pub fn guarded_command_argv(
     sandbox: Option<&crate::cli::Cli>,
     resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
 ) -> Option<Vec<String>> {
+    guarded_argv(root, mode, tool, input, sandbox, resolve, None)
+}
+
+fn guarded_argv(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+    copy: Option<(&Path, &[PathBuf])>,
+) -> Option<Vec<String>> {
     let cli = sandbox?;
     if !mode.guarded() || !["Bash", "PowerShell"].contains(&tool) || !cli.prefix.is_empty() || !Path::new(&cli.command).is_absolute() {
         return None;
@@ -709,24 +792,61 @@ pub fn guarded_command_argv(
         return None;
     }
     let writable = mode != crate::model::Permissions::Plan;
-    let mut config = data_sandbox_config(&root, writable);
+    let mut config = if let Some((copy, protected)) = copy {
+        let name = normal(&root_text);
+        let stores: Vec<_> = roots.iter().map(|path| normal(&path.to_string_lossy())).collect();
+        if !cfg!(windows)
+            || copy.canonicalize().ok()? != root
+            || !inside_any(&name, &stores)
+            || stores.iter().any(|data| inside(data, &name))
+        {
+            return None;
+        }
+        let mut config = managed_copy_config(&root, writable)?;
+        let protected: Vec<_> = protected
+            .iter()
+            .filter_map(|path| {
+                if !path.is_absolute() {
+                    return None;
+                }
+                let path_name = normal(path.to_str()?);
+                if inside(&name, &path_name) {
+                    return Some(root.clone());
+                }
+                let relative = path_name.strip_prefix(&name)?.strip_prefix('/')?;
+                let first = Path::new(relative).components().next()?;
+                if secret(Path::new(first.as_os_str()), true) {
+                    return None;
+                }
+                // Keep the full branch pinned, even if the protected path already exists.
+                let anchor = root.join(first);
+                Some(anchor.canonicalize().ok().filter(|path| path.starts_with(&root)).unwrap_or_else(|| root.clone()))
+            })
+            .collect();
+        keep_read_only(&mut config, &protected);
+        config
+    } else {
+        data_sandbox_config(&root, writable)
+    };
     let id = config["default_permissions"].as_str()?.to_owned();
     let profile = config.get_mut(&format!("permissions.{id}"))?;
     profile["network"] = json!({"enabled": true});
-    for metadata in [".claude", ".codex", ".mcp.json", ".git", ".faber/verify.local.json"] {
-        profile["filesystem"][":workspace_roots"][metadata] = "read".into();
-    }
-    for data in roots {
-        // A missing, replaced or unresolvable Store never authorizes an unprotected command.
-        let data = data.canonicalize().ok()?;
-        unlinked_store(&data)?;
-        let data_text = unified(data.to_str()?);
-        profile["filesystem"][&data_text] = "deny".into();
-        if inside(&normal(&root_text), &normal(&data_text)) {
-            return None;
-        } else if let Ok(relative) = data.strip_prefix(&root) {
-            // Deny its first workspace ancestor too: renaming an allowed parent bypasses a deeper path rule.
-            profile["filesystem"][":workspace_roots"][unified(relative.components().next()?.as_os_str().to_str()?)] = "deny".into();
+    if copy.is_none() {
+        for metadata in [".claude", ".codex", ".mcp.json", ".git", ".faber/verify.local.json"] {
+            profile["filesystem"][":workspace_roots"][metadata] = "read".into();
+        }
+        for data in roots {
+            // A missing, replaced or unresolvable Store never authorizes an unprotected command.
+            let data = data.canonicalize().ok()?;
+            unlinked_store(&data)?;
+            let data_text = unified(data.to_str()?);
+            profile["filesystem"][&data_text] = "deny".into();
+            if inside(&normal(&root_text), &normal(&data_text)) {
+                return None;
+            } else if let Ok(relative) = data.strip_prefix(&root) {
+                // Deny its first workspace ancestor too: renaming an allowed parent bypasses a deeper path rule.
+                profile["filesystem"][":workspace_roots"][unified(relative.components().next()?.as_os_str().to_str()?)] = "deny".into();
+            }
         }
     }
     if cfg!(windows) {
@@ -795,6 +915,26 @@ pub fn guarded_input(
     resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
 ) -> Option<Value> {
     let command = guarded_command_argv(root, mode, tool, input, sandbox, resolve)?;
+    Some(wrapped_guarded_input(tool, input, command))
+}
+
+/// The caller must establish copy ownership before asking to wrap an approved command.
+pub fn guarded_copy_input(
+    root: &Path,
+    mode: crate::model::Permissions,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+    copy: (&Path, &[PathBuf]),
+) -> Option<Value> {
+    let command = guarded_argv(root, mode, tool, input, sandbox, resolve, Some(copy))?;
+    let updated = wrapped_guarded_input(tool, input, command);
+    // Leave space for the launcher's quoting and arguments on Windows.
+    (updated["command"].as_str()?.encode_utf16().take(24_001).count() <= 24_000).then_some(updated)
+}
+
+fn wrapped_guarded_input(tool: &str, input: &Value, command: Vec<String>) -> Value {
     let powershell = tool == "PowerShell";
     let command = command.iter().map(|arg| quoted(arg, powershell)).collect::<Vec<_>>().join(" ");
     let mut updated = input.clone();
@@ -802,7 +942,7 @@ pub fn guarded_input(
     if updated.get("run_in_background").is_some() {
         updated["run_in_background"] = false.into();
     }
-    Some(updated)
+    updated
 }
 
 /// Build tools execute project code only inside an OS sandbox; never approve the original command as a fallback.
@@ -1195,7 +1335,7 @@ fn record_piece(piece: &str) -> bool {
 
 /// Does a path or command name one of `FABER_RECORDS` or `ENGINE_NOTES`? What is written (a file's text, an edit's old
 /// and new strings, a patch) is skipped: a source file or a note that mentions a record's name is ordinary work.
-fn names_record(input: &Value) -> bool {
+pub fn names_record(input: &Value) -> bool {
     match input {
         Value::String(s) => normal(s).split(|c: char| c == '/' || c.is_whitespace() || ":\"'`;|&<>()=,".contains(c)).any(record_piece),
         Value::Array(items) => items.iter().any(names_record),
@@ -1683,6 +1823,17 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn guarded_commands_can_check_a_live_store_with_its_budget_lock_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = crate::store::Store::new(dir.path());
+        store.claim_budget().unwrap();
+        assert!(super::unlinked_store(dir.path()).is_some(), "a live Store's held budget lock is a regular file");
+        let record = dir.path().join("settings.json");
+        std::fs::write(&record, "sample").unwrap();
+        std::fs::hard_link(&record, dir.path().join("alias.json")).unwrap();
+        assert!(super::unlinked_store(dir.path()).is_none(), "a linked record still refuses the whole grant");
+    }
+    #[test]
     fn a_never_touch_path_is_refused_to_writes_and_commands_but_not_to_reads() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path().canonicalize().unwrap();
@@ -1722,6 +1873,89 @@ mod tests {
         let filesystem = &config[&format!("permissions.{id}")]["filesystem"];
         assert_eq!(filesystem[super::unified(&root.join("legacy").to_string_lossy())], "read");
         assert_eq!(filesystem[":workspace_roots"]["."], "write", "the rest of the project stays writable");
+    }
+
+    #[test]
+    fn registered_copy_profile_has_no_ambient_store_grants_and_plan_has_no_write_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let _store = crate::store::Store::new(temp.path());
+        let root = temp.path().join("copies/one/app");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let store = temp.path().canonicalize().unwrap();
+        let nested_git = root.join("module/.git");
+        std::fs::create_dir_all(&nested_git).unwrap();
+        let git_config = nested_git.join("config");
+        let key = root.join("module/example.key");
+        for path in [&git_config, &key] {
+            std::fs::write(path, "synthetic fixture").unwrap();
+        }
+        for writable in [true, false] {
+            let mut config = super::managed_copy_config(&root, writable).unwrap();
+            super::keep_read_only(&mut config, &[root.join("keep")]);
+            let id = config["default_permissions"].as_str().unwrap();
+            let profile = &config[&format!("permissions.{id}")];
+            let fs = &profile["filesystem"];
+            assert_eq!(fs[":root"], "deny");
+            assert_eq!(fs[":minimal"], "read");
+            assert_eq!(fs[super::unified(root.to_str().unwrap())], if writable { "write" } else { "read" });
+            assert_eq!(fs[super::unified(root.join("keep").to_str().unwrap())], "read");
+            assert_eq!(fs[super::unified(nested_git.to_str().unwrap())], "read");
+            assert_eq!(fs[super::unified(root.join("module").to_str().unwrap())], "read");
+            for path in [&git_config, &key] {
+                assert_eq!(fs[super::unified(path.to_str().unwrap())], "deny");
+            }
+            for outside in [&store, &store.join("copies"), &store.join("copies/two")] {
+                assert!(fs.get(super::unified(outside.to_str().unwrap())).is_none(), "{}", outside.display());
+            }
+        }
+        let protected = store.join("protected-fixture.txt");
+        std::fs::write(&protected, "fixture").unwrap();
+        std::fs::hard_link(&protected, root.join("duplicate.txt")).unwrap();
+        assert!(super::managed_copy_config(&root, true).is_none());
+        assert!(super::managed_copy_config(&root, false).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_checked_store_copy_gets_a_scoped_guarded_command() {
+        use crate::{cli::Cli, model::Permissions};
+        let temp = tempfile::tempdir().unwrap();
+        let _store = crate::store::Store::new(temp.path());
+        let root = temp.path().join("copies/one/app");
+        std::fs::create_dir_all(&root).unwrap();
+        let native = Cli { command: "C:/fixtures/codex.exe".into(), prefix: vec![] };
+        let resolve = |_: &str| Some(Cli { command: "C:/fixtures/node.exe".into(), prefix: vec![] });
+        let input = json!({"command":"node proof.js"});
+        let argv =
+            super::guarded_argv(&root, Permissions::AcceptEdits, "Bash", &input, Some(&native), &resolve, Some((&root, &[]))).unwrap();
+        let profile = argv.iter().find(|arg| arg.starts_with("permissions.faber-")).unwrap();
+        assert!(profile.contains("':root'='deny'"));
+        assert!(profile.contains("/copies/one/app'='write'"));
+        assert!(!profile.contains("/copies/two"));
+        assert!(super::guarded_argv(&root, Permissions::AcceptEdits, "Bash", &input, Some(&native), &resolve, None).is_none());
+        let other = temp.path().join("copies/two/app");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(
+            super::guarded_argv(&root, Permissions::AcceptEdits, "Bash", &input, Some(&native), &resolve, Some((&other, &[]))).is_none()
+        );
+        let kept = root.join("kept");
+        std::fs::create_dir_all(kept.join("notes")).unwrap();
+        let existing = kept.join("notes/keep.txt");
+        std::fs::write(&existing, "fixture").unwrap();
+        let paths = [existing, root.join("another/future.txt"), other.join("other.txt")];
+        let argv =
+            super::guarded_argv(&root, Permissions::AcceptEdits, "Bash", &input, Some(&native), &resolve, Some((&root, &paths))).unwrap();
+        let profile = argv.iter().find(|arg| arg.starts_with("permissions.faber-")).unwrap();
+        assert!(profile.contains("/copies/one/app/kept'='read'"));
+        assert!(profile.contains("/copies/one/app'='read'"));
+        assert!(!profile.contains("/copies/two"));
+        let long = json!({"command":format!("node {}", "x".repeat(24_001))});
+        assert!(super::guarded_copy_input(&root, Permissions::AcceptEdits, "Bash", &long, Some(&native), &resolve, (&root, &[])).is_none());
+        let _nested_store = crate::store::Store::new(&root.join("other-store"));
+        assert!(
+            super::guarded_argv(&root, Permissions::AcceptEdits, "Bash", &input, Some(&native), &resolve, Some((&root, &[]))).is_none()
+        );
     }
 
     #[test]
@@ -2072,6 +2306,57 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), linked.path().join(".faber")).unwrap();
         assert!(!prepare_tmp(linked.path()));
         assert!(!outside.path().join("tmp").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_temp_files_do_not_use_a_junction_within_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let redirected = root.path().join("elsewhere");
+        std::fs::create_dir(&redirected).unwrap();
+        junction::create(&redirected, root.path().join(".faber")).unwrap();
+        assert!(!prepare_tmp(root.path()));
+        assert!(!redirected.join("tmp").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_temp_files_allow_a_checked_workspace_alias() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let alias = root.path().join("alias");
+        std::fs::create_dir(&project).unwrap();
+        junction::create(&project, &alias).unwrap();
+        assert!(prepare_tmp(&alias));
+        assert!(project.join(".faber/tmp").is_dir());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_temp_files_can_be_prepared_by_concurrent_commands() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path();
+        let start = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    start.wait();
+                    assert!(prepare_tmp(folder));
+                });
+            }
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_temp_files_can_reuse_but_not_create_a_store_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let _store = crate::store::Store::new(root.path());
+        let temp = root.path().join(".faber/tmp");
+        assert!(!prepare_tmp(root.path()));
+        assert!(!temp.exists());
+        std::fs::create_dir_all(temp).unwrap();
+        assert!(prepare_tmp(root.path()));
     }
 
     #[test]

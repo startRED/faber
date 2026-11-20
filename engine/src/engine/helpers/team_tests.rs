@@ -70,6 +70,8 @@ impl Team {
                         hsid: 42 + n as u64,
                         vendor: helper::other(vendor),
                         model: "fake".into(),
+                        permissions: Permissions::FullAccess,
+                        web: WebSearch::Live,
                         session: child,
                         started: core.secs(),
                         report: String::new(),
@@ -79,9 +81,12 @@ impl Team {
                         waiting: vec![],
                         told: vec![],
                         held: None,
-                        earlier_turn: false,
+                        command_wake: 0,
+                        command_cost: None,
+                        prior_cost_incomplete: false,
                         stopping: None,
                         ready: true,
+                        note_turn: None,
                         early: vec![],
                         lead_call: Some(call),
                         question: None,
@@ -173,7 +178,11 @@ async fn team_question_answer_and_report_for_both_leads() {
         assert!(first[0].2.contains("\"answer\""));
         assert!(t.first.lock().unwrap().replies.is_empty(), "ask remains pending in the live helper");
         t.engine.with(|core| {
-            core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, text: first[0].2.clone() });
+            core.handle(
+                &t.conv,
+                1,
+                EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, exit_code: None, text: first[0].2.clone() },
+            );
             assert!(core.tool_of(&t.conv, "h0").unwrap().ok.is_none(), "a question is not a report");
             assert_eq!(core.team_of(&t.conv, "h0").unwrap().state, TeamState::WaitingLead);
         });
@@ -189,7 +198,11 @@ async fn team_question_answer_and_report_for_both_leads() {
             assert_eq!(team.messages[1].kind, TeamKind::Answer);
             assert_eq!(team.messages[1].question, team.messages[0].question);
             assert_eq!(team.state, TeamState::Ended);
-            core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, text: first[0].2.clone() });
+            core.handle(
+                &t.conv,
+                1,
+                EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, exit_code: None, text: first[0].2.clone() },
+            );
             assert!(
                 core.tool_of(&t.conv, "h0").unwrap().output.as_deref().unwrap().contains("check passed"),
                 "a late wire echo cannot replace the report with a question"
@@ -455,7 +468,11 @@ async fn team_five_minutes_start_after_the_leads_other_tools_return() {
         tokio::task::yield_now().await;
         assert!(t.first.lock().unwrap().replies.is_empty(), "a command still blocks the lead from thinking");
         t.engine.with(|core| {
-            core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "slow-check".into(), ok: true, declined: false, text: "passed".into() })
+            core.handle(
+                &t.conv,
+                1,
+                EngineEvent::ToolResult { id: "slow-check".into(), ok: true, declined: false, exit_code: None, text: "passed".into() },
+            )
         });
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(300)).await;
@@ -569,7 +586,11 @@ async fn team_question_releases_a_memory_deferred_helper_and_starts_the_timer() 
             "Still queued: do other work, then wait again for its question or report."
         );
         t.engine.with(|core| {
-            core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, text: "Still queued".into() });
+            core.handle(
+                &t.conv,
+                1,
+                EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, exit_code: None, text: "Still queued".into() },
+            );
             assert!(core.live[&t.conv].open_tools.is_empty());
             assert!(core.tool_of(&t.conv, "h1").unwrap().ok.is_none());
         });
@@ -599,7 +620,11 @@ async fn team_question_has_a_fifteen_minute_cap_while_a_person_question_is_open(
     tokio::task::yield_now().await;
     assert_eq!(t.first.lock().unwrap().replies[0].2, helper::NO_ANSWER);
     t.engine.with(|core| {
-        core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "person-question".into(), ok: true, declined: false, text: "Done".into() });
+        core.handle(
+            &t.conv,
+            1,
+            EngineEvent::ToolResult { id: "person-question".into(), ok: true, declined: false, exit_code: None, text: "Done".into() },
+        );
     });
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(301)).await;
@@ -711,7 +736,11 @@ async fn team_helper_result_hands_over_the_persons_queued_message() {
                 sending: false,
                 wake: None,
             });
-            core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, text: "Done".into() });
+            core.handle(
+                &t.conv,
+                1,
+                EngineEvent::ToolResult { id: "h0".into(), ok: true, declined: false, exit_code: None, text: "Done".into() },
+            );
             assert!(core.convs[&t.conv].queued[0].sending);
         });
         assert_eq!(t.lead.lock().unwrap().notes[0].0, "person");
@@ -727,7 +756,11 @@ async fn team_a_released_queued_helper_that_cannot_start_keeps_its_failure() {
         core.start_helper(&t.conv, "h1".into(), json!({"title":"Piece 1","brief":"Check it."}));
         assert_eq!(core.tool_of(&t.conv, "h1").unwrap().ok, Some(false));
         assert_eq!(core.team_of(&t.conv, "h1").unwrap().state, TeamState::Ended);
-        core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, text: "Still queued".into() });
+        core.handle(
+            &t.conv,
+            1,
+            EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, exit_code: None, text: "Still queued".into() },
+        );
         assert_eq!(core.tool_of(&t.conv, "h1").unwrap().ok, Some(false));
     });
     assert_eq!(t.lead.lock().unwrap().replies.iter().filter(|r| r.0 == "h1").count(), 1);
@@ -763,7 +796,11 @@ async fn team_question_releases_a_helper_deferred_by_a_launch_check() {
     t.tool("h0", "ask", json!({"do":"ask","text":"Which field?"}));
     assert!(t.lead.lock().unwrap().replies.iter().any(|r| r.0 == "h1" && r.2.contains("still queued")));
     t.engine.with(|core| {
-        core.handle(&t.conv, 1, EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, text: "Still queued".into() });
+        core.handle(
+            &t.conv,
+            1,
+            EngineEvent::ToolResult { id: "h1".into(), ok: true, declined: false, exit_code: None, text: "Still queued".into() },
+        );
         assert!(core.tool_of(&t.conv, "h1").unwrap().ok.is_none());
         assert!(core.live[&t.conv].open_tools.is_empty());
     });

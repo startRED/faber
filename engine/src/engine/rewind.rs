@@ -22,7 +22,8 @@ pub(super) struct State {
     retired_sessions: HashMap<(String, u64), (Vendor, Session)>,
     session_folders: HashMap<(String, u64), PathBuf>,
     starting_sessions: HashSet<(String, u64)>,
-    exited_sessions: HashSet<(String, u64)>,
+    // An exit proven before retirement may also release the exact command wait of an idle session.
+    exited_sessions: HashMap<(String, u64), Option<command_wait::CommandWaitKey>>,
     // Deleting the visible conversation does not terminate its writers; None keeps an unlocated writer unknown.
     deleted_folders: HashMap<String, Option<PathBuf>>,
     cursors: HashMap<(String, String), (Cursor, Option<String>)>,
@@ -97,7 +98,7 @@ impl State {
             retired_sessions: HashMap::new(),
             session_folders: HashMap::new(),
             starting_sessions: HashSet::new(),
-            exited_sessions: HashSet::new(),
+            exited_sessions: HashMap::new(),
             deleted_folders: HashMap::new(),
             cursors: HashMap::new(),
             preparing_steers: HashMap::new(),
@@ -464,6 +465,8 @@ impl Engine {
         let saved = self.with(|c| {
             c.keep_going_off(id);
             c.compacts.remove(id);
+            c.background.forget_finished(id);
+            c.command_waits.remove(id);
             let actual = c.convs.get_mut(id).ok_or("error.conversationGone")?;
             crate::rewind::SavedConversation::take(conversation).apply(actual);
             actual.updated_at = now();
@@ -677,8 +680,27 @@ impl Core {
     }
 
     pub(super) fn rewind_writers_active(&self, conv: &str) -> bool {
-        self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| !writers.is_empty() || *unknown)
-            || self.helpers_in(conv)
+        self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| !writers.is_empty() || *unknown) || self.rewind_has_other_work(conv)
+    }
+
+    /// Only the current driver's known turn is active, with no startup, retiring session or separate work.
+    pub(super) fn rewind_reports_only_turn(&self, conv: &str, sid: u64) -> bool {
+        let Some((writers, false)) = self.rewind.writers.get(conv) else { return false };
+        let [turn] = writers.as_slice() else { return false };
+        if turn.strip_prefix("turn:").is_none_or(str::is_empty) {
+            return false;
+        }
+        let mut reports = self.rewind.session_writers.iter().filter(|((owner, _), _)| owner == conv);
+        reports.next().is_some_and(|((_, owner_sid), _)| *owner_sid == sid) && reports.next().is_none() && !self.rewind_has_other_work(conv)
+    }
+
+    /// An isolated Claude turn reports only its separate writers, not the turn itself.
+    pub(super) fn rewind_reports_no_separate_writer(&self, conv: &str) -> bool {
+        self.rewind.writers.get(conv).is_some_and(|(writers, unknown)| writers.is_empty() && !unknown) && !self.rewind_has_other_work(conv)
+    }
+
+    fn rewind_has_other_work(&self, conv: &str) -> bool {
+        self.helpers_in(conv)
             || self.rewind.helper_writers.values().any(|(owner, _, _)| owner == conv)
             || self.rewind.unconfirmed_checks.contains(conv)
             || self.rewind.pending.contains(conv)
@@ -706,20 +728,33 @@ impl Core {
     }
 
     pub(super) fn rewind_writing(&self, conv: &str) -> bool {
+        self.rewind_writing_except_shared_tree(conv, false)
+    }
+
+    pub(super) fn rewind_writing_except_shared_tree(&self, conv: &str, release_native: bool) -> bool {
         // Closing markers block restore until exit is confirmed, but cannot keep their own shared server alive.
         self.live.get(conv).is_some_and(|l| self.rewind.starting_sessions.contains(&(conv.to_string(), l.sid)))
-            || self.rewind.session_writers.iter().any(|((owner, _), (writers, unknown))| owner == conv && (!writers.is_empty() || *unknown))
+            || self.rewind.session_writers.iter().any(|((owner, _), (writers, unknown))| {
+                owner == conv
+                    && (!writers.is_empty() || *unknown)
+                    && !(release_native && writers.len() == 1 && writers[0] == "process-tree")
+            })
             || self.rewind.helper_writers.values().any(|(owner, writers, unknown)| owner == conv && (!writers.is_empty() || *unknown))
     }
 
-    pub(super) fn rewind_retire(&mut self, conv: &str, live: &Live) {
+    pub(super) fn session_exit_confirmed(&self, conv: &str, sid: u64) -> bool {
+        self.rewind.exited_sessions.contains_key(&(conv.to_string(), sid))
+    }
+
+    pub(super) fn rewind_retire(&mut self, conv: &str, live: &Live) -> Option<command_wait::CommandWaitKey> {
         let key = (conv.to_string(), live.sid);
-        if self.rewind.exited_sessions.remove(&key) {
-            return;
+        if let Some(command_wait) = self.rewind.exited_sessions.remove(&key) {
+            return command_wait;
         }
         self.rewind.session_folders.entry(key.clone()).or_insert_with(|| live.cwd.clone());
         self.rewind.retired_sessions.insert(key, (live.vendor, live.session.clone()));
         self.rewind.refresh_writers(conv);
+        None
     }
 
     pub(super) fn rewind_session_started(&mut self, conv: &str, sid: u64, folder: PathBuf) {
@@ -753,7 +788,13 @@ impl Core {
         self.rewind.retired_sessions.get(&(conv.to_string(), sid)).cloned()
     }
 
-    pub(super) fn rewind_event(&mut self, conv: &str, sid: u64, event: &EngineEvent) -> bool {
+    pub(super) fn rewind_event(
+        &mut self,
+        conv: &str,
+        sid: u64,
+        event: &EngineEvent,
+        command_wait_on_exit: Option<command_wait::CommandWaitKey>,
+    ) -> bool {
         // Repeated idle snapshots cannot invalidate the final scan they just requested.
         if !matches!(event, EngineEvent::Writers { .. }) {
             self.rewind.bump(conv);
@@ -784,7 +825,7 @@ impl Core {
                     self.rewind.session_folders.remove(&key);
                     self.rewind.starting_sessions.remove(&key);
                     if self.live.get(conv).is_some_and(|live| live.sid == sid) {
-                        self.rewind.exited_sessions.insert(key);
+                        self.rewind.exited_sessions.entry(key).or_insert(command_wait_on_exit);
                     }
                     self.rewind.observe_writers(conv, sid, &[], false);
                 } else {
@@ -1475,8 +1516,8 @@ mod tests {
                     tuning: Default::default(),
                     research: None,
                     retiring: false,
-                    was_idle: false,
-                    command_wait: None,
+                    codex_goal_held: false,
+                    idle_period: None,
                     runs: Permissions::Ask,
                     cwd: root.clone(),
                     visual_root: None,

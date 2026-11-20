@@ -2,10 +2,14 @@
 use crate::events::Session;
 use crate::model::Vendor;
 use serde::Serialize;
+use std::collections::VecDeque;
 
 pub const MAX_COMMANDS: usize = 32;
 pub const MAX_LINES: usize = 20;
 pub const MAX_BYTES: usize = 8192;
+const FINISHED_LIMIT: usize = 32;
+const LABEL_BYTES: usize = 512;
+const ID_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,8 +23,15 @@ pub enum State {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Update {
     Start { id: String, command: String, stoppable: bool, turn_ended: bool },
-    Output { id: String, text: String, replace: bool },
+    Output { id: String, text: String, capture: Capture, source_truncated: bool },
     End { id: String, state: State },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capture {
+    Delta,
+    Snapshot,
+    Terminal,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -42,18 +53,43 @@ pub struct List {
     pub items: Vec<Command>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub vendor: Vendor,
+    pub command: Option<String>,
+    pub started: u64,
+    pub ended: Option<u64>,
+    pub state: Option<State>,
+    pub output: String,
+    pub output_truncated: bool,
+    pub terminal_output: bool,
+}
+
 struct Entry {
     row: Command,
     native: String,
     sid: u64,
     session: Session,
     turn_ended: bool,
+    output_truncated: bool,
+    terminal_output: bool,
+    retain_result: bool,
+}
+
+struct FinishedEntry {
+    row: CommandRecord,
+    native: String,
+    sid: u64,
 }
 
 #[derive(Default)]
 pub struct Commands {
     revision: u64,
     entries: Vec<Entry>,
+    finished: VecDeque<FinishedEntry>,
+    finished_version: u64,
 }
 
 /// A UTF-8 tail, bounded before allocating even when a delta is very large. A trailing newline belongs to its last line.
@@ -68,13 +104,149 @@ pub fn tail(text: &str) -> &str {
     &text[at..]
 }
 
+fn append_output(output: &mut String, cut: &mut bool, terminal: &mut bool, text: &str, capture: Capture, source_truncated: bool) -> bool {
+    if capture == Capture::Delta && text.is_empty() && !source_truncated {
+        return false;
+    }
+    let kept = tail(text);
+    let (next, truncated) = if capture != Capture::Delta || source_truncated {
+        (kept.to_string(), source_truncated || kept.len() < text.len())
+    } else {
+        let mut joined = String::with_capacity(output.len() + kept.len());
+        if kept.len() == text.len() {
+            joined.push_str(output);
+        }
+        joined.push_str(kept);
+        let next = tail(&joined);
+        (next.to_string(), *cut || kept.len() < text.len() || next.len() < joined.len())
+    };
+    *cut = truncated;
+    *terminal = capture == Capture::Terminal;
+    if *output == next {
+        return false;
+    }
+    *output = next;
+    true
+}
+
 impl Commands {
+    pub fn finished_version(&self) -> u64 {
+        self.finished_version
+    }
+
+    /// Terminal metadata and bounded capture, kept only in memory. The caller authorizes and masks before display.
+    pub fn recent(&self, conv: &str, id: Option<&str>, limit: usize) -> Vec<CommandRecord> {
+        self.finished
+            .iter()
+            .rev()
+            .filter(|e| e.row.conversation_id == conv && id.is_none_or(|id| e.row.id == id))
+            .take(limit)
+            .map(|e| e.row.clone())
+            .collect()
+    }
+
+    /// Active metadata only. Do not clone partial capture into project reads.
+    pub fn running(&self, conv: &str, id: Option<&str>, limit: usize) -> Vec<CommandRecord> {
+        self.entries
+            .iter()
+            .rev()
+            .filter(|e| {
+                e.retain_result && e.row.conversation_id == conv && e.row.state == State::Running && id.is_none_or(|id| e.row.id == id)
+            })
+            .take(limit)
+            .map(|e| CommandRecord {
+                id: e.row.id.clone(),
+                conversation_id: e.row.conversation_id.clone(),
+                vendor: e.row.vendor,
+                command: (e.row.command.len() <= LABEL_BYTES).then(|| e.row.command.clone()),
+                started: e.row.started,
+                ended: None,
+                state: Some(State::Running),
+                output: String::new(),
+                output_truncated: false,
+                terminal_output: false,
+            })
+            .collect()
+    }
+
+    fn remember(finished: &mut VecDeque<FinishedEntry>, entry: &Entry, ended: u64, state: Option<State>) {
+        let row = &entry.row;
+        if !entry.retain_result || entry.native.len() > ID_BYTES || row.conversation_id.len() > ID_BYTES {
+            return;
+        }
+        if let Some(old) = finished.iter_mut().find(|e| e.row.id == row.id) {
+            old.row.state = state;
+            return;
+        }
+        if finished.len() == FINISHED_LIMIT {
+            finished.pop_front();
+        }
+        finished.push_back(FinishedEntry {
+            row: CommandRecord {
+                id: row.id.clone(),
+                conversation_id: row.conversation_id.clone(),
+                vendor: row.vendor,
+                command: (row.command.len() <= LABEL_BYTES).then(|| row.command.clone()),
+                started: row.started,
+                ended: Some(ended),
+                state,
+                output: row.output.clone(),
+                output_truncated: entry.output_truncated,
+                terminal_output: entry.terminal_output,
+            },
+            native: entry.native.clone(),
+            sid: entry.sid,
+        });
+    }
+
+    /// A late event can update its exact result. Session IDs are unique within the engine.
+    pub fn late_update(&mut self, conv: Option<&str>, sid: u64, update: &Update) {
+        let id = match update {
+            Update::Output { id, .. } | Update::End { id, .. } => id,
+            Update::Start { .. } => return,
+        };
+        let Some(entry) = self
+            .finished
+            .iter_mut()
+            .rev()
+            .find(|e| e.sid == sid && conv.is_none_or(|conv| e.row.conversation_id == conv) && e.native == *id)
+        else {
+            return;
+        };
+        match update {
+            Update::Output { text, capture, source_truncated, .. } => {
+                append_output(
+                    &mut entry.row.output,
+                    &mut entry.row.output_truncated,
+                    &mut entry.row.terminal_output,
+                    text,
+                    *capture,
+                    *source_truncated,
+                );
+            }
+            Update::End { state, .. } if entry.row.state.is_none() && *state != State::Running => entry.row.state = Some(*state),
+            _ => {}
+        }
+    }
+
+    pub fn forget_finished(&mut self, conv: &str) {
+        self.finished_version = self.finished_version.wrapping_add(1);
+        self.finished.retain(|entry| entry.row.conversation_id != conv);
+        for entry in self.entries.iter_mut().filter(|entry| entry.row.conversation_id == conv) {
+            entry.retain_result = false;
+        }
+    }
+
     pub fn list(&self) -> List {
         List { revision: self.revision, items: self.entries.iter().map(|e| e.row.clone()).collect() }
     }
 
     pub fn running_in(&self, conv: &str) -> bool {
         self.entries.iter().any(|e| e.row.conversation_id == conv && e.row.state == State::Running)
+    }
+
+    pub fn running_for(&self, session: u64) -> bool {
+        self.entries.iter().any(|e| e.sid == session && e.row.state == State::Running)
     }
 
     pub fn update(&mut self, conv: &str, sid: u64, vendor: Vendor, session: &Session, update: Update, now: u64) -> bool {
@@ -106,6 +278,9 @@ impl Commands {
                     sid,
                     session: session.clone(),
                     turn_ended,
+                    output_truncated: false,
+                    terminal_output: false,
+                    retain_result: true,
                 });
             }
             (Some(at), Update::Start { stoppable, turn_ended, .. }) => {
@@ -115,35 +290,42 @@ impl Commands {
                 }
                 self.entries[at].row.stoppable = stoppable;
             }
-            (Some(at), Update::Output { text, replace, .. }) => {
-                let row = &mut self.entries[at].row;
-                let output = if replace {
-                    tail(&text).to_string()
-                } else {
-                    let mut joined = String::with_capacity(row.output.len() + text.len().min(MAX_BYTES));
-                    let kept = tail(&text);
-                    if kept.len() == text.len() {
-                        joined.push_str(&row.output);
-                    }
-                    joined.push_str(kept);
-                    tail(&joined).to_string()
-                };
-                if row.output == output {
+            (Some(at), Update::Output { text, capture, source_truncated, .. }) => {
+                let entry = &mut self.entries[at];
+                let changed = append_output(
+                    &mut entry.row.output,
+                    &mut entry.output_truncated,
+                    &mut entry.terminal_output,
+                    &text,
+                    capture,
+                    source_truncated,
+                );
+                if entry.row.state != State::Running
+                    && let Some(finished) = self.finished.iter_mut().find(|e| e.row.id == entry.row.id)
+                {
+                    finished.row.output.clone_from(&entry.row.output);
+                    finished.row.output_truncated = entry.output_truncated;
+                    finished.row.terminal_output = entry.terminal_output;
+                }
+                if !changed {
                     return false;
                 }
-                row.output = output;
             }
             (Some(at), Update::End { state, .. }) => {
-                if self.entries[at].turn_ended {
+                let entry = &mut self.entries[at];
+                if entry.row.state == state || state == State::Running {
+                    return false;
+                }
+                entry.row.state = state;
+                Self::remember(&mut self.finished, entry, now, Some(state));
+                if entry.turn_ended {
                     self.entries.remove(at);
-                } else {
-                    if self.entries[at].row.state == state {
-                        return false;
-                    }
-                    self.entries[at].row.state = state;
                 }
             }
-            _ => return false,
+            (None, update @ (Update::Output { .. } | Update::End { .. })) => {
+                self.late_update(Some(conv), sid, &update);
+                return false;
+            }
         }
         self.revision += 1;
         true
@@ -178,9 +360,18 @@ impl Commands {
         changed
     }
 
-    pub fn exited(&mut self, conv: &str, sid: u64) -> bool {
+    pub fn exited(&mut self, conv: &str, sid: u64, now: u64) -> bool {
         let before = self.entries.len();
-        self.entries.retain(|e| e.row.conversation_id != conv || e.sid != sid);
+        let finished = &mut self.finished;
+        self.entries.retain(|entry| {
+            if entry.row.conversation_id != conv || entry.sid != sid {
+                return true;
+            }
+            if entry.row.state == State::Running {
+                Self::remember(finished, entry, now, None);
+            }
+            false
+        });
         let changed = before != self.entries.len();
         if changed {
             self.revision += 1;
@@ -209,7 +400,121 @@ mod tests {
     }
 
     fn output(commands: &mut Commands, id: &str, text: &str, replace: bool) {
-        commands.update("one", 1, Vendor::Codex, &session(), Update::Output { id: id.into(), text: text.into(), replace }, 124);
+        let capture = if replace { Capture::Snapshot } else { Capture::Delta };
+        let update = Update::Output { id: id.into(), text: text.into(), capture, source_truncated: false };
+        commands.update("one", 1, Vendor::Codex, &session(), update, 124);
+    }
+
+    #[test]
+    fn a_running_page_is_scoped_limited_and_skips_forgotten_commands() {
+        let mut commands = Commands::default();
+        start(&mut commands, "one", 1, "first");
+        start(&mut commands, "two", 2, "unrelated");
+        start(&mut commands, "one", 1, "second");
+        let page = commands.running("one", None, 1);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].command.as_deref(), Some("run second"));
+        assert!(commands.running("two", Some(&page[0].id), 1).is_empty());
+        commands.forget_finished("one");
+        assert!(commands.running("one", None, 2).is_empty());
+        assert!(commands.running_in("one"), "restoring history leaves the running processes alone");
+    }
+
+    #[test]
+    fn a_command_that_finishes_after_its_reply_remains_readable_by_its_public_id() {
+        let mut commands = Commands::default();
+        start(&mut commands, "one", 1, "build");
+        let public_id = commands.list().items[0].id.clone();
+        output(&mut commands, "build", "intermediate log\n", false);
+        commands.end_turn("one", 1);
+        commands.update("one", 1, Vendor::Codex, &session(), Update::End { id: "build".into(), state: State::Failed }, 125);
+        assert!(commands.list().items.is_empty(), "the screen no longer owns the row");
+        let found = commands.recent("one", Some(&public_id), 1);
+        assert_eq!(found.len(), 1, "a resumed agent can still find the result");
+        assert_eq!(found[0].state, Some(State::Failed));
+        assert_eq!(found[0].ended, Some(125));
+        assert_eq!(found[0].output, "intermediate log\n");
+        assert!(!found[0].terminal_output);
+
+        let final_log =
+            Update::Output { id: "build".into(), text: "final log\n".into(), capture: Capture::Terminal, source_truncated: false };
+        commands.late_update(Some("two"), 1, &final_log);
+        commands.late_update(Some("one"), 2, &final_log);
+        assert_eq!(commands.recent("one", Some(&public_id), 1)[0].output, "intermediate log\n");
+        let tail = Update::Output { id: "build".into(), text: "final log\n".into(), capture: Capture::Snapshot, source_truncated: true };
+        commands.late_update(Some("one"), 1, &tail);
+        assert!(commands.recent("one", Some(&public_id), 1)[0].output_truncated);
+        commands.late_update(Some("one"), 1, &final_log);
+        let found = commands.recent("one", Some(&public_id), 1);
+        assert_eq!(found[0].output, "final log\n");
+        assert!(found[0].terminal_output, "the terminal replacement can have identical text");
+        assert!(!found[0].output_truncated, "a complete replacement clears the flag even when the text matches");
+        assert_eq!(found[0].ended, Some(125), "a late log does not reorder results");
+        assert!(commands.recent("two", Some(&public_id), 1).is_empty());
+        output(&mut commands, "build", "", false);
+        assert!(commands.recent("one", Some(&public_id), 1)[0].terminal_output, "an empty delta adds no progress data");
+        output(&mut commands, "build", "late progress\n", false);
+        let mixed = commands.recent("one", Some(&public_id), 1);
+        assert_eq!(mixed[0].output, "final log\nlate progress\n");
+        assert!(!mixed[0].terminal_output, "the mixed output has bytes beyond the terminal snapshot");
+        commands.late_update(Some("one"), 1, &final_log);
+        output(&mut commands, "build", "final log\n", true);
+        assert!(!commands.recent("one", Some(&public_id), 1)[0].terminal_output, "a later progress snapshot replaces identical bytes");
+    }
+
+    #[test]
+    fn a_confirmed_process_exit_leaves_unknown_state_and_marks_a_clipped_capture() {
+        let mut commands = Commands::default();
+        commands.update(
+            "one",
+            1,
+            Vendor::Claude,
+            &session(),
+            Update::Start { id: "build".into(), command: "x".repeat(LABEL_BYTES + 1), stoppable: true, turn_ended: false },
+            123,
+        );
+        output(&mut commands, "build", &"line\n".repeat(MAX_LINES + 1), true);
+        output(&mut commands, "build", "last\n", false);
+        assert!(commands.exited("one", 1, 126));
+        assert!(commands.list().items.is_empty());
+        let done = &commands.recent("one", None, 1)[0];
+        assert_eq!(done.state, None);
+        assert_eq!(done.ended, Some(126));
+        assert!(done.command.is_none());
+        assert!(done.output.len() <= MAX_BYTES && done.output.lines().count() <= MAX_LINES);
+        assert!(done.output_truncated);
+        assert!(!done.terminal_output, "process exit cannot confirm the source of progress output");
+        commands.late_update(None, 1, &Update::End { id: "build".into(), state: State::Done });
+        assert_eq!(commands.recent("one", None, 1)[0].state, Some(State::Done));
+    }
+
+    #[test]
+    fn forgetting_results_prevents_reinsertion_when_an_old_command_ends() {
+        let mut commands = Commands::default();
+        start(&mut commands, "one", 1, "prior");
+        commands.update("one", 1, Vendor::Codex, &session(), Update::End { id: "prior".into(), state: State::Done }, 124);
+        start(&mut commands, "one", 1, "current");
+        commands.forget_finished("one");
+        assert!(commands.recent("one", None, 1).is_empty());
+        assert!(commands.running_in("one"));
+        commands.exited("one", 1, 125);
+        assert!(commands.recent("one", None, 1).is_empty());
+    }
+
+    #[test]
+    fn finished_command_retention_is_global_and_follows_terminal_order() {
+        let mut commands = Commands::default();
+        for i in 0..=FINISHED_LIMIT {
+            let conv = if i == 0 { "two" } else { "one" };
+            start(&mut commands, conv, 1, &i.to_string());
+            commands.end_turn(conv, 1);
+            commands.update(conv, 1, Vendor::Codex, &session(), Update::End { id: i.to_string(), state: State::Done }, 200 + i as u64);
+        }
+        assert!(commands.recent("two", None, 1).is_empty());
+        let recent = commands.recent("one", None, FINISHED_LIMIT + 1);
+        assert_eq!(recent.len(), FINISHED_LIMIT);
+        assert_eq!(recent.first().unwrap().ended, Some(200 + FINISHED_LIMIT as u64));
+        assert_eq!(recent.last().unwrap().ended, Some(201));
     }
 
     #[test]
@@ -285,8 +590,8 @@ mod tests {
         assert!(!commands.end_turn("one", 2), "a still-running command survives its turn");
         assert!(commands.update("one", 2, Vendor::Codex, &session(), Update::End { id: "same".into(), state: State::Done }, 126));
         assert_eq!(commands.list().items.len(), 1, "a command ending after its turn leaves immediately");
-        assert!(!commands.exited("one", 1));
-        assert!(commands.exited("two", 1));
+        assert!(!commands.exited("one", 1, 124));
+        assert!(commands.exited("two", 1, 124));
         assert!(commands.list().items.is_empty());
         assert!(Commands::default().list().items.is_empty(), "nothing survives a new engine's in-memory command list");
     }

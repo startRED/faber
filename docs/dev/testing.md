@@ -1,8 +1,8 @@
 # Testing
 
-Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
-
-The runner finds the repository from the current folder or an ancestor with the workspace, testkit and engine manifests. Run it in the intended checkout; outside Faber it fails even with a warm `CARGO_TARGET_DIR`. The fake CLI stays beside the runner, and the configured target folder is preserved.
+`cargo t` finds the checkout by its workspace, testkit and engine manifests, starting in the current folder. It preserves
+`CARGO_TARGET_DIR` and keeps the fake CLI beside the runner. Rust suites clear the caller's Faber identity, so tests
+reaching their own Faber use the identity set by the fixture.
 
 `Launch::claude_recording` and `codex_recording` select fake replays for the main agent and helper via
 `--faber-recording <path>`; unset overrides use `Launch::recording`. Isolation stays the same.
@@ -17,7 +17,7 @@ of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser pro
   app concurrently with a check could replace that check's focus with the first-run heading or composer focus.
   No DevTools port is involved, so
   they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
-  With `--filter`, only check bodies whose names contain that text run; startup and module registration remain shared.
+  `--filter` runs matching bodies; bootstrap and registration stay shared. Reports keep page errors and flag extra checks.
   Checks start after the shared look and context menu bootstrap; the normal App is not mounted beside their own App
   fixtures, so startup cannot change their language or focus. Test builds without `?checks` still open the normal app.
 - **Scenarios** (`testkit/src/screen/`, written in Rust) wait for the rendered app and its text/sentinel helpers within the existing startup or reload deadline, then drive it like a person: they read the page, click and
@@ -61,7 +61,8 @@ of an earlier failure. Process enumeration may also delay reporting; no memory l
 A page wait (`Cdp::settle`) runs inside the page: one DevTools call of up to two seconds reads the condition again at
 every change of the document (at most every 16 ms, and every 50 ms without a change), instead of one call every 100 ms
 from the runner. A condition the page cannot wrap, statements rather than one expression, is asked every 100 ms as before. The checks and the hooks that report them exist only in the test build
-(`--features test-hooks`, `vite build --mode test`); production `dist/` has none. CI's [shared-base proofs](landing.md#fast-lane)
+(`--features test-hooks`, `vite build --mode test`). Vite requires a separate `dist-test/` and Tauri's test config can run
+no build hooks. CI's [shared-base proofs](landing.md#fast-lane)
 stay independent; each run picks jobs by changed files (R163), with the same rules as
 `cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
 `.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, the test files of the engine
