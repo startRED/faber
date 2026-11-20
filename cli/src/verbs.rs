@@ -27,7 +27,6 @@ pub const VERBS: &[(&str, &[&str])] = &[
     ("mark-waiting", &["mark_waiting"]),
     ("stop", &["interrupt"]),
     ("continue", &["conversation", "continue_closed"]),
-    ("wake", &["wake_wait"]),
     ("archive", &["archive"]),
     ("unarchive", &["archive"]),
     ("pin", &["pin"]),
@@ -43,7 +42,7 @@ pub const VERBS: &[(&str, &[&str])] = &[
 ];
 type ResultValue = Result<Value, i32>;
 async fn ask(client: &Client, out: &Out, command: &str, args: Value) -> ResultValue {
-    match connect::call(client, command, args).await {
+    match client.call_detailed(command, args).await {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(error)) => {
             let code = if matches!(error.key.as_str(), "error.reach.ask" | "error.reach.person" | "error.reach.screen") {
@@ -79,7 +78,7 @@ fn valid(args: &Args, verb: &str) -> bool {
     let count = args.words.len();
     let (min, max) = match verb {
         "help" => (0, 2),
-        "read" | "export" | "open" | "stop" | "continue" | "wake" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
+        "read" | "export" | "open" | "stop" | "continue" | "archive" | "unarchive" | "pin" | "unpin" | "wait" | "send" => (2, 2),
         "search" => (2, usize::MAX),
         "rename" => (3, 3),
         "start" | "message" => (3, 3),
@@ -94,12 +93,11 @@ fn valid(args: &Args, verb: &str) -> bool {
     }
     let allowed = match verb {
         "list" => &["state", "archived", "all", "project", "family", "query", "limit"][..],
-        "read" => &["last", "from", "limit"],
+        "read" => &["last"],
         "search" => &["area"],
         "send" => &["to", "project", "vendor", "model", "effort", "wait", "timeout"],
         "start" => &["ai", "model", "effort", "step", "keep-going"],
         "mark-waiting" => &["on", "note"],
-        "wake" => &["since", "until"],
         "watch" => &["id", "family", "project"],
         "wait" => &["timeout"],
         _ => &[],
@@ -108,22 +106,6 @@ fn valid(args: &Args, verb: &str) -> bool {
         return false;
     }
     if ["limit", "last", "timeout"].iter().any(|k| args.value(k).is_some_and(|v| v.parse::<u64>().is_err())) {
-        return false;
-    }
-    if verb == "read" {
-        match args.value("from") {
-            Some(_)
-                if !num(args, "from", 0).is_some_and(|n| n > 0)
-                    || args.value("last").is_some()
-                    || !num(args, "limit", 1).is_some_and(|n| (1..=10).contains(&n)) =>
-            {
-                return false;
-            }
-            None if args.value("limit").is_some() => return false,
-            _ => {}
-        }
-    }
-    if verb == "wake" && !matches!(wait_bounds(args), Some((since, until)) if until > since) {
         return false;
     }
     if args.value("area").is_some_and(|v| !["chat", "projects"].contains(&v)) {
@@ -158,17 +140,8 @@ pub async fn run(args: Args, out: Out) -> i32 {
                 json!({"name":v,"description":if out.json { key.clone() } else { out.words.get(&key) }})
             })
             .collect();
-        let commands: Vec<Value> = commands
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|c| {
-                target.is_none_or(|t| {
-                    c["name"] == t || VERBS.iter().any(|(verb, calls)| *verb == t && calls.iter().any(|name| c["name"] == *name))
-                })
-            })
-            .cloned()
-            .collect();
+        let commands: Vec<Value> =
+            commands.as_array().into_iter().flatten().filter(|c| target.is_none_or(|t| c["name"] == t)).cloned().collect();
         if target.is_some() && verbs.is_empty() && commands.is_empty() {
             return usage(&out);
         }
@@ -220,14 +193,7 @@ pub async fn run(args: Args, out: Out) -> i32 {
             }
             ask(&client, &out, "conversations", v).await
         }
-        "read" => {
-            let args = if args.value("from").is_some() {
-                json!({"id":id,"from":num(&args,"from",0).unwrap(),"limit":num(&args,"limit",1).unwrap()})
-            } else {
-                json!({"id":id,"last":num(&args,"last",20).unwrap()})
-            };
-            ask(&client, &out, "conversation", args).await
-        }
+        "read" => ask(&client, &out, "conversation", json!({"id":id,"last":num(&args,"last",20).unwrap()})).await,
         "export" => ask(&client, &out, "conversation_markdown", json!({"id":id})).await,
         "search" => {
             let query = args.words[1..].join(" ");
@@ -319,10 +285,6 @@ pub async fn run(args: Args, out: Out) -> i32 {
             },
             Err(e) => Err(e),
         },
-        "wake" => {
-            let Some((since, until)) = wait_bounds(&args) else { return usage(&out) };
-            ask(&client, &out, "wake_wait", json!({"id":id,"since":since,"until":until})).await
-        }
         "archive" | "unarchive" => ask(&client, &out, "archive", json!({"id":id,"on":verb=="archive"})).await,
         "pin" | "unpin" => ask(&client, &out, "pin", json!({"id":id,"on":verb=="pin"})).await,
         "rename" => ask(&client, &out, "rename", json!({"id":id,"title":args.word(2)})).await,
@@ -367,38 +329,8 @@ pub async fn run(args: Args, out: Out) -> i32 {
         Err(e) => e,
     }
 }
-
-fn wait_bounds(args: &Args) -> Option<(u64, u64)> {
-    Some((args.value("since")?.parse().ok()?, args.value("until")?.parse().ok()?))
-}
 async fn wait(client: &Client, out: &Out, id: &str, timeout: u64) -> i32 {
-    let mut latest = None;
-    let deadline = async {
-        if timeout == 0 {
-            std::future::pending::<()>().await;
-        }
-        tokio::time::sleep(Duration::from_secs(timeout)).await;
-    };
-    tokio::select! {
-        biased;
-        _ = tokio::signal::ctrl_c() => out::STOPPED,
-        _ = deadline => match latest {
-            Some(v) => {
-                out.result(&v);
-                out::TIMEOUT
-            }
-            None => out.fail("cli.error.waitTimeout", out::TIMEOUT),
-        },
-        code = wait_for_end(client, out, id, &mut latest) => code,
-    }
-}
-
-async fn wait_for_end(client: &Client, out: &Out, id: &str, latest: &mut Option<Value>) -> i32 {
-    // Start receiving before reading so a state change during the read cannot go unnoticed.
-    let mut events = match client.subscribe_state().await {
-        Ok(events) => events,
-        Err(_) => return out.fail("cli.error.channel", out::UNREACHED),
-    };
+    let start = Instant::now();
     loop {
         let v = match ask(client, out, "conversation", json!({"id":id,"last":1})).await {
             Ok(v) => v,
@@ -408,34 +340,19 @@ async fn wait_for_end(client: &Client, out: &Out, id: &str, latest: &mut Option<
             out.result(&v);
             return out::DONE;
         }
-        *latest = Some(v);
-        loop {
-            match events.recv().await {
-                Some(event) if faber_channel::wire::state_event(&event) => break,
-                Some(_) => {} // Older hosts may send unrelated events.
-                None => return out.fail("cli.error.channel", out::UNREACHED),
-            }
+        if timeout > 0 && start.elapsed() >= Duration::from_secs(timeout) {
+            out.result(&v);
+            return out::TIMEOUT;
         }
-        // The next read covers notices already buffered. Leave new arrivals during the read for the next round.
-        for _ in 0..events.len() {
-            let _ = events.try_recv();
-        }
+        tokio::select! { _=tokio::signal::ctrl_c()=>return out::STOPPED, _=tokio::time::sleep(Duration::from_millis(250))=>{} }
     }
 }
 async fn watch(client: &Client, out: &Out, args: &Args) -> i32 {
-    tokio::select! {
-        biased;
-        _ = tokio::signal::ctrl_c() => out::STOPPED,
-        code = watch_states(client, out, args) => code,
-    }
-}
-
-async fn watch_states(client: &Client, out: &Out, args: &Args) -> i32 {
-    let mut events = match client.subscribe_state().await {
+    let mut events = match client.subscribe().await {
         Ok(v) => v,
         Err(_) => return out.fail("cli.error.channel", out::UNREACHED),
     };
-    let mut previous: HashMap<String, (String, Option<Value>)> = HashMap::new();
+    let mut previous: HashMap<String, String> = HashMap::new();
     let mut initial = true;
     let mut last: Option<Instant> = None;
     loop {
@@ -462,89 +379,36 @@ async fn watch_states(client: &Client, out: &Out, args: &Args) -> i32 {
                 continue;
             }
             let state = row["state"].as_str().unwrap_or("");
-            let wait = row.get("waitingOn").filter(|w| w.is_object() && matches!(state, "working" | "waiting")).map(|w| {
-                let mut wait = json!({"since":w["since"],"until":w["until"]});
-                if let Some(problem) = w["problem"].as_str() {
-                    wait["problem"] = json!(problem);
-                }
-                wait
-            });
-            let current = (state.to_owned(), wait);
+            let was = previous.get(id).cloned();
             if initial && !["working", "waiting"].contains(&state) {
-                previous.insert(id.into(), current);
+                previous.insert(id.into(), state.into());
                 continue;
             }
-            let before = previous.get(id);
-            if before == Some(&current) {
+            if was.as_deref() == Some(state) {
                 continue;
             }
-            let was = before.map(|(state, _)| state.as_str());
             let mut line = json!({"type":"state","id":id,"title":row["title"],"state":state,"was":was,"family":row["family"]});
-            if let Some(wait) = &current.1 {
-                line["waitingOn"] = wait.clone();
-            }
-            if state == "idle" && matches!(was, Some("working" | "waiting")) {
+            if state == "idle" && was.as_deref().is_some_and(|s| s == "working" || s == "waiting") {
                 let detail = match ask(client, out, "conversation", json!({"id":id,"last":0})).await {
                     Ok(v) => v,
                     Err(e) => return e,
                 };
                 line["state"] = detail["state"].clone();
-                if detail["state"] == "concluded" && !detail["conclusion"].is_null() {
+                if !detail["conclusion"].is_null() {
                     line["conclusion"] = detail["conclusion"].clone();
                 }
             }
             out.result(&line);
-            previous.insert(id.into(), current);
+            previous.insert(id.into(), state.into());
         }
         initial = false;
-        // Older hosts may still send every event. Only reread on state notices or a missed event.
-        loop {
-            match events.recv().await {
-                Some(event) if faber_channel::wire::state_event(&event) => break,
-                Some(_) => {}
-                None => return out.fail("cli.error.channel", out::UNREACHED),
-            }
-        }
+        tokio::select! { _=tokio::signal::ctrl_c()=>return out::STOPPED, event=events.recv()=>if event.is_none() {return out.fail("cli.error.channel",out::UNREACHED)} }
     }
 }
 
 #[cfg(test)]
 mod parity {
     use super::VERBS;
-
-    #[tokio::test]
-    async fn watch_requests_state_notices_and_preserves_the_summary_read() {
-        use super::{Args, Client, Out, out, watch};
-        use crate::words::Words;
-        use faber_channel::Hello;
-        use serde_json::{Value, json};
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-        let (stream, peer) = tokio::io::duplex(4096);
-        let server = tokio::spawn(async move {
-            let mut peer = BufReader::new(peer);
-            let mut line = String::new();
-            let mut requests = vec![];
-            for response in [json!({"commands": []}), Value::Null, json!([])] {
-                line.clear();
-                assert!(peer.read_line(&mut line).await.unwrap() > 0);
-                let request: Value = serde_json::from_str(&line).unwrap();
-                peer.write_all(format!("{}\n", json!({"id": request["id"], "ok": response})).as_bytes()).await.unwrap();
-                requests.push(request);
-            }
-            requests
-        });
-        let client = Client::over(stream, Hello::default()).await.unwrap();
-        let options = Args::parse(["watch", "--project", "example"].map(str::to_string)).unwrap();
-        let code = watch(&client, &Out::new(true, false, Words::new("en")), &options).await;
-        let requests = server.await.unwrap();
-        assert_eq!(code, out::UNREACHED);
-        assert_eq!(requests[1]["cmd"], "subscribe");
-        assert_eq!(requests[1]["args"], json!({"stateOnly": true}));
-        assert_eq!(requests[2]["cmd"], "conversations");
-        assert_eq!(requests[2]["args"], json!({"archived":false,"projectId":"example"}));
-    }
-
     #[test]
     fn verb_commands_exist_and_free_reads_are_documented() {
         let commands: serde_json::Value = serde_json::from_str(include_str!("../commands.json")).unwrap();

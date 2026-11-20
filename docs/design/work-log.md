@@ -24,13 +24,6 @@ and a useful file location is allowed when the person needs to find or open an a
 - A click on a step row (`aria-expanded`) opens `div.step-detail` below it: for a file change, the changed lines
   (`ChangedLines`, up to 40 lines, then "N more lines"); otherwise the full command or path (`code.step-what`) and what
   it returned (`pre.step-out`, up to 30 lines, then "N more lines"). Long input text may show a short preview; commands and file paths stay whole.
-  For Codex, a failed MCP call keeps the provider's error or text result. A failed command with no output keeps its exit
-  code when reported. A project agent's step list includes reported command exit codes in its metadata. Faber's isolated
-  command tool sends a confirmed process exit code to the agent separately from command output and saves it as step metadata.
-  Long connector errors can supply the masked end for an authorized project-agent read, while the display and helper
-  journal keep their existing previews. A native web action keeps the reported query terms,
-  page address or find terms. The start and completion record those request fields without page contents. The native web
-  completion carries no success field or page-level error classification in the [published protocol](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json).
 - Thinking (`Thought`, `div.step.thought`) is a quiet row in its place among the steps: the shared thought icon (or the working ring
   while thinking), "Thought" (or "Thinking" while live) in the regular weight and the muted ink, so the answer's words lead the column, and its first line (or latest line while live) in one
   middle-cut line. A click opens `div.step-detail.thought-text` with all of its paragraphs (`thinkingParts`).

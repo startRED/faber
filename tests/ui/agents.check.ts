@@ -374,8 +374,8 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
   const root = document.createElement('div');
   document.body.append(root);
   const tools = [OWN, { ...HELPER, ok: true, output: 'Two mistakes in parser.rs.' }, HELPER_RUN];
-  const [message, setMessage] = createSignal<Message>({ id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools });
-  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
+  const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools };
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
   try {
     root.querySelector<HTMLButtonElement>('.team-fold')!.click();
     const row = root.querySelector<HTMLButtonElement>('.team-member')!;
@@ -385,9 +385,6 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
     equal(row.querySelector('.team-state [role=img]')!.getAttribute('aria-label'), 'finished', 'a helper that ran no check is finished, not done');
     ok(row.getAttribute('aria-label')!.includes('1 step'));
     equal(row.querySelector('.team-outcome')!.textContent, 'Two mistakes in parser.rs.');
-    setMessage({ ...message(), tools: [OWN, { ...tools[1]!, output: 'Two mistakes in render.rs.' }, HELPER_RUN] });
-    equal(root.querySelector('.team-member'), row, 'a revised report leaves the open fold in place');
-    equal(row.querySelector('.team-outcome')!.textContent, 'Two mistakes in render.rs.', 'a correction of the same length replaces the old report');
   } finally {
     dispose();
     root.remove();

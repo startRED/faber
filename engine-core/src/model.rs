@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -154,17 +153,11 @@ pub struct ToolUse {
     pub input: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
-    /// Exit code reported for a command. Older records and tools without a process have no code.
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "exitCode")]
-    pub exit_code: Option<i32>,
     /// No running CLI owns this unfinished agent call after restore or copy; no result or end time was observed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub interrupted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
-    /// Masked end of an oversized failure, kept for a selected-step read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_tail: Option<Arc<str>>,
     /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub declined: bool,
@@ -730,21 +723,11 @@ pub struct Wake {
     /// (`wake.childDone`), by their report ids, so a restart still finds each report delivered and never sends it twice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ids: Vec<String>,
-    /// A queued wait can take the place of a restart turn, or require an explicit send after Stop or a lost permission.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait_restart: Option<WaitRestart>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WaitRestart {
-    Resumed,
-    NeedsSend { after: String },
 }
 
 impl Wake {
     pub fn of(why: &str) -> Wake {
-        Wake { why: why.into(), pr: None, checks: vec![], ids: vec![], wait_restart: None }
+        Wake { why: why.into(), pr: None, checks: vec![], ids: vec![] }
     }
 
     /// Whether the message or queued item `own` (its id) carrying this wake delivered the report `id`.
@@ -807,20 +790,6 @@ pub struct KeepWait {
     pub why: String,
     /// Seconds since the Unix epoch.
     pub until: f64,
-    /// Identity within the running engine, even when two timers share a deadline.
-    #[serde(skip)]
-    pub timer_id: u64,
-    /// The original deadline stays in force if another command starts during the CLI's grace period.
-    #[serde(skip)]
-    pub command_limit: Option<KeepCommandLimit>,
-}
-
-/// The command timer that a fallback can yield back to without starting a second long wait.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KeepCommandLimit {
-    pub timer_id: u64,
-    pub until: f64,
-    pub elapsed: bool,
 }
 
 /// What "keep going" did since it was turned on, told on the newest reply once the person has been away a while.
@@ -1102,19 +1071,6 @@ pub struct Requirement {
 }
 
 impl WrapUp {
-    /// The reply body and closing words, as another agent reads them.
-    pub fn with_reply(&self, reply: &str) -> String {
-        format!("{reply}\n\n{}", self.visible_words()).trim().to_string()
-    }
-
-    /// The recap and question shown with the reply, without copying the reply body.
-    pub fn visible_words(&self) -> std::borrow::Cow<'_, str> {
-        match &self.ask {
-            Some(question) => std::borrow::Cow::Owned(format!("{}\n{question} ({})", self.recap, self.actions.join(" / "))),
-            None => std::borrow::Cow::Borrowed(&self.recap),
-        }
-    }
-
     /// The conclusion's outcome: the one the agent named, else what an older box meant (`done`, or a question for the person).
     /// None for a box that concludes nothing: it says what is not done and asks nothing.
     pub fn outcome(&self) -> Option<Outcome> {
@@ -1155,13 +1111,9 @@ impl Message {
         self.visual_file_count = (!self.visual_files.is_empty()).then_some(self.visual_files.len());
         self.visual_files.clear();
         // A subagent's words are loaded when its side chat opens (`Engine::child_words`), so they never ride in every update.
-        for call in self.tools.iter_mut().flatten() {
-            call.failure_tail = None;
-            call.exit_code = None;
-            if !call.words.is_empty() {
-                call.words_chars = Some(call.words.iter().map(|w| w.text.chars().count()).sum());
-                call.words.clear();
-            }
+        for call in self.tools.iter_mut().flatten().filter(|t| !t.words.is_empty()) {
+            call.words_chars = Some(call.words.iter().map(|w| w.text.chars().count()).sum());
+            call.words.clear();
         }
         self
     }
@@ -1170,7 +1122,25 @@ impl Message {
     /// repeat in words. Another AI taking over and a parent conversation read this, not the text alone.
     pub fn said(&self) -> String {
         let Some(w) = &self.wrap_up else { return self.text.clone() };
-        w.with_reply(&self.text)
+        let ask = w
+            .ask
+            .as_ref()
+            .map(|q| {
+                format!(
+                    "
+{q} ({})",
+                    w.actions.join(" / ")
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "{}
+
+{}{ask}",
+            self.text, w.recap
+        )
+        .trim()
+        .to_string()
     }
 
     pub fn new(id: String, role: Role, text: String, at: u64) -> Self {
@@ -1315,9 +1285,6 @@ pub struct WaitingOn {
     /// Why an automatic return could not be admitted. No automatic spending retry without a new event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
-    /// The engine failed to save this wait before attempting its return. A later good save can clear the blocker.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub storage_blocked: bool,
     /// The followed pull request as last read when the wait began: only a newer reading returns it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<WaitPr>,
@@ -1345,8 +1312,6 @@ struct SavedWaitingOn {
     since: u64,
     until: Option<u64>,
     problem: Option<String>,
-    #[serde(default, rename = "storageBlocked")]
-    storage_blocked: bool,
     #[serde(default)]
     pr: Option<WaitPr>,
 }
@@ -1359,7 +1324,6 @@ impl From<SavedWaitingOn> for WaitingOn {
             since: w.since,
             until: w.until.unwrap_or_else(|| w.since.saturating_add(300_000)),
             problem: w.problem,
-            storage_blocked: w.storage_blocked,
             pr: w.pr,
         }
     }
@@ -1388,9 +1352,6 @@ pub struct Conversation {
     /// Codex's saved thread is still in Plan; its first work turn must explicitly leave that prompt.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub codex_plan: bool,
-    /// The person's last explicit request to park or rearm this native thread's goal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex_goal_intent: Option<NativeGoalIntent>,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
@@ -1543,12 +1504,6 @@ pub struct Conversation {
     pub send_after_stop: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NativeGoalIntent {
-    pub thread: String,
-    pub hold: bool,
-}
-
 /// The context of a conversation's own agent: `used` tokens of a `window`, the point where its CLI compacts by itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1653,9 +1608,6 @@ pub struct Summary {
     /// running list read it, so they agree. Absent in a list from before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<crate::conversation_state::State>,
-    /// The last reply's own ending, before any live activity overrides it in the command line.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reply_state: Option<crate::conversation_state::ReplyState>,
     /// How far the agent's plan has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<PlanCount>,
@@ -2143,7 +2095,6 @@ impl Conversation {
     pub fn for_screen(mut self) -> Self {
         self.messages = self.messages.into_iter().map(Message::for_screen).collect();
         self.session_start_cards.clear();
-        self.codex_goal_intent = None;
         self.plan = self.shown_plan();
         self
     }

@@ -9,7 +9,8 @@ use serde_json::Value;
 
 /// Conversations and notes one answer lists; the rest are counted.
 const SHOWN: usize = 8;
-/// Request more hits than shown so the answer can report additional matches.
+/// What the search is asked for: more than is shown, so the count of the rest means something. The search reads at most one
+/// conversation file more than this for its hits.
 pub const ASKED: usize = 12;
 const NOTE_CHARS: usize = 240;
 const TITLE_CHARS: usize = 60;

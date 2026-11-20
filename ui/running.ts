@@ -4,31 +4,19 @@ import { lang, t } from './i18n.ts';
 import { ageNow } from './foot.ts';
 import { en, type Key } from './locales/en.ts';
 
-function knownWaitDeadline(until: number | undefined): until is number {
-  return !!until && Number.isFinite(new Date(until).getTime());
-}
-
-export function waitNeedsAttention(wait: Summary['waitingOn']): boolean {
-  if (!wait) return false;
-  if (wait.problem) return wait.problem !== 'reason.wait.stopped' && wait.problem !== 'reason.wait.archived';
-  return !knownWaitDeadline(wait.until) || wait.until <= Math.max(Date.now(), ageNow());
-}
-
 /** The saved return contract, shared by the sidebar, open thread and child rows. */
 export function waitWords(wait: Summary['waitingOn']): string | undefined {
   if (!wait) return undefined;
-  const savedNote = wait.note?.trim();
+  const note = wait.note?.trim() || (wait.ids?.length ? t('run.waitingOn', { n: wait.ids.length }) : t('child.waiting'));
   if (wait.problem) {
     const why = Object.hasOwn(en, wait.problem) ? t(wait.problem as Key) : t('wait.unknownProblem');
-    const problem = wait.problem === 'reason.budget.other' ? why : t('wait.blocked', { why });
-    return savedNote ? `${savedNote} · ${problem}` : problem;
+    return wait.problem === 'reason.budget.other' ? `${note} · ${why}` : `${note} · ${t('wait.blocked', { why })}`;
   }
-  const note = savedNote || (wait.ids?.length ? t('run.waitingOn', { n: wait.ids.length }) : t('child.waiting'));
-  if (!knownWaitDeadline(wait.until)) {
+  if (!wait.until || !Number.isFinite(wait.until) || !Number.isFinite(new Date(wait.until).getTime())) {
     return `${note} · ${t('wait.noDeadline')}`;
   }
   const when = new Intl.DateTimeFormat(lang(), { dateStyle: 'short', timeStyle: 'medium' }).format(wait.until);
-  return `${note} · ${t(waitNeedsAttention(wait) ? 'wait.overdue' : 'wait.until', { when })}`;
+  return `${note} · ${t(wait.until <= Math.max(Date.now(), ageNow()) ? 'wait.overdue' : 'wait.until', { when })}`;
 }
 
 // The running list on the screen (docs/design/layout.md, "Running column"). The engine builds and orders the list; the screen
@@ -100,7 +88,7 @@ export function doneCards(all: Summary[], items: RunningItem[], onScreen?: strin
  * answering in it right now, yet the work is not over. */
 export const isWaiting = (i: RunningItem): boolean => i.state === 'working' && !!(i.waitUntil || i.keepWait || i.waitingOn);
 
-/** The saved wait words in the running column. */
+/** What a row that waits for the conversations its agent started says: how many, else its agent's own words. */
 export function waitingOnWords(w: NonNullable<RunningItem['waitingOn']>): string {
   return waitWords(w)!;
 }

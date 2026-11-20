@@ -15,7 +15,7 @@ import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
-import { type Place, stateWords, waitNeedsAttention, waitWords } from './running.ts';
+import { type Place, stateWords, waitWords } from './running.ts';
 import { planWords } from './Plan.tsx';
 import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
@@ -405,7 +405,7 @@ export function Sidebar(props: Props) {
         }
       >
         <button class="item" aria-current={row.c.id === props.place.id} title={row.c.plan ? `${row.c.title} · ${planWords(row.c.plan)}` : undefined} onClick={() => props.onOpen(row.c)}>
-          <span title={waitWords(row.c.waitingOn)}>{row.c.title}<Show when={waitWords(row.c.waitingOn)}>{(words) => <small class="conversation-wait" classList={{ 'wait-attention': !row.c.archived && waitNeedsAttention(row.c.waitingOn) }}>{words()}</small>}</Show></span>
+          <span title={waitWords(row.c.waitingOn)}>{row.c.title}<Show when={waitWords(row.c.waitingOn)}>{(words) => <small class="conversation-wait">{words()}</small>}</Show></span>
           <Show when={row.c.archived}>
             <span class="tag-quiet">{t('archive.tag')}</span>
           </Show>

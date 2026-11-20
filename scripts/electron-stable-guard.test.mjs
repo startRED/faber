@@ -25,7 +25,7 @@ test('only the explicit switch allows stable; previews ignore the switch', () =>
       assert.equal(run('v1.2.3-preview.1'), 0, value);
     }
     set('{"allowed":true}');
-    assert.equal(run('v1.2.3'), 0, 'the switch on allows stable');
+    assert.notEqual(run('v1.2.3'), 0, 'unavailable release range');
     for (const tag of ['', 'v1.2', 'v1.2.3-rc.1', 'v1.2.3-preview.x']) assert.notEqual(run(tag), 0, tag);
     const committed = JSON.parse(readFileSync(new URL('release/electron-stable.json', root), 'utf8'));
     assert.deepEqual(Object.keys(committed), ['allowed']);
@@ -35,11 +35,19 @@ test('only the explicit switch allows stable; previews ignore the switch', () =>
   }
 });
 
-test('a stable reads the switch; a preview never does', () => {
+test('stable switch must be unchanged since the previous stable tag', () => {
+  const calls = [];
+  const git = (changed, tags = 'v1.2.2\nv1.2.3\nv1.2.4-preview.1') => (...args) => {
+    calls.push(args);
+    return args[0] === 'tag' ? tags : changed;
+  };
   const enabled = () => '{"allowed":true}';
-  assert.doesNotThrow(() => guard('v1.2.3', enabled));
-  assert.throws(() => guard('v1.2.3', () => '{"allowed":false}'), /disabled/);
-  assert.doesNotThrow(() => guard('v1.2.3-preview.1', () => { throw new Error('gate read'); }));
+  assert.throws(() => guard('v1.2.3', git('release/electron-stable.json'), enabled), /changed in the release range/);
+  assert.deepEqual(calls.at(-1), ['diff', '--name-only', 'v1.2.2..v1.2.3', '--', 'release/electron-stable.json']);
+  assert.doesNotThrow(() => guard('v1.2.3', git(''), enabled));
+  assert.throws(() => guard('v1.2.3', git('', 'v1.2.3'), enabled), /previous stable tag/);
+  assert.throws(() => guard('v1.2.3', () => { throw new Error('git failed'); }, enabled), /git failed/);
+  assert.doesNotThrow(() => guard('v1.2.3-preview.1', () => { throw new Error('git called'); }, () => { throw new Error('gate read'); }));
 });
 
 function checkWorkflow(text) {

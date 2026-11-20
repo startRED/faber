@@ -6,8 +6,8 @@ use crate::cadence::{Cadence, TICK};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
-use crate::codex::{CodexOpen, CodexServer, CodexServerOptions, CodexThread, NativeGoalOpen};
-use crate::events::{EngineEvent, Session, TOOL_OUTPUT_CHARS, UserTurn};
+use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
+use crate::events::{EngineEvent, Session, UserTurn};
 use crate::learn::Span;
 use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
@@ -102,7 +102,6 @@ mod versions;
 mod wait;
 pub use crate::usage::{VendorUsage, WindowUsage};
 pub use pr_watch::{PrReader, gh_reader};
-pub use wait::WaitCheck;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -198,7 +197,7 @@ pub struct EngineOptions {
     pub claude_env_billed: bool,
     /// At most this many idle Claude processes stay ready; Codex conversations share one process and do not count.
     pub max_warm: usize,
-    /// After this long, an eligible idle session can release resources and reopen on its next turn.
+    /// An idle Claude process closes after this long; its next turn resumes the same session.
     pub idle: Duration,
     /// Where session and timer tasks run, so the engine can be called from any thread.
     pub runtime: tokio::runtime::Handle,
@@ -271,18 +270,6 @@ pub struct TerminalCommand {
     pub cwd: PathBuf,
 }
 
-struct IdlePeriod {
-    generation: u64,
-    used: u64,
-    timer: tokio::task::AbortHandle,
-}
-
-impl Drop for IdlePeriod {
-    fn drop(&mut self) {
-        self.timer.abort();
-    }
-}
-
 struct Live {
     start_card: Option<String>,
     tool_kit: crate::tools::kits::Report,
@@ -337,10 +324,10 @@ struct Live {
     research: Option<crate::persona::Research>,
     /// A settings change replaces this session once its scheduled work ends.
     retiring: bool,
-    /// This Codex session was opened with a hold for a saved native goal.
-    codex_goal_held: bool,
-    /// Identifies the current idle period and the last use it was armed for.
-    idle_period: Option<IdlePeriod>,
+    /// Arms the idle timer once per idle period when the running state is refreshed.
+    was_idle: bool,
+    /// The turn ended while a background command it started still runs: the reply waits for it, not for the person.
+    command_wait: Option<command_wait::CommandWait>,
     /// The mode the CLI really runs: not `permissions` when the CLI lacks it (Claude Code without `auto`).
     runs: Permissions,
     /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
@@ -411,12 +398,9 @@ pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, 
 /// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
 /// The queued item `drain` sends next: the head after a finished reply, the oldest wake after a failed one without Keep going.
 fn next_queued(c: &Conversation) -> Option<usize> {
-    let last = c.messages.last()?;
-    match last.status {
-        Some(Status::Done) => c.queued.iter().position(|q| !wait::needs_send(q)),
-        Some(Status::Error) if c.keep_going.is_none() && last.error.as_deref() != Some(silence::SHARED_DELIVERY_UNKNOWN) => {
-            c.queued.iter().position(|q| q.wake.is_some() && !wait::needs_send(q))
-        }
+    match c.messages.last().and_then(|m| m.status) {
+        Some(Status::Done) => (!c.queued.is_empty()).then_some(0),
+        Some(Status::Error) if c.keep_going.is_none() => c.queued.iter().position(|q| q.wake.is_some()),
         _ => None,
     }
 }
@@ -535,9 +519,6 @@ struct Core {
     #[cfg(test)]
     kit_check_hook: Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>, std::sync::mpsc::Sender<Duration>)>,
     background: crate::background::Commands,
-    /// Replies waiting for a command stay at work even after the session that owned it retires.
-    command_waits: HashMap<String, command_wait::CommandWait>,
-    next_wait_timer: u64,
     background_pending: bool,
     opts: EngineOptions,
     store: Arc<Store>,
@@ -572,8 +553,6 @@ struct Core {
     /// What each conversation last read of another one in its running turn (`siblings.rs`), so reading it again with nothing new
     /// answers briefly. Never saved.
     sibling_reads: HashMap<(String, String), siblings::SeenRead>,
-    // A batch loads saved histories in sequence, with one batch reading from disk at a time.
-    sibling_history_gate: Arc<tokio::sync::Semaphore>,
     /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
     git: Option<copies::GitRunner>,
     git_missing: bool,
@@ -733,7 +712,7 @@ struct Core {
     given: HashMap<String, crate::route::Asked>,
     /// The pull request each project conversation follows, by conversation (R200), and what reads one.
     follows: HashMap<String, pr_watch::Watch>,
-    wait_timers: HashMap<String, wait::WaitTimer>,
+    wait_timers: HashMap<String, (u64, tokio::task::AbortHandle)>,
     pr_reader: PrReader,
     rewind: rewind::State,
     unclean_exit: Option<crate::crash::UncleanExit>,
@@ -826,8 +805,6 @@ impl Engine {
                 #[cfg(test)]
                 kit_check_hook: None,
                 background: Default::default(),
-                command_waits: HashMap::new(),
-                next_wait_timer: 0,
                 background_pending: false,
                 opts,
                 chat_dir,
@@ -849,7 +826,6 @@ impl Engine {
                 stage_told: HashMap::new(),
                 quiet_teams: HashMap::new(),
                 sibling_reads: HashMap::new(),
-                sibling_history_gate: Arc::new(tokio::sync::Semaphore::new(1)),
                 live: HashMap::new(),
                 closed_continues: HashMap::new(),
                 update_resumes: HashSet::new(),
@@ -962,7 +938,7 @@ impl Engine {
         Ok(engine)
     }
 
-    /// The rest of a start, which finds saved recovery candidates (`Store::start_scan`) with the engine free: the
+    /// The rest of a start, which reads every conversation file once (`Store::start_scan`) with the engine free: the
     /// reports owed to team leaders are queued, and each conversation Keep going was on in goes on (`resume_keep_going`).
     pub fn settle_start(&self) {
         let keep_going = self.settle();
@@ -1206,34 +1182,6 @@ impl Engine {
         self.with(|c| c.state())
     }
 
-    pub fn projects(&self) -> Vec<Project> {
-        self.with(|c| c.project_catalog())
-    }
-
-    pub fn quota_view(&self) -> (Vec<QuotaReading>, Vec<VendorUsage>) {
-        self.with(|c| (c.quota_readings(), c.usage()))
-    }
-
-    /// The conversation list uses saved summaries and live activity, without assembling the screen's state.
-    pub fn conversation_list(&self) -> (Vec<Summary>, Vec<(String, RunState)>) {
-        self.with(|core| {
-            let mut rows = core.listed_rows();
-            for row in &mut rows {
-                if let Some(c) = core.convs.get(&row.id) {
-                    row.reply_state = Some(crate::conversation_state::ReplyState::of(c.messages.last()));
-                    row.waiting_on.clone_from(&c.waiting_on);
-                }
-            }
-            let running = core
-                .running
-                .items
-                .iter()
-                .filter_map(|item| core.read_run_state(item).map(|state| (item.conversation_id.clone(), state)))
-                .collect();
-            (rows, running)
-        })
-    }
-
     pub fn background_commands(&self) -> crate::background::List {
         self.with(|c| c.background.list())
     }
@@ -1259,57 +1207,6 @@ impl Engine {
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|core| core.opened(id))
-    }
-    /// Project a read-only view without cloning the history or changing the person's selection.
-    pub fn view_conversation<T>(&self, id: &str, view: impl FnOnce(&Conversation, Option<RunState>) -> T) -> Option<T> {
-        self.with(|core| {
-            let running = core.running.items.iter().find(|item| item.conversation_id == id).map(|item| item.state);
-            core.load(id).map(|conversation| view(conversation, running))
-        })
-    }
-    /// An already open history is borrowed. Opening a saved page does not retain it or hold the engine lock.
-    /// With no starting offset, select the most recent `limit` messages. The view receives the state for reads and
-    /// whether the running panel has an item, which also covers a declared wait by itself.
-    pub fn view_history<T>(
-        &self,
-        id: &str,
-        start: Option<usize>,
-        limit: usize,
-        view: impl FnOnce(crate::history::Page<'_>, Option<RunState>, bool) -> T,
-    ) -> Option<T> {
-        let (store, view) = match self.with(|core| {
-            let Some(c) = core.convs.get(id) else { return Err((core.store.clone(), view)) };
-            let item = core.running.items.iter().find(|item| item.conversation_id == id);
-            let start = start.unwrap_or_else(|| c.messages.len().saturating_sub(limit));
-            Ok(view(crate::history::Page::borrowed(c, start, limit), item.and_then(|i| core.read_run_state(i)), item.is_some()))
-        }) {
-            Ok(value) => return Some(value),
-            Err(cold) => cold,
-        };
-        let mut page = match start {
-            Some(start) => store.history_page(id, start, limit, None),
-            None => store.history_tail(id, limit),
-        }?;
-        // Same interrupted reply and message status as a cold full read, without restoring any running state.
-        if let Some(reply) = page.last_reply.as_mut().filter(|r| r.status == Some(Status::Streaming)) {
-            reply.closed = true;
-            reply.status = Some(Status::Stopped);
-        }
-        for m in page.messages.to_mut() {
-            m.closed |= m.status == Some(Status::Streaming);
-            settle(m);
-        }
-        Some(view(page, None, false))
-    }
-    /// A role-filtered index of message positions, using the saved record off the engine lock when closed.
-    pub fn conversation_headers(&self, id: &str, start: usize, limit: usize, role: Option<Role>) -> Option<crate::history::Headers> {
-        match self.with(|c| c.convs.get(id).map(|c| crate::history::Headers::of(c, start, limit, role)).ok_or_else(|| c.store.clone())) {
-            Ok(headers) => Some(headers),
-            Err(store) => store
-                .history_headers(id, start, limit, role, None)
-                .filter(|(_, version)| store.history_version_is_current(id, *version))
-                .map(|(headers, _)| headers),
-        }
     }
     /// A bounded screen-ready read without changing the person's selection or closing temporary chats.
     pub fn read_window(&self, id: &str, newest: usize) -> Option<Conversation> {
@@ -1519,14 +1416,7 @@ impl Engine {
     }
     pub fn interrupt(&self, id: &str) {
         // One lock for all of it: no completion can send a turn in between.
-        self.with(|core| {
-            let current = core.live.get(id).filter(|l| l.vendor == Vendor::Codex).and_then(|l| l.unsaved_session.clone());
-            if let Some(c) = core.load(id) {
-                c.codex_goal_intent =
-                    current.or_else(|| c.resumable(Vendor::Codex).cloned()).map(|thread| NativeGoalIntent { thread, hold: true });
-            }
-            core.interrupt(id, true);
-        })
+        self.with(|c| c.interrupt(id, true))
     }
     /// Opens a session started in a terminal as a project conversation (parity F5). Gives the conversation's id.
     pub fn pick_up(&self, project_id: &str, session: crate::model::CliSession) -> Result<String, String> {
@@ -1893,7 +1783,7 @@ impl Engine {
             if !projects.iter().any(|p| p.id == id) {
                 return Err("error.project.notFound".into());
             }
-            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && c.running_item(conv).is_some()) {
+            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, c.live.get(&conv.id)).is_some()) {
                 return Err("error.project.busy".into());
             }
             projects.retain(|p| p.id != id);
@@ -1991,9 +1881,6 @@ impl Engine {
                     m.closed = true;
                     m.overload_retry = None;
                     conv.pending_parent_report |= conv.started_by.is_some() && conv.keep_going.is_none();
-                }
-                if let Some(conv) = c.convs.get_mut(&id).filter(|conv| wait::has_open_permission(conv)) {
-                    wait::hold_queued_returns(conv);
                 }
                 c.stop_waiting(&id, false);
             }
@@ -2235,13 +2122,15 @@ impl Core {
         }
     }
 
-    fn child_tool(&self, conv: &str, id: &str) -> Option<(&ToolUse, String)> {
-        self.convs.get(conv)?.messages.iter().rev().flat_map(|message| message.tools.iter().flatten()).find(|tool| tool.id == id).and_then(
-            |tool| {
-                let owner = if tool.transcript.is_some() { &tool.id } else { tool.parent.as_ref()? };
-                Some((tool, owner.clone()))
-            },
-        )
+    fn child_owner(&self, conv: &str, id: &str) -> Option<String> {
+        self.convs
+            .get(conv)?
+            .messages
+            .iter()
+            .rev()
+            .flat_map(|message| message.tools.iter().flatten())
+            .find(|tool| tool.id == id)
+            .and_then(|tool| tool.transcript.as_ref().map(|_| tool.id.clone()).or_else(|| tool.parent.clone()))
     }
     /// The time in Unix seconds.
     fn secs(&self) -> f64 {
@@ -2557,8 +2446,8 @@ impl Core {
             self.old_inputs_pending.insert(id.to_string());
             self.save_soon();
         }
-        let needs = self.reply_needs_you(self.convs.get(id)?);
         let conv = self.convs.get_mut(id)?;
+        let needs = reply_needs_you(conv, self.live.get(id));
         // The other messages never leave the loaded conversation, so a window of a huge one costs only its own messages.
         let all = std::mem::take(&mut conv.messages);
         let mut c = conv.clone();
@@ -2575,10 +2464,6 @@ impl Core {
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
         if !self.convs.contains_key(id) {
             let mut c = self.store.get(id)?;
-            // Losing a request with its process is not approval to send a saved automatic return on the next start.
-            if c.messages.last().is_some_and(|m| m.closed || m.status == Some(Status::Streaming)) && wait::has_open_permission(&c) {
-                wait::hold_queued_returns(&mut c);
-            }
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(|m| {
                 m.closed |= m.status == Some(Status::Streaming);
@@ -2705,7 +2590,6 @@ impl Core {
             }
             return Err(key.to_string());
         }
-        self.wait_storage_saved(id);
         Ok(())
     }
 
@@ -2746,13 +2630,9 @@ impl Core {
         None
     }
 
-    fn quota_readings(&self) -> Vec<QuotaReading> {
+    fn state(&self) -> AppState {
         let mut quotas: Vec<QuotaReading> = self.quotas.values().cloned().collect();
         quotas.sort_by(|a, b| (a.vendor, &a.window).cmp(&(b.vendor, &b.window)));
-        quotas
-    }
-
-    fn project_catalog(&self) -> Vec<Project> {
         let states = self.project_states.lock().unwrap_or_else(|e| e.into_inner());
         let mut projects = self.store.projects();
         for project in &mut projects {
@@ -2760,20 +2640,16 @@ impl Core {
                 project.set_state(*state);
             }
         }
-        projects
-    }
-
-    fn state(&self) -> AppState {
         AppState {
             git_reason: self.git_missing.then_some("reason.git_missing"),
             background: self.background.list(),
             conversations: self.listed(),
-            projects: self.project_catalog(),
+            projects,
             groups: self.store.chat_groups().unwrap_or_default(),
             vendors: self.vendors(),
             settings: self.store.settings(),
             running: self.running.clone(),
-            quotas: self.quota_readings(),
+            quotas,
             usage: self.usage(),
             unclean_exit: self.unclean_exit,
         }
@@ -2782,24 +2658,6 @@ impl Core {
     /// The sidebar's conversations. A loaded conversation states itself from memory (a turn running now, or not); one that is
     /// not loaded and was saved with a reply still streaming was cut by Faber closing or crashing mid-turn: interrupted.
     fn listed(&self) -> Vec<Summary> {
-        let mut list = self.listed_rows();
-        for row in &mut list {
-            row.follow_ups = self.ready_follow_ups(&row.id, &row.follow_ups);
-            row.state = match self.convs.get(&row.id) {
-                Some(c) => (!c.messages.is_empty()).then(|| ended::run_state(c, self.live.get(&row.id).is_some_and(|l| l.turn.is_some()))),
-                None if row.state == Some(crate::sibling::State::Working)
-                    && !self.running.items.iter().any(|i| i.conversation_id == row.id) =>
-                {
-                    Some(crate::sibling::State::Interrupted)
-                }
-                None => row.state,
-            };
-        }
-        list
-    }
-
-    /// List metadata with newer pending records, before any sidebar-only work.
-    fn listed_rows(&self) -> Vec<Summary> {
         let mut list: Vec<Summary> = self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect();
         let pending = self.saves.pending.lock().unwrap_or_else(|e| e.into_inner());
         for id in pending.keys() {
@@ -2815,6 +2673,18 @@ impl Core {
         }
         list.retain(|row| !row.title.is_empty() && !self.convs.get(&row.id).is_some_and(|c| c.temporary));
         list.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
+        for row in &mut list {
+            row.follow_ups = self.ready_follow_ups(&row.id, &row.follow_ups);
+            row.state = match self.convs.get(&row.id) {
+                Some(c) => (!c.messages.is_empty()).then(|| ended::run_state(c, self.live.get(&row.id).is_some_and(|l| l.turn.is_some()))),
+                None if row.state == Some(crate::sibling::State::Working)
+                    && !self.running.items.iter().any(|i| i.conversation_id == row.id) =>
+                {
+                    Some(crate::sibling::State::Interrupted)
+                }
+                None => row.state,
+            };
+        }
         list
     }
 
@@ -2945,7 +2815,6 @@ impl Core {
                     self.finish(&id, live.turn);
                 }
             }
-            self.stop_helpers_for_settings(to, settings.tuning().web);
         }
         // The blank conversation being typed was started with the old name; the next one starts with the new one.
         if settings.user_name != before.user_name {
@@ -3063,17 +2932,16 @@ impl Core {
         }
         if by_person && let Some(conv) = self.convs.get_mut(id) {
             conv.stopped = true;
-            wait::hold_queued_returns(conv);
             if let Some(wait) = conv.waiting_on.as_mut() {
                 wait.problem = Some("reason.wait.stopped".into());
-                wait.storage_blocked = false;
             }
             conv.send_after_stop = None;
             conv.queued.retain(|q| q.wake.as_ref().is_none_or(|w| w.why != "wake.approvedPlan"));
         }
         if by_person {
-            self.command_waits.remove(id);
-            self.cancel_wait_timer(id);
+            if let Some((_, timer)) = self.wait_timers.remove(id) {
+                timer.abort();
+            }
             if self.convs.get(id).is_some_and(|c| c.waiting_on.is_some()) {
                 // The list drops the wait's deadline now, even when no turn runs to announce the Stop.
                 self.list_changed();
@@ -3170,13 +3038,8 @@ impl Core {
     }
 
     fn handle(&mut self, conv: &str, sid: u64, event: EngineEvent) {
-        self.handle_with_failure_tail(conv, sid, event, None);
-    }
-
-    fn handle_with_failure_tail(&mut self, conv: &str, sid: u64, event: EngineEvent, failure_tail: Option<Arc<str>>) {
         let current = self.live.get(conv).is_some_and(|entry| entry.sid == sid);
         if let EngineEvent::Background(update) = event {
-            let started = matches!(update, crate::background::Update::Start { .. });
             let ended = matches!(update, crate::background::Update::End { .. });
             let owner = self
                 .live
@@ -3185,52 +3048,26 @@ impl Core {
                 .map(|l| (l.vendor, l.session.clone()))
                 .or_else(|| self.rewind_retired_session(conv, sid))
                 .or_else(|| self.background.session(conv, sid));
-            let changed = if let Some((vendor, session)) = owner {
-                self.background.update(conv, sid, vendor, &session, update, now())
-            } else {
-                self.background.late_update(Some(conv), sid, &update);
-                false
-            };
-            if changed {
+            if let Some((vendor, session)) = owner
+                && self.background.update(conv, sid, vendor, &session, update, now())
+            {
                 self.emit_background();
                 self.refresh_running();
-                if started {
-                    self.command_started(conv);
-                } else if ended {
+                if ended {
                     self.command_ended(conv);
                 }
             }
             return;
         }
-        let mut command_wait_on_exit = None;
-        if matches!(event, EngineEvent::WriterExit { confirmed: true }) {
-            let lost_command = self.background.running_for(sid);
-            if self.background.exited(conv, sid, now()) {
-                self.emit_background();
-                if lost_command && !self.closing {
-                    match self.live.get(conv) {
-                        None => self.command_ended(conv),
-                        // Codex can confirm exit before reporting failure. Wait for retirement before sending the next turn.
-                        Some(live) if live.sid == sid && live.turn.is_none() && !self.background.running_in(conv) => {
-                            command_wait_on_exit = self.command_wait_key(conv);
-                        }
-                        // A prepared replacement can serve a reply still waiting for the old session's last command.
-                        // A Keep going wait may belong to the replacement and is handled by its own timer.
-                        Some(live) if live.sid != sid => self.command_wait_ended(conv, false),
-                        _ => {}
-                    }
-                }
-            }
+        if matches!(event, EngineEvent::WriterExit { confirmed: true }) && self.background.exited(conv, sid) {
+            self.emit_background();
         }
         // A replaced session still owns its writers; no other late event may reach the new reply.
         if matches!(event, EngineEvent::Writers { .. } | EngineEvent::WriterExit { .. })
             && (current || self.rewind_tracks_session(conv, sid))
         {
-            self.rewind_event(conv, sid, &event, command_wait_on_exit);
+            self.rewind_event(conv, sid, &event);
             self.refresh_running();
-            if !current && matches!(event, EngineEvent::WriterExit { confirmed: true }) {
-                self.evict_if_unused(conv);
-            }
             return;
         }
         if !current {
@@ -3239,7 +3076,7 @@ impl Core {
         if self.native_fork_event(conv, &event) {
             return;
         }
-        if self.rewind_event(conv, sid, &event, None) {
+        if self.rewind_event(conv, sid, &event) {
             self.refresh_running();
             return;
         }
@@ -3252,28 +3089,6 @@ impl Core {
         }
         if matches!(event, EngineEvent::OwnTurn) {
             return self.own_turn(conv);
-        }
-        if let EngineEvent::NativeGoalHoldCleared { session_id, after_rearm } = event {
-            if let Some(c) = self.convs.get_mut(conv).filter(|c| {
-                c.codex_goal_intent.as_ref().is_some_and(|intent| intent.thread == session_id && (!after_rearm || !intent.hold))
-            }) {
-                c.codex_goal_intent = None;
-                if let Some(live) = self.live.get_mut(conv) {
-                    live.codex_goal_held = false;
-                }
-                self.save(conv);
-            }
-            return;
-        }
-        if let EngineEvent::CompactFinished(outcome) = event {
-            if self.convs.get(conv).is_some_and(|c| c.compacting) {
-                match outcome {
-                    crate::events::CompactOutcome::Unconfirmed => self.compaction_unconfirmed(conv),
-                    crate::events::CompactOutcome::Applied => self.compaction_ended(conv, true),
-                    crate::events::CompactOutcome::Failed => self.compaction_ended(conv, false),
-                }
-            }
-            return;
         }
         let entry = self.live.get(conv).expect("session checked above");
         let (vendor, resumed) = (entry.vendor, entry.resumed);
@@ -3318,10 +3133,7 @@ impl Core {
             self.save(conv);
         }
         // While the context is compacted only its end matters (`compact.rs`).
-        if self.convs.get(conv).is_some_and(|c| c.compacting)
-            && (turn_id.is_none() || matches!(event, EngineEvent::Error { fatal: true, .. }))
-            && self.compaction_event(conv, vendor, &event)
-        {
+        if self.convs.get(conv).is_some_and(|c| c.compacting) && self.compaction_event(conv, &event) {
             return;
         }
         // A completed turn may still report usage while its process closes; it cannot start more work.
@@ -3548,8 +3360,6 @@ impl Core {
                         input,
                         ok: None,
                         output: None,
-                        failure_tail: None,
-                        exit_code: None,
                         declined: false,
                         interrupted: false,
                         parent,
@@ -3604,14 +3414,7 @@ impl Core {
                     }
                 }
             }
-            EngineEvent::ToolDetached { id } => {
-                if let Some(live) = self.live.get_mut(conv) {
-                    live.open_tools.retain(|open| *open != id);
-                }
-                self.start_team_timers(conv);
-                self.hand_over_at_step(conv);
-            }
-            EngineEvent::ToolResult { id, ok, declined, exit_code, text } => {
+            EngineEvent::ToolResult { id, ok, declined, text } => {
                 if self.helper_call_released(conv, &id) {
                     if let Some(live) = self.live.get_mut(conv) {
                         live.open_tools.retain(|open| *open != id);
@@ -3619,42 +3422,29 @@ impl Core {
                     self.start_team_timers(conv);
                     return self.hand_over_at_step(conv);
                 }
-                let (background, private_read) = self.tool_of(conv, &id).map_or((false, false), |tool| {
-                    (
-                        !declined && crate::model::runs_in_background(tool),
-                        tool.name == crate::sibling::TOOL
-                            && tool.input["action"].as_str().is_some_and(|action| action.trim() == "command_results"),
-                    )
-                });
-                // The selected output was delivered to the caller. Its echo need not enter the saved work log.
-                let text = if private_read && ok { String::new() } else { text };
-                if let Some((tool, owner)) = self.child_tool(conv, &id) {
-                    // Long connector failures reach the masker, but their raw helper journal keeps its previous preview.
-                    let end = if !ok && tool.name == "mcpToolCall" {
-                        text.char_indices().nth(TOOL_OUTPUT_CHARS).map_or(text.len(), |(at, _)| at)
-                    } else {
-                        text.len()
-                    };
-                    self.keep_child_event(conv, &owner, crate::transcript::TranscriptKind::Result, Some(&id), &text[..end]);
+                if let Some(owner) = self.child_owner(conv, &id) {
+                    self.keep_child_event(conv, &owner, crate::transcript::TranscriptKind::Result, Some(&id), &text);
                 }
                 if let Some(l) = self.live.get_mut(conv) {
                     l.open_tools.retain(|open| *open != id);
                 }
                 self.start_team_timers(conv);
                 let current = self.live.get(conv).and_then(|l| l.turn.clone());
-                // A helper sent to the background answers its call as soon as it starts; its end comes as `HelperDone`.
+                let mut background = false;
+                if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
+                    let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
+                    // A helper sent to the background answers its call as soon as it starts; its end comes as `HelperDone`.
+                    background = !declined && crate::model::runs_in_background(tool);
+                }
                 if background {
                     return self.hand_over_at_step(conv);
                 }
-                let keep_failure_tail = !ok && !declined && self.convs.get(conv).is_some_and(|c| c.area == Area::Project && !c.temporary);
                 if let Some(m) = self.convs.get_mut(conv).and_then(|c| message_with_tool(&mut c.messages, current.as_deref(), &id)) {
                     let tool = m.tools.as_mut().unwrap().iter_mut().find(|t| t.id == id).unwrap();
                     tool.ok = Some(ok);
                     tool.ended = Some(now());
                     tool.declined = declined;
-                    tool.exit_code = if declined { None } else { exit_code.or(tool.exit_code) };
-                    tool.failure_tail = failure_tail.filter(|_| keep_failure_tail && !tool.interrupted);
-                    tool.output = Some(text.chars().take(TOOL_OUTPUT_CHARS).collect());
+                    tool.output = Some(text.chars().take(4000).collect());
                     let committed = ok
                         && !declined
                         && crate::nudge::command(tool).is_some_and(|c| crate::follow::committed(c, tool.output.as_deref().unwrap_or("")));
@@ -3678,7 +3468,7 @@ impl Core {
                 if let Some(tool) = self.tool_of(conv, &id).filter(|t| t.ok.is_none()) {
                     tool.ok = Some(ok);
                     tool.ended = Some(now());
-                    tool.output = Some(text.chars().take(TOOL_OUTPUT_CHARS).collect());
+                    tool.output = Some(text.chars().take(4000).collect());
                 }
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
@@ -3819,7 +3609,7 @@ impl Core {
             EngineEvent::Injected { tag: Some(ref tag) } | EngineEvent::SteerFailed { ref tag } if tag.starts_with("team:") => {}
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
             // Handled before the turn is read (`own_turn`).
-            EngineEvent::OwnTurn | EngineEvent::NativeGoalHoldCleared { .. } | EngineEvent::CompactFinished(_) => {}
+            EngineEvent::OwnTurn => {}
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => return self.apply_signals(vendor, s),
@@ -3993,15 +3783,9 @@ impl Core {
                 return;
             }
             EngineEvent::Error { message, fatal } => {
-                // A start refusal describes this request only. The server's text is diagnostic, not an account or resume signal.
-                let rejected = fatal && vendor == Vendor::Codex && message.starts_with(crate::codex::TURN_START_FAILURE);
-                // A message handed to a dead shared service may already be in its history. Keep it for a deliberate send.
-                let hold_queue = fatal
-                    && message == crate::codex::SHARED_SERVICE_STOPPED
-                    && self.convs.get(conv).is_some_and(|c| c.queued.iter().any(|q| q.sending));
                 // A completed turn's closing process may fail instead of reporting final counters. Work already queued
                 // after that turn still goes through the normal path; missing counters are never presented as zero use.
-                if fatal && !hold_queue && self.turn(conv).is_some_and(|m| m.status == Some(Status::Done)) {
+                if fatal && self.turn(conv).is_some_and(|m| m.status == Some(Status::Done)) {
                     self.note_turn(conv, None, true);
                     if let Some(m) = self.turn(conv) {
                         m.incomplete = Some(true);
@@ -4012,28 +3796,9 @@ impl Core {
                     return self.finish(conv, turn_id);
                 }
                 // The process Faber cut for its silence says why, not that the interrupt timed out (`silence.rs`).
-                let mut message = if hold_queue {
-                    silence::SHARED_DELIVERY_UNKNOWN.into()
-                } else if fatal && self.silenced(conv) {
-                    silence::said(&message).to_string()
-                } else {
-                    message
-                };
-                if fatal && vendor == Vendor::Codex && message == crate::codex::IDLE_RESUME_UNCONFIRMED {
-                    let can_resend = resumed
-                        && self.transfers.get(conv).is_some_and(|transfer| Some(transfer.reply.as_str()) == turn_id.as_deref())
-                        && !self.reply_has_work(conv, turn_id.as_deref());
-                    if can_resend && let Some(c) = self.convs.get_mut(conv).filter(|c| !c.stopped && !c.tentative.contains_key(&vendor)) {
-                        // This request was still waiting for admission. The saved transcript can open a fresh thread once.
-                        c.forget_session(vendor);
-                        if self.rerun_fresh(conv, turn_id.as_deref()) {
-                            return;
-                        }
-                    }
-                    message = "reason.codexThreadOpenTimeout".into();
-                }
+                let mut message = if fatal && self.silenced(conv) { silence::said(&message).to_string() } else { message };
                 // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
-                if fatal && !rejected && resumed && recovery::session_lost(&message) {
+                if fatal && resumed && recovery::session_lost(&message) {
                     // Only a session that never took a turn may be replaced silently: not one whose turn was accepted, and not
                     // a reply that already holds work (partial text, tool actions, a retry after the quota ran out).
                     let silent = !self.convs.get(conv).is_some_and(|c| c.tentative.contains_key(&vendor))
@@ -4051,24 +3816,20 @@ impl Core {
                 }
                 // A CLI that refuses a flag Faber passed (it was changed under a running Faber): forget the newer flags at once, so the
                 // next launch is the old one, and read the new help.
-                if fatal && !rejected && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
+                if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
                     self.claude_flags = Default::default();
                     self.claude_fork = false;
                     self.probe_claude_flags();
                 }
-                let limited = fatal && !rejected && recovery::plan_limit(&message);
-                let stopped = rejected && self.convs.get(conv).is_some_and(|c| c.stopped);
+                let limited = fatal && recovery::plan_limit(&message);
                 if let Some(m) = self.turn(conv) {
-                    m.error = (!stopped).then_some(message);
+                    m.error = Some(message);
                     if fatal {
-                        m.status = Some(if stopped { Status::Stopped } else { Status::Error });
+                        m.status = Some(Status::Error);
                         m.permissions = None;
                     }
                 }
                 if fatal {
-                    if hold_queue && let Some(reply) = &turn_id {
-                        self.halt(conv, reply, silence::KEEP_GOING_DELIVERY_UNKNOWN);
-                    }
                     self.unwatch(conv);
                     self.note_turn(conv, None, true);
                     self.stop_helpers(conv, true);
@@ -4197,9 +3958,8 @@ impl Core {
         };
         // A turn that delivered ends a stuck run, whether or not Keep going sends another.
         self.clear_dry_delivery(conv);
-        // A turn that failed or was stopped cancels its own request, but cannot cancel a compaction
-        // already started by a previous turn.
-        if !completed_ok && !self.convs.get(conv).is_some_and(|c| c.compacting) {
+        // A turn that failed or was stopped compacts nothing: the agent's request ended with it.
+        if !completed_ok {
             self.compacts.remove(conv);
         }
         let approving = self
@@ -4251,97 +4011,50 @@ impl Core {
     /// A scheduled compaction/continuation is work even when no CLI turn runs. An unsent queue can stay
     /// after Stop and needs no live process, regardless of whether the running list already consumed `stopped`.
     fn session_idle(&self, conv: &str) -> bool {
-        self.session_work_drained(conv) && !self.rewind_writing(conv)
-    }
-
-    fn session_work_drained(&self, conv: &str) -> bool {
         !self.live.get(conv).is_some_and(|l| l.turn.is_some())
             && !self.background.running_in(conv)
             && !self.helpers_in(conv)
-            && self.waiting_command(conv).is_none()
+            && !self.live.get(conv).is_some_and(|l| l.command_wait.is_some())
+            && !self.rewind_writing(conv)
             && !self.compacts.contains_key(conv)
             && self.convs.get(conv).is_none_or(|c| {
                 !c.compacting && c.keep_going.is_none() && c.messages.last().is_none_or(|m| m.status != Some(Status::Streaming))
             })
     }
 
-    fn codex_idle_thread(&self, conv: &str, live: &Live) -> Option<&str> {
-        let conversation = self.convs.get(conv)?;
-        // The native driver also checks its queues and owners, including writers outside the engine's view.
-        if live.retiring
-            || live.prepared
-            || !live.steering.is_empty()
-            || conversation.temporary
-            || !self.session_work_drained(conv)
-            || self.rewind_writing_except_shared_tree(conv, true)
-        {
-            return None;
-        }
-        conversation.sessions.get(&Vendor::Codex).map(String::as_str)
-    }
-
     /// Replaced sessions close as soon as their work ends. Otherwise an idle process closes after a
     /// while; the next turn resumes the same session. Any newer use cancels the timer.
     fn close_when_idle(&mut self, conv: &str) {
         self.try_seal_rewind(conv);
+        if !self.session_idle(conv) {
+            return;
+        }
         if self.live.get(conv).is_some_and(|l| l.retiring) {
-            if self.session_idle(conv)
-                && let Some(l) = self.retire(conv)
-            {
+            if let Some(l) = self.retire(conv) {
                 l.session.close();
                 self.evict_idle();
             }
             return;
         }
-        self.arm_idle_period(conv, self.opts.idle, true);
-    }
-
-    fn arm_idle_period(&mut self, conv: &str, delay: Duration, can_retry: bool) {
-        let Some(l) = self.live.get_mut(conv) else { return };
-        let (sid, used) = (l.sid, l.used);
-        self.tick += 1;
-        let generation = self.tick;
-        let (me, owned_conv) = (self.me.clone(), conv.to_string());
-        let timer = self
-            .opts
-            .runtime
-            .spawn(async move {
-                let conv = owned_conv;
-                tokio::time::sleep(delay).await;
-                let Some(core) = me.upgrade() else { return };
-                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                let current = move |l: &&Live| {
-                    l.sid == sid && l.used == used && l.idle_period.as_ref().is_some_and(|period| period.generation == generation)
-                };
-                let Some(l) = core.live.get(&conv).filter(current) else { return };
-                if l.vendor == Vendor::Codex {
-                    let Some(thread) = core.codex_idle_thread(&conv, l).map(str::to_owned) else { return };
-                    l.session.release_idle(thread.clone(), move |ready| {
-                        let Some(core) = me.upgrade() else { return false };
-                        let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                        let Some(l) = core.live.get(&conv).filter(current) else { return false };
-                        if core.codex_idle_thread(&conv, l) != Some(thread.as_str()) {
-                            return false;
-                        }
-                        if !ready {
-                            if can_retry {
-                                core.arm_idle_period(&conv, Duration::from_secs(10), false);
-                            }
-                            return false;
-                        }
-                        // No engine lock spans the goal lookup. A concurrent Send sees either the original session or a successor.
-                        core.retire(&conv).is_some()
-                    });
-                } else if core.session_idle(&conv)
-                    && let Some(l) = core.retire(&conv)
-                {
-                    l.session.close();
-                    // The closed session was the last thing using it, unless the screen still shows it.
-                    core.evict_idle();
-                }
-            })
-            .abort_handle();
-        l.idle_period = Some(IdlePeriod { generation, used, timer });
+        let Some(l) = self.live.get(conv) else { return };
+        if l.vendor != Vendor::Claude {
+            return;
+        }
+        let (sid, used, idle) = (l.sid, l.used, self.opts.idle);
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        tokio::spawn(async move {
+            tokio::time::sleep(idle).await;
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used)
+                && core.session_idle(&conv)
+                && let Some(l) = core.retire(&conv)
+            {
+                l.session.close();
+                // The closed session was the last thing using it, unless the screen still shows it.
+                core.evict_idle();
+            }
+        });
     }
 
     fn push(&mut self, conv: &str, message_id: Option<&str>, immediate: bool) {
@@ -4373,7 +4086,7 @@ impl Core {
             && let Some(m) = c.messages.iter().find(|m| m.id == message_id)
         {
             let mut message = m.clone();
-            message.needs_you = c.messages.last().is_some_and(|m| m.id == message_id) && self.reply_needs_you(c);
+            message.needs_you = c.messages.last().is_some_and(|m| m.id == message_id) && reply_needs_you(c, self.live.get(conv));
             (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(message.for_screen()) });
         }
         self.refresh_running();
@@ -4385,10 +4098,7 @@ impl Core {
         self.refresh_running();
     }
 
-    fn requeue(&mut self, id: &str, mut item: QueuedTurn) {
-        if let Some(wake) = item.wake.as_mut().filter(|w| w.wait_restart == Some(crate::model::WaitRestart::Resumed)) {
-            wake.wait_restart = None;
-        }
+    fn requeue(&mut self, id: &str, item: QueuedTurn) {
         if let Some(c) = self.convs.get_mut(id) {
             c.queued.insert(0, item);
             self.save(id);
@@ -4479,7 +4189,7 @@ impl Core {
         while let Some(c) = self.convs.get_mut(conv) {
             // A reply whose agent already finished takes nothing in: the message goes out as the next turn.
             let finished = c.messages.last().is_some_and(|m| m.role == Role::Assistant && m.finished_at.is_some());
-            let Some(pos) = c.queued.iter().position(|q| !q.sending && !wait::needs_send(q)) else { break };
+            let Some(pos) = c.queued.iter().position(|q| !q.sending) else { break };
             let next = &c.queued[pos];
             // Agent coordination can join this turn; other continuations still need their own turn.
             if finished
@@ -4664,10 +4374,6 @@ impl Core {
     /// After success, send the queue head. After Error without Keep going, send the oldest wake and leave human messages
     /// for the person. Each wake is consumed once; Stop and Keep going's failure backoff still hold the queue.
     fn drain(&mut self, conv: &str) {
-        self.drain_queued(conv, next_queued);
-    }
-
-    fn drain_queued(&mut self, conv: &str, next_queued: fn(&Conversation) -> Option<usize>) {
         // A compaction the agent asked for comes first; the queue goes out when it ended (`compact.rs`).
         if self.compact_due(conv) {
             return;
@@ -4675,10 +4381,6 @@ impl Core {
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let Some(c) = self.convs.get(conv) else { return };
         let Some(next) = next_queued(c) else { return };
-        // An unanswered permission can arrive on the older reply after a wait was accepted into the queue.
-        if wait::permission_holds_return(c, &c.queued[next]) {
-            return;
-        }
         if self.preparing_rewind_steer(&c.queued[next].id) {
             return;
         }
@@ -4699,7 +4401,7 @@ impl Core {
         self.emit_queue(conv);
         // What the person queued behind the dropped message goes out now; the queue is shorter each time, so this ends.
         if capped {
-            self.drain_queued(conv, next_queued);
+            self.drain(conv);
         }
     }
 
@@ -4755,18 +4457,14 @@ impl Core {
             }
             let previous = c.send_after_stop.clone();
             let mut item = c.queued.remove(pos);
-            let hold = wait::release_hold(&mut item);
             let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
             // A stopped turn accepts no steering, even when its final result has not arrived yet.
             let stopped = c.stopped;
             if stopped {
                 c.send_after_stop = Some(item.id.clone());
             }
-            // A wait return takes a separate turn. It must not be steered and then started again after an uncertain delivery.
-            let steer = !stopped
-                && item.wake.as_ref().is_none_or(|w| w.why != "wake.wait")
-                && research::question(&item.text).is_none()
-                && [vendor, "auto"].contains(&item.choice.vendor.as_str());
+            // One for the other AI cannot go into this turn: it goes first among those that wait.
+            let steer = !stopped && research::question(&item.text).is_none() && [vendor, "auto"].contains(&item.choice.vendor.as_str());
             item.sending = steer;
             if let Some(c) = self.convs.get_mut(id) {
                 c.queued.insert(at, item);
@@ -4774,9 +4472,6 @@ impl Core {
             if let Err(error) = self.try_save(id) {
                 let c = self.convs.get_mut(id).expect("queued conversation exists");
                 let mut item = c.queued.remove(at);
-                if let (Some(wake), Some(hold)) = (item.wake.as_mut(), hold) {
-                    wake.wait_restart = Some(hold);
-                }
                 item.sending = false;
                 c.queued.insert(pos, item);
                 c.send_after_stop = previous;
@@ -4794,21 +4489,12 @@ impl Core {
             || self.convs.get(id).is_some_and(|c| c.compacting || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
         let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
         let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
-        let mut item = c.queued.remove(pos);
+        let item = c.queued.remove(pos);
         // Something with no turn to take it runs (compaction, a wait for quota, the pick of an AI): it goes first.
         if busy {
             let at = c.queued.iter().rposition(|q| q.sending).map_or(0, |p| p + 1);
-            let hold = wait::release_hold(&mut item);
             c.queued.insert(at, item);
-            if let Err(error) = self.try_save(id) {
-                let c = self.convs.get_mut(id).expect("queued conversation exists");
-                let mut item = c.queued.remove(at);
-                if let (Some(wake), Some(hold)) = (item.wake.as_mut(), hold) {
-                    wake.wait_restart = Some(hold);
-                }
-                c.queued.insert(pos, item);
-                return Err(error);
-            }
+            self.save(id);
             self.emit_queue(id);
             return Ok(());
         }
@@ -4932,7 +4618,6 @@ impl Core {
             self.requeue(id, item);
             return Err(error);
         }
-        self.command_waits.remove(id);
         let _ = self.take_rewind_steer(&item.id);
         self.clear_older_plan_cards(id, &reply_id);
         self.list_changed();
@@ -5005,23 +4690,10 @@ impl Core {
         Ok(())
     }
 
-    /// The running panel keeps a declared wait visible. Reads defer to the saved wait when it has no active work or decision.
-    fn read_run_state(&self, item: &RunningItem) -> Option<RunState> {
-        if item.state != RunState::Working || item.waiting_on.is_none() || item.keep_wait.is_some() || item.wait_until.is_some() {
-            return Some(item.state);
-        }
-        let c = self.convs.get(&item.conversation_id)?;
-        let reply = c.messages.last()?;
-        (c.compacting
-            || reply.checks.as_ref().is_some_and(|checks| checks.state == ChecksState::Running)
-            || approved_plan_resuming(c, self.live.get(&c.id), reply))
-        .then_some(item.state)
-    }
-
     /// The conversations to show in the running list, in the order the screen draws them: blocks that hold a question
     /// first, then the sidebar's project order with Chat last; inside a block the questions first, oldest first.
     fn running_items(&self) -> Vec<RunningItem> {
-        let mut items: Vec<RunningItem> = self.convs.values().filter_map(|c| self.running_item(c)).collect();
+        let mut items: Vec<RunningItem> = self.convs.values().filter_map(|c| running_item(c, self.live.get(&c.id))).collect();
         if items.is_empty() {
             return items;
         }
@@ -5048,18 +4720,13 @@ impl Core {
             .live
             .iter()
             .filter_map(|(id, l)| {
-                let idle = if l.vendor == Vendor::Codex && !l.retiring {
-                    self.codex_idle_thread(id, l).is_some()
-                } else {
-                    (l.vendor == Vendor::Claude || l.retiring) && self.session_idle(id)
-                };
-                let use_when_idle = idle.then_some(l.used);
-                (use_when_idle != l.idle_period.as_ref().map(|period| period.used) || (idle && l.retiring)).then(|| (id.clone(), idle))
+                let idle = self.session_idle(id);
+                (idle != l.was_idle || (idle && l.retiring)).then(|| (id.clone(), idle))
             })
             .collect();
         for (id, idle) in changed {
             if let Some(l) = self.live.get_mut(&id) {
-                l.idle_period = None;
+                l.was_idle = idle;
             }
             if idle {
                 self.close_when_idle(&id);
@@ -5157,13 +4824,6 @@ impl Core {
         }
         self.worker_memory.registry.register(server.owned_tree());
         server
-    }
-
-    fn open_codex(&mut self, area: Area, user_hooks: bool, permissions: Permissions, cli: &Cli, open: CodexOpen) -> Session {
-        match self.codex_server(area, user_hooks, permissions, cli).try_open(open) {
-            Ok(session) => session,
-            Err(open) => self.codex_server(area, user_hooks, permissions, cli).open_request(*open),
-        }
     }
 
     /// The gate before a user turn (3.4): the everyday default and the profile of an existing conversation are checked here
@@ -5446,13 +5106,6 @@ impl Core {
         let group = if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) { self.group_for(conv)? } else { None };
         let group_context = group.as_ref().map(|g| (g.instructions.clone(), g.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>()));
         let prepared_key = self.convs.get(conv).map(|c| (c.area, settings.user_hooks() && permissions.guarded(), permissions));
-        let native_goal = self
-            .convs
-            .get(conv)
-            .filter(|_| pick.vendor == Vendor::Codex)
-            .and_then(|c| c.codex_goal_intent.as_ref().filter(|intent| c.resumable(Vendor::Codex) == Some(&intent.thread)))
-            .map_or(NativeGoalOpen::Ordinary, |intent| if intent.hold { NativeGoalOpen::CheckStopped } else { NativeGoalOpen::Rearm });
-        let codex_goal_held = native_goal == NativeGoalOpen::CheckStopped;
         let prepared_tools = if mode == kits::SessionStart::Turn && self.live.get(conv).is_some_and(|l| l.prepared) {
             let (mut delivery, report) = self.choose_session_tools(conv, pick.vendor, permissions, &cwd);
             if pick.vendor == Vendor::Claude && !flags.plugin_dir {
@@ -5469,7 +5122,6 @@ impl Core {
                 && Some(&l.cli) == cli.as_ref()
                 && l.permissions == permissions
                 && l.research == research
-                && l.codex_goal_held == codex_goal_held
                 && l.tuning == tuning
                 && l.runs == runs
                 && l.cwd == cwd
@@ -5563,16 +5215,9 @@ impl Core {
             }
         }
         let end = DriverEnd { me, key, sid, runtime: self.opts.runtime.clone() };
-        let prepare_failures = c.area == Area::Project && !c.temporary;
         let sink: EventSink = Arc::new(move |e| {
             if let Some(core) = end.me.upgrade() {
-                let failure_tail = match &e {
-                    EngineEvent::ToolResult { ok: false, declined: false, text, .. } if prepare_failures => {
-                        siblings::retained_failure_tail(text)
-                    }
-                    _ => None,
-                };
-                core.lock().unwrap_or_else(|e| e.into_inner()).handle_with_failure_tail(&end.key, end.sid, e, failure_tail);
+                core.lock().unwrap_or_else(|e| e.into_inner()).handle(&end.key, end.sid, e);
             }
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
@@ -5589,13 +5234,6 @@ impl Core {
             }
         };
         let area = c.area;
-        let guarded_copy = c
-            .copy
-            .as_ref()
-            .filter(|_| {
-                self.opts.windows && pick.vendor == Vendor::Claude && area == Area::Project && permissions.guarded() && !c.temporary
-            })
-            .map(|copy| crate::claude::GuardedCopy { data: self.opts.data_dir.clone(), conversation: conv.into(), copy: copy.clone() });
         let leave_plan = c.codex_plan && permissions != Permissions::Plan;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
@@ -5663,8 +5301,6 @@ impl Core {
         }
         let resumed = resume.is_some();
         let native_point = pending_fork.filter(|point| resume.as_ref() == Some(&point.session));
-        let native_goal = if resumed && native_point.is_none() { native_goal } else { NativeGoalOpen::Ordinary };
-        let codex_goal_held = native_goal == NativeGoalOpen::CheckStopped;
         if native_point.as_ref().is_some_and(|point| !point.valid(pick.vendor) || pick.vendor == Vendor::Claude && !self.claude_fork) {
             return Err("error.sessionLost".into());
         }
@@ -5772,7 +5408,6 @@ impl Core {
                 sink,
                 native_point.as_ref(),
                 self.claude_fork,
-                guarded_copy,
             )?,
             Vendor::Codex => {
                 let command_spawn = self.opts.spawn.clone();
@@ -5784,40 +5419,34 @@ impl Core {
                     .and_then(|c| c.rewind_native.as_ref())
                     .filter(|native| resume.as_ref() == Some(&native.thread))
                     .map(|native| native.before_turn.clone());
-                self.open_codex(
-                    area,
-                    user_hooks,
-                    permissions,
-                    &cli,
-                    CodexOpen {
-                        thread: CodexThread {
-                            temporary,
-                            title,
-                            helper,
-                            browse,
-                            conversations,
-                            leads,
-                            verify,
-                            progress,
-                            cwd,
-                            model,
-                            effort,
-                            resume,
-                            instructions: None,
-                            research,
-                            group_instructions,
-                            user_name,
-                            permissions,
-                            leave_plan,
-                            tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
-                            subagents: subagents.clone(),
-                        },
-                        sink,
-                        tools: Some(project_tools),
-                        identity: Some(crate::codex::ThreadIdentity { identity, spawn: command_spawn, native_goal }),
-                        before_turn,
-                        native_fork: native_point,
+                self.codex_server(area, user_hooks, permissions, &cli).open_identified(
+                    CodexThread {
+                        temporary,
+                        title,
+                        helper,
+                        browse,
+                        conversations,
+                        leads,
+                        verify,
+                        progress,
+                        cwd,
+                        model,
+                        effort,
+                        resume,
+                        instructions: None,
+                        research,
+                        group_instructions,
+                        user_name,
+                        permissions,
+                        leave_plan,
+                        tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
+                        subagents: subagents.clone(),
                     },
+                    sink,
+                    project_tools,
+                    crate::codex::ThreadIdentity { identity, spawn: command_spawn },
+                    before_turn,
+                    native_point,
                 )
             }
         };
@@ -5864,8 +5493,8 @@ impl Core {
                 tuning,
                 research,
                 retiring: false,
-                codex_goal_held,
-                idle_period: None,
+                was_idle: false,
+                command_wait: None,
                 runs,
                 cwd: cwd_used,
                 visual_root: None,
@@ -5928,7 +5557,6 @@ impl Core {
             tentative: BTreeMap::new(),
             command_gate: false,
             codex_plan: false,
-            codex_goal_intent: None,
             cost_base: BTreeMap::new(),
             allow_always: None,
             allow_always_epochs: BTreeMap::new(),
@@ -6127,7 +5755,6 @@ impl Core {
             }
             return Err(error);
         }
-        self.command_waits.remove(&id);
         self.sent_draft(&id);
         if previous.0 == 0 && previous.1.is_empty() {
             self.track_title(&id);
@@ -6580,8 +6207,6 @@ impl Core {
                 self.keep_family(id, heir);
             }
             self.rewind_forget(id);
-            self.background.forget_finished(id);
-            self.command_waits.remove(id);
             self.draft_routes.remove(id);
             self.given.remove(id);
             if self.old_inputs_active.contains(id) {
@@ -6671,7 +6296,7 @@ impl Core {
         if projects.iter().any(|p| p.id != id && crate::recents::same_place(&p.path, &resolved)) {
             return Err("error.project.changed".into());
         }
-        if self.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && self.running_item(conv).is_some()) {
+        if self.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv, self.live.get(&conv.id)).is_some()) {
             return Err("error.project.busy".into());
         }
         let old_path = projects[pos].path.clone();
@@ -6765,31 +6390,19 @@ fn unseen(c: char) -> bool {
         )
 }
 
-impl Core {
-    /// The same needs-you decision as the running row and the done card, scoped to the latest reply even after its card was seen.
-    fn reply_needs_you(&self, c: &Conversation) -> bool {
-        self.running_item(c).is_some_and(|item| item.state == RunState::NeedsYou)
-            || (c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming) || m.finished_at.is_some())
-                && ended::end_kind(c) == Some(EndKind::NeedsYou)
-                && self.waiting_command(&c.id).is_none())
-    }
-
-    fn running_item(&self, c: &Conversation) -> Option<RunningItem> {
-        running_item(c, self.live.get(&c.id), self.waiting_command(&c.id))
-    }
+/// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
+/// requests (denied for want of anyone to answer; they wait for the person until the next message or until the person says they
+/// read them, and count as "needs you"). Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
+/// Cache warmth is not here: it is a quiet note on the reply itself.
+/// The same needs-you decision as the running row and the done card, scoped to the latest reply even after its card was seen.
+fn reply_needs_you(c: &Conversation, live: Option<&Live>) -> bool {
+    running_item(c, live).is_some_and(|item| item.state == RunState::NeedsYou)
+        || (c.messages.last().is_some_and(|m| m.status != Some(Status::Streaming) || m.finished_at.is_some())
+            && ended::end_kind(c) == Some(EndKind::NeedsYou)
+            && command_wait::waiting_command(c, live).is_none())
 }
 
-fn approved_plan_resuming(c: &Conversation, live: Option<&Live>, reply: &Message) -> bool {
-    reply.status == Some(Status::Done)
-        && live.is_some_and(|l| l.turn.as_deref() == Some(reply.id.as_str()))
-        && c.queued.iter().any(|q| {
-            q.wake.as_ref().is_some_and(|w| w.why == "wake.approvedPlan")
-                && (!c.stopped || c.send_after_stop.as_deref() == Some(q.id.as_str()))
-        })
-}
-
-/// The running row includes an active reply and work still pending: permission requests, checks and tracked waits.
-fn running_item(c: &Conversation, live: Option<&Live>, command: Option<&command_wait::CommandWait>) -> Option<RunningItem> {
+fn running_item(c: &Conversation, live: Option<&Live>) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
     let seen = reply.parked_seen == Some(true);
@@ -6807,14 +6420,15 @@ fn running_item(c: &Conversation, live: Option<&Live>, command: Option<&command_
     // and no idle update restarts Faber under it.
     let kg_wait = c.keep_going.as_ref().and_then(|k| k.wait_until).filter(|_| reply.status != Some(Status::Streaming));
     // A reply that ended to wait for its own background command waits like Keep going does (`command_wait.rs`).
-    let keep_wait = c
-        .keep_going
-        .as_ref()
-        .and_then(|k| k.waiting.clone())
-        .or_else(|| command.map(|w| KeepWait { why: "command".into(), until: w.until, timer_id: 0, command_limit: None }));
+    let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone()).or_else(|| command_wait::waiting_command(c, live));
     // An agent that waits for the conversations it started is not done: the row stays while it waits.
     let waiting_on = c.waiting_on.clone().filter(|_| reply.status != Some(Status::Streaming) && !c.stopped);
-    let approved_work = approved_plan_resuming(c, live, reply);
+    let approved_work = reply.status == Some(Status::Done)
+        && live.is_some_and(|l| l.turn.as_deref() == Some(reply.id.as_str()))
+        && c.queued.iter().any(|q| {
+            q.wake.as_ref().is_some_and(|w| w.why == "wake.approvedPlan")
+                && (!c.stopped || c.send_after_stop.as_deref() == Some(q.id.as_str()))
+        });
     if reply.status != Some(Status::Streaming)
         && !c.compacting
         && kg_wait.is_none()
@@ -6917,7 +6531,7 @@ fn message_with_tool<'a>(messages: &'a mut [Message], current: Option<&str>, id:
 
 #[cfg(test)]
 fn start_conversation_claude(identity: Arc<crate::proc::ConversationIdentity>, opts: ClaudeOptions, sink: EventSink) -> Session {
-    start_conversation_claude_native(identity, opts, sink, None, false, None).expect("ordinary launch")
+    start_conversation_claude_native(identity, opts, sink, None, false).expect("ordinary launch")
 }
 
 fn start_conversation_claude_native(
@@ -6926,7 +6540,6 @@ fn start_conversation_claude_native(
     sink: EventSink,
     point: Option<&NativePoint>,
     supported: bool,
-    copy: Option<crate::claude::GuardedCopy>,
 ) -> Result<Session, String> {
     let on_exit = identity.clone();
     let sink: EventSink = Arc::new(move |event| {
@@ -6936,10 +6549,9 @@ fn start_conversation_claude_native(
         sink(event);
     });
     let sink = identity.token.as_ref().map_or_else(|| sink.clone(), |token| crate::codex::redact_sink(sink.clone(), token.clone()));
-    let session = crate::proc::as_conversation(&identity, || match (copy, point) {
-        (Some(copy), point) => crate::claude::start_claude_in_copy(opts, sink, point.map(|point| (point, supported)), copy),
-        (None, Some(point)) => crate::claude::start_claude_fork(opts, point, supported, sink),
-        (None, None) => Ok(start_claude(opts, sink)),
+    let session = crate::proc::as_conversation(&identity, || match point {
+        Some(point) => crate::claude::start_claude_fork(opts, point, supported, sink),
+        None => Ok(start_claude(opts, sink)),
     })?;
     Ok(session.with_identity(identity))
 }
@@ -7127,8 +6739,8 @@ mod tool_in_tests {
             tuning: Default::default(),
             research: None,
             retiring: false,
-            codex_goal_held: false,
-            idle_period: None,
+            was_idle: false,
+            command_wait: None,
             runs: Permissions::Ask,
             cwd: data.path().to_path_buf(),
             visual_root: None,
@@ -7224,8 +6836,8 @@ mod tool_in_tests {
                         tuning: Default::default(),
                         research: None,
                         retiring: false,
-                        codex_goal_held: false,
-                        idle_period: None,
+                        was_idle: false,
+                        command_wait: None,
                         runs: Permissions::Ask,
                         cwd: data.path().to_path_buf(),
                         visual_root: None,

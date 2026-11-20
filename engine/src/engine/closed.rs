@@ -43,7 +43,7 @@ impl Core {
         let conv = self.load(id).ok_or("error.conversationGone")?;
         // Only a turn that goes out now: one that would wait in the queue leaves this reply last, and a second click would
         // queue another.
-        let waits = conv.stopped || conv.queued.iter().any(|q| !wait::needs_send(q)) || conv.compacting;
+        let waits = conv.stopped || !conv.queued.is_empty() || conv.compacting;
         if !conv.messages.last().is_some_and(|m| m.id == turn_id && m.closed)
             || waits
             || self.live.get(id).is_some_and(|l| l.turn.is_some())
@@ -89,11 +89,7 @@ impl Core {
             .and_then(|i| conv.messages.get(i))
             .and_then(|m| m.wake.as_ref())
             .is_some_and(|w| matches!(w.why.as_str(), "wake.closed" | "wake.updated"));
-        if again || wait::cut_while_resuming_wait(conv) || conv.keep_going.is_some() || conv.archived_at.is_some() {
-            return;
-        }
-        if self.resume_queued_wait(id).is_some() {
-            self.turn_ended(id);
+        if again || conv.keep_going.is_some() || conv.archived_at.is_some() {
             return;
         }
         let _ = self.continue_closed_now(id, &turn);

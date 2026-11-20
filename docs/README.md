@@ -28,7 +28,6 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [research/audio-runtimes.md](research/audio-runtimes.md) | Building the catalog's audio runtimes: item fields, install path, VRAM gate, licence warnings, checks |
 | [product/following.md](product/following.md) | Following and watching the agent work, visual answers, learning and memory |
 | [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
-| [product/cli-conversations.md](product/cli-conversations.md) | Conversation states, numbered messages and their tool steps |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
 | [product/recovery.md](product/recovery.md) | Desktop-shell migration, draft import, rollback files and engine restart limits |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
@@ -71,7 +70,6 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
 | [dev/autonomy.md](dev/autonomy.md) | Delivered wait repairs, real and controlled proofs, installed-app status and remaining recovery work |
-| [dev/shared-codex-service.md](dev/shared-codex-service.md) | Controlled shared-service recovery, Windows resource samples and memory budget |
 | [dev/evals.md](dev/evals.md) | Opt-in evaluations of what the AI writes with the real CLIs: the router, the persona |
 | [dev/cli-qualification.md](dev/cli-qualification.md) | Nightly unauthenticated CLI candidate contracts, bounded metadata receipts and missing compatibility evidence |
 | [dev/plan-boundary-qualification.md](dev/plan-boundary-qualification.md) | Task 500 approval-layer size admission, recorded coverage and ungated observations |
@@ -79,7 +77,6 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |
-| [research/adaptive-workflow-pilots.md](research/adaptive-workflow-pilots.md) | Proposed adaptable workflows, evidence and low-cost comparisons |
 | [dev/benchmark.md](dev/benchmark.md) | Running the light benchmark: the one command, what a run measures, what it leaves out |
 | [research/aside-study.md](research/aside-study.md) | A static study of another app's browser and desk, and the build order the browser lane follows |
 | [research/harness-study-2026-11.md](research/harness-study-2026-11.md) | Before changing how the lead agent reviews, verifies, hands off or asks: what measured studies and user complaints say raises quality and cuts cost, and which figures are still unverified |

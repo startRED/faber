@@ -229,10 +229,9 @@ impl Core {
     /// or was never opened since Faber started has ended.
     fn goal_conv_working(&self, id: &str) -> bool {
         self.copying.contains_key(id)
-            || self
-                .convs
-                .get(id)
-                .is_some_and(|c| self.running_item(c).is_some() || c.messages.is_empty() || !c.queued.is_empty() || c.compacting)
+            || self.convs.get(id).is_some_and(|c| {
+                running_item(c, self.live.get(id)).is_some() || c.messages.is_empty() || !c.queued.is_empty() || c.compacting
+            })
     }
 
     /// Whether anything of the project is at work now.

@@ -378,7 +378,6 @@ mod tests {
         drop(job);
         let worker = tokio::spawn(finish_maintenance(crate::proc::CommandOutput {
             success: false,
-            exit_code: None,
             text: String::new(),
             confirmed: false,
             unresolved: tree,

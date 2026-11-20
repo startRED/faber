@@ -59,11 +59,6 @@ pub fn event(event: &Value) -> String {
     json!({ "event": event }).to_string()
 }
 
-/// Only these events can make a caller reread a conversation's state.
-pub fn state_event(event: &Value) -> bool {
-    matches!(event["type"].as_str(), Some("running" | "list" | "lagged"))
-}
-
 pub fn reply_detailed(id: u64, result: &Result<Value, Error>) -> String {
     match result {
         Ok(ok) => json!({ "id": id, "ok": ok }),

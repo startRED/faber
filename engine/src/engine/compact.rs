@@ -336,13 +336,6 @@ impl Core {
             self.end_compaction_watch(conv);
             return false;
         };
-        // A native goal reply can still be running before the compact request takes effect.
-        // Its regular reply watcher owns that time.
-        if self.live.get(conv).is_some_and(|l| l.turn.is_some()) {
-            t.since = now;
-            t.looked = now;
-            return true;
-        }
         let gap = now - std::mem::replace(&mut t.looked, now);
         if gap > 4.0 * EVERY.as_secs_f64() {
             t.since += gap;
@@ -460,14 +453,11 @@ impl Core {
         self.revoke_replacement(conv);
         self.release_codex_preparation(conv);
         let live = self.live.remove(conv)?;
-        let command_wait_on_exit = self.rewind_retire(conv, &live);
+        self.rewind_retire(conv, &live);
         if let Some(c) = self.convs.get_mut(conv).filter(|c| c.compacting) {
             self.compacts.remove(conv);
             c.compacting = false;
             self.list_changed();
-        }
-        if !self.closing && command_wait_on_exit.is_some_and(|wait| self.command_wait_key(conv) == Some(wait)) {
-            self.command_ended(conv);
         }
         Some(live)
     }
@@ -481,7 +471,7 @@ impl Core {
 
     /// What the CLI reports while it compacts: only its end matters. Whatever else it says belongs to no reply.
     /// True when the event was taken here.
-    pub(super) fn compaction_event(&mut self, conv: &str, vendor: Vendor, event: &EngineEvent) -> bool {
+    pub(super) fn compaction_event(&mut self, conv: &str, event: &EngineEvent) -> bool {
         match event {
             // Context news and account news are the same as at any time.
             EngineEvent::Context { .. }
@@ -489,8 +479,6 @@ impl Core {
             | EngineEvent::Compacted { .. }
             | EngineEvent::Quota { .. }
             | EngineEvent::Signals(_) => false,
-            // Codex reports the result separately, even if a racing goal reply was refused or an interrupt RPC failed.
-            EngineEvent::Done { .. } | EngineEvent::Error { fatal: false, .. } if vendor == Vendor::Codex => true,
             EngineEvent::Done { ok, .. } => {
                 self.compaction_ended(conv, *ok);
                 true
@@ -514,7 +502,7 @@ impl Core {
 
     /// The CLI finished compacting, or could not. The agent's `next` joins the queue after messages already waiting;
     /// then the queue, Keep going and the report to a parent go on as after any turn.
-    pub(super) fn compaction_ended(&mut self, conv: &str, ok: bool) {
+    fn compaction_ended(&mut self, conv: &str, ok: bool) {
         self.end_compaction_watch(conv);
         let plan = self.compacts.remove(conv);
         let Some(c) = self.convs.get_mut(conv) else { return };
@@ -529,23 +517,14 @@ impl Core {
         self.queue_after_compaction(conv, plan, ok);
         let Some(c) = self.convs.get_mut(conv) else { return };
         c.updated_at = now();
-        let can_continue = c.messages.last().is_some_and(|m| {
-            m.status == Some(Status::Done) || (m.vendor == Some(Vendor::Codex) && m.status == Some(Status::Stopped) && m.error.is_none())
-        });
         self.save(conv);
-        // The turn that scheduled this compaction completed. If a racing goal reply was interrupted,
-        // its status must not hold the plan. A reported failure still uses the ordinary queue rules.
-        if can_continue {
-            self.drain_queued(conv, |c| c.queued.iter().position(|q| !wait::needs_send(q)));
-        } else {
-            self.drain(conv);
-        }
+        self.drain(conv);
         self.emit_queue(conv);
         self.list_changed();
         let reply = self
             .convs
             .get(conv)
-            .filter(|c| can_continue && c.keep_going.is_some())
+            .filter(|c| c.keep_going.is_some())
             .and_then(|c| c.messages.last())
             .filter(|m| m.role == Role::Assistant)
             .map(|m| m.id.clone());
@@ -554,30 +533,6 @@ impl Core {
             // Nothing follows: a conversation an agent started reports to its parent now.
             None => self.turn_ended(conv),
         }
-    }
-
-    /// The request might still run on the old thread. Preserve the queue and retire that writer
-    /// without telling Keep going or a waiting message to reuse it.
-    pub(super) fn compaction_unconfirmed(&mut self, conv: &str) {
-        let plan = self.compacts.remove(conv);
-        self.end_compaction_watch(conv);
-        self.keep_going_off(conv);
-        if let Some(l) = self.retire(conv) {
-            l.session.close();
-        }
-        let reply = if let Some(plan) = plan {
-            self.queue_after_compaction(conv, plan, false);
-            self.convs.get_mut(conv).and_then(|c| c.messages.last_mut()).filter(|m| m.role == Role::Assistant).map(|m| {
-                m.error = Some("error.rewind.stopUnconfirmed".into());
-                m.id.clone()
-            })
-        } else {
-            None
-        };
-        self.save(conv);
-        self.push(conv, reply.as_deref(), true);
-        self.emit_queue(conv);
-        self.list_changed();
     }
 
     fn queue_after_compaction(&mut self, conv: &str, plan: Plan, ok: bool) {

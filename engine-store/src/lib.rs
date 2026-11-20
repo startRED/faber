@@ -9,7 +9,6 @@ pub mod auto_learned;
 pub mod claude_sessions;
 pub mod cli;
 pub mod export;
-pub mod history;
 pub mod install;
 pub mod ledger;
 pub mod look_log;

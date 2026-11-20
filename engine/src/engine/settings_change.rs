@@ -271,11 +271,7 @@ impl Core {
                 },
             );
         }
-        self.handle(
-            &receipt.conv,
-            receipt.sid,
-            EngineEvent::ToolResult { id: receipt.call, ok: true, declined: false, exit_code: None, text },
-        );
+        self.handle(&receipt.conv, receipt.sid, EngineEvent::ToolResult { id: receipt.call, ok: true, declined: false, text });
     }
 }
 

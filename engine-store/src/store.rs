@@ -6,14 +6,14 @@
 //! former is empty, and a damaged safety file is never read as no data.
 
 use crate::ledger::Ledger;
-use crate::model::{BranchOf, Conversation, Project, Role, Settings, Summary};
+use crate::model::{BranchOf, Conversation, Project, Settings, Summary};
 use crate::project_memory::{AdoptedKind, KeptDecision, LearningKind, LearningRecords};
 use crate::recents::Recents;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::SystemTime;
@@ -167,7 +167,7 @@ pub struct Store {
     /// changed. Reading one decodes the whole conversation to take a few fields: 202 MB and 420 ms for 32 real ones
     /// (2026-10-27), twice a turn. Every save writes a new file and renames it into place, so a changed file has a new
     /// time; only a program that rewrites one in place with its old length and time would go unseen until the next save.
-    summaries: Mutex<HashMap<PathBuf, (Stamp, IndexedSummary)>>,
+    summaries: Mutex<HashMap<PathBuf, (Stamp, Summary)>>,
     /// The rows above kept on disk (`conversation-list.json`), so a start lists the conversations from one small file and
     /// reads only the conversation files that changed since: with 257 MB of conversations the first list took 1.1 s, and
     /// 7.6 s from a cold disk (2026-11-04).
@@ -184,7 +184,7 @@ pub struct Store {
 // Constructed together from one conversation; publication needs only bytes and small index metadata.
 pub struct Snapshot {
     pub bytes: Vec<u8>,
-    index: IndexedSummary,
+    row: Summary,
 }
 
 #[derive(Default)]
@@ -195,7 +195,6 @@ struct SnapshotWrites {
 
 /// A file's length and last change: the same pair means the file was not written since.
 type Stamp = (u64, Option<SystemTime>);
-pub type HistoryVersion = (u64, SystemTime);
 
 /// How often a busy list writes `conversation-list.json` again at most; closing writes it too.
 const KEEP_LIST_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
@@ -223,55 +222,7 @@ struct ListRow {
     /// The file's last change, in seconds and nanoseconds since 1970.
     modified: Option<(u64, u32)>,
     temporary: bool,
-    index: IndexedSummary,
-}
-
-/// Sidebar fields and the extra facts an authorized agent's list needs from the same saved record.
-#[derive(Clone, Serialize, Deserialize)]
-struct IndexedSummary {
     row: Summary,
-    agent: Option<AgentSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    child_on_start: Option<ChildOnStart>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    message_count: Option<usize>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct AgentSummary {
-    state: crate::conversation_state::State,
-    copy_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pages: Option<Arc<BTreeMap<String, u64>>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    latest_reply: Option<Arc<crate::history::ReplyIndex>>,
-    #[serde(skip)]
-    recovered: Option<Arc<RecoveredState>>,
-}
-
-struct RecoveredState {
-    journal: crate::transcript::JournalRevision,
-    state: crate::conversation_state::State,
-}
-
-impl IndexedSummary {
-    fn new(c: &Conversation) -> Self {
-        Self { row: summary(c), agent: AgentSummary::new(c), child_on_start: ChildOnStart::of(c), message_count: Some(c.messages.len()) }
-    }
-}
-
-impl AgentSummary {
-    fn new(c: &Conversation) -> Option<Self> {
-        c.project_id.as_ref()?;
-        let pages = crate::transcript::TranscriptStore::page_positions(&c.messages);
-        Some(Self {
-            state: crate::conversation_state::saved_state(c),
-            copy_path: c.copy.as_ref().map(|copy| copy.path.clone()),
-            pages: (!pages.is_empty()).then(|| Arc::new(pages)),
-            latest_reply: crate::history::ReplyIndex::from_saved(c).map(Arc::new),
-            recovered: None,
-        })
-    }
 }
 
 /// This program, by its own file's length and time: rows written by any other build are read again from the files.
@@ -308,7 +259,6 @@ pub fn summary(c: &Conversation) -> Summary {
         child_line: c.started_by.as_ref().and_then(|_| crate::conversation_state::child_line(c)),
         ended: c.ended.clone(),
         state: (!c.messages.is_empty()).then(|| crate::conversation_state::run_state(c, false)),
-        reply_state: Some(crate::conversation_state::ReplyState::of(c.messages.last())),
         plan: c.plan.as_ref().map(crate::model::Plan::count),
         results: Some(crate::results::tally(c)).filter(|r| r.cost.turns > 0),
         stuck: c.stuck.is_some(),
@@ -354,31 +304,6 @@ pub struct StartScan {
     pub started_by: Vec<String>,
     /// Waiting on conversations it started.
     pub waiting_on: Vec<String>,
-}
-
-/// What a saved team member may still do after Faber reopens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChildOnStart {
-    Quiet,
-    Active,
-    OwesReport,
-}
-
-impl ChildOnStart {
-    fn of(c: &Conversation) -> Option<Self> {
-        use crate::model::{Role, Status};
-
-        c.started_by.as_ref()?;
-        let cut_off = c.messages.iter().rev().find(|m| m.role == Role::Assistant).is_some_and(|m| m.status == Some(Status::Streaming));
-        Some(if c.pending_parent_report || cut_off {
-            Self::OwesReport
-        } else if c.keep_going.is_some() || !c.queued.is_empty() {
-            Self::Active
-        } else {
-            Self::Quiet
-        })
-    }
 }
 
 /// The id of a conversation record marked temporary, or None for an ordinary or unreadable one.
@@ -518,7 +443,7 @@ impl Store {
             return;
         };
         let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        for ListRow { file, len, modified, temporary, mut index } in kept.rows {
+        for ListRow { file, len, modified, temporary, mut row } in kept.rows {
             // Only a plain name inside the conversations folder.
             if file.contains(['/', '\\']) || !file.ends_with(".json") {
                 continue;
@@ -534,8 +459,8 @@ impl Store {
                 }
                 Some(_) => continue,
             };
-            index.row.temporary = temporary;
-            cache.entry(self.conversations.join(file)).or_insert(((len, modified), index));
+            row.temporary = temporary;
+            cache.entry(self.conversations.join(file)).or_insert(((len, modified), row));
         }
     }
 
@@ -552,11 +477,11 @@ impl Store {
             let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache
                 .iter()
-                .filter_map(|(path, ((len, modified), index))| {
+                .filter_map(|(path, ((len, modified), row))| {
                     let modified =
                         modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| (d.as_secs(), d.subsec_nanos()));
                     let file = path.file_name()?.to_str()?.to_string();
-                    Some(ListRow { file, len: *len, modified, temporary: index.row.temporary, index: index.clone() })
+                    Some(ListRow { file, len: *len, modified, temporary: row.temporary, row: row.clone() })
                 })
                 .collect()
         };
@@ -574,66 +499,6 @@ impl Store {
         let list = self.listed();
         self.keep_list(false);
         list
-    }
-
-    /// The registered work copy and state for a same-project row just found by `list`.
-    pub fn listed_project_detail(&self, row: &Summary, project: &str) -> Option<(crate::conversation_state::State, Option<String>)> {
-        let id = &row.id;
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return None;
-        }
-        let path = self.file(id);
-        let version = stamp(&path)?;
-        let detail = {
-            let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (kept, index) = cache.get(&path)?;
-            let saved = &index.row;
-            if *kept != version
-                || saved.id != *id
-                || saved.project_id.as_deref() != Some(project)
-                || saved.temporary
-                || saved.archived
-                || saved.title != row.title
-                || saved.updated_at != row.updated_at
-            {
-                return None;
-            }
-            index.agent.clone()?
-        };
-        if self.transcripts.has_more(id, detail.pages.as_deref()) {
-            // Journal pages may have landed after the record, including edits that require a real conclusion.
-            let journal = self.transcripts.recovery_revision(id);
-            if let Some(recovered) = &detail.recovered
-                && journal.as_ref() == Some(&recovered.journal)
-            {
-                return (stamp(&path) == Some(version)).then_some((recovered.state, detail.copy_path));
-            }
-            let Some(c) = self.get(id) else {
-                return (stamp(&path) == Some(version)).then_some((crate::conversation_state::State::Unconcluded, detail.copy_path));
-            };
-            if c.id != *id
-                || c.project_id.as_deref() != Some(project)
-                || c.temporary
-                || c.archived_at.is_some()
-                || c.title != row.title
-                || c.updated_at != row.updated_at
-                || stamp(&path) != Some(version)
-            {
-                return None;
-            }
-            let state = crate::conversation_state::saved_state(&c);
-            if let Some(journal) = journal.filter(|before| self.transcripts.recovery_revision(id).as_ref() == Some(before)) {
-                let mut cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some((kept, index)) = cache.get_mut(&path)
-                    && *kept == version
-                    && let Some(agent) = &mut index.agent
-                {
-                    agent.recovered = Some(Arc::new(RecoveredState { journal, state }));
-                }
-            }
-            return Some((state, c.copy.map(|copy| copy.path)));
-        }
-        Some((detail.state, detail.copy_path))
     }
 
     fn listed(&self) -> Vec<Summary> {
@@ -658,18 +523,18 @@ impl Store {
             .filter_map(|path| {
                 let now_stamp = stamp(&path)?;
                 match cache.get(&path) {
-                    Some((kept, index)) if *kept == now_stamp => {
+                    Some((kept, row)) if *kept == now_stamp => {
                         unreadable.remove(&path);
-                        Some(index.row.clone())
+                        Some(row.clone())
                     }
                     // A file that cannot be read now (locked by a scanner, half copied) is tried again at the next list.
                     _ => {
-                        if let Some(index) = read::<Conversation>(&path).as_ref().map(IndexedSummary::new) {
+                        let row = read::<Conversation>(&path).as_ref().map(summary);
+                        if let Some(row) = &row {
                             unreadable.remove(&path);
-                            let row = index.row.clone();
-                            cache.insert(path, (now_stamp, index));
+                            cache.insert(path, (now_stamp, row.clone()));
                             self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
-                            return Some(row);
+                            return Some(row.clone());
                         }
                         let previous = unreadable.insert(path.clone(), (now_stamp, false));
                         let (failed_stamp, dismissed) = previous?;
@@ -709,7 +574,6 @@ impl Store {
                             child_line: None,
                             ended: None,
                             state: None,
-                            reply_state: None,
                             plan: None,
                             results: None,
                             stuck: false,
@@ -788,66 +652,28 @@ impl Store {
             .collect()
     }
 
-    /// Finds candidates for startup recovery. Only files without a current row need a text scan.
+    /// What a start looks for in every conversation file, read once, by searching the text of each.
     pub fn start_scan(&self) -> StartScan {
-        self.read_kept_list();
         let mut scan = StartScan::default();
         for entry in fs::read_dir(&self.conversations).into_iter().flatten().flatten() {
             let path = entry.path();
             if path.extension().is_none_or(|x| x != "json") {
                 continue;
             }
-            let Some(id) = path.file_stem().map(|id| id.to_string_lossy().into_owned()) else { continue };
-            let indexed = self.with_current_start_index(&path, &id, |index| {
-                let row = &index.row;
-                Some((row.keep_going, row.started_by.is_some(), row.waiting_on.is_some()))
-            });
-            let Some((keep_going, started_by, waiting_on)) = indexed.or_else(|| {
-                let text = fs::read_to_string(&path).ok()?;
-                Some((text.contains("\"keepGoing\""), text.contains("\"startedBy\""), text.contains("\"waitingOn\"")))
-            }) else {
+            let (Some(id), Ok(text)) = (path.file_stem().map(|id| id.to_string_lossy().into_owned()), fs::read_to_string(&path)) else {
                 continue;
             };
-            if keep_going {
+            if text.contains("\"keepGoing\"") {
                 scan.keep_going.push(id.clone());
             }
-            if started_by {
+            if text.contains("\"startedBy\"") {
                 scan.started_by.push(id.clone());
             }
-            if waiting_on {
+            if text.contains("\"waitingOn\"") {
                 scan.waiting_on.push(id);
             }
         }
         scan
-    }
-
-    fn with_current_start_index<T>(&self, path: &Path, id: &str, select: impl FnOnce(&IndexedSummary) -> Option<T>) -> Option<T> {
-        let current = stamp(path)?;
-        current.1?;
-        let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (kept, index) = cache.get(path)?;
-        if *kept != current || index.row.id != id {
-            return None;
-        }
-        select(index)
-    }
-
-    /// The startup scan has already loaded the kept list. Open legacy or changed members to recover their current state.
-    pub fn child_on_start(&self, id: &str) -> Option<(String, ChildOnStart)> {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return None;
-        }
-        let indexed =
-            self.with_current_start_index(&self.file(id), id, |index| Some((index.row.started_by.clone()?, index.child_on_start?)));
-        if indexed.is_some() {
-            return indexed;
-        }
-        let c = self.get(id)?;
-        if c.id != id {
-            return None;
-        }
-        let state = ChildOnStart::of(&c)?;
-        Some((c.started_by?, state))
     }
 
     /// The ids of conversations whose file mentions `text`, read without parsing.
@@ -871,151 +697,14 @@ impl Store {
         let before = stamp(&path);
         let mut c: Conversation = read(&path)?;
         self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
-        let agent = AgentSummary::new(&c);
         // Pages and helper steps reach disk before the record counts them: see `TranscriptStore::recover`.
         self.transcripts.recover(id, &mut c.messages);
         // Known as read, unless it changed while it was being read: `unchanged` then says so.
         if let Some(read_stamp) = before.filter(|b| stamp(&path).as_ref() == Some(b)) {
-            let index =
-                IndexedSummary { row: summary(&c), agent, child_on_start: ChildOnStart::of(&c), message_count: Some(c.messages.len()) };
-            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, index));
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (read_stamp, summary(&c)));
             self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
         Some(c)
-    }
-
-    fn history_file(&self, id: &str) -> Option<(fs::File, HistoryVersion)> {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return None;
-        }
-        let directory = crate::project_memory::Directory::open(&self._data_root, Path::new("conversations")).ok()?;
-        let file = directory.replacement_file(&format!("{id}.json")).ok()?;
-        let metadata = file.metadata().ok()?;
-        Some((file, (metadata.len(), metadata.modified().ok()?)))
-    }
-
-    /// A saved project reply needs the latest answer and the original state rules, without opening the conversation
-    /// in the engine. Recover journaled tools only for the requested project's own record.
-    pub fn project_history_record(&self, id: &str, project: &str) -> Option<(crate::history::ProjectHistory, HistoryVersion)> {
-        use crate::history::ProjectHistory;
-
-        let (mut file, version) = self.history_file(id)?;
-        let mut text = String::new();
-        file.read_to_string(&mut text).ok()?;
-        if let Some(reply) = self.indexed_project_reply(id, project, version, &text) {
-            return Some((ProjectHistory::Latest(reply), version));
-        }
-        let mut c: Conversation = serde_json::from_str(&text).ok()?;
-        drop(text);
-        if c.id != id || c.temporary || c.project_id.as_deref() != Some(project) {
-            return None;
-        }
-        self.transcripts.recover(id, &mut c.messages);
-        Some((ProjectHistory::Complete(Box::new(c)), version))
-    }
-
-    fn indexed_project_reply(
-        &self,
-        id: &str,
-        project: &str,
-        (len, modified): HistoryVersion,
-        text: &str,
-    ) -> Option<crate::history::LatestReply> {
-        let (state, latest, pages) = {
-            let entries = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (version, index) = entries.get(&self.file(id))?;
-            if *version != (len, Some(modified))
-                || index.row.id != id
-                || index.row.temporary
-                || index.row.project_id.as_deref() != Some(project)
-            {
-                return None;
-            }
-            let agent = index.agent.as_ref()?;
-            (agent.state, agent.latest_reply.clone()?, agent.pages.clone())
-        };
-        if self.transcripts.has_more(id, pages.as_deref()) {
-            return None;
-        }
-        latest.read(text, id, project, state)
-    }
-
-    /// Reads a saved selection without touching the conversation cache or its summary. Agent-to-agent reads must
-    /// establish scope from the saved record before bringing in any additional tool steps from its transcript.
-    pub fn history_page(&self, id: &str, start: usize, limit: usize, project: Option<&str>) -> Option<crate::history::Page<'static>> {
-        let (file, version) = self.history_file(id)?;
-        let page = crate::history::read(io::BufReader::new(file), start, limit).ok()?;
-        self.finish_history_page(id, page, version, project)
-    }
-
-    /// Reads message positions and roles without loading bodies or recovering the tool journal.
-    pub fn history_headers(
-        &self,
-        id: &str,
-        start: usize,
-        limit: usize,
-        role: Option<Role>,
-        project: Option<&str>,
-    ) -> Option<(crate::history::Headers, HistoryVersion)> {
-        let (file, version) = self.history_file(id)?;
-        let page = crate::history::read_headers(io::BufReader::new(file), start, limit, role).ok()?;
-        (page.id == id && project.is_none_or(|project| page.in_project(project))).then(|| (page.into_headers(), version))
-    }
-
-    /// The most recent messages from the same saved record, without opening the conversation in the engine.
-    pub fn history_tail(&self, id: &str, last: usize) -> Option<crate::history::Page<'static>> {
-        if last == 0 {
-            return self.history_page(id, 0, 0, None);
-        }
-        let (file, version) = self.history_file(id)?;
-        let mut reader = io::BufReader::new(file);
-        let indexed_start = self.history_message_count(id, version).map(|n| n.saturating_sub(last));
-        let mut page = match indexed_start {
-            Some(start) => crate::history::read(&mut reader, start, last).ok()?,
-            None => crate::history::read(&mut reader, 0, 0).ok()?,
-        };
-        let start = page.count.saturating_sub(last);
-        if page.count > 0 && indexed_start != Some(start) {
-            reader.rewind().ok()?;
-            page = crate::history::read(&mut reader, start, last).ok()?;
-            if page.count.saturating_sub(last) != start {
-                return None;
-            }
-        }
-        self.finish_history_page(id, page, version, None)
-    }
-
-    fn history_message_count(&self, id: &str, (len, modified): HistoryVersion) -> Option<usize> {
-        self.read_kept_list();
-        let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (version, index) = cache.get(&self.file(id))?;
-        (*version == (len, Some(modified)) && index.row.id == id).then_some(index.message_count).flatten()
-    }
-
-    fn finish_history_page(
-        &self,
-        id: &str,
-        mut page: crate::history::Page<'static>,
-        version: HistoryVersion,
-        project: Option<&str>,
-    ) -> Option<crate::history::Page<'static>> {
-        if page.id != id || project.is_some_and(|p| !page.in_project(p)) {
-            return None;
-        }
-        if !page.messages.is_empty() {
-            self.transcripts.recover(id, page.messages.to_mut());
-        }
-        page.saved_version = Some(version);
-        Some(page)
-    }
-
-    /// Refuses to deliver a saved-only snapshot if the record was replaced or removed while the reader was away.
-    pub fn history_is_current(&self, page: &crate::history::Page<'_>) -> bool {
-        page.saved_version.is_some_and(|version| self.history_version_is_current(&page.id, version))
-    }
-
-    pub fn history_version_is_current(&self, id: &str, (len, modified): HistoryVersion) -> bool {
-        stamp(&self.file(id)) == Some((len, Some(modified)))
     }
 
     pub fn save(&self, conversation: &Conversation) {
@@ -1033,14 +722,14 @@ impl Store {
     }
 
     pub fn prepare_snapshot(conversation: &Conversation) -> Snapshot {
-        Snapshot { bytes: Self::snapshot(conversation), index: IndexedSummary::new(conversation) }
+        Snapshot { bytes: Self::snapshot(conversation), row: summary(conversation) }
     }
 
     pub fn save_prepared(&self, id: &str, snapshot: &Snapshot, generation: u64, patient: bool) -> Result<(), Fault> {
-        if snapshot.index.row.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        if snapshot.row.id != id || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err(Fault::Corrupt);
         }
-        self.save_record(&snapshot.index, generation, &snapshot.bytes, patient)
+        self.save_record(&snapshot.row, generation, &snapshot.bytes, patient)
     }
 
     fn snapshot_lock(&self, id: &str) -> Arc<SnapshotWrites> {
@@ -1074,11 +763,10 @@ impl Store {
     }
 
     fn save_snapshot_with(&self, conversation: &Conversation, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
-        self.save_record(&IndexedSummary::new(conversation), generation, bytes, patient)
+        self.save_record(&summary(conversation), generation, bytes, patient)
     }
 
-    fn save_record(&self, index: &IndexedSummary, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
-        let row = &index.row;
+    fn save_record(&self, row: &Summary, generation: u64, bytes: &[u8], patient: bool) -> Result<(), Fault> {
         let _move = self.group_move.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let lock = self.snapshot_lock(&row.id);
         lock.next.fetch_max(generation, std::sync::atomic::Ordering::Relaxed);
@@ -1096,20 +784,20 @@ impl Store {
         replace_with(&*self.disk, &path, bytes, patient)?;
         *written = Some(generation);
         self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.written_summary(path, index.clone());
+        self.written_summary(path, row.clone());
         self.search.saved_metadata(&row.id, row.area, row.project_id.clone(), row.updated_at, row.temporary);
         Ok(())
     }
 
     /// The file just written is the conversation in hand, so the next list need not read it back, and `unchanged` knows it.
     fn written(&self, path: PathBuf, conversation: &Conversation) {
-        self.written_summary(path, IndexedSummary::new(conversation));
+        self.written_summary(path, summary(conversation));
     }
 
-    fn written_summary(&self, path: PathBuf, index: IndexedSummary) {
+    fn written_summary(&self, path: PathBuf, row: Summary) {
         self.unreadable.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path);
         if let Some(now_stamp) = stamp(&path) {
-            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, index));
+            self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (now_stamp, row));
             self.kept_list.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
     }
@@ -1128,7 +816,7 @@ impl Store {
             .filter_map(|path| {
                 let known = {
                     let cache = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    cache.get(&path).filter(|(kept, _)| stamp(&path).as_ref() == Some(kept)).map(|(_, index)| index.row.temporary)
+                    cache.get(&path).filter(|(kept, _)| stamp(&path).as_ref() == Some(kept)).map(|(_, row)| row.temporary)
                 };
                 if known == Some(false) {
                     return None;
@@ -1719,170 +1407,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_stable_saved_reply_uses_the_index_and_keeps_the_same_words_and_state() {
-        use crate::history::ProjectHistory;
-
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let mut saved: Conversation = serde_json::from_value(serde_json::json!({
-            "id":"saved", "title":"Saved", "area":"project", "projectId":"local", "createdAt":1, "updatedAt":4, "archivedAt":5,
-            "messages":[{"id":"one","role":"assistant","text":"Earlier","at":1},
-                {"id":"two","role":"assistant","text":"Latest","at":2,
-                    "wrapUp":{"recap":"Recap","done":false,"ask":"Resume?","actions":["Resume"]}},
-                {"id":"three","role":"user","text":"Later request","at":3}]
-        }))
-        .unwrap();
-        saved.compacting = true;
-        saved.stopped = true;
-        store.save_checked(&saved).unwrap();
-        let (read, version) = store.project_history_record(&saved.id, "local").unwrap();
-        let ProjectHistory::Latest(read) = read else { panic!("the saved latest reply did not use the index") };
-        assert!(store.history_version_is_current(&saved.id, version));
-        assert_eq!(read.id, "two");
-        assert_eq!(read.title, "Saved");
-        assert_eq!(read.words, saved.messages[1].said());
-        assert_eq!(read.state, crate::conversation_state::saved_state(&saved));
-        assert!(store.project_history_record(&saved.id, "another").is_none());
-        assert!(matches!(Store::new(dir.path()).project_history_record(&saved.id, "local"), Some((ProjectHistory::Complete(_), _))));
-
-        let tool = serde_json::from_value(serde_json::json!({"id":"uncounted","name":"Helper","input":null})).unwrap();
-        store.transcripts.append_call(&saved.id, "two", &tool).unwrap();
-        let ProjectHistory::Complete(recovered) = store.project_history_record(&saved.id, "local").unwrap().0 else {
-            panic!("a new journaled call must use recovery")
-        };
-        assert_eq!(recovered.messages[1].tools.as_ref().unwrap()[0].id, "uncounted");
-    }
-
-    #[test]
-    fn a_saved_reply_with_a_pending_plan_decision_uses_the_complete_record() {
-        use crate::history::ProjectHistory;
-
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let saved: Conversation = serde_json::from_value(serde_json::json!({
-            "id":"plan", "title":"Plan", "area":"project", "projectId":"local", "createdAt":1, "updatedAt":2,
-            "messages":[{"id":"reply","role":"assistant","text":"A pending plan","at":2,"vendor":"codex","status":"done",
-                "permissions":[{"requestId":"decision","tool":"ExitPlanMode","input":{}}]}]
-        }))
-        .unwrap();
-        store.save_checked(&saved).unwrap();
-        let ProjectHistory::Complete(read) = store.project_history_record(&saved.id, "local").unwrap().0 else {
-            panic!("a pending decision must use the full state rules")
-        };
-        assert_eq!(read.messages[0].permissions.as_ref().unwrap()[0].tool, "ExitPlanMode");
-    }
-
-    #[test]
-    fn saved_history_pages_recover_only_the_selected_transcript_steps() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let mut saved: Conversation = serde_json::from_value(serde_json::json!({
-            "id":"saved", "title":"Saved", "area":"project", "projectId":"local", "createdAt":1, "updatedAt":2,
-            "messages":[{"id":"one","role":"assistant","text":"Earlier","at":1}, {"id":"two","role":"assistant","text":"Selected","at":2}]
-        }))
-        .unwrap();
-        store.save_checked(&saved).unwrap();
-        for (message, call) in [("one", "helper-one"), ("two", "helper-two")] {
-            let tool = serde_json::from_value(serde_json::json!({"id":call,"name":"Helper","input":null})).unwrap();
-            store.transcripts.append_call(&saved.id, message, &tool).unwrap();
-        }
-        let page = store.history_page(&saved.id, 1, 1, Some("local")).unwrap();
-        assert_eq!(page.count, 2);
-        assert_eq!(page.messages.len(), 1);
-        let tools = page.messages[0].tools.as_ref().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].id, "helper-two");
-        assert!(store.history_is_current(&page));
-        for count in [Some(2), None, Some(1)] {
-            store.summaries.lock().unwrap().get_mut(&store.file(&saved.id)).unwrap().1.message_count = count;
-            let tail = store.history_tail(&saved.id, 1).unwrap();
-            assert_eq!(tail.count, 2);
-            assert_eq!(tail.messages.len(), 1);
-            assert_eq!(tail.messages[0].id, "two");
-            assert_eq!(tail.messages[0].tools.as_ref().unwrap()[0].id, "helper-two");
-        }
-        saved.project_id = Some("different".into());
-        store.save_checked(&saved).unwrap();
-        assert!(!store.history_is_current(&page));
-        assert!(store.history_page(&saved.id, 1, 1, Some("foreign")).is_none());
-        assert!(store.history_page("../saved", 0, 1, None).is_none());
-    }
-
-    #[test]
-    fn a_project_listing_rechecks_scope_and_accounts_for_recovered_edits() {
-        use crate::conversation_state::State;
-        use crate::transcript::{TranscriptEntry, TranscriptKind};
-
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let mut saved: Conversation = serde_json::from_value(serde_json::json!({
-            "id":"saved", "title":"Saved", "area":"project", "projectId":"local", "createdAt":1, "updatedAt":2,
-            "messages":[{"id":"reply","role":"assistant","text":"Answer","at":2,"tools":[
-                {"id":"helper","name":"Helper","input":null,"transcript":{"pages":0,"failed":false}}
-            ]}]
-        }))
-        .unwrap();
-        saved.compacting = true;
-        assert_eq!(crate::conversation_state::state_of(false, &saved), State::Working);
-        store.save_checked(&saved).unwrap();
-        let row = store.list().pop().unwrap();
-        assert_eq!(store.listed_project_detail(&row, "local"), Some((State::Concluded, None)));
-        assert!(store.listed_project_detail(&row, "outside").is_none());
-        let wrong_title = Summary { title: "Old title".into(), ..row.clone() };
-        let wrong_date = Summary { updated_at: 1, ..row.clone() };
-        assert!(store.listed_project_detail(&wrong_title, "local").is_none());
-        assert!(store.listed_project_detail(&wrong_date, "local").is_none());
-
-        let edit = serde_json::from_value(serde_json::json!({
-            "id":"edit","name":"Write","input":{"file_path":"result.md"},"parent":"helper","ok":true
-        }))
-        .unwrap();
-        store.transcripts.append_tool("saved", "helper", 0, &edit).unwrap();
-        store
-            .transcripts
-            .append_page(
-                "saved",
-                "helper",
-                0,
-                &[TranscriptEntry { at: 0, kind: TranscriptKind::Tool, tool: Some("edit".into()), text: String::new() }],
-            )
-            .unwrap();
-        assert_eq!(store.listed_project_detail(&row, "local"), Some((State::Unconcluded, None)));
-        let recovered = store.get("saved").unwrap();
-        let positions = crate::transcript::TranscriptStore::page_positions(&recovered.messages);
-        assert!(!store.transcripts.has_more("saved", Some(&positions)));
-        let late = serde_json::from_value(serde_json::json!({
-            "id":"late-helper","name":"Helper","input":null,"transcript":{"pages":0,"failed":false}
-        }))
-        .unwrap();
-        store.transcripts.append_call("saved", "reply", &late).unwrap();
-        assert!(store.transcripts.has_more("saved", Some(&positions)));
-
-        saved.archived_at = Some(3);
-        store.save_checked(&saved).unwrap();
-        let archived = store.list().pop().unwrap();
-        assert!(store.listed_project_detail(&archived, "local").is_none());
-        saved.archived_at = None;
-        saved.temporary = true;
-        store.save_checked(&saved).unwrap();
-        assert!(store.list().is_empty());
-        assert!(store.listed_project_detail(&row, "local").is_none());
-
-        saved.temporary = false;
-        saved.project_id = Some("outside".into());
-        Store::new(dir.path()).save_checked(&saved).unwrap();
-        assert!(store.listed_project_detail(&row, "local").is_none());
-        let moved = store.list().pop().unwrap();
-        assert!(store.listed_project_detail(&moved, "local").is_none());
-
-        saved.id = "not-the-file-name".into();
-        fs::write(store.file("saved"), Store::snapshot(&saved)).unwrap();
-        let mismatched = store.list().pop().unwrap();
-        assert!(store.listed_project_detail(&mismatched, "outside").is_none());
-        assert!(store.listed_project_detail(&moved, "outside").is_none());
-    }
-
-    #[test]
     fn temporary_chat_delete_guard_preserves_ordinary_and_mismatched_records() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path());
@@ -1972,64 +1496,6 @@ mod tests {
         }
         fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
         assert!(Store::new(dir.path()).list().iter().all(|row| row.title != "Kept"));
-    }
-
-    #[test]
-    fn startup_reuses_the_kept_list_and_scans_changed_conversations() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let passive = serde_json::json!({
-            "id": "passive", "title": "Passive", "area": "chat", "createdAt": 0, "updatedAt": 1, "messages": [],
-            "extra": {"keepGoing": {}, "startedBy": "another", "waitingOn": {}}
-        });
-        let active = serde_json::json!({
-            "id": "active", "title": "Active", "area": "project", "createdAt": 0, "updatedAt": 1, "messages": [],
-            "keepGoing": {"turns": 0, "failed": 0}, "startedBy": "parent", "waitingOn": {"since": 1, "until": 2}
-        });
-        // Listing sees the top-level fields only, even when the same names occur in nested data.
-        fs::write(store.file("passive"), serde_json::to_vec(&passive).unwrap()).unwrap();
-        fs::write(store.file("active"), serde_json::to_vec(&active).unwrap()).unwrap();
-        assert_eq!(store.list().len(), 2);
-        store.keep_list(true);
-        assert!(store.kept_list.file.is_file());
-        let scan = Store::new(dir.path()).start_scan();
-        assert_eq!(scan.keep_going, ["active"]);
-        assert_eq!(scan.started_by, ["active"]);
-        assert_eq!(scan.waiting_on, ["active"]);
-        let mut changed = passive;
-        changed.as_object_mut().unwrap().remove("extra");
-        changed["waitingOn"] = serde_json::json!({"since": 1, "until": 2, "note": "Check again after the conversation changes"});
-        let bytes = serde_json::to_vec(&changed).unwrap();
-        assert_ne!(fs::metadata(store.file("passive")).unwrap().len(), bytes.len() as u64);
-        fs::write(store.file("passive"), bytes).unwrap();
-        let mut scan = Store::new(dir.path()).start_scan();
-        scan.waiting_on.sort();
-        assert_eq!(scan.keep_going, ["active"]);
-        assert_eq!(scan.started_by, ["active"]);
-        assert_eq!(scan.waiting_on, ["active", "passive"]);
-    }
-
-    #[test]
-    fn startup_child_state_rechecks_a_changed_record() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::new(dir.path());
-        let mut record = serde_json::json!({
-            "id": "member", "title": "Worker", "area": "project", "createdAt": 0, "updatedAt": 1, "messages": [],
-            "startedBy": "lead", "keepGoing": {"turns": 0, "failed": 0}
-        });
-        let path = store.file("member");
-        fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-        assert_eq!(store.list().len(), 1);
-        store.keep_list(true);
-        drop(store);
-
-        let store = Store::new(dir.path());
-        assert_eq!(store.start_scan().started_by, ["member"]);
-        assert_eq!(store.child_on_start("member"), Some(("lead".into(), ChildOnStart::Active)));
-        record["startedBy"] = serde_json::json!("another-lead");
-        record["pendingParentReport"] = serde_json::json!(true);
-        fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-        assert_eq!(store.child_on_start("member"), Some(("another-lead".into(), ChildOnStart::OwesReport)));
     }
 
     #[test]

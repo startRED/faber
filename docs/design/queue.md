@@ -16,11 +16,6 @@
 - Turn completion drains this queue and reports to the parent through the same idempotent path, including after
   compaction and interrupted-turn recovery, carrying the existing conclusion state once per reply. Reply endings
   start no automatic checks or fix wakes. Plan approval, Stop and Keep going keep their holds. No new control.
-- An already saved wait return at the front of the runnable queue takes the place of the automatic restart turn after
-  a close or an update. It keeps its message id and prompt and leaves the queue in the same save that admits it
-  as a turn. A second cut during that recovery needs the person's Continue. A return held by Stop or an
-  unanswered permission from a process that ended remains available to Send now, even across another restart.
-  That return does not block unrelated work once the person takes up the conversation again.
 - Reports that wait one behind the other go out as one turn: the lead reads them all together, under one quiet line in
   the plural ("3 conversations this agent started finished…", `wake.childrenDone`); the merged message keeps each
   report's id (`Wake.ids`) so a restart never sends one twice. A person's message between two reports keeps them apart.
@@ -30,8 +25,6 @@
   last report of a team. Each report starts with Faber's own record of the conversation: files changed, checks run, and
   whether a check ran after the last edit (`results::record_line`). Successes can reach the lead up to 30 seconds later
   (R573).
-- A child report still in the queue shows its current delivery state. With no connected subscription, Connect opens the
-  account cards from that row. Closing the cards returns focus to the row's action, and the report stays in the queue.
 - A queued chip keeps its badge, words and attachments. Edit uses the same quiet text button as Remove and Send now;
   while editing, a small text box replaces only the words and Save and Cancel replace the actions. Enter saves,
   Shift+Enter adds a line and Escape cancels from any control in the editor form; composition input never saves or
@@ -66,9 +59,7 @@
 
 A conversation another agent started tells that agent once per reply (`quiet_child.rs`, `wake.childQuiet`): when a step of its
 own has said nothing for 30 minutes, when it repeats the same step or fails it three times, or when it has worked for an hour
-without changing a file or passing a check. The line gives the conversation ID, message number and tool offset for its
-latest recorded step. The lead can open that step through the scoped `steps` action. The notice keeps command
-inputs out of the automatic wake and says Faber stopped nothing; held reports go out first. A piece that ends twice in
-a row with no file changed and no conclusion gets, in its
+without changing a file or passing a check. The line names the conversation and its latest step and says Faber stopped
+nothing; held reports go out first. A piece that ends twice in a row with no file changed and no conclusion gets, in its
 lead's report, the same AI's stronger model and how much more a turn costs there; with "Stronger AI if stuck"
 on, Faber moves it there once with one checkable step (`stronger.rs`, `wake.stronger`).

@@ -54,25 +54,6 @@ fn a_codex_turn_that_failed_says_the_kind_its_error_names() {
 }
 
 #[test]
-fn a_codex_retry_notice_is_not_a_turn_error() {
-    let mut state = CodexTurnState::default();
-    let mut notice = json!({"method": "error", "params": {
-        "threadId": "thread", "turnId": "turn", "willRetry": true,
-        "error": {"message": "Reconnecting... 1/5", "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": null}}}
-    }});
-    assert!(parse_codex_notification(&notice, &mut state).is_empty());
-
-    for will_retry in [json!(false), Value::Null] {
-        notice["params"]["willRetry"] = will_retry;
-        notice["params"]["error"]["message"] = json!("The stream stopped.");
-        assert_eq!(
-            parse_codex_notification(&notice, &mut state),
-            [EngineEvent::Error { message: "The stream stopped.".into(), fatal: false }]
-        );
-    }
-}
-
-#[test]
 fn a_claude_turn_that_failed_says_the_kind_its_error_words_name() {
     for (words, key) in [
         (r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#, "reason.fail.overloaded"),

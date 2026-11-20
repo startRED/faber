@@ -112,22 +112,14 @@ pub fn parse_report(text: &str) -> Result<Vec<Check>, String> {
 }
 
 pub fn to_outcomes(checks: Vec<Check>, filter: Option<&str>) -> Vec<Outcome> {
-    let mut outcomes = Vec::new();
-    let mut extra = 0;
-    for c in checks {
-        // A bootstrap crash in tests/ui/crash.ts has no check name to match.
-        if filter.is_some_and(|f| !c.name.contains(f)) && (c.ok || c.name != "page error") {
-            extra += 1;
-            continue;
-        }
-        let time = Some(Duration::from_secs_f64(c.ms.max(0.0) / 1000.0));
-        let outcome = if c.ok { Outcome::pass(Suite::Ui, &c.name, time) } else { Outcome::fail(Suite::Ui, &c.name, time, &c.message) };
-        outcomes.push(outcome);
-    }
-    if extra > 0 {
-        outcomes.push(Outcome::fail(Suite::Ui, "check filter", None, &format!("the page ran {extra} checks outside the requested filter")));
-    }
-    outcomes
+    checks
+        .into_iter()
+        .filter(|c| filter.is_none_or(|f| c.name.contains(f)))
+        .map(|c| {
+            let time = Some(Duration::from_secs_f64(c.ms.max(0.0) / 1000.0));
+            if c.ok { Outcome::pass(Suite::Ui, &c.name, time) } else { Outcome::fail(Suite::Ui, &c.name, time, &c.message) }
+        })
+        .collect()
 }
 
 fn read_report(path: &Path) -> Option<String> {
@@ -241,29 +233,13 @@ mod tests {
     }
 
     #[test]
-    fn the_report_keeps_each_matching_verdict() {
+    fn the_filter_keeps_only_checks_whose_name_contains_the_text() {
         let checks =
             parse_report(r#"[{"name":"i18n: keys","ok":true,"ms":1},{"name":"models: ids","ok":false,"message":"x","ms":1}]"#).unwrap();
         let all = to_outcomes(checks.clone(), None);
         assert_eq!(all.len(), 2);
-        let some = to_outcomes(vec![checks[1].clone()], Some("models"));
+        let some = to_outcomes(checks, Some("models"));
         assert_eq!((some.len(), some[0].status), (1, Status::Fail));
         assert_eq!(some[0].suite, Suite::Ui);
-    }
-
-    #[test]
-    fn a_filtered_run_refuses_a_report_with_unrequested_checks() {
-        let checks = parse_report(r#"[{"name":"models: ids","ok":true,"ms":1},{"name":"i18n: keys","ok":true,"ms":1}]"#).unwrap();
-        let outcomes = to_outcomes(checks, Some("models"));
-        assert!(outcomes.iter().any(|outcome| outcome.status == Status::Fail && outcome.message.contains("outside the requested filter")));
-    }
-
-    #[test]
-    fn a_filtered_run_reports_a_crash_before_its_check_can_start() {
-        let checks = parse_report(r#"[{"name":"page error","ok":false,"message":"failed while loading the page","ms":0}]"#).unwrap();
-        let outcomes = to_outcomes(checks, Some("models"));
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(outcomes[0].status, Status::Fail);
-        assert_eq!(outcomes[0].message, "failed while loading the page");
     }
 }

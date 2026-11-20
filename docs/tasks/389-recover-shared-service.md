@@ -12,5 +12,3 @@ Build: Detect correlated lack of progress in the shared service, use a bounded h
 Leave out: tests using user credentials or real user processes. A cheap Terra low run is optional.
 
 Done: A synthetic fake or isolated native failure reproduces the stall and verifies detection, bounded recovery, conversation preservation without duplicate sends and the visible reason. Preserve the existing codex_session proof that one failed thread does not kill an otherwise healthy shared server. Show the tests fail before the fix and pass afterward. Record resource measurements and the CLI-server budget separately from R125. Update the product map and design page in the same future commit. Obtain an independent risk review.
-
-Evidence: [Shared service recovery and resource measurements](../dev/shared-codex-service.md) describes the controlled stall and restart separately from the stock resource controls and the live snapshot. The user-reported incident's internal cause is still unknown.

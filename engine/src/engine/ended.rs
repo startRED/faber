@@ -163,8 +163,7 @@ impl Core {
 
     pub(super) fn can_request_conclusion(&self, conv: &str) -> bool {
         // A turn that ended to wait for its background command concludes after it, not now.
-        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
-            || self.waiting_command(conv).is_some()
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some() || l.command_wait.is_some())
             || self.compacts.contains_key(conv)
             || self.compactions.contains_key(conv)
             || self.room_refusal(conv).is_some()
@@ -353,7 +352,6 @@ mod tests {
             core.live.get_mut(&id).unwrap().turn = None;
             assert!(core.can_request_conclusion(&id), "a turn that ended with no conclusion is asked for one");
             let wait = crate::model::WaitingOn {
-                storage_blocked: false,
                 ids: vec!["child".into()],
                 note: "Both lanes report".into(),
                 since: 1,

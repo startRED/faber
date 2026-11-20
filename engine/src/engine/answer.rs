@@ -523,8 +523,8 @@ pub(super) mod tests {
                 tuning: Default::default(),
                 research: None,
                 retiring: false,
-                codex_goal_held: false,
-                idle_period: None,
+                was_idle: false,
+                command_wait: None,
                 runs: Permissions::Ask,
                 by_hand: true,
                 approved: false,
@@ -573,7 +573,7 @@ pub(super) mod tests {
                     1,
                     EngineEvent::Tool { id: call.into(), name: "Bash".into(), input: json!({ "command": command }), parent: None },
                 );
-                let result = EngineEvent::ToolResult { id: call.into(), ok, declined, exit_code: None, text: String::new() };
+                let result = EngineEvent::ToolResult { id: call.into(), ok, declined, text: String::new() };
                 c.handle(&id, 1, result.clone());
                 c.handle(&id, 1, result);
             });
@@ -643,11 +643,7 @@ pub(super) mod tests {
             reply.status = Some(Status::Streaming);
             conv.messages.push(reply);
             c.live.get_mut(&id).unwrap().turn = Some("t2".into());
-            c.handle(
-                &id,
-                1,
-                EngineEvent::ToolResult { id: "save".into(), ok: true, declined: false, exit_code: None, text: String::new() },
-            );
+            c.handle(&id, 1, EngineEvent::ToolResult { id: "save".into(), ok: true, declined: false, text: String::new() });
         });
         let c = engine.open(&id).unwrap();
         assert_eq!(c.messages.iter().find(|m| m.id == "t1").unwrap().commits, ["save"]);
@@ -2087,9 +2083,7 @@ pub(super) mod tests {
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         assert_eq!(settled(&engine, &id).await, (None, Some(false)), "a helper is still at work for the agent");
 
-        engine.with(|c| {
-            c.handle(&id, 1, EngineEvent::ToolResult { id: "bg".into(), ok: true, declined: false, exit_code: None, text: String::new() })
-        });
+        engine.with(|c| c.handle(&id, 1, EngineEvent::ToolResult { id: "bg".into(), ok: true, declined: false, text: String::new() }));
         engine.with(|c| c.handle(&id, 1, EngineEvent::Settled));
         assert_eq!(settled(&engine, &id).await.1, Some(true));
     }
@@ -2172,7 +2166,7 @@ pub(super) mod tests {
     }
 
     fn result(id: &str) -> EngineEvent {
-        EngineEvent::ToolResult { id: id.into(), ok: true, declined: false, exit_code: None, text: String::new() }
+        EngineEvent::ToolResult { id: id.into(), ok: true, declined: false, text: String::new() }
     }
 
     #[tokio::test]

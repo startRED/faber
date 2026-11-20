@@ -223,7 +223,7 @@ fn resolved_private(protected: &[String]) -> Vec<String> {
 }
 
 /// Holds a directory's identity through enumeration and atomic replacement.
-pub(crate) struct Directory {
+struct Directory {
     #[cfg(windows)]
     dir: faber_winproc::MemoryDirectory,
     #[cfg(unix)]
@@ -252,7 +252,7 @@ enum SaveStage {
 }
 
 impl Directory {
-    pub(crate) fn open(root: &Path, relative: &Path) -> std::io::Result<Self> {
+    fn open(root: &Path, relative: &Path) -> std::io::Result<Self> {
         if relative.components().any(|c| !matches!(c, Component::Normal(_))) {
             return Err(std::io::ErrorKind::PermissionDenied.into());
         }
@@ -313,7 +313,7 @@ impl Directory {
         }
     }
 
-    pub(crate) fn replacement_file(&self, name: &str) -> std::io::Result<File> {
+    fn replacement_file(&self, name: &str) -> std::io::Result<File> {
         #[cfg(windows)]
         return self.dir.replacement_file(name);
         #[cfg(unix)]

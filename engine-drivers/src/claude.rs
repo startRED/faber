@@ -3,7 +3,7 @@
 mod background;
 mod commands;
 
-use crate::events::{Capabilities, Delivery, EngineEvent, QuietSearchInterrupt, Session, SessionCommand, UserTurn, failure_reason};
+use crate::events::{Capabilities, Delivery, EngineEvent, Session, SessionCommand, UserTurn, failure_reason};
 pub use crate::model::ClaudeFlags;
 use crate::model::{Area, Permissions, Tuning, Vendor, WebSearch};
 use crate::persona::{PersonaInput, persona};
@@ -11,11 +11,10 @@ use crate::proc::{self, Spawner};
 use crate::router::{EFFORT, default_model};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{Semaphore, mpsc, oneshot};
 
 #[derive(Debug, Clone)]
 pub struct ClaudeLaunch {
@@ -713,7 +712,6 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                     id: s(&c["tool_use_id"]),
                     ok,
                     declined: !ok && DECLINED.iter().any(|d| text.starts_with(d)),
-                    exit_code: None,
                     text,
                 }
             })
@@ -849,28 +847,6 @@ pub struct ClaudeOptions {
     pub sandbox: Option<crate::cli::Cli>,
 }
 
-/// The engine supplies this from the session's attached copy, never from a tool request.
-#[derive(Clone)]
-pub struct GuardedCopy {
-    pub data: PathBuf,
-    pub conversation: String,
-    pub copy: faber_engine_projects::project::copy::WorkCopy,
-    #[cfg(test)]
-    prepare_hook: Option<Arc<dyn Fn() + Send + Sync>>,
-}
-
-static COPY_COMMAND_SCANS: Semaphore = Semaphore::const_new(2);
-type CopyAnswer = (String, u64, Option<Value>, oneshot::Sender<Delivery>);
-const SANDBOX_UNAVAILABLE: &str = "The required data-folder sandbox is unavailable. Never retry unsandboxed.";
-const COMMAND_OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
-
-struct CommandOutputRead {
-    task: String,
-    terminal: bool,
-    next_terminal: Option<bool>,
-    until: tokio::time::Instant,
-}
-
 pub fn supports_fork(help: &str) -> bool {
     help.lines().any(|line| {
         line.starts_with([' ', '\t'])
@@ -902,34 +878,15 @@ pub fn start_claude_fork(
     on_event: EventSink,
 ) -> Result<Session, String> {
     let args = claude_fork_args(&opts.launch, point, supported)?;
-    Ok(start_configured(opts, on_event, args, None))
+    Ok(start_configured(opts, on_event, args))
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     let args = claude_args(&opts.launch);
-    start_configured(opts, on_event, args, None)
+    start_configured(opts, on_event, args)
 }
 
-pub fn start_claude_in_copy(
-    opts: ClaudeOptions,
-    on_event: EventSink,
-    fork: Option<(&crate::rewind::NativePoint, bool)>,
-    copy: GuardedCopy,
-) -> Result<Session, String> {
-    let args = match fork {
-        Some((point, supported)) => claude_fork_args(&opts.launch, point, supported)?,
-        None => claude_args(&opts.launch),
-    };
-    let copy = (cfg!(windows)
-        && opts.launch.permissions.guarded()
-        && !opts.launch.temporary
-        && opts.launch.area == Area::Project
-        && opts.launch.instructions.is_none())
-    .then_some(copy);
-    Ok(start_configured(opts, on_event, args, copy))
-}
-
-fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>, copy: Option<GuardedCopy>) -> Session {
+fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
     // A denial in the result only means "nobody could answer" when the CLI ran with no prompts; with the host answering, a denial is
@@ -962,22 +919,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                 result
             }};
         }
-        let mut pending: HashMap<String, (String, Value, u64)> = HashMap::new();
-        let (copy_answer, mut copy_answers) = mpsc::unbounded_channel::<CopyAnswer>();
-        let mut preparing = HashSet::new();
-        let mut approval_turn = 0;
-        macro_rules! send_answer {
-            ($id:expr, $response:expr) => {{
-                let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": $id, "response": $response } });
-                match write_checked!(&msg) {
-                    Ok(()) => {
-                        pending.remove(&$id);
-                        Delivery::Delivered
-                    }
-                    Err(_) => Delivery::WriteFailed,
-                }
-            }};
-        }
+        let mut pending: HashMap<String, (String, Value)> = HashMap::new();
         // Helper calls waiting for their report: tool call id to the control request and the JSON-RPC id that carried it.
         let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
@@ -987,24 +929,8 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
         // The id of the `get_context_usage` request still waiting for its answer.
         let mut usage_request: Option<String> = None;
         let mut commands = commands::Commands::default();
-        let mut command_reads: HashMap<String, CommandOutputRead> = HashMap::new();
-        macro_rules! read_command_output {
-            ($task:expr, $terminal:expr) => {{
-                let task = $task;
-                control_id += 1;
-                let id = format!("faber-{control_id}");
-                let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
-                let written = write_checked!(&request).is_ok();
-                if written {
-                    command_reads.insert(id, CommandOutputRead {
-                        task, terminal: $terminal, next_terminal: None, until: tokio::time::Instant::now() + COMMAND_OUTPUT_WAIT,
-                    });
-                }
-                written
-            }};
-        }
+        let mut command_reads: HashMap<String, (String, bool)> = HashMap::new();
         let mut command_stops: HashMap<String, tokio::sync::oneshot::Sender<Delivery>> = HashMap::new();
-        let mut search_stop: Option<(String, QuietSearchInterrupt, bool)> = None;
         let mut watch = proc::TurnWatch::default();
         let mut queued: Vec<UserTurn> = vec![];
         // Lines not yet echoed back, in order, with their words: the tag of one the person wrote while a turn ran, none for a
@@ -1021,27 +947,14 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
         let mut tree_check = None;
         on_event(writers.snapshot());
         'driver: loop {
-            if retiring && !watch.active() && !writers.busy() && command_reads.is_empty() {
+            if retiring && !watch.active() && !writers.busy() {
                 shutdown_confirmed |= proc::stop_confirmed(&mut *stdin, &mut child, &mut job).await;
                 writers.shutdown(shutdown_confirmed, false);
                 on_event(writers.snapshot());
                 break;
             }
             let deadline = close_deadline.or(watch.deadline());
-            let output_deadline = command_reads.values().map(|read| read.until).min();
             tokio::select! {
-                () = proc::wait_deadline(output_deadline) => {
-                    let now = tokio::time::Instant::now();
-                    let mut retry = Vec::new();
-                    command_reads.retain(|_, read| {
-                        if read.until > now { return true; }
-                        if let Some(terminal) = read.next_terminal { retry.push((read.task.clone(), terminal)); }
-                        false
-                    });
-                    for (task, terminal) in retry {
-                        if !read_command_output!(task, terminal) { break; }
-                    }
-                }
                 () = proc::wait_deadline(tree_check) => {
                     if let Some(container) = job.as_ref() { writers.observe_tree(container.descendants()); }
                     tree_check = writers.tree_pending().then(|| tokio::time::Instant::now() + std::time::Duration::from_secs(1));
@@ -1072,9 +985,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                             let code = tokio::time::timeout(std::time::Duration::from_secs(1), proc::exit_code(&mut child))
                                 .await.unwrap_or_else(|_| "unknown".into());
                             let tail = tail.lock().unwrap().clone();
-                            let detail = crate::helper::writer_exit_detail(opts.launch.helper, shutdown_confirmed);
-                            let message = format!("{detail}Claude Code stopped (exit {code}). {tail}").trim().into();
-                            on_event(EngineEvent::Error { message, fatal: true });
+                            on_event(EngineEvent::Error { message: format!("Claude Code stopped (exit {code}). {tail}").trim().into(), fatal: true });
                         }
                         break;
                     };
@@ -1093,23 +1004,15 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                             if msg["type"] == "control_response" {
                                 let response = &msg["response"];
                                 if let Some(request) = response["request_id"].as_str() {
-                                    if let Some((_, _, acknowledged)) = search_stop.as_mut().filter(|(id, _, _)| id == request) {
-                                        *acknowledged = response["subtype"] == "success"
-                                            && response["response"]["still_queued"].as_array().is_some_and(Vec::is_empty);
-                                        continue;
-                                    }
-                                    if let Some(CommandOutputRead { task, terminal, next_terminal, .. }) = command_reads.remove(request) {
-                                        use crate::background::{Capture, Update};
-                                        let body = &response["response"];
-                                        if response["subtype"] == "success" && let Some(output) = body["output"].as_str() {
-                                            on_event(EngineEvent::Background(Update::Output {
-                                                id: task.clone(), text: output.into(),
-                                                capture: if terminal { Capture::Terminal } else { Capture::Snapshot },
-                                                source_truncated: body["truncated"] == true,
-                                            }));
+                                    if let Some((task, dirty)) = command_reads.remove(request) {
+                                        if let Some(output) = response["response"]["output"].as_str() {
+                                            on_event(EngineEvent::Background(crate::background::Update::Output { id: task.clone(), text: output.into(), replace: true }));
                                         }
-                                        if let Some(terminal) = next_terminal {
-                                            read_command_output!(task, terminal);
+                                        if dirty {
+                                            control_id += 1;
+                                            let id = format!("faber-{control_id}");
+                                            let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
+                                            if write_checked!(&request).is_ok() { command_reads.insert(id, (task, false)); }
                                         }
                                         continue;
                                     }
@@ -1119,25 +1022,20 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                     }
                                 }
                             }
-                            // Task edges request the latest tail; the deadline releases a missing receipt without polling.
-                            let known_task = commands.read_event(&msg);
+                            // A task edge requests its latest tail once. No timer, file watching or model turn.
+                            let final_read = commands.read_event(&msg);
                             let news = commands.observe(&msg);
                             for update in news { on_event(EngineEvent::Background(update)); }
-                            if let Some(task) = known_task.or_else(|| commands.read_event(&msg)) {
-                                // Only a recognized terminal notification removes its task.
-                                let terminal = !commands.contains(&task);
-                                if let Some(read) = command_reads.values_mut().find(|read| read.task == task) { read.next_terminal = Some(terminal); }
+                            if let Some(task) = final_read.or_else(|| commands.read_event(&msg)) {
+                                if let Some((_, dirty)) = command_reads.values_mut().find(|(id, _)| *id == task) { *dirty = true; }
                                 else if command_reads.len() < crate::background::MAX_COMMANDS {
-                                    read_command_output!(task, terminal);
+                                    control_id += 1;
+                                    let id = format!("faber-{control_id}");
+                                    let request = json!({"type":"control_request","request_id":id,"request":{"subtype":"get_task_output","task_id":task}});
+                                    if write_checked!(&request).is_ok() { command_reads.insert(id, (task, false)); }
                                 }
                             }
                             writers.observe(&msg);
-                            if search_stop.is_some() && (writers.busy()
-                                || (msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null())
-                                || (msg["type"] == "control_request" && matches!(msg["request"]["subtype"].as_str(), Some("can_use_tool" | "mcp_message"))))
-                            {
-                                search_stop = None;
-                            }
                             if msg["type"] == "result" || (msg["type"] == "system" &&
                                 matches!(msg["subtype"].as_str(), Some("init" | "task_started" | "task_notification")))
                             {
@@ -1170,15 +1068,9 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                             }
                             let finished = background.ends_reply(&msg, watch.stopping());
                             if finished {
-                                if let Some((_, request, true)) = search_stop.take()
-                                    && failure_reason(msg["terminal_reason"].as_str(), msg["subtype"].as_str()) == "reason.interrupted"
-                                {
-                                    request.confirmed();
-                                }
                                 // Bash tasks may be announced after their original reply has ended.
                                 commands.end_turn();
                                 watch.finish();
-                                approval_turn += 1;
                             }
                             if replay && msg["type"] == "user" && msg["isReplay"] == true {
                                 let said = words(&msg["message"]["content"]);
@@ -1224,14 +1116,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                 continue;
                             }
                             for mut event in parse_claude_message(&msg) {
-                                if search_stop.as_ref().is_some_and(|(_, request, _)| match &event {
-                                    EngineEvent::Tool { id, .. } => id != &request.tool,
-                                    EngineEvent::ToolResult { id, ok: true, .. } => id == &request.tool,
-                                    EngineEvent::Text(_) | EngineEvent::Thinking(_) => true,
-                                    _ => false,
-                                }) {
-                                    search_stop = None;
-                                }
                                 if matches!(event, EngineEvent::Settled) && background.owes() {
                                     event = EngineEvent::MainIdle;
                                 }
@@ -1252,15 +1136,9 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     let kept_out = crate::permissions::names_protected(tool, input, opts.cwd.to_str(), &opts.launch.tuning.protected);
-                                    let scoped_shell = copy.is_some() && ["Bash", "PowerShell"].contains(&tool.as_str());
-                                    let store_denied = if scoped_shell {
-                                        crate::permissions::names_record(input) || input["dangerouslyDisableSandbox"].as_bool() == Some(true)
-                                    } else {
-                                        crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str())
-                                    };
                                     if (opts.launch.permissions.guarded() && tool == "Monitor")
                                         || kept_out
-                                        || store_denied {
+                                        || crate::permissions::denies_data_write(opts.launch.permissions, tool, input, opts.cwd.to_str()) {
                                         let message = if kept_out {
                                             "Faber refused this: the person's kept rule says never to touch that path. Leave it as it is."
                                         } else {
@@ -1310,7 +1188,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                         }
                                         continue;
                                     }
-                                    pending.insert(request_id.clone(), (tool.clone(), input.clone(), approval_turn));
+                                    pending.insert(request_id.clone(), (tool.clone(), input.clone()));
                                 }
                                 on_event(event);
                             }
@@ -1345,31 +1223,10 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                         }
                     }
                 }
-                answer = copy_answers.recv(), if !preparing.is_empty() => {
-                    let Some((request_id, turn, updated, ack)) = answer else { continue };
-                    preparing.remove(&request_id);
-                    let delivery = if watch.active() && !watch.stopping() && !retiring && !closed && turn == approval_turn
-                        && let Some((tool, _, pending_turn)) = pending.get(&request_id)
-                        && *pending_turn == turn {
-                        let response = updated.map_or_else(
-                            || json!({ "behavior":"deny", "message":SANDBOX_UNAVAILABLE }),
-                            |input| allow_response(tool, &input, None),
-                        );
-                        send_answer!(request_id, response)
-                    } else {
-                        if pending.get(&request_id).is_some_and(|(_, _, pending_turn)| *pending_turn == turn) {
-                            pending.remove(&request_id);
-                        }
-                        Delivery::Unknown
-                    };
-                    let _ = ack.send(delivery);
-                }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::McpStatus { reply }) => { let _ = reply.send(None); }
-                    Some(SessionCommand::ReleaseIdle(_)) => {}
                     Some(SessionCommand::StopBackground { id: task, ack }) => {
                         if !commands.contains(&task) { let _ = ack.send(Delivery::Unknown); continue; }
-                        command_stops.retain(|_, waiting| !waiting.is_closed());
                         if command_stops.len() >= crate::background::MAX_COMMANDS { let _ = ack.send(Delivery::WriteFailed); continue; }
                         control_id += 1;
                         let id = format!("faber-{control_id}");
@@ -1378,7 +1235,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                         else { let _ = ack.send(Delivery::WriteFailed); }
                     }
                     Some(SessionCommand::Send(turn)) => {
-                        search_stop = None;
                         if watch.stopping() { queued.push(turn); continue; }
                         watch.begin();
                         on_event(writers.snapshot());
@@ -1397,7 +1253,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                     }
                     // The CLI's own command, as a line of its own: it compacts and answers with a result like any turn.
                     Some(SessionCommand::Compact) => {
-                        search_stop = None;
                         if watch.stopping() { continue; }
                         let turn = UserTurn::text(format!("/compact {COMPACT_FOCUS}"));
                         watch.begin();
@@ -1411,7 +1266,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                     // own after a plain reply or a stop (fixtures `steer*`, `queued*`, `helper-told*`). Its echo says which turn
                     // took it in.
                     Some(SessionCommand::Steer { turn, tag }) => {
-                        search_stop = None;
                         if replay && watch.active() && !watch.stopping() && write_checked!(&user_message(&turn)).is_ok() {
                             unread.push_back((Some(tag), turn.text.clone()));
                         } else {
@@ -1420,47 +1274,23 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                     }
                     Some(SessionCommand::Answer { request_id, allow, reply, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
-                        if allow && let Some(copy) = &copy && let Some((tool, input, pending_turn)) = pending.get(&request_id)
-                            && ["Bash", "PowerShell"].contains(&tool.as_str()) {
-                            if !watch.active() || watch.stopping() || retiring || *pending_turn != approval_turn || preparing.contains(&request_id) {
-                                let _ = ack.send(Delivery::Unknown);
-                                continue;
-                            }
-                            if let Ok(permit) = COPY_COMMAND_SCANS.try_acquire() {
-                                preparing.insert(request_id.clone());
-                                let (copy, cwd, sandbox, protected) = (copy.clone(), opts.cwd.clone(), opts.sandbox.clone(), opts.launch.tuning.protected.clone());
-                                let (tool, input, finish, turn) = (tool.clone(), input.clone(), copy_answer.clone(), approval_turn);
-                                let mode = opts.launch.permissions;
-                                tokio::task::spawn_blocking(move || {
-                                    let _permit = permit;
-                                    #[cfg(test)]
-                                    if let Some(hook) = &copy.prepare_hook { hook(); }
-                                    let updated = (|| {
-                                        use faber_engine_projects::project::copy::sandbox_folder;
-                                        let folder = sandbox_folder(&copy.data, &copy.conversation, &copy.copy, &cwd)?;
-                                        let input = crate::permissions::guarded_copy_input(
-                                            &cwd, mode, &tool, &input, sandbox.as_ref(), &crate::cli::find_cli, (&folder, &protected),
-                                        )?;
-                                        (sandbox_folder(&copy.data, &copy.conversation, &copy.copy, &cwd)? == folder).then_some(input)
-                                    })();
-                                    let _ = finish.send((request_id, turn, updated, ack));
-                                });
-                            } else {
-                                let delivery = send_answer!(request_id, json!({ "behavior":"deny", "message":SANDBOX_UNAVAILABLE }));
-                                let _ = ack.send(delivery);
-                            }
-                            continue;
-                        }
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
-                            Some((tool, input, _)) => {
+                            Some((tool, input)) => {
                                 let response = if allow && opts.launch.permissions.guarded() && ["Bash", "PowerShell"].contains(&tool.as_str()) {
                                     match crate::permissions::guarded_input(&opts.cwd, opts.launch.permissions, tool, input, opts.sandbox.as_ref(), &crate::cli::find_cli) {
                                         Some(updated) => allow_response(tool, &updated, None),
-                                        None => json!({ "behavior": "deny", "message": SANDBOX_UNAVAILABLE }),
+                                        None => json!({ "behavior": "deny", "message": "The required data-folder sandbox is unavailable. Never retry unsandboxed." }),
                                     }
                                 } else if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": if tool == "ExitPlanMode" { "The person wants to keep planning." } else { reply.as_ref().and_then(|v| v["planContract"].as_str()).unwrap_or(DECLINED[0]) } }) };
-                                send_answer!(request_id, response)
+                                let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
+                                match write_checked!(&msg) {
+                                    Ok(()) => {
+                                        pending.remove(&request_id);
+                                        Delivery::Delivered
+                                    }
+                                    Err(_) => Delivery::WriteFailed,
+                                }
                             }
                         };
                         let _ = ack.send(delivery);
@@ -1484,7 +1314,6 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                         }
                     }
                     Some(SessionCommand::Interrupt) => {
-                        search_stop = None;
                         if !writers.should_interrupt(watch.active(), watch.stopping()) { continue; }
                         watch.interrupt();
                         writers.interrupt();
@@ -1493,37 +1322,8 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                         let _ = write_checked!(&msg);
                     }
-                    Some(SessionCommand::InterruptQuietSearch(request)) => {
-                        if search_stop.is_some() || retiring || !watch.active() || watch.stopping()
-                            || !unread.is_empty() || !queued.is_empty() || !pending.is_empty() || !preparing.is_empty()
-                            || !helpers.is_empty() || background.owes() || writers.busy()
-                        {
-                            request.defer();
-                            continue;
-                        }
-                        let isolated = job.as_ref().is_some_and(|container| {
-                            #[cfg(unix)]
-                            if !container.owned_tree().is_some_and(|tree| tree.external_descendants().is_ok_and(|children| children.is_empty())) {
-                                return false;
-                            }
-                            container.descendants().is_ok_and(|children| children.is_empty())
-                        });
-                        if !isolated || !request.current() {
-                            request.defer();
-                            continue;
-                        }
-                        control_id += 1;
-                        let id = format!("faber-{control_id}");
-                        let msg = json!({ "type": "control_request", "request_id": id, "request": { "subtype": "interrupt" } });
-                        // This interrupt has no force-stop deadline: the CLI can have advanced past the search.
-                        if write_checked!(&msg).is_ok() { search_stop = Some((id, request, false)); }
-                    }
-                    Some(SessionCommand::Retire) => {
-                        search_stop = None;
-                        retiring = true;
-                    }
+                    Some(SessionCommand::Retire) => retiring = true,
                     Some(SessionCommand::Close) | None => {
-                        search_stop = None;
                         closed = true;
                         if watch.active() || writers.busy() {
                             if !watch.stopping() {
@@ -1593,133 +1393,6 @@ fn user_message(turn: &UserTurn) -> Value {
 mod allow_tests {
     use super::*;
 
-    fn project_launch() -> ClaudeLaunch {
-        ClaudeLaunch {
-            subagents: None,
-            temporary: false,
-            area: Area::Project,
-            model: None,
-            effort: None,
-            resume: None,
-            user_hooks: false,
-            permissions: Permissions::Ask,
-            instructions: None,
-            research: None,
-            group_instructions: None,
-            user_name: None,
-            flags: Default::default(),
-            tuning: Default::default(),
-            helper: Default::default(),
-            browse: false,
-            conversations: false,
-            leads: false,
-            verify: false,
-            progress: false,
-            tools: Default::default(),
-        }
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn approved_copy_commands_are_wrapped_and_stop_discards_a_preparing_approval() {
-        use std::sync::{
-            Mutex,
-            atomic::{AtomicBool, Ordering},
-        };
-        use std::time::Duration;
-        use tokio::io::AsyncWriteExt;
-
-        let data = tempfile::tempdir().unwrap();
-        let _store = crate::store::Store::new(data.path());
-        let root = faber_engine_projects::project::copy::home(data.path()).join("one");
-        std::fs::create_dir_all(&root).unwrap();
-        let (driver, script) = tokio::io::duplex(65536);
-        let (stdout, stdin) = tokio::io::split(driver);
-        let (from_driver, mut to_driver) = tokio::io::split(script);
-        let mut lines = BufReader::new(from_driver).lines();
-        let proc =
-            Mutex::new(Some(proc::Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None }));
-        let spawn: Spawner = Arc::new(move |_, _, _| Ok(proc.lock().unwrap().take().unwrap()));
-        let (entered, wait) = oneshot::channel();
-        let (release, gate) = std::sync::mpsc::channel();
-        let gate = Mutex::new(Some((entered, gate)));
-        let pause = Arc::new(AtomicBool::new(false));
-        let should_pause = pause.clone();
-        let scope = GuardedCopy {
-            data: data.path().into(),
-            conversation: "one".into(),
-            copy: faber_engine_projects::project::copy::WorkCopy {
-                path: root.to_str().unwrap().into(),
-                branch: "faber/one".into(),
-                root: data.path().join("source").to_str().unwrap().into(),
-                sub: String::new(),
-                base: None,
-            },
-            prepare_hook: Some(Arc::new(move || {
-                if should_pause.load(Ordering::Acquire)
-                    && let Some((entered, gate)) = gate.lock().unwrap().take()
-                {
-                    let _ = entered.send(());
-                    let _ = gate.recv_timeout(Duration::from_secs(5));
-                }
-            })),
-        };
-        let (sent, mut events) = mpsc::unbounded_channel();
-        let session = start_claude_in_copy(
-            ClaudeOptions {
-                bin: "scripted".into(),
-                cwd: root,
-                launch: project_launch(),
-                spawn,
-                sandbox: Some(crate::cli::Cli { command: "C:/fixtures/sandbox.exe".into(), prefix: vec![] }),
-            },
-            Arc::new(move |event| drop(sent.send(event))),
-            None,
-            scope,
-        )
-        .unwrap();
-        let request = |id, disabled| {
-            json!({"type":"control_request","request_id":id,"request":{
-            "subtype":"can_use_tool","tool_name":"PowerShell","input":{"command":"Write-Output 'ready'","run_in_background":true,
-                "dangerouslyDisableSandbox":disabled}}})
-        };
-        tokio::time::timeout(Duration::from_secs(5), async {
-            session.send(UserTurn::text("work"));
-            assert!(lines.next_line().await.unwrap().is_some());
-            let refused = request("outside-sandbox", true);
-            to_driver.write_all(format!("{refused}\n").as_bytes()).await.unwrap();
-            let denied: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-            assert_eq!(denied["response"]["response"]["behavior"], "deny");
-
-            for id in ["approved", "stopped"] {
-                let request = request(id, false);
-                to_driver.write_all(format!("{request}\n").as_bytes()).await.unwrap();
-                while !matches!(events.recv().await.unwrap(), EngineEvent::Permission { request_id, .. } if request_id == id) {}
-                let ack = session.answer(id, true);
-                if id == "approved" {
-                    assert_eq!(ack.await.unwrap(), Delivery::Delivered);
-                    let wrapped: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-                    let response = &wrapped["response"]["response"];
-                    assert_eq!(response["behavior"], "allow");
-                    assert_eq!(response["updatedInput"]["run_in_background"], false);
-                    let command = response["updatedInput"]["command"].as_str().unwrap();
-                    assert!(command.contains("--permission-profile") && command.contains("-EncodedCommand"));
-                    pause.store(true, Ordering::Release);
-                } else {
-                    wait.await.unwrap();
-                    session.interrupt();
-                    let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-                    assert_eq!(interrupt["request"]["subtype"], "interrupt");
-                    release.send(()).unwrap();
-                    assert_eq!(ack.await.unwrap(), Delivery::Unknown);
-                    break;
-                }
-            }
-        })
-        .await
-        .expect("scoped approval or interrupt stalled");
-    }
-
     #[tokio::test(start_paused = true)]
     async fn rewind_close_retains_a_failed_tree_query_until_stop_retries_the_same_owned_container() {
         use crate::proc::ProcessIdentity;
@@ -1757,9 +1430,32 @@ mod allow_tests {
             contained: Some(contained),
         })));
         let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
+        let launch = ClaudeLaunch {
+            subagents: None,
+            temporary: false,
+            area: Area::Project,
+            model: None,
+            effort: None,
+            resume: None,
+            user_hooks: false,
+            permissions: Permissions::Ask,
+            instructions: None,
+            research: None,
+            group_instructions: None,
+            user_name: None,
+            flags: Default::default(),
+            tuning: Default::default(),
+            helper: Default::default(),
+            browse: false,
+            conversations: false,
+            leads: false,
+            verify: false,
+            progress: false,
+            tools: Default::default(),
+        };
         let (sent, mut events) = tokio::sync::mpsc::unbounded_channel();
         let session = start_claude(
-            ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch: project_launch(), spawn, sandbox: None },
+            ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None },
             Arc::new(move |event| drop(sent.send(event))),
         );
         assert!(session.owned_tree().is_some(), "worker memory retains the actual container before the driver takes it");
@@ -1785,203 +1481,6 @@ mod allow_tests {
         tokio::time::timeout(std::time::Duration::from_secs(3), exchange)
             .await
             .expect("the retained Stop route must retry the same owned tree");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn quiet_search_interrupt_needs_a_fresh_empty_tree_and_a_matching_reply() {
-        use crate::events::QuietSearchCheck;
-        use std::sync::{
-            Mutex,
-            atomic::{AtomicBool, AtomicU8, Ordering},
-        };
-        use tokio::io::AsyncWriteExt;
-        use tokio::time::{Duration, timeout};
-
-        let root = proc::ProcessIdentity { pid: 42, created: 1 };
-        let tree_phase = Arc::new(AtomicU8::new(0));
-        let probe = tree_phase.clone();
-        let contained = proc::Containment::scripted_descendants(
-            root,
-            move || match probe.load(Ordering::Acquire) {
-                0 => Err(std::io::Error::other("unavailable")),
-                1 => Ok(vec![root, proc::ProcessIdentity { pid: 99, created: 2 }]),
-                _ => Ok(vec![root]),
-            },
-            || {},
-        );
-        let (driver, wire) = tokio::io::duplex(65536);
-        let (stdout, stdin) = tokio::io::split(driver);
-        let (input, mut output) = tokio::io::split(wire);
-        let mut input = BufReader::new(input).lines();
-        let process = Mutex::new(Some(proc::Proc {
-            stdin: Box::new(stdin),
-            stdout: Box::new(stdout),
-            stderr: None,
-            child: None,
-            contained: Some(contained),
-        }));
-        let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
-        let (sent, mut events) = mpsc::unbounded_channel();
-        let session = start_claude(
-            ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch: project_launch(), spawn, sandbox: None },
-            Arc::new(move |event| drop(sent.send(event))),
-        );
-        let confirmed = Arc::new(AtomicBool::new(false));
-        let request = |current| {
-            let confirmed = confirmed.clone();
-            session.interrupt_quiet_search("search".into(), move |check| {
-                if matches!(check, QuietSearchCheck::Confirmed) {
-                    confirmed.store(true, Ordering::Release);
-                }
-                current
-            });
-        };
-        timeout(Duration::from_secs(20), async {
-            for mode in ["confirmed", "resumed", "queued", "no receipt", "finished normally", "stopped manually"] {
-                confirmed.store(false, Ordering::Release);
-                session.send(UserTurn::text("find docs"));
-                input.next_line().await.unwrap().unwrap();
-                for message in [
-                    json!({"type":"user","isReplay":true,"message":{"content":"find docs"}}),
-                    json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"search","name":"WebSearch","input":{}}]}}),
-                ] {
-                    output.write_all(format!("{message}\n").as_bytes()).await.unwrap();
-                }
-                while !matches!(events.recv().await.unwrap(), EngineEvent::Tool { name, .. } if name == "WebSearch") {}
-                if mode == "confirmed" {
-                    for (phase, current) in [(0, true), (1, true), (2, false)] {
-                        tree_phase.store(phase, Ordering::Release);
-                        request(current);
-                        session.context_usage();
-                        let line: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
-                        assert_eq!(line["request"]["subtype"], "get_context_usage", "phase {phase} must not interrupt");
-                    }
-                }
-                request(true);
-                let line: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
-                assert_eq!(line["request"]["subtype"], "interrupt");
-                if mode == "confirmed" {
-                    assert!(timeout(Duration::from_secs(6), input.next_line()).await.is_err(), "an unresponsive search does not force-close the pipe");
-                }
-                assert!(!confirmed.load(Ordering::Acquire));
-                if mode != "no receipt" {
-                    let queued = if mode == "queued" { json!(["sent while busy"]) } else { json!([]) };
-                    let receipt = json!({"type":"control_response","response":{"subtype":"success","request_id":line["request_id"],"response":{"still_queued":queued}}});
-                    output.write_all(format!("{receipt}\n").as_bytes()).await.unwrap();
-                }
-                if mode == "resumed" {
-                    let text = json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"working again"}}});
-                    output.write_all(format!("{text}\n").as_bytes()).await.unwrap();
-                }
-                if mode == "stopped manually" {
-                    session.interrupt();
-                    let manual: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
-                    assert_eq!(manual["request"]["subtype"], "interrupt");
-                    assert_ne!(manual["request_id"], line["request_id"]);
-                }
-                let result = if mode == "finished normally" {
-                    json!({"type":"result","subtype":"success","is_error":false})
-                } else {
-                    let failed = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"search","is_error":true,"content":"interrupted"}]}});
-                    output.write_all(format!("{failed}\n").as_bytes()).await.unwrap();
-                    json!({"type":"result","subtype":"error_during_execution","terminal_reason":"aborted_tools","is_error":true})
-                };
-                output.write_all(format!("{result}\n").as_bytes()).await.unwrap();
-                while !matches!(events.recv().await.unwrap(), EngineEvent::Done { .. }) {}
-                assert_eq!(confirmed.load(Ordering::Acquire), mode == "confirmed", "{mode}");
-            }
-        }).await.expect("isolated search exchange must finish");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn retiring_a_shell_session_drains_its_final_output_within_a_deadline() {
-        use std::sync::Mutex;
-        use tokio::io::AsyncWriteExt;
-        use tokio::time::{Duration, Instant, timeout};
-
-        for (deliver_output, miss_initial, force_close) in
-            [(true, false, false), (false, false, false), (true, true, false), (false, false, true)]
-        {
-            let (driver, wire) = tokio::io::duplex(65536);
-            let (stdout, stdin) = tokio::io::split(driver);
-            let (input, mut output) = tokio::io::split(wire);
-            let mut input = BufReader::new(input).lines();
-            let process = Arc::new(Mutex::new(Some(proc::Proc {
-                stdin: Box::new(stdin),
-                stdout: Box::new(stdout),
-                stderr: None,
-                child: None,
-                contained: None,
-            })));
-            let spawn = Arc::new(move |_: &str, _: &[String], _: &std::path::Path| Ok(process.lock().unwrap().take().unwrap()));
-            let (send, mut events) = mpsc::unbounded_channel();
-            let session = start_claude(
-                ClaudeOptions { bin: "scripted".into(), cwd: PathBuf::new(), launch: project_launch(), spawn, sandbox: None },
-                Arc::new(move |event| drop(send.send(event))),
-            );
-            timeout(Duration::from_secs(10), async {
-                session.send(UserTurn::text("run a command"));
-                assert!(input.next_line().await.unwrap().is_some());
-                let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use",
-                    "id":"call","name":"Bash","input":{"command":"echo ready","run_in_background":true}}]}});
-                let start = json!({"type":"system","subtype":"task_started","task_type":"local_bash","task_id":"task",
-                    "tool_use_id":"call","is_backgrounded":true});
-                let result = json!({"type":"result","subtype":"success","is_error":false,"usage":{}});
-                output.write_all(format!("{call}\n{start}\n{result}\n").as_bytes()).await.unwrap();
-                let first: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
-                assert_eq!(first["request"]["subtype"], "get_task_output");
-                let initial = json!({"type":"control_response","response":{"subtype":"success","request_id":first["request_id"],
-                    "response":{"output":"starting"}}});
-                if !miss_initial {
-                    output.write_all(format!("{initial}\n").as_bytes()).await.unwrap();
-                    while !matches!(events.recv().await.unwrap(), EngineEvent::Background(crate::background::Update::Output { .. })) {}
-                }
-
-                session.retire();
-                assert_eq!(session.mcp_status().await.unwrap(), None);
-                let end = json!({"type":"system","subtype":"task_notification","task_id":"task","status":"completed"});
-                let began = Instant::now();
-                output.write_all(format!("{end}\n").as_bytes()).await.unwrap();
-                let request: Value = serde_json::from_str(&input.next_line().await.unwrap().unwrap()).unwrap();
-                assert_eq!(request["request"]["subtype"], "get_task_output");
-                assert_ne!(request["request_id"], first["request_id"]);
-                let final_request = Instant::now();
-                if miss_initial {
-                    output.write_all(format!("{initial}\n").as_bytes()).await.unwrap();
-                }
-                if force_close {
-                    session.close();
-                } else if deliver_output {
-                    let late = json!({"type":"system","subtype":"task_progress","task_id":"task"});
-                    let tail = json!({"type":"control_response","response":{"subtype":"success","request_id":request["request_id"],
-                        "response":{"output":"final output"}}});
-                    assert!(
-                        output.write_all(format!("{late}\n{tail}\n").as_bytes()).await.is_ok(),
-                        "retirement closed before the final read"
-                    );
-                }
-                let mut saw_final = false;
-                loop {
-                    match events.recv().await.expect("retirement must report a confirmed exit") {
-                        EngineEvent::Background(crate::background::Update::Output { text, capture, .. }) => {
-                            assert_ne!(text, "starting", "an expired response is ignored");
-                            assert_eq!(text, "final output");
-                            assert_eq!(capture, crate::background::Capture::Terminal);
-                            saw_final = true;
-                        }
-                        EngineEvent::WriterExit { confirmed: true } => break,
-                        _ => {}
-                    }
-                }
-                assert_eq!(saw_final, deliver_output);
-                assert_eq!(began.elapsed() >= COMMAND_OUTPUT_WAIT, miss_initial || (!deliver_output && !force_close));
-                if deliver_output || force_close {
-                    assert!(final_request.elapsed() < COMMAND_OUTPUT_WAIT, "closing must not wait for another output request");
-                }
-            })
-            .await
-            .expect("the command's output must not keep a retired session open indefinitely");
-        }
     }
 
     #[test]

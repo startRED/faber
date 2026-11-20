@@ -17,8 +17,6 @@ pub(super) struct Run {
     pub(super) hsid: u64,
     vendor: Vendor,
     model: String,
-    permissions: Permissions,
-    web: WebSearch,
     session: Session,
     started: f64,
     /// The helper's latest block of text: its final words are the report.
@@ -31,19 +29,16 @@ pub(super) struct Run {
     /// Messages the person wrote to it that it has not taken in yet (their ids), and the words of those it took (R161 step 5).
     waiting: Vec<String>,
     told: Vec<String>,
-    /// A turn's end retained until a queued message or one of this helper's commands is resolved.
+    /// A turn that ended while a message was still on its way: the end, kept until the message is taken in (another turn
+    /// follows, and its end is the helper's) or refused (this end was the last).
     held: Option<Ended>,
-    command_wake: u64,
-    command_cost: Option<f64>,
-    /// A previous turn has unaccounted cost. A cumulative Claude total can account for it later.
-    prior_cost_incomplete: bool,
+    /// A turn of this helper ended before the one now running: Claude's total then covers both, a price from tokens one.
+    earlier_turn: bool,
     /// The agent stopped: the turn that ends now is the last, whatever is still on its way.
     stopping: Option<&'static str>,
     /// Whether a message can reach the helper's turn now: Claude Code reads its input from the start, Codex only once its turn
     /// has begun (`turn/steer` names the turn). What the person wrote before that waits in `early` (id, words).
     ready: bool,
-    /// A note sent as a new Codex turn while the helper was waiting on a command.
-    note_turn: Option<String>,
     early: Vec<(String, String)>,
     lead_call: Option<String>,
     question: Option<String>,
@@ -57,13 +52,6 @@ struct Ended {
     error: Option<String>,
     cost: Option<f64>,
     incomplete: bool,
-    wait: HeldBy,
-}
-
-#[derive(PartialEq, Eq)]
-enum HeldBy {
-    Message,
-    Command(Option<u64>),
 }
 
 impl Core {
@@ -318,7 +306,6 @@ impl Core {
         let shown_effort = effort.clone();
         let effort = Some(effort);
         let resources = (vendor == Vendor::Claude).then(|| super::kits::claude_resources(Area::Project, &tools)).flatten();
-        let web = tuning.web;
         let session = match vendor {
             Vendor::Gemini => return Err("error.notConnected"),
             Vendor::Claude => start_claude(
@@ -353,39 +340,31 @@ impl Core {
                 },
                 sink,
             ),
-            Vendor::Codex => self.open_codex(
-                Area::Project,
-                user_hooks,
-                permissions,
-                &cli,
-                CodexOpen {
-                    tools: Some(tools),
-                    ..CodexOpen::new(
-                        CodexThread {
-                            subagents: None,
-                            temporary: false,
-                            title: None,
-                            leave_plan: false,
-                            cwd,
-                            model: model.clone(),
-                            effort,
-                            resume: None,
-                            instructions: None,
-                            research: None,
-                            user_name: None,
-                            group_instructions: None,
-                            permissions,
-                            tuning,
-                            helper: if review.is_some() { Helper::Reviewer } else { Helper::Is },
-                            browse: false,
-                            conversations: false,
-                            leads: false,
-                            progress: false,
-                            verify: false,
-                        },
-                        sink,
-                    )
+            Vendor::Codex => self.codex_server(Area::Project, user_hooks, permissions, &cli).open_with_tools(
+                CodexThread {
+                    subagents: None,
+                    temporary: false,
+                    title: None,
+                    leave_plan: false,
+                    cwd,
+                    model: model.clone(),
+                    effort,
+                    resume: None,
+                    instructions: None,
+                    research: None,
+                    user_name: None,
+                    group_instructions: None,
+                    permissions,
+                    tuning,
+                    helper: if review.is_some() { Helper::Reviewer } else { Helper::Is },
+                    browse: false,
+                    conversations: false,
+                    leads: false,
+                    progress: false,
+                    verify: false,
                 },
+                sink,
+                tools,
             ),
         };
         self.worker_memory.registry.register(session.owned_tree());
@@ -421,8 +400,6 @@ impl Core {
             hsid,
             vendor,
             model: shown,
-            permissions,
-            web,
             session,
             started,
             report: String::new(),
@@ -432,12 +409,9 @@ impl Core {
             waiting: vec![],
             told: vec![],
             held: None,
-            command_wake: 0,
-            command_cost: None,
-            prior_cost_incomplete: false,
+            earlier_turn: false,
             stopping: None,
             ready: vendor == Vendor::Claude,
-            note_turn: None,
             early: vec![],
             lead_call: (self.team_of(conv, call).is_none()
                 || self.live.get(conv).is_some_and(|l| l.open_tools.iter().any(|id| id == call)))
@@ -536,46 +510,24 @@ impl Core {
         }
         self.rewind.bump(conv);
         let id = new_id();
-        let running = self.helpers.get(call).is_some_and(|h| h.conv == conv);
         let starting = self.helper_starting(conv, call);
-        if !running && !starting {
-            return Err("error.helperDone".into());
-        }
-        self.mark_told(conv, call, |told| told.push(Told { id: id.clone(), text: text.to_string(), taken: None }));
-        if running {
-            self.deliver_helper_note(call, id, text.into());
-        } else {
-            self.helper_early.entry(call.to_string()).or_default().push((id, text.into()));
-        }
-        Ok(())
-    }
-
-    fn deliver_helper_note(&mut self, call: &str, id: String, text: String) -> bool {
-        let h = &self.helpers[call];
-        let waiting_for_command = h.held.as_ref().is_some_and(|e| e.wait != HeldBy::Message);
-        let new_turn = h.vendor == Vendor::Codex && waiting_for_command;
-        let screen = self.screen_code();
-        self.helpers.get_mut(call).unwrap().waiting.push(id.clone());
-        if new_turn && let Some(reason) = self.helper_wake_refusal(call) {
-            self.end_helper(call, false, Some(reason), None, true);
-            return false;
-        }
-        let h = self.helpers.get_mut(call).unwrap();
-        if new_turn || (h.ready && !waiting_for_command) {
-            let text = if id.starts_with("team:") { text } else { from_person(&text, Some(screen)) };
-            let turn = UserTurn::text(text);
-            if new_turn {
-                h.held = None;
-                h.ready = false;
-                h.note_turn = Some(id);
-                h.session.send(turn);
-            } else {
-                h.session.steer(turn, &id);
+        let screen = Some(self.screen_code());
+        match self.helpers.get_mut(call).filter(|h| h.conv == conv) {
+            Some(h) if h.ready => {
+                h.waiting.push(id.clone());
+                h.session.steer(UserTurn::text(from_person(text, screen)), &id);
             }
-        } else {
-            h.early.push((id, text));
+            Some(h) => {
+                h.waiting.push(id.clone());
+                h.early.push((id.clone(), text.to_string()));
+            }
+            None if starting => {
+                self.helper_early.entry(call.to_string()).or_default().push((id.clone(), text.to_string()));
+            }
+            None => return Err("error.helperDone".into()),
         }
-        true
+        self.mark_told(conv, call, |told| told.push(Told { id, text: text.to_string(), taken: None }));
+        Ok(())
     }
 
     /// Changes what the person wrote to a helper, on its call in the conversation, and shows it.
@@ -592,11 +544,7 @@ impl Core {
     /// A message to the helper reached it, or did not: `taken` says which, and `tag` names it when the CLI echoes it.
     fn helper_took(&mut self, call: &str, tag: Option<String>, taken: bool) {
         let Some(h) = self.helpers.get_mut(call) else { return };
-        let at = match tag {
-            Some(tag) => h.waiting.iter().position(|id| *id == tag),
-            None => (h.waiting.len() > h.early.len()).then_some(0),
-        };
-        let Some(at) = at else { return };
+        let Some(at) = tag.and_then(|t| h.waiting.iter().position(|w| *w == t)).or((!h.waiting.is_empty()).then_some(0)) else { return };
         let id = h.waiting.remove(at);
         let conv = h.conv.clone();
         let mut words = None;
@@ -611,15 +559,10 @@ impl Core {
             h.told.extend(words);
             // A turn that ended before this message was read is not the last: the message is a turn of its own now.
             h.held = None;
-        } else if h.waiting.len() == h.early.len() {
-            if h.held.as_ref().is_some_and(|e| e.wait != HeldBy::Message) {
-                let hsid = h.hsid;
-                self.helper_command_ended(call, hsid);
-            } else if h.waiting.is_empty()
-                && let Some(e) = h.held.take()
-            {
-                self.end_helper(call, e.ok, e.error.as_deref(), e.cost, e.incomplete);
-            }
+        } else if h.waiting.is_empty()
+            && let Some(e) = h.held.take()
+        {
+            self.end_helper(call, e.ok, e.error.as_deref(), e.cost, e.incomplete);
         }
     }
 
@@ -633,45 +576,28 @@ impl Core {
         }
         self.rewind_helper_event(call, hsid, &event);
         if let EngineEvent::Background(update) = event {
-            let ended = matches!(update, crate::background::Update::End { .. });
             let owner = self
                 .helpers
                 .get(call)
                 .filter(|h| h.hsid == hsid)
                 .map(|h| (h.conv.clone(), h.vendor, h.session.clone()))
                 .or_else(|| self.background.owner(hsid));
-            let changed = if let Some((conv, vendor, session)) = owner {
-                self.background.update(&conv, hsid, vendor, &session, update, now())
-            } else {
-                self.background.late_update(None, hsid, &update);
-                false
-            };
-            if changed {
+            if let Some((conv, vendor, session)) = owner
+                && self.background.update(&conv, hsid, vendor, &session, update, now())
+            {
                 self.emit_background();
                 self.refresh_running();
-                if ended {
-                    self.helper_command_ended(call, hsid);
-                }
             }
             return;
         }
         if matches!(event, EngineEvent::WriterExit { confirmed: true })
             && let Some((conv, ..)) = self.background.owner(hsid)
-            && self.background.exited(&conv, hsid, now())
+            && self.background.exited(&conv, hsid)
         {
             self.emit_background();
             self.refresh_running();
         }
         if !self.helpers.get(call).is_some_and(|h| h.hsid == hsid) {
-            return;
-        }
-        if matches!(event, EngineEvent::OwnTurn) && self.helpers[call].held.as_ref().is_some_and(|e| e.wait != HeldBy::Message) {
-            if let Some(reason) = self.helper_wake_refusal(call) {
-                self.end_helper(call, false, Some(reason), None, true);
-            } else {
-                self.helpers.get_mut(call).unwrap().held = None;
-                self.flush_early(call);
-            }
             return;
         }
         // Writer/cursor metadata accompanies streamed tokens; only content boundaries flush the buffer.
@@ -695,9 +621,6 @@ impl Core {
             && let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid)
         {
             h.ready = true;
-            if let Some(tag) = h.note_turn.take() {
-                self.helper_took(call, Some(tag), true);
-            }
             self.flush_early(call);
         }
         if let EngineEvent::Done { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, .. } = &event
@@ -740,13 +663,8 @@ impl Core {
             EngineEvent::SteerFailed { tag } => self.helper_took(call, Some(tag), false),
             EngineEvent::Quota { window, used, resets_at } => self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => self.apply_signals(vendor, s),
-            EngineEvent::WriterExit { confirmed } => {
-                let reason = match (confirmed, h.stopping.is_some()) {
-                    (true, true) => "the helper process ended before reporting its result",
-                    (true, false) => "the helper process ended before reporting its result; the stop cause is unknown",
-                    (false, _) => "the helper session ended before reporting its result; writer exit is unconfirmed",
-                };
-                self.end_helper(call, false, Some(reason), None, true);
+            EngineEvent::WriterExit { .. } => {
+                self.end_helper(call, false, Some("the helper process ended before reporting its result"), None, true);
             }
             EngineEvent::Done {
                 ok,
@@ -763,8 +681,7 @@ impl Core {
                 // A helper's session is new, so Claude's running total is the cost of its turns so far; Codex prices each turn,
                 // and a message steered into a Codex turn stays in it. A price from tokens covers only the last turn.
                 let total = cost_total_usd.filter(|c| c.is_finite() && *c >= 0.0);
-                let cumulative = vendor == Vendor::Claude && total.is_some();
-                let cost = total.map(|sum| if cumulative { (sum - h.command_cost.unwrap_or(0.0)).max(0.0) } else { sum }).or_else(|| {
+                let cost = total.or_else(|| {
                     usage::api_price_for_prompt(
                         &model,
                         input_tokens,
@@ -775,25 +692,12 @@ impl Core {
                         0,
                     )
                 });
-                let incomplete = incomplete || cost.is_none() || (h.prior_cost_incomplete && !cumulative);
+                let incomplete = incomplete || cost.is_none() || (h.earlier_turn && total.is_none());
                 let error = (!ok).then_some(reason);
-                if ok && h.stopping.is_none() && self.background.running_for(hsid) {
-                    (h.new_block, h.prior_cost_incomplete) = (true, incomplete);
-                    if let Some(cost) = cost {
-                        h.command_cost = Some(h.command_cost.unwrap_or(0.0) + cost);
-                    }
-                    h.held = Some(Ended { ok, error, cost: None, incomplete, wait: HeldBy::Command(None) });
-                    if self.background.end_turn(&conv, hsid) {
-                        self.emit_background();
-                    }
-                    self.add_spend(&conv, cost);
-                    self.save(&conv);
-                    return;
-                }
                 // A message to the helper still on its way: this end waits to see whether another turn follows.
                 if let Some(h) = self.helpers.get_mut(call).filter(|h| !h.waiting.is_empty() && h.stopping.is_none()) {
-                    (h.new_block, h.prior_cost_incomplete) = (true, true);
-                    h.held = Some(Ended { ok, error, cost, incomplete, wait: HeldBy::Message });
+                    (h.new_block, h.earlier_turn) = (true, true);
+                    h.held = Some(Ended { ok, error, cost, incomplete });
                     return;
                 }
                 self.end_helper(call, ok, error.as_deref(), cost, incomplete);
@@ -803,64 +707,6 @@ impl Core {
                 self.end_helper(call, false, Some(&message), None, true)
             }
             _ => {}
-        }
-    }
-
-    fn helper_wake_refusal(&mut self, call: &str) -> Option<&'static str> {
-        let h = self.helpers.get(call)?;
-        let (conv, vendor, model) = (h.conv.clone(), h.vendor, h.model.clone());
-        if self.closing || h.stopping.is_some() || self.convs.get(&conv).is_none_or(|c| c.stopped || c.archived_at.is_some()) {
-            Some("the calling conversation closed, stopped or was archived")
-        } else if self.goal_out_of_money(&conv) {
-            Some("the project's goal reached its spending limit before the helper could continue")
-        } else if self.allows(vendor, family_of(&model), Purpose::UserTurn { by_hand: false }, false).is_err() {
-            Some("account or quota evidence did not allow the helper to continue")
-        } else {
-            None
-        }
-    }
-
-    fn helper_command_ended(&mut self, call: &str, hsid: u64) {
-        if self.background.running_for(hsid) {
-            return;
-        }
-        let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid && h.waiting.len() == h.early.len() && h.stopping.is_none())
-        else {
-            return;
-        };
-        let Some(e) = h.held.as_mut().filter(|e| e.wait == HeldBy::Command(None)) else { return };
-        h.command_wake += 1;
-        let wake = h.command_wake;
-        e.wait = HeldBy::Command(Some(wake));
-        let grace = if h.vendor == Vendor::Claude { keep_going::COMMAND_OWN } else { keep_going::COMMAND_GRACE };
-        let delay = Duration::from_secs_f64(grace * self.keep_pace);
-        let (me, call) = (self.me.clone(), call.to_string());
-        self.opts.runtime.spawn(async move {
-            tokio::time::sleep(delay).await;
-            if let Some(core) = me.upgrade() {
-                core.lock().unwrap_or_else(|e| e.into_inner()).wake_helper_command(&call, hsid, wake);
-            }
-        });
-    }
-
-    fn wake_helper_command(&mut self, call: &str, hsid: u64, wake: u64) {
-        let Some(h) = self.helpers.get_mut(call).filter(|h| h.hsid == hsid) else { return };
-        let Some(e) = h.held.as_mut().filter(|e| e.wait == HeldBy::Command(Some(wake))) else { return };
-        if h.waiting.len() > h.early.len() || self.background.running_for(hsid) {
-            e.wait = HeldBy::Command(None);
-            return;
-        }
-        // A late native Claude turn could race a second sent turn. Return control to the caller if the native wake is absent.
-        let missing = (h.vendor == Vendor::Claude).then_some("the command ended but the helper's CLI did not start a follow-up");
-        let incomplete = e.incomplete;
-        if let Some(reason) = self.helper_wake_refusal(call).or(missing) {
-            self.end_helper(call, false, Some(reason), None, incomplete);
-            return;
-        }
-        if let Some(h) = self.helpers.get_mut(call) {
-            h.held = None;
-            h.ready = false;
-            h.session.send(UserTurn::text(by_itself::OWN_TURN));
         }
     }
 
@@ -883,9 +729,8 @@ impl Core {
         }
         self.rewind_helper_retire(call, h.hsid);
         h.session.close();
-        self.add_spend(&h.conv, cost);
-        let cost = h.command_cost.map(|spent| spent + cost.unwrap_or(0.0)).or(cost);
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);
+        self.add_spend(&h.conv, cost);
         let reason = h.stopping.map(|why| match error {
             Some(error) => format!("{why}; helper result: {error}"),
             None => why.to_string(),
@@ -906,21 +751,15 @@ impl Core {
                 text.push_str(&format!("\nThe helper was refused approval for: {}.", refused.chars().take(200).collect::<String>()));
             }
         }
-        if !ok && !h.reviewer {
-            text.push_str("\n\nFor interrupted edits, inspect the same folder before recovery. If available, use conversation with action workspace for the current project copy and observed work. Confirm writer exit separately. Describe work as running only when there is current evidence.");
-        }
         if !h.told.is_empty() {
             text.push_str(&helper::told_note(&h.told));
-        }
-        if !h.early.is_empty() {
-            text.push_str("\n\nThe helper ended before receiving its queued notes. Their text is still in the conversation.");
         }
         self.never_read(&h.conv, call, &h.waiting);
         if self.review_ended(&h.conv, call, ok, &h.report, false) {
             if !ok {
                 text = "error.review.failed".into();
             }
-            self.handle(&h.conv, h.sid, EngineEvent::ToolResult { id: call.to_string(), ok, declined: false, exit_code: None, text });
+            self.handle(&h.conv, h.sid, EngineEvent::ToolResult { id: call.to_string(), ok, declined: false, text });
         } else {
             self.record_helper_result(&h.conv, h.sid, call, ok, &text);
             if let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid && l.turn.is_some())
@@ -970,7 +809,6 @@ impl Core {
             if c.waiting_on.is_none() && !c.queued.iter().any(|q| q.id == receipt) && !c.messages.iter().any(|m| m.id == receipt) {
                 let at = now();
                 c.waiting_on = Some(crate::model::WaitingOn {
-                    storage_blocked: false,
                     ids: vec![],
                     note: format!(
                         "Helper {} ended while the engine is shutting down. Read its saved tool result for the observed outcome.",
@@ -998,7 +836,7 @@ impl Core {
         if let Some(tool) = self.tool_of(conv, call) {
             tool.ok = Some(ok);
             tool.ended = Some(now());
-            tool.output = Some(text.chars().take(TOOL_OUTPUT_CHARS).collect());
+            tool.output = Some(text.chars().take(4000).collect());
         }
         if self.live.get(conv).is_some_and(|live| live.sid == sid) {
             self.handle(conv, sid, EngineEvent::HelperDone { id: call.to_string(), ok, text: text.to_string() });
@@ -1044,19 +882,6 @@ impl Core {
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.vendor == vendor).map(|(call, _)| call.clone()).collect();
         for call in calls {
             self.end_helper(&call, false, Some("the other AI would be billed beyond its subscription"), None, true);
-        }
-    }
-
-    /// A helper may outlive its lead's reply. Retire sessions whose saved launch authority was narrowed.
-    pub(super) fn stop_helpers_for_settings(&mut self, permissions: Permissions, web: WebSearch) {
-        let stale: Vec<String> = self
-            .helpers
-            .iter()
-            .filter(|(_, h)| h.permissions.strictness() < permissions.strictness() || h.web.strictness() < web.strictness())
-            .map(|(call, _)| call.clone())
-            .collect();
-        for call in stale {
-            self.end_helper(&call, false, Some("the person reduced the helper's permissions or web access"), None, true);
         }
     }
 
@@ -1115,7 +940,6 @@ impl Core {
             let since = (self.secs() * 1000.0) as u64;
             let c = self.convs.get_mut(conv).unwrap();
             c.waiting_on = Some(crate::model::WaitingOn {
-                storage_blocked: false,
                 ids: vec![],
                 note: calls.join(", ").chars().take(200).collect(),
                 since,
@@ -1138,12 +962,7 @@ impl Core {
         self.stop_verify(conv);
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.conv == conv).map(|(call, _)| call.clone()).collect();
         for call in calls {
-            if close
-                || self
-                    .helpers
-                    .get(&call)
-                    .is_some_and(|h| h.question.is_some() || h.held.as_ref().is_some_and(|e| e.wait != HeldBy::Message))
-            {
+            if close || self.helpers.get(&call).is_some_and(|h| h.question.is_some()) {
                 if let Some(h) = self.helpers.get_mut(&call) {
                     h.stopping = Some(why);
                 }
@@ -1176,20 +995,7 @@ mod tests {
     use super::*;
     use crate::events::SessionCommand;
 
-    const UNCONFIRMED_EXIT: u8 = 8;
-    const BACKGROUND_COMMAND: u8 = 9;
-    const BACKGROUND_NO_ACCOUNT: u8 = 10;
-    const BACKGROUND_UNPRICED: u8 = 11;
-    const BACKGROUND_PERMISSIONS: u8 = 12;
-    const BACKGROUND_MESSAGE: u8 = 13;
-
     async fn helper_exit(vendor: Vendor, partial: bool, interrupt: bool, stop_reason: &'static str, lifecycle: u8, long_told: bool) {
-        let delivered_directly = matches!(lifecycle, 0 | UNCONFIRMED_EXIT);
-        let exit_reason = if lifecycle == UNCONFIRMED_EXIT {
-            "writer exit is unconfirmed"
-        } else {
-            "the helper process ended before reporting its result"
-        };
         let dir = crate::workspace::TestRoot::new();
         let (engine, _) = super::super::answer::tests::engine(&dir);
         let replies = Arc::new(Mutex::new(Vec::new()));
@@ -1217,14 +1023,9 @@ mod tests {
         let conv = super::super::answer::tests::seed(&engine, caller, &[("turn", &[])]);
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = closed.clone();
-        let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let sends = wakes.clone();
         let session = Session::from_fn(move |command| {
             if matches!(command, SessionCommand::Close) {
                 stopped.store(true, std::sync::atomic::Ordering::Release);
-            }
-            if matches!(command, SessionCommand::Send(_)) {
-                sends.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         });
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -1250,8 +1051,6 @@ mod tests {
                         hsid: 42,
                         vendor,
                         model: "unknown-test-model".into(),
-                        permissions: Permissions::FullAccess,
-                        web: WebSearch::Live,
                         session,
                         started: core.secs(),
                         report: String::new(),
@@ -1261,12 +1060,9 @@ mod tests {
                         waiting: vec!["pending-message".into()],
                         told: if long_told { vec!["Keep the retries bounded.".into()] } else { vec![] },
                         held: None,
-                        command_wake: 0,
-                        command_cost: None,
-                        prior_cost_incomplete: false,
+                        earlier_turn: false,
                         stopping: None,
                         ready: true,
-                        note_turn: None,
                         early: vec![],
                         lead_call: Some("call".into()),
                         question: None,
@@ -1279,13 +1075,7 @@ mod tests {
                     core.handle(
                         &conv,
                         sid,
-                        EngineEvent::ToolResult {
-                            id: "call".into(),
-                            ok: true,
-                            declined: false,
-                            exit_code: None,
-                            text: "wrapper returned".into(),
-                        },
+                        EngineEvent::ToolResult { id: "call".into(), ok: true, declined: false, text: "wrapper returned".into() },
                     );
                 }
                 if partial {
@@ -1294,112 +1084,6 @@ mod tests {
                 if long_told {
                     core.live.get_mut(&conv).unwrap().cwd = dir.path().into();
                     core.helper_event("call", 42, EngineEvent::Text("Long report. ".repeat(250)));
-                }
-                if matches!(
-                    lifecycle,
-                    BACKGROUND_COMMAND | BACKGROUND_NO_ACCOUNT | BACKGROUND_UNPRICED | BACKGROUND_PERMISSIONS | BACKGROUND_MESSAGE
-                ) {
-                    core.helpers.get_mut("call").unwrap().waiting.clear();
-                    core.ledger.of_mut(vendor).billing = crate::budget::Billing::Subscription;
-                    let unpriced = lifecycle == BACKGROUND_UNPRICED;
-                    let done = |cost| EngineEvent::Done {
-                        ok: true,
-                        reason: String::new(),
-                        cost_total_usd: cost,
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
-                        cache_write_1h_tokens: 0,
-                        incomplete: false,
-                    };
-                    let start = |id: &str| crate::background::Update::Start {
-                        id: id.into(),
-                        command: "run project checks".into(),
-                        stoppable: true,
-                        turn_ended: false,
-                    };
-                    let end = |id: &str| {
-                        EngineEvent::Background(crate::background::Update::End { id: id.into(), state: crate::background::State::Done })
-                    };
-                    let parent = core.live[&conv].session.clone();
-                    core.background.update(&conv, sid, helper::other(vendor), &parent, start("check"), now());
-                    core.helper_event("call", 42, EngineEvent::Background(start("check")));
-                    core.helper_event("call", 42, EngineEvent::Background(start("check-again")));
-                    core.helper_event("call", 42, EngineEvent::Text("The check is still running.".into()));
-                    core.helper_event("call", 42, done((!unpriced).then_some(0.02)));
-                    assert!(core.helpers.contains_key("call"), "a completed reply is not a completed helper while its command runs");
-                    assert!(!closed.load(std::sync::atomic::Ordering::Acquire));
-                    assert!(replies.lock().unwrap().is_empty(), "the caller waits for the actual result");
-                    assert_eq!(core.convs[&conv].spent_usd, if unpriced { 0.0 } else { 0.02 }, "known first turn cost precedes a new turn");
-                    core.helper_event("call", 42, end("check"));
-                    assert!(core.helpers["call"].held.as_ref().is_some_and(|e| e.wait == HeldBy::Command(None)));
-                    core.helper_event("call", 42, end("check-again"));
-                    let wake = core.helpers["call"].command_wake;
-                    assert!(core.helpers["call"].held.as_ref().is_some_and(|e| e.wait == HeldBy::Command(Some(wake))));
-                    if lifecycle == BACKGROUND_MESSAGE {
-                        core.tell_helper(&conv, "call", "Keep the original test result.").unwrap();
-                        if vendor == Vendor::Claude {
-                            let h = &core.helpers["call"];
-                            let tag = h.waiting[0].clone();
-                            assert_eq!(h.early.len(), 1, "keep a Claude note until its own turn begins");
-                            core.helper_event("call", 42, EngineEvent::OwnTurn);
-                            assert!(core.helpers["call"].early.is_empty());
-                            core.helper_event("call", 42, EngineEvent::Injected { tag: Some(tag) });
-                        } else {
-                            assert_eq!(
-                                wakes.load(std::sync::atomic::Ordering::Relaxed),
-                                1,
-                                "an idle Codex thread needs a turn to read the note"
-                            );
-                            core.helper_event("call", 42, EngineEvent::TurnStarted);
-                        }
-                        assert!(core.tool_of(&conv, "call").unwrap().told.iter().any(|note| note.taken == Some(true)));
-                    }
-                    if interrupt || matches!(lifecycle, BACKGROUND_NO_ACCOUNT | BACKGROUND_PERMISSIONS) {
-                        if interrupt {
-                            core.stop_helpers_because(&conv, false, stop_reason);
-                        } else if lifecycle == BACKGROUND_PERMISSIONS {
-                            core.turn(&conv).unwrap().status = Some(Status::Done);
-                            core.finish(&conv, Some("turn".into()));
-                            assert!(core.helpers.contains_key("call"), "the helper was still waiting after its lead finished");
-                            core.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-                        } else {
-                            core.ledger.of_mut(vendor).billing = crate::budget::Billing::Unknown;
-                        }
-                        core.wake_helper_command("call", 42, wake);
-                        assert!(core.helpers.is_empty());
-                        assert!(closed.load(std::sync::atomic::Ordering::Acquire));
-                        assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), 0);
-                        let reports = replies.lock().unwrap();
-                        if lifecycle == BACKGROUND_PERMISSIONS {
-                            assert!(reports.is_empty(), "the previous lead turn has already ended");
-                            let report = core.tool_of(&conv, "call").unwrap();
-                            assert!(report.output.as_ref().is_some_and(|words| words.contains(stop_reason)));
-                        } else {
-                            assert_eq!(reports.len(), 1);
-                            assert!(!reports[0].1 && reports[0].2.contains(stop_reason));
-                        }
-                        assert_eq!(core.convs[&conv].spent_usd, 0.02);
-                        return;
-                    }
-                    if vendor == Vendor::Claude {
-                        core.helper_event("call", 42, EngineEvent::OwnTurn);
-                    }
-                    core.wake_helper_command("call", 42, wake);
-                    core.wake_helper_command("call", 42, wake);
-                    assert_eq!(wakes.load(std::sync::atomic::Ordering::Relaxed), usize::from(vendor == Vendor::Codex));
-                    core.helper_event("call", 42, EngineEvent::Text("The check passed.".into()));
-                    core.helper_event("call", 42, done(Some(0.03)));
-                    assert!(core.helpers.is_empty());
-                    assert!(closed.load(std::sync::atomic::Ordering::Acquire));
-                    let reports = replies.lock().unwrap();
-                    assert_eq!(reports.len(), 1);
-                    assert!(reports[0].1 && reports[0].2.contains("The check passed."));
-                    let total = if unpriced || vendor == Vendor::Claude { 0.03 } else { 0.05 };
-                    assert_eq!(core.convs[&conv].spent_usd, total, "the known cost of each turn counts only once");
-                    assert_eq!(core.turn(&conv).unwrap().incomplete == Some(true), unpriced);
-                    return;
                 }
                 if lifecycle == 1 {
                     core.live.get_mut(&conv).unwrap().sid += 1;
@@ -1448,7 +1132,7 @@ mod tests {
                         },
                     );
                 } else {
-                    core.helper_event("call", 42, EngineEvent::WriterExit { confirmed: lifecycle != UNCONFIRMED_EXIT });
+                    core.helper_event("call", 42, EngineEvent::WriterExit { confirmed: true });
                 }
                 assert!(core.helpers.is_empty(), "process death must not wait for the helper timeout or a pending message");
                 assert!(closed.load(std::sync::atomic::Ordering::Acquire), "the helper session is closed");
@@ -1467,12 +1151,8 @@ mod tests {
                 if interrupt {
                     assert!(text.contains(stop_reason), "caller needs the observed stop cause: {text}");
                 } else {
-                    assert!(text.contains(exit_reason));
-                    if lifecycle != UNCONFIRMED_EXIT {
-                        assert!(text.contains("the stop cause is unknown"));
-                    }
+                    assert!(text.contains("the helper process ended before reporting its result"));
                 }
-                assert!(text.contains("action workspace"), "the caller gets recovery steps with the cause");
                 assert_eq!(text.contains("Keep these partial words."), partial);
                 if long_told {
                     assert!(text.contains("Full report: .faber/verify/helper-"), "{text}");
@@ -1484,7 +1164,11 @@ mod tests {
                 let saved = reply.tools.as_ref().unwrap().iter().find(|t| t.id == "call").unwrap();
                 assert_eq!(saved.ok, Some(false), "the engine must retain the outcome without a CLI echo");
                 assert!(
-                    saved.output.as_ref().is_some_and(|out| out.contains(if interrupt { stop_reason } else { exit_reason })),
+                    saved.output.as_ref().is_some_and(|out| out.contains(if interrupt {
+                        stop_reason
+                    } else {
+                        "the helper process ended before reporting its result"
+                    })),
                     "the observed reason must survive restart"
                 );
                 core.helper_event("call", 42, EngineEvent::WriterExit { confirmed: true });
@@ -1493,19 +1177,6 @@ mod tests {
         })
         .await
         .expect("a dead helper must release its caller within two seconds");
-        if matches!(
-            lifecycle,
-            BACKGROUND_COMMAND | BACKGROUND_NO_ACCOUNT | BACKGROUND_UNPRICED | BACKGROUND_PERMISSIONS | BACKGROUND_MESSAGE
-        ) {
-            tokio::task::yield_now().await;
-            let saved = crate::store::Store::new(dir.path()).get(&conv).unwrap();
-            if lifecycle != BACKGROUND_PERMISSIONS {
-                assert!(saved.queued.is_empty(), "a delivered helper report has no fallback in the queue");
-            }
-            let tool = saved.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == "call").unwrap();
-            assert_eq!(tool.ok, Some(!interrupt && matches!(lifecycle, BACKGROUND_COMMAND | BACKGROUND_UNPRICED | BACKGROUND_MESSAGE)));
-            return;
-        }
         if lifecycle == 6 {
             let before = engine.open(&conv).unwrap().waiting_on.unwrap();
             engine.shutdown();
@@ -1580,12 +1251,12 @@ mod tests {
                 tokio::task::yield_now().await;
             }
             assert!(resumed(&engine), "an unconfirmed reply must resume the caller durably");
-        } else if delivered_directly {
+        } else if lifecycle == 0 {
             tokio::task::yield_now().await;
             assert!(!resumed(&engine), "a delivered reply must not run the caller twice");
         }
         let restored = crate::store::Store::new(dir.path()).get(&conv).unwrap();
-        if !delivered_directly {
+        if lifecycle != 0 {
             assert!(restored.queued.iter().any(|q| q.id == receipt) || restored.messages.iter().any(|m| m.id == receipt));
         }
         let tool = restored.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|t| t.id == "call").unwrap();
@@ -1595,7 +1266,7 @@ mod tests {
         } else if lifecycle == 4 {
             "the calling session is closing or its turn ended"
         } else {
-            exit_reason
+            "the helper process ended before reporting its result"
         })));
         engine.shutdown();
     }
@@ -1663,10 +1334,6 @@ mod tests {
         helper_exit(Vendor::Codex, false, false, "unused", 0, false).await;
     }
     #[tokio::test]
-    async fn unconfirmed_helper_writer_exit_releases_caller_with_the_uncertainty() {
-        helper_exit(Vendor::Claude, true, false, "unused", UNCONFIRMED_EXIT, false).await;
-    }
-    #[tokio::test]
     async fn cli_lifetime_codex_helper_exit_keeps_partial_words_and_releases_its_claude_caller() {
         helper_exit(Vendor::Codex, true, false, "unused", 0, false).await;
     }
@@ -1682,42 +1349,6 @@ mod tests {
     #[tokio::test]
     async fn helper_jobs_keep_person_note_after_shortening_report() {
         helper_exit(Vendor::Claude, false, false, "unused", 0, true).await;
-    }
-
-    #[tokio::test]
-    async fn a_helper_reports_after_its_background_command_and_native_follow_up() {
-        helper_exit(Vendor::Claude, true, false, "unused", BACKGROUND_COMMAND, false).await;
-        helper_exit(Vendor::Codex, true, false, "unused", BACKGROUND_COMMAND, false).await;
-    }
-
-    #[tokio::test]
-    async fn stopping_a_waiting_helper_cancels_its_pending_wake() {
-        helper_exit(Vendor::Codex, true, true, "the person stopped the project", BACKGROUND_COMMAND, false).await;
-    }
-
-    #[tokio::test]
-    async fn a_waiting_helper_rechecks_current_account_evidence_before_another_send() {
-        helper_exit(Vendor::Codex, true, false, "account or quota evidence", BACKGROUND_NO_ACCOUNT, false).await;
-    }
-
-    #[tokio::test]
-    async fn an_unknown_first_turn_cost_remains_incomplete_after_a_known_per_turn_cost() {
-        helper_exit(Vendor::Codex, true, false, "unused", BACKGROUND_UNPRICED, false).await;
-    }
-
-    #[tokio::test]
-    async fn a_waiting_helper_closes_when_its_launch_permissions_are_reduced() {
-        helper_exit(Vendor::Claude, true, false, "the person reduced the helper's permissions", BACKGROUND_PERMISSIONS, false).await;
-    }
-
-    #[tokio::test]
-    async fn a_message_to_a_waiting_codex_helper_starts_one_turn_and_is_acknowledged() {
-        helper_exit(Vendor::Codex, true, false, "unused", BACKGROUND_MESSAGE, false).await;
-    }
-
-    #[tokio::test]
-    async fn a_message_to_a_waiting_claude_helper_is_kept_until_its_native_turn() {
-        helper_exit(Vendor::Claude, true, false, "unused", BACKGROUND_MESSAGE, false).await;
     }
 }
 use crate::model::{HelperTeam, QuestionState, TeamKind, TeamMessage, TeamState};
@@ -1872,13 +1503,8 @@ impl Core {
                     return self.team_reply(call, id, false, "Choose another teammate. Decide yourself.");
                 }
                 self.helpers.get_mut(call).unwrap().sent += 1;
-                let sent = self.send_team_note(&conv, call, &target, text);
-                let result = if sent {
-                    "The note is queued for the teammate."
-                } else {
-                    "The teammate could not take the note. Its report has the reason."
-                };
-                self.team_reply(call, id, sent, result);
+                self.send_team_note(&conv, call, &target, text);
+                self.team_reply(call, id, true, "Sent to the teammate.");
             }
             _ => self.team_reply(call, id, false, "Use who, ask or tell; only one question may wait. Decide yourself."),
         }
@@ -1980,15 +1606,18 @@ impl Core {
         true
     }
 
-    fn send_team_note(&mut self, conv: &str, from: &str, to: &str, text: &str) -> bool {
+    fn send_team_note(&mut self, conv: &str, from: &str, to: &str, text: &str) {
+        self.team_record(conv, (from, to), TeamKind::Tell, text, None);
         let name = (from != "lead").then(|| self.team_name(conv, from));
         let note = Self::helper_message(name.as_deref(), text);
+        let h = self.helpers.get_mut(to).unwrap();
         let id = format!("team:{}", new_id());
-        if self.deliver_helper_note(to, id, note) {
-            self.team_record(conv, (from, to), TeamKind::Tell, text, None);
-            return true;
+        h.waiting.push(id.clone());
+        if h.ready {
+            h.session.steer(UserTurn::text(note), &id);
+        } else {
+            h.early.push((id, note));
         }
-        false
     }
 
     fn helper_control(&mut self, conv: &str, id: &str, input: &serde_json::Value) {
@@ -2036,10 +1665,8 @@ impl Core {
                 return reply(self, false, "At most 6 team messages per helper per reply. Decide yourself.".into());
             }
             self.helpers.get_mut(&call).unwrap().sent += 1;
-            let sent = self.send_team_note(conv, "lead", &call, text);
-            let result =
-                if sent { "The note is queued for the helper." } else { "The helper could not take the note. Its report has the reason." };
-            return reply(self, sent, result.into());
+            self.send_team_note(conv, "lead", &call, text);
+            return reply(self, true, "Sent to the helper.".into());
         }
         if self.helpers[&call].lead_call.is_some() {
             return reply(self, false, "A call is already waiting for this helper.".into());

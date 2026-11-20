@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
-import { EventEmitter, once } from 'node:events';
+import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { readFileSync } from 'node:fs';
 
@@ -66,7 +66,7 @@ test('quit bounds a hung host and waits for its exit after termination', async (
   await stopping;
 });
 
-test('an exited host with a pipe still open rejects unanswered requests within one second', async (t) => {
+test('unexpected exit rejects requests and notifies the restart owner exactly once', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const ended = [];
   const events = [];
@@ -74,109 +74,23 @@ test('an exited host with a pipe still open rejects unanswered requests within o
   const child = children.at(-1);
   const pending = assert.rejects(host.call('send', { text: 'only once' }), /error.host.gone/);
   child.emit('exit', 1);
-  await assert.rejects(host.call('state', {}), /error.host.gone/);
-  t.mock.timers.tick(999);
-  assert.deepEqual(ended, []);
-  t.mock.timers.tick(1);
   await pending;
   child.stdout.write(JSON.stringify({ event: { type: 'lagged' } }) + '\n');
   child.emit('error', new Error('late error after exit'));
   child.emit('exit', 1);
-  child.emit('close', 1);
   t.mock.timers.tick(60_000); await flush();
   assert.deepEqual(ended, [1]);
   assert.deepEqual(events, [], 'the exited host cannot publish stale events');
   assert.equal(children.at(-1), child, 'only main.ts may start a replacement');
   assert.deepEqual(child.requests.map((request) => request.cmd), ['send'], 'requests are never replayed');
+  await assert.rejects(host.call('state', {}), /error.host.gone/);
   await host.stop(budget);
-});
-
-test('a failed host can deliver a buffered response after its exit notification', async () => {
-  const ended = [];
-  const host = Sidecar.start({ event: assert.fail, order: assert.fail, ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  const pending = host.call('state', {}).catch((error) => error.message);
-  child.emit('exit', 1);
-  assert.deepEqual(ended, []);
-  child.stdout.write('{"event":{"type":"lagged"}}\n{"order":{"kind":"show"}}\n');
-  child.stdout.write(JSON.stringify({ id: child.requests[0].id, ok: { saved: true } }) + '\n');
-  assert.deepEqual(ended, [1], 'the last buffered reply permits immediate recovery');
-  child.emit('close', 1);
-  assert.deepEqual(await pending, { saved: true });
-  assert.deepEqual(ended, [1]);
-  assert.deepEqual(child.requests.map((request) => request.cmd), ['state']);
-});
-
-test('Quit during a reply drain never starts a replacement', async () => {
-  const ended = [];
-  const host = Sidecar.start({ ...listeners(), ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  const pending = host.call('state', {});
-  child.emit('exit', 1);
-  const stopping = host.stop(budget);
-  child.stdout.write(JSON.stringify({ id: child.requests[0].id, ok: true }) + '\n');
-  assert.equal(await pending, true);
-  await stopping;
-  assert.deepEqual(ended, []);
-  assert.equal(child.killed, false);
-});
-
-test('Quit begun before exit drains the final reply without trying to kill the exited host', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  const ended = [];
-  const host = Sidecar.start({ ...listeners(), ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  const pending = host.call('state', {}).catch((error) => error.message);
-  const stopping = host.stop(50);
-  t.mock.timers.tick(49);
-  child.emit('exit', 0);
-  t.mock.timers.tick(1);
-  await flush();
-  assert.equal(child.killed, false);
-  child.stdout.write(JSON.stringify({ id: child.requests[0].id, ok: true }) + '\n');
-  assert.equal(await pending, true);
-  await stopping;
-  assert.deepEqual(ended, []);
-});
-
-test('exit without pending calls can restart immediately even with a pipe open', () => {
-  const ended = [];
-  Sidecar.start({ ...listeners(), ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  child.emit('exit', 1);
-  assert.deepEqual(ended, [1]);
-});
-
-test('an already drained pipe cannot keep an unanswered call pending after exit', async () => {
-  const ended = [];
-  const host = Sidecar.start({ ...listeners(), ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  const pending = assert.rejects(host.call('state', {}), /error.host.gone/);
-  const drained = once(child.stdout, 'end');
-  child.stdout.end();
-  await drained;
-  child.emit('exit', 1);
-  assert.deepEqual(ended, [1]);
-  await pending;
-});
-
-test('a non-object line does not break the next host reply', async () => {
-  const host = Sidecar.start(listeners());
-  const child = children.at(-1);
-  const pending = host.call('state', {});
-  child.stdout.write('null\n42\n');
-  child.stdout.write(JSON.stringify({ id: child.requests[0].id, ok: { connected: true } }) + '\n');
-  assert.deepEqual(await pending, { connected: true });
-  child.emit('exit', 0);
-  child.emit('close', 0);
 });
 
 test('an unrequested clean exit is reported to the restart owner', () => {
   const ended = [];
   Sidecar.start({ ...listeners(), ended: (code) => ended.push(code) });
-  const child = children.at(-1);
-  child.emit('exit', 0);
-  child.emit('close', 0);
+  children.at(-1).emit('exit', 0);
   assert.deepEqual(ended, [0]);
 });
 

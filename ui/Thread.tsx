@@ -42,7 +42,7 @@ import { catalogName, bytes, compact, duration, failureText, fromEngine, lang, m
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList, keepForExit } from './motion.ts';
 import { windowHidden } from './appearance.ts';
-import { elapsed, waitNeedsAttention, waitWords, warmLeft } from './running.ts';
+import { elapsed, waitWords, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
 import { agentState, agentWord, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
@@ -272,7 +272,7 @@ function ChildCard(props: { child: Summary; running?: RunningItem[]; onOpen: (c:
   const state = () => childStateOf(child(), running());
   return <button type="button" class="btn child-conversation" data-state={state()} onClick={() => props.onOpen(child())}>
     <b>{child().title}</b>
-    <span classList={{ 'wait-attention': !child().archived && waitNeedsAttention(child().waitingOn) }}>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), state() === 'waiting' && child().waitingOn && !child().waitingOn!.note?.trim() ? '' : t(`child.${state()}`), waitWords(child().waitingOn), running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
+    <span>{[running()?.vendor ? vendorName(running()!.vendor!) : child().childChoice?.vendor === 'auto' ? t('model.auto') : child().childChoice?.vendor ? vendorName(child().childChoice!.vendor as 'claude' | 'codex') : '', prettyModel(running()?.model ?? child().childChoice?.model), state() === 'waiting' && child().waitingOn && !child().waitingOn!.note?.trim() ? '' : t(`child.${state()}`), waitWords(child().waitingOn), running()?.now ?? child().childLine].filter(Boolean).join(' · ')}</span>
   </button>;
 }
 
@@ -555,7 +555,8 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   // which then replaces the card under each start step. A reply with no helper gets a block of its own (`Crew`) after the
   // steps that hold its first start.
   const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
-  // The recorded output identifies the conversation a step started.
+  // Read from the message, not from `tools()`: that list stays the same while a step's output keeps its length, and the
+  // conversation a step started is in what its output says.
   const starts = createMemo(() => (m().tools ?? []).flatMap((tool) => { const id = startedChild(tool); return id ? [{ id, tool: tool.id }] : []; }), [], { equals: (a, b) => sameIds(a.map((s) => s.id + s.tool), b.map((s) => s.id + s.tool)) });
   const hasTeam = createMemo(() => parts().some((part) => part.kind === 'team'));
   const mine = (id: string) => !!props.conversations?.some((c) => c.id === id && c.startedBy === props.conversationId);
@@ -1207,17 +1208,7 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
   );
 }
 
-export function Thread(props: Shared & { messages: Message[]; temporary?: boolean; archived?: boolean; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; noConnectedAccounts?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void>; onOpenWaitAccounts?: () => void; onWriteWaitMessage?: () => void }) {
-  const waitAction = () => {
-    if (props.archived) return;
-    const problem = props.waitingOn?.problem;
-    if (problem === 'reason.wait.delivery' && props.onWriteWaitMessage) {
-      return { label: t('wait.write'), onClick: props.onWriteWaitMessage };
-    }
-    if ((problem === 'reason.wait.delivery' || problem === 'reason.budget.other' || problem === 'error.noSubscription') && props.onOpenWaitAccounts) {
-      return { label: t(props.onWriteWaitMessage ? 'set.openSetup' : 'empty.noAiButton'), onClick: props.onOpenWaitAccounts };
-    }
-  };
+export function Thread(props: Shared & { messages: Message[]; temporary?: boolean; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void> }) {
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
   const shown = keepForExit(open);
@@ -1313,16 +1304,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
         }}
       </For>
       <Show when={props.area === 'project' && props.until === undefined}>
-        <Show when={waitWords(props.waitingOn)}>
-          {(words) => (
-            <div>
-              <p class="conversation-wait" classList={{ 'wait-attention': !props.archived && waitNeedsAttention(props.waitingOn) }} role="status">{words()}</p>
-              <Show when={waitAction()}>
-                {(action) => <button type="button" class="btn wait-message" data-restore="wait-recovery" onClick={() => action().onClick()}>{action().label}</button>}
-              </Show>
-            </div>
-          )}
-        </Show>
+        <Show when={waitWords(props.waitingOn)}>{(words) => <p class="conversation-wait" role="status">{words()}</p>}</Show>
         <DetailsLine conversationId={props.conversationId} messages={props.messages} busy={props.busy} background={props.background} />
       </Show>
       <Show when={props.conversationId} keyed>{(conversationId) =>
@@ -1330,21 +1312,13 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
           const initial = props.queued!.find((q) => q.id === id)!;
           const queued = () => props.queued?.find((q) => q.id === id) ?? initial;
           const origin = () => ['wake.asked', 'wake.childDone', 'wake.childQuiet'].includes(queued().wake?.why ?? '') ? queued().wake : undefined;
-          const childReport = () => origin()?.why === 'wake.childDone';
-          const reconnect = () => childReport() && props.noConnectedAccounts ? props.onOpenWaitAccounts : undefined;
-          const restoreKey = `queue-action:${conversationId}:${id}`;
           return <Show when={origin()} fallback={<Queued conversationId={conversationId} q={queued()}
             temporary={props.temporary} busy={props.busy ?? false} onRecovered={props.onQueuedRecovered} onError={props.onError} />}>
-            {(wake) => <p class="woke" classList={{ 'wait-attention': !!reconnect() && !queued().sending }}><Icon name="loop" small />
-              <span>{childReport() ? t(queued().sending ? 'queue.handed' : 'wake.childQueued') : fromEngine(wakeKey(wake()))}</span>
+            {(wake) => <p class="woke"><Icon name="loop" small /><span>{fromEngine(wakeKey(wake()), { count: (wake().ids?.length ?? 0) + 1 })}</span>
               <Show when={!queued().sending && !props.busy && props.messages.at(-1)?.status !== 'streaming'}>
                 <span class="actions">
                   <button type="button" onClick={() => api.removeQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>{t('queue.remove')}</button>
-                  <Show when={reconnect()} fallback={
-                    <button type="button" data-restore={childReport() ? restoreKey : undefined} onClick={() => api.sendQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>{t('queue.sendNow')}</button>
-                  }>
-                    {(open) => <button type="button" data-restore={restoreKey} onClick={() => open()()}>{t('empty.noAiButton')}</button>}
-                  </Show>
+                  <button type="button" onClick={() => api.sendQueued(conversationId, id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>{t('queue.sendNow')}</button>
                 </span>
               </Show>
             </p>}

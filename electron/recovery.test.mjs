@@ -24,7 +24,7 @@ function shell() {
     },
     Sidecar: { start(listen) {
       const ready = Promise.withResolvers();
-      const host = { listen: { ...listen, ended: (code, exitedAt = now) => listen.ended(code, exitedAt) }, ready, calls: [], notes: [],
+      const host = { listen, ready, calls: [], notes: [],
         call(cmd, args) { host.calls.push({ cmd, args }); return ready.promise; },
         note(note) { host.notes.push(note); },
       };
@@ -91,15 +91,6 @@ test('thirty seconds of host uptime resets the failure window, shorter uptime do
     assert.equal(s.hosts.length, uptime < 30_000 ? 4 : 5);
     assert.equal(s.quits(), uptime < 30_000 ? 1 : 0);
   }
-});
-
-test('time spent reading a final reply does not count as host uptime', () => {
-  const s = shell();
-  for (let i = 0; i < 3; i++) s.hosts.at(-1).listen.ended(1);
-  s.advance(30_100);
-  s.hosts.at(-1).listen.ended(1, 29_999);
-  assert.equal(s.hosts.length, 4);
-  assert.equal(s.quits(), 1);
 });
 
 test('restart counts expire after a minute even without thirty seconds of uptime', () => {

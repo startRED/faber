@@ -83,37 +83,6 @@ async fn hello_answers_the_version_protocol_and_the_command_table() {
     assert_eq!(client.offer["commands"][0]["name"], "send");
 }
 
-#[tokio::test(start_paused = true)]
-async fn hello_times_out_and_closes_the_stream_when_the_peer_does_not_answer() {
-    let (ours, theirs) = tokio::io::duplex(4096);
-    let peer = tokio::spawn(async move {
-        let mut reader = BufReader::new(theirs);
-        let mut line = String::new();
-        reader.read_line(&mut line).await.unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["cmd"], "hello");
-        line.clear();
-        assert_eq!(reader.read_line(&mut line).await.unwrap(), 0);
-    });
-    let err = tokio::time::timeout(Duration::from_secs(6), Client::over(ours, Hello::default()))
-        .await
-        .expect("the client must stop waiting for hello")
-        .err()
-        .expect("the peer did not answer hello");
-    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
-    tokio::time::timeout(Duration::from_secs(1), peer).await.expect("the stream must close").unwrap();
-}
-
-#[tokio::test(start_paused = true)]
-async fn closing_a_client_releases_its_connection_without_another_request() {
-    let (backend, _) = fake();
-    let (ours, theirs) = tokio::io::duplex(4096);
-    let secret = test_secret();
-    let task = tokio::spawn(connection_at(theirs, backend.clone(), Guard::watching(backend.subscribe()), secret.clone(), 0));
-    let client = Client::over(ours, Hello { secret: secret.hex(), ..Default::default() }).await.unwrap();
-    drop(client);
-    tokio::time::timeout(Duration::from_secs(1), task).await.expect("the connection must close").unwrap();
-}
-
 #[tokio::test]
 async fn a_command_before_hello_is_refused() {
     let (backend, _) = fake();
@@ -401,20 +370,6 @@ async fn events_arrive_in_order_and_a_slow_reader_is_told_what_it_missed() {
     assert_eq!(heard.recv().await.unwrap(), json!({"type": "list"}));
     assert_eq!(heard.recv().await.unwrap(), json!({"type": "catalog"}));
     assert!(client.subscribe().await.is_err(), "events go to the first subscription only");
-}
-
-#[tokio::test(start_paused = true)]
-async fn state_subscription_sends_only_state_notices() {
-    let (backend, events) = fake();
-    let client = client(backend, 0).await;
-    let mut heard = client.subscribe_state().await.unwrap();
-    events.send(json!({"type":"message", "message":{"text":"answer"}})).unwrap();
-    events.send(json!({"type":"running", "revision":1, "items":[{"title":"Another chat"}]})).unwrap();
-    events.send(json!({"type":"list"})).unwrap();
-    for kind in ["running", "list"] {
-        let notice = tokio::time::timeout(Duration::from_secs(1), heard.recv()).await.unwrap().unwrap();
-        assert_eq!(notice, json!({"type":kind}));
-    }
 }
 
 #[tokio::test]

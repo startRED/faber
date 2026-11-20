@@ -54,7 +54,7 @@ impl Engine {
                 .convs
                 .values()
                 .filter(|v| v.keep_going.is_none())
-                .filter(|v| c.live.get(&v.id).is_some_and(|l| l.turn.is_some()) || v.queued.iter().any(|q| !wait::needs_send(q)))
+                .filter(|v| c.live.get(&v.id).is_some_and(|l| l.turn.is_some()) || !v.queued.is_empty())
                 .map(|v| (&v.id, v.messages.last().map_or("", |m| m.id.as_str())))
                 .collect();
             let path = c.opts.data_dir.join(RESUME_FILE);
@@ -91,13 +91,10 @@ impl Core {
     /// the turn goes out first and the queue follows when it ends.
     fn resume_one(&mut self, id: &str, last: &str) {
         let Some(v) = self.load(id) else { return };
-        if v.keep_going.is_some() || v.messages.last().map_or("", |m| m.id.as_str()) != last || wait::cut_while_resuming_wait(v) {
+        if v.keep_going.is_some() || v.messages.last().map_or("", |m| m.id.as_str()) != last {
             return;
         }
         if self.live.get(id).is_some_and(|l| l.turn.is_some()) {
-            return;
-        }
-        if self.resume_queued_wait(id).is_some() {
             return;
         }
         let _ = self.send_by_itself(id, RESUME.into(), crate::model::Wake::of("wake.updated"));

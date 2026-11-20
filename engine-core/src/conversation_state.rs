@@ -40,13 +40,9 @@ pub fn result_kind(c: &Conversation) -> Option<EndKind> {
 /// Where the conversation stands now, from what is stored and whether a turn runs (`busy`). The one answer the sidebar, the
 /// running list, another agent's read and the command line share.
 pub fn run_state(c: &Conversation, busy: bool) -> State {
-    run_state_with_activity(c, busy || c.compacting)
-}
-
-fn run_state_with_activity(c: &Conversation, active: bool) -> State {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
     let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
-    let working = active || !c.queued.is_empty() || last.is_some_and(|m| m.status == Some(Status::Streaming));
+    let working = busy || c.compacting || !c.queued.is_empty() || last.is_some_and(|m| m.status == Some(Status::Streaming));
     match last {
         _ if asking => State::Waiting,
         // Its copy is still being made: the brief follows it.
@@ -130,29 +126,20 @@ pub fn unanswered_question(m: &Message) -> bool {
 }
 /// Where a conversation stands; `busy` is whether its CLI runs a turn now.
 pub fn state_of(busy: bool, c: &Conversation) -> State {
-    state_for_list(c, busy, c.compacting, c.stopped)
-}
-
-/// State from a saved record, even when computing the index before serializing one with live flags.
-pub fn saved_state(c: &Conversation) -> State {
-    state_for_list(c, false, false, false)
-}
-
-fn state_for_list(c: &Conversation, busy: bool, compacting: bool, stopped: bool) -> State {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant);
-    if !busy && stopped && c.waiting_on.is_some() {
+    if !busy && c.stopped && c.waiting_on.is_some() {
         return if last.is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped };
     }
     let failed = last.is_some_and(|m| m.error.is_some());
     if !busy && c.waiting_on.is_some() && !failed {
         return State::Waiting;
     }
-    let state = run_state_with_activity(c, busy || compacting);
+    let state = run_state(c, busy);
     if matches!(state, State::Working | State::Stuck)
         && !busy
-        && !compacting
+        && !c.compacting
         && c.messages.last().is_some_and(|m| {
-            m.role == Role::Assistant && (m.status == Some(Status::Stopped) || (stopped && m.status != Some(Status::Streaming)))
+            m.role == Role::Assistant && (m.status == Some(Status::Stopped) || (c.stopped && m.status != Some(Status::Streaming)))
         })
     {
         if c.messages.last().is_some_and(|m| m.closed) { State::Interrupted } else { State::Stopped }
@@ -196,51 +183,6 @@ pub enum State {
     Stopped,
     /// Its turn was cut off by Faber closing or crashing (`Message::closed`).
     Interrupted,
-}
-
-/// The command line's reply-only ending. A plain answer and an explicit done box have different meanings there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ReplyState {
-    New,
-    Concluded,
-    Ended,
-    Interrupted,
-    Stopped,
-    Failed,
-}
-
-impl ReplyState {
-    pub fn of(last: Option<&Message>) -> Self {
-        match last.filter(|m| m.role == Role::Assistant) {
-            Some(m) => Self::from_reply(m.status, m.closed, m.error.is_some(), m.wrap_up.as_ref().is_some_and(|w| w.done)),
-            None => Self::New,
-        }
-    }
-
-    pub fn from_reply(status: Option<Status>, closed: bool, error: bool, done: bool) -> Self {
-        if closed || status == Some(Status::Streaming) {
-            return Self::Interrupted;
-        }
-        match status {
-            Some(Status::Stopped) => Self::Stopped,
-            Some(Status::Error) => Self::Failed,
-            _ if error => Self::Failed,
-            _ if done => Self::Concluded,
-            _ => Self::Ended,
-        }
-    }
-
-    pub fn word(self) -> &'static str {
-        match self {
-            Self::New => "new",
-            Self::Concluded => "concluded",
-            Self::Ended => "ended",
-            Self::Interrupted => "interrupted",
-            Self::Stopped => "stopped",
-            Self::Failed => "failed",
-        }
-    }
 }
 
 /// The first sentence of a recap, for a running row, a done card and the tray: up to its first full stop, question or
