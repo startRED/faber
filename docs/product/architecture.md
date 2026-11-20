@@ -77,10 +77,21 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   the process receives no conversation identity. Resumes unsubscribe first so a loaded idle thread applies the new token.
   The first live thread takes over its prepared server without closing it, even when effort or the selected kit changes.
   A replaced thread that still owns commands releases them before the resume, because reloading would stop its terminals.
-  Only Claude processes use the idle timer and warm-process count. Next: one shared copy of each MCP server for all
-  sessions of a project. On Windows, automatic helpers and unattended conversation turns also queue while measured
+  On Codex 0.166.0 and later, closing a drained conversation can unsubscribe its thread while peers keep working.
+  Faber asks for a two-second idle grace on the threads it opens, so a protected resume does not normally wait for
+  the server's one-minute default.
+  Faber keeps its resources leased through runtime shutdown and still verifies the process tree afterward.
+  Once the old runtime is confirmed unloaded, its saved thread can reopen while the shared tree still holds other
+  processes. The old copy's writer lease remains in force until that tree can be checked.
+  If the shutdown notice is missing, Faber checks whether that runtime is still loaded.
+  An opening already sent for the same thread takes precedence. If a later resume races shutdown and the server
+  rejects it as closing, Faber retries that opening once.
+  Codex can [unload saved idle threads](../dev/shared-codex-service.md#automatic-idle-release). Only Claude processes
+  use the warm-process count. On Windows, automatic helpers and unattended conversation turns also queue while measured
   owned CLI private working sets reach half physical RAM or less than 2 GiB is available for the person. One new
   automatic start is admitted per fresh sample; the nonempty queue samples every two seconds, off the engine lock.
+  On Windows versions with per-process private working set counters, each sample reads only the exact owned process
+  identities. Older versions and unavailable counters use a system snapshot joined to the same identities.
   Shared processes count once, including their root and owned children, and Stop cancels queued starts. Active work
   is never killed. This is admission headroom, not a hard cap on later process growth or native CLI subagent starts.
   Internal text-comparison judges retain their separate bounded concurrency and do not wait on this admission queue.

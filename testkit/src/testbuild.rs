@@ -6,10 +6,10 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::time::SystemTime;
 
 /// Where Vite writes the test screen (relative to the repository). The shell embeds it.
 pub const TEST_DIST: &str = "dist-test";
+const TAURI_TEST_CONFIG: &str = "src-tauri/tauri.test.conf.json";
 
 /// The arguments of the Vite build. `vite.config.ts` has `root: 'ui'`, so `--outDir` is relative to that folder.
 pub fn vite_args() -> Vec<String> {
@@ -27,7 +27,7 @@ pub fn tauri_args(target_dir: &Path, jobs: usize) -> Vec<String> {
         "--features",
         "test-hooks",
         "--config",
-        "src-tauri/tauri.test.conf.json",
+        TAURI_TEST_CONFIG,
         "--",
         "--target-dir",
     ]
@@ -51,34 +51,6 @@ pub fn sidecar_args(target_dir: &Path, jobs: usize) -> Vec<String> {
         .into_iter()
         .chain([target_dir.to_string_lossy().into_owned(), "-j".to_string(), jobs.to_string()])
         .collect()
-}
-
-/// A fingerprint of a folder: every file's relative path, size and modification time. `absent` when it does not exist.
-/// The test build must leave the production `dist/` exactly as it found it.
-pub fn fingerprint(dir: &Path) -> String {
-    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, base, out);
-            } else if let Ok(meta) = entry.metadata() {
-                let modified = meta.modified().ok().and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-                out.push(format!("{} {} {modified}", path.strip_prefix(base).unwrap_or(&path).display(), meta.len()));
-            }
-        }
-    }
-    if !dir.exists() {
-        return "absent".into();
-    }
-    let mut lines = Vec::new();
-    walk(dir, dir, &mut lines);
-    // An empty folder holds no build: the Tauri build makes an empty `dist/` in a clean checkout (the landing's worktree).
-    if lines.is_empty() {
-        return "absent".into();
-    }
-    lines.sort();
-    faber_engine::hex(&Sha256::digest(lines.join("\n")))
 }
 
 /// What the Vite build of the test screen reads: the screen, its checks, the one shell file they import, and the build's
@@ -309,19 +281,15 @@ pub fn prebuilt(paths: &Paths) -> Result<(), String> {
 /// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo. The Tauri build makes
 /// the shell with the features and settings it ships with.
 pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
-    let production = paths.root.join("dist");
-    let before = fingerprint(&production);
     build_screen(paths)?;
-    build_shell(paths, jobs, &production, &before)
+    build_shell(paths, jobs)
 }
 
 /// The fake CLI and the test app for a run on this PC. Vite, which mostly waits on one core, builds the screen while Cargo
 /// builds the fake CLI and the cache example; the Tauri build waits for both, so Cargo never runs twice at once here.
 pub fn build_for_run(paths: &Paths, jobs: usize) -> Result<(), String> {
-    let production = paths.root.join("dist");
-    let before = fingerprint(&production);
     both(|| build_screen(paths), || ensure_fake_cli(paths, jobs))?;
-    build_shell(paths, jobs, &production, &before)
+    build_shell(paths, jobs)
 }
 
 fn wrapper_target(args: &mut Vec<String>) {
@@ -329,11 +297,26 @@ fn wrapper_target(args: &mut Vec<String>) {
     args.drain(i..i + 2);
 }
 
+fn validate_tauri_test_config(source: &str) -> Result<(), String> {
+    let config: serde_json::Value = serde_json::from_str(source).map_err(|e| format!("invalid {TAURI_TEST_CONFIG}: {e}"))?;
+    let build = &config["build"];
+    if build["frontendDist"] != "../dist-test"
+        || !["beforeBuildCommand", "beforeDevCommand"].into_iter().all(|key| build.get(key).is_some_and(|value| value.is_null()))
+        || config["bundle"]["active"] != false
+    {
+        return Err(format!("{TAURI_TEST_CONFIG} must embed dist-test/, disable build hooks and leave bundling off"));
+    }
+    Ok(())
+}
+
 /// The build of the shell. Tauri's embeds the test screen Vite left in `dist-test`; Electron's is its compiled code and the
 /// Rust host beside it, and serves `dist-test` from the folder (`FABER_TEST_DIST`).
-fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> Result<(), String> {
+fn build_shell(paths: &Paths, jobs: usize) -> Result<(), String> {
     match Shell::chosen() {
         Shell::Tauri => {
+            let config =
+                std::fs::read_to_string(paths.root.join(TAURI_TEST_CONFIG)).map_err(|e| format!("cannot read {TAURI_TEST_CONFIG}: {e}"))?;
+            validate_tauri_test_config(&config)?;
             let mut tauri = build_priority(without_run_env(Command::new("node")));
             let mut args = tauri_args(&paths.target, jobs);
             if std::env::var_os("FABER_CARGO_WRAPPER").is_some() {
@@ -361,9 +344,6 @@ fn build_shell(paths: &Paths, jobs: usize, production: &Path, before: &str) -> R
             host.current_dir(&paths.root).args(args);
             run("host build", host)?;
         }
-    }
-    if fingerprint(production) != before {
-        return Err("the test build changed dist/, which only the production build may write".into());
     }
     if !paths.app.exists() {
         return Err(format!("the test build did not produce {}", paths.app.display()));
@@ -421,17 +401,6 @@ mod tests {
         }
         assert!(files.contains(&paths.sidecar()));
         assert!(!built_for_shell(&paths, Shell::Tauri).contains(&root.join("dist-test/index.html")));
-    }
-
-    #[test]
-    fn an_empty_dist_is_no_build_but_a_file_in_it_is() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dist = tmp.path().join("dist");
-        assert_eq!(fingerprint(&dist), "absent");
-        std::fs::create_dir_all(dist.join("assets")).unwrap();
-        assert_eq!(fingerprint(&dist), "absent", "the Tauri build may leave empty folders in a clean checkout");
-        std::fs::write(dist.join("index.html"), "<html>").unwrap();
-        assert_ne!(fingerprint(&dist), "absent");
     }
 
     #[test]
@@ -543,24 +512,6 @@ mod tests {
     }
 
     #[test]
-    fn the_fingerprint_changes_when_a_file_is_added_changed_or_removed() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(fingerprint(&dir.path().join("missing")), "absent");
-        let empty = fingerprint(dir.path());
-        std::fs::write(dir.path().join("index.html"), "one").unwrap();
-        let one = fingerprint(dir.path());
-        assert_ne!(one, empty);
-        assert_eq!(fingerprint(dir.path()), one, "the same folder gives the same fingerprint");
-        std::fs::write(dir.path().join("index.html"), "three").unwrap();
-        assert_ne!(fingerprint(dir.path()), one, "a file that changed size");
-        std::fs::create_dir(dir.path().join("assets")).unwrap();
-        std::fs::write(dir.path().join("assets/app.js"), "x").unwrap();
-        let two = fingerprint(dir.path());
-        std::fs::remove_file(dir.path().join("assets/app.js")).unwrap();
-        assert_ne!(fingerprint(dir.path()), two);
-    }
-
-    #[test]
     fn a_screen_build_reads_nothing_outside_its_inputs() {
         fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -644,11 +595,18 @@ mod tests {
 
     #[test]
     fn the_test_override_config_embeds_dist_test_and_runs_no_hook_and_makes_no_bundle() {
-        let config: serde_json::Value = serde_json::from_str(&repo_file("src-tauri/tauri.test.conf.json")).unwrap();
-        assert_eq!(config["build"]["frontendDist"], "../dist-test");
-        assert!(config["build"].get("beforeBuildCommand").is_some_and(|v| v.is_null()), "the production hook runs through a shell");
-        assert!(config["build"].get("beforeDevCommand").is_some_and(|v| v.is_null()));
-        assert_eq!(config["bundle"]["active"], false);
+        let config = repo_file(TAURI_TEST_CONFIG);
+        assert!(validate_tauri_test_config(&config).is_ok());
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        let mut wrong_folder = config.clone();
+        wrong_folder["build"]["frontendDist"] = "../dist".into();
+        assert!(validate_tauri_test_config(&wrong_folder.to_string()).is_err());
+        let mut inherited_hook = config.clone();
+        inherited_hook["build"].as_object_mut().unwrap().remove("beforeBuildCommand");
+        assert!(validate_tauri_test_config(&inherited_hook.to_string()).is_err(), "an omitted hook inherits the production command");
+        let mut bundling = config;
+        bundling["bundle"]["active"] = true.into();
+        assert!(validate_tauri_test_config(&bundling.to_string()).is_err());
     }
 
     #[test]

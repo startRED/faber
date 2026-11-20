@@ -80,6 +80,9 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 - "Manage accounts" opens the account cards alone. Closing them (or Esc) brings Settings back on the same section, with
   the draft that was not applied. An install failure explains what happened and offers Try again and the official page, including when the request fails before reporting progress.
 - Account limits use the engine's sanitized quota windows, including control-only subscription readings before any model turn. Missing windows keep the existing unavailable state; no account credentials reach the screen.
+  The model picker refresh shares one isolated Codex process with this account reading. The account and limits update as
+  soon as those two requests settle, even if the model list is still waiting; a reply received before the deadline is kept
+  if another request fails or never answers.
 - Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a

@@ -19,9 +19,11 @@ mod bench_quiet;
 mod inputs;
 #[path = "../../bench/pure.rs"]
 mod pure;
+#[path = "../../bench/workflow.rs"]
+mod workflow;
 
 use faber_engine::cli::{Cli, find_cli};
-use faber_engine::model::{Area, Conversation, Message, Permissions, Role, Settings, Status, Vendor};
+use faber_engine::model::{Area, Conversation, Message, Permissions, Project, Role, Settings, Status, Vendor};
 use faber_engine::proc::{self, Proc};
 use faber_engine::router::Choice;
 use faber_engine::{Engine, EngineOptions, SendRequest};
@@ -57,11 +59,13 @@ struct Options {
     per_run_usd: f64,
     dry_run: bool,
     busy_account: bool,
+    workflow_pair: bool,
 }
 
 impl Options {
     fn read() -> Result<Options, Failure> {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        let workflow_pair = args.iter().any(|a| a == "--workflow-pair");
         let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         let vendor =
             |name: &str| Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"));
@@ -78,7 +82,10 @@ impl Options {
         };
         Ok(Options {
             run_id: value("--run-id").unwrap_or_else(|| chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()),
-            dir: value("--dir").map_or_else(|| std::env::temp_dir().join("faber-bench"), PathBuf::from),
+            dir: value("--dir").map_or_else(
+                || if workflow_pair { PathBuf::from("target/workflow-pilots") } else { std::env::temp_dir().join("faber-bench") },
+                PathBuf::from,
+            ),
             only: value("--only").map(|v| v.split(',').map(String::from).collect()).unwrap_or_default(),
             plain,
             vendors,
@@ -87,10 +94,14 @@ impl Options {
             judge_model: value("--judge-model").unwrap_or_default(),
             judge_effort: value("--judge-effort").unwrap_or_default(),
             judge_vendor: plain,
-            cap: Cap { max_usd: number("--cap-usd", 8.0)?, max_fresh_tokens: number("--cap-tokens", 3_000_000.0)? as u64 },
-            per_run_usd: number("--per-run-usd", 1.5)?,
+            cap: Cap {
+                max_usd: number("--cap-usd", if workflow_pair { 0.35 } else { 8.0 })?,
+                max_fresh_tokens: number("--cap-tokens", if workflow_pair { 120_000.0 } else { 3_000_000.0 })? as u64,
+            },
+            per_run_usd: number("--per-run-usd", if workflow_pair { 0.175 } else { 1.5 })?,
             dry_run: args.iter().any(|a| a == "--dry-run"),
             busy_account: args.iter().any(|a| a == "--busy-account"),
+            workflow_pair,
         })
     }
 }
@@ -132,6 +143,10 @@ struct Finished {
 async fn run_program(program: &str, args: &[String], cwd: &Path, input: Option<&str>, limit: Duration) -> Result<Finished, String> {
     let mut command = tokio::process::Command::new(program);
     command.args(args).current_dir(cwd);
+    run_child(command, program, input, limit).await
+}
+
+async fn run_child(command: tokio::process::Command, program: &str, input: Option<&str>, limit: Duration) -> Result<Finished, String> {
     let Proc { mut stdin, mut stdout, stderr, child, contained } =
         proc::spawn_check(command, None).map_err(|e| format!("could not start {program}: {e}"))?;
     if let Some(text) = input {
@@ -213,7 +228,7 @@ struct Work {
     repo: PathBuf,
 }
 
-fn prepare(request: &Request, root: &Path, node: &str, inputs: &Path) -> Result<Work, Failure> {
+fn prepare(request: &Request, root: &Path, node: &str, inputs: &Path, starting_tree: Option<&Path>) -> Result<Work, Failure> {
     let base = root.join(&request.id);
     let work = Work { pristine: base.join("pristine"), plain: base.join("plain"), repo: base.join("faber").join("repo") };
     for dir in [&work.pristine, &work.plain, &work.repo] {
@@ -222,15 +237,16 @@ fn prepare(request: &Request, root: &Path, node: &str, inputs: &Path) -> Result<
     if request.kind == Kind::Chat {
         return Ok(work);
     }
-    match &request.fixture {
-        Some(name) => {
+    match (starting_tree, &request.fixture) {
+        (Some(tree), _) => copy_tree(tree, &work.pristine)?,
+        (None, Some(name)) => {
             let script = inputs.join("fixtures").join(format!("{name}.mjs"));
             let out = hidden(node).arg(&script).arg(&work.pristine).output()?;
             if !out.status.success() {
                 return Err(format!("fixture {name} failed: {}", String::from_utf8_lossy(&out.stderr)).into());
             }
         }
-        None => std::fs::write(work.pristine.join("README.md"), "# Project\n")?,
+        (None, None) => std::fs::write(work.pristine.join("README.md"), "# Project\n")?,
     }
     for dir in [&work.plain, &work.repo] {
         copy_tree(&work.pristine, dir)?;
@@ -463,12 +479,20 @@ fn logging_spawner(log: PathBuf) -> proc::Spawner {
     })
 }
 
-async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work, root: &Path, allowance: f64, billed: bool) -> SideResult {
+async fn run_faber(
+    clis: &BTreeMap<Vendor, Cli>,
+    request: &Request,
+    work: &Work,
+    root: &Path,
+    allowance: f64,
+    billed: bool,
+    paired: Option<&Choice>,
+) -> SideResult {
     let started = Instant::now();
     let state = root.join(&request.id).join("faber").join("state");
     let engine = match Engine::new(
         EngineOptions {
-            data_dir: state,
+            data_dir: state.clone(),
             #[cfg(windows)]
             chat_dir: root.join(&request.id).join("faber").join("chat-work"),
             clis: clis.clone(),
@@ -492,21 +516,38 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
     }));
     engine.set_verifier(faber_engine::verify::Verifier::real(None, None));
     let result = async {
-        // The same trust as the plain side's bypassPermissions: Full access.
-        engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Default::default() })?;
-        engine.check_plans(Duration::from_secs(30)).await;
+        // The plain comparison needs equal trust. The pair accepts edits in a disposable project.
+        let permissions = if paired.is_some() { Permissions::AcceptEdits } else { Permissions::FullAccess };
+        engine.save_settings(Settings { permissions: Some(permissions), ..Default::default() })?;
+        if paired.is_none() {
+            engine.check_plans(Duration::from_secs(30)).await;
+        }
         if let Some(codex) = clis.get(&Vendor::Codex) {
             // The app reads Codex's limits and model list at start (src-tauri/src/main.rs); Auto needs both.
             let real = proc::real_spawner();
             let prefix = codex.prefix.clone();
             let spawn: proc::Spawner =
                 Arc::new(move |bin, args, cwd| real(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
+            #[cfg(windows)]
+            if paired.is_some() {
+                workflow::check_local_command(&work.repo, &state).await.map_err(|error| error.to_string())?;
+            }
             let limits =
                 faber_engine::codex::read_codex_limits(&codex.command, &work.repo, cfg!(windows), spawn.clone(), Duration::from_secs(20))
                     .await;
+            if paired.is_some() && !workflow::account_is_safe(&limits) {
+                return Err(
+                    "fresh account check did not confirm a usable subscription with paid credits unavailable; no request started".into()
+                );
+            }
             engine.note_account_events(Vendor::Codex, limits);
             let list =
                 faber_engine::codex::list_codex_models(&codex.command, &work.repo, cfg!(windows), spawn, Duration::from_secs(20)).await;
+            if let Some(profile) = paired
+                && !list.iter().any(|model| Some(&model.id) == profile.model.as_ref())
+            {
+                return Err("the account did not list the pinned model; no request started".into());
+            }
             let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
             engine.set_codex_models(list.iter().map(|m| m.id.clone()).collect(), recommended);
         }
@@ -515,7 +556,14 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
         }
         let (area, project_id) = match request.kind {
             Kind::Chat => (Area::Chat, None),
-            Kind::Project => (Area::Project, Some(engine.add_project(&work.repo.to_string_lossy())?.id)),
+            Kind::Project => {
+                let project = engine.add_project(&work.repo.to_string_lossy())?;
+                if paired.is_some() {
+                    // Each trial already has its own fixture outside the engine's protected data folder.
+                    engine.update_project(&project, &Project { separate_copies: false, ..project.clone() })?;
+                }
+                (Area::Project, Some(project.id))
+            }
         };
         let id = engine.send(SendRequest {
             conversation_id: None,
@@ -524,7 +572,7 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
             text: request.prompt.clone(),
             images: vec![],
             files: vec![],
-            choice: Choice { vendor: "auto".into(), model: None, effort: None },
+            choice: paired.cloned().unwrap_or_else(|| Choice { vendor: "auto".into(), model: None, effort: None }),
         })?;
         Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance, baseline).await))
     }
@@ -536,6 +584,9 @@ async fn run_faber(clis: &BTreeMap<Vendor, Cli>, request: &Request, work: &Work,
         Ok((_, (Some(conversation), capped))) => {
             let replies: Vec<&Message> = conversation.messages.iter().filter(|m| m.role == Role::Assistant).collect();
             let usage = message_usage(&replies);
+            if let Some(choice) = paired {
+                workflow::observe(root, choice, &replies);
+            }
             let last = replies.last();
             let reply = last.map_or("", |m| {
                 let tail = pure::from_utf16(&m.text, m.activity_end.unwrap_or(0));
@@ -861,6 +912,9 @@ async fn main() -> Result<(), Failure> {
         return Ok(());
     }
     let mut options = Options::read()?;
+    if options.workflow_pair {
+        return workflow::run(&options).await;
+    }
     let root = std::path::absolute(options.dir.join(&options.run_id))?;
     let inputs = if options.dry_run {
         repo_root().join("bench")
@@ -942,7 +996,7 @@ async fn main() -> Result<(), Failure> {
             continue;
         }
         println!("[{}/{}] {}", index + 1, requests.len(), request.id);
-        let work = prepare(request, &root, &node.command, &inputs)?;
+        let work = prepare(request, &root, &node.command, &inputs, None)?;
         if let Err(error) = accounts.wait(&judges, &[options.plain], &mut spent).await {
             write_checkpoint(&root, &options, &rows, &row, &spent)?;
             return Err(error.into());
@@ -960,7 +1014,7 @@ async fn main() -> Result<(), Failure> {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
-            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false).await
+            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false, None).await
         };
         accounts.worked(&options.vendors);
         spent.add(&faber.usage, faber.cost_usd);

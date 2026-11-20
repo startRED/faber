@@ -1,7 +1,8 @@
 //! A bounded, volatile index of the person's words and final answers. No tool, thinking or attachment text is retained.
 
-use crate::model::{Area, Conversation, Message, Role, Status};
-use serde::Serialize;
+use crate::model::{Area, Conversation, Role, Status};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +40,33 @@ struct Document {
     words: Box<str>,
     complete: bool,
     revision: u64,
+}
+
+// Search reads saved text and its location without materializing tools, images or other conversation state.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchRecord {
+    id: String,
+    title: String,
+    area: Area,
+    project_id: Option<String>,
+    #[serde(default)]
+    temporary: bool,
+    updated_at: u64,
+    archived_at: Option<u64>,
+    started_by: Option<String>,
+    messages: Vec<SearchMessage>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchMessage {
+    role: Role,
+    text: String,
+    wake: Option<IgnoredAny>,
+    status: Option<Status>,
+    finished_at: Option<u64>,
+    activity_end: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,7 +164,7 @@ fn has_prefix(sorted: &str, prefix: &str) -> bool {
     false
 }
 
-fn visible(message: &Message) -> &str {
+fn visible(message: &SearchMessage) -> &str {
     if message.wake.is_some()
         || (message.role == Role::Assistant && message.status == Some(Status::Streaming) && message.finished_at.is_none())
     {
@@ -152,7 +180,7 @@ fn visible(message: &Message) -> &str {
     &message.text[byte.unwrap_or(message.text.len())..]
 }
 
-fn document(c: &Conversation) -> Document {
+fn document(c: &SearchRecord) -> Document {
     let mut distinct = BTreeSet::new();
     let mut complete = true;
     for message in &c.messages {
@@ -279,7 +307,7 @@ impl Search {
                 let id = index.pending.pop_first().unwrap();
                 let revision = index.documents[&id].revision;
                 drop(index);
-                let doc = crate::store::read_checked::<Conversation>(&search.directory.join(format!("{id}.json")))
+                let doc = crate::store::read_checked::<SearchRecord>(&search.directory.join(format!("{id}.json")))
                     .ok()
                     .flatten()
                     .filter(|c| c.id == id && !c.temporary)
@@ -309,7 +337,7 @@ impl Search {
             if self.state.lock().unwrap_or_else(|e| e.into_inner()).stopped {
                 return;
             }
-            let Some(c) = crate::store::read_checked::<Conversation>(&file.path()).ok().flatten() else { continue };
+            let Some(c) = crate::store::read_checked::<SearchRecord>(&file.path()).ok().flatten() else { continue };
             if c.temporary {
                 continue;
             }
@@ -379,16 +407,13 @@ impl Search {
     }
 
     pub fn query_cancellable(&self, query: &str, area: Area, cancelled: &AtomicBool) -> Result<Results, &'static str> {
-        self.query_until(query, area, None, HIT_LIMIT, || cancelled.load(Ordering::Relaxed))
+        self.query_until(query, area, None, None, HIT_LIMIT, || cancelled.load(Ordering::Relaxed))
     }
 
     /// The conversations of one project (never Chat, never another project's) except `asking`, newest first, at most `limit`.
     /// Blocking, like `query`: it runs on a worker, never under the engine lock.
     pub fn query_project(&self, query: &str, project: &str, asking: &str, limit: usize) -> Result<Results, &'static str> {
-        let mut found = self.query_until(query, Area::Project, Some(project), limit + 1, || false)?;
-        found.hits.retain(|h| h.conversation_id != asking);
-        found.hits.truncate(limit);
-        Ok(found)
+        self.query_until(query, Area::Project, Some(project), Some(asking), limit, || false)
     }
 
     fn query_until(
@@ -396,6 +421,7 @@ impl Search {
         query: &str,
         area: Area,
         project: Option<&str>,
+        exclude: Option<&str>,
         limit: usize,
         mut cancelled: impl FnMut() -> bool,
     ) -> Result<Results, &'static str> {
@@ -406,13 +432,15 @@ impl Search {
             return Err("error.store.read");
         }
         let ready = index.ready;
-        if words.is_empty() {
+        if words.is_empty() || limit == 0 {
             return Ok(Results { ready, hits: vec![] });
         }
         let mut docs: Vec<_> = index
             .documents
             .iter()
-            .filter(|(_, doc)| doc.area == area && project.is_none_or(|p| doc.project_id.as_deref() == Some(p)))
+            .filter(|(id, doc)| {
+                Some(id.as_str()) != exclude && doc.area == area && project.is_none_or(|p| doc.project_id.as_deref() == Some(p))
+            })
             .map(|(id, doc)| (id.clone(), doc.clone()))
             .collect();
         drop(index);
@@ -430,7 +458,7 @@ impl Search {
             if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                 continue;
             }
-            let Some(c) = crate::store::read_checked::<Conversation>(&self.directory.join(format!("{id}.json"))).ok().flatten() else {
+            let Some(c) = crate::store::read_checked::<SearchRecord>(&self.directory.join(format!("{id}.json"))).ok().flatten() else {
                 continue;
             };
             if c.temporary || c.id != id || c.area != area || project.is_some_and(|p| c.project_id.as_deref() != Some(p)) {
@@ -519,7 +547,7 @@ fn snippet(text: &str, words: &[String]) -> Option<(String, Vec<Highlight>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Wake;
+    use crate::model::{Message, Wake};
     use crate::store::Store;
     use serde_json::json;
 
@@ -528,6 +556,10 @@ mod tests {
             "id": id, "title": "A title", "area": "chat", "createdAt": 1, "updatedAt": 1,
             "messages": texts.iter().enumerate().map(|(i, text)| Message::new(i.to_string(), Role::User, (*text).into(), 1)).collect::<Vec<_>>()
         })).unwrap()
+    }
+
+    fn indexed(c: &Conversation) -> Document {
+        document(&serde_json::from_value(serde_json::to_value(c).unwrap()).unwrap())
     }
 
     #[test]
@@ -588,16 +620,18 @@ mod tests {
         let mut message = Message::new("answer".into(), Role::Assistant, "🦀 narration. CAFÉ com açúcar".into(), 1);
         message.status = Some(Status::Done);
         message.activity_end = Some("🦀 narration. ".encode_utf16().count());
-        assert_eq!(normalize(visible(&message)), "cafe com acucar");
-        let (snippet, highlights) = snippet(visible(&message), &["cafe".into(), "acucar".into()]).unwrap();
+        let decode = |message: &Message| -> SearchMessage { serde_json::from_value(serde_json::to_value(message).unwrap()).unwrap() };
+        let saved = decode(&message);
+        assert_eq!(normalize(visible(&saved)), "cafe com acucar");
+        let (snippet, highlights) = snippet(visible(&saved), &["cafe".into(), "acucar".into()]).unwrap();
         assert_eq!(snippet, "CAFÉ com açúcar");
         assert_eq!(highlights.iter().map(|h| (h.start, h.end)).collect::<Vec<_>>(), [(0, 4), (9, 15)]);
         message.status = Some(Status::Streaming);
-        assert_eq!(visible(&message), "");
+        assert_eq!(visible(&decode(&message)), "");
         message.finished_at = Some(2);
-        assert!(!visible(&message).is_empty());
+        assert!(!visible(&decode(&message)).is_empty());
         message.wake = Some(Wake::of("wake.keepGoing"));
-        assert_eq!(visible(&message), "");
+        assert_eq!(visible(&decode(&message)), "");
         assert_eq!(normalize("AÇÃO ÜBER déjà"), "acao uber deja");
     }
 
@@ -652,7 +686,7 @@ mod tests {
     #[test]
     fn search_words_are_sorted_unique_bounded_and_binary_prefixes_match_a_linear_scan() {
         let text = format!("Café café,99 a {} {} end", "b".repeat(32), "c".repeat(33));
-        let doc = document(&conversation("words", &[&text]));
+        let doc = indexed(&conversation("words", &[&text]));
         assert_eq!(&*doc.words, format!("99\n{}\ncafe\nend", "b".repeat(32)));
         let vocabulary = ["12", "abc", "abcd", "az", "cafe", "café", "end", "über", "世界", "世界中", "中文"];
         let sorted = vocabulary.join("\n");
@@ -664,8 +698,8 @@ mod tests {
         }
         assert!(!has_prefix("", "abc"));
         let all: Vec<_> = (0..WORD_LIMIT + 10).map(|i| format!("word{i:05}")).collect();
-        let forward = document(&conversation("limit", &[&all.join(" ")]));
-        let backward = document(&conversation("limit", &[&all.into_iter().rev().collect::<Vec<_>>().join(" ")]));
+        let forward = indexed(&conversation("limit", &[&all.join(" ")]));
+        let backward = indexed(&conversation("limit", &[&all.into_iter().rev().collect::<Vec<_>>().join(" ")]));
         assert_eq!(forward.words, backward.words, "the safety net never depends on recency");
         assert_eq!(words(&forward.words).count(), WORD_LIMIT);
     }
@@ -781,6 +815,7 @@ mod tests {
         let search = store.search();
         assert_eq!(ids(search.query_project("zebra", "a", "asking", 10).unwrap()), ["mine-3", "mine-2", "mine-1", "mine-0", "archived"]);
         assert_eq!(ids(search.query_project("zebra", "a", "asking", 2).unwrap()), ["mine-3", "mine-2"], "the limit counts the answer");
+        assert!(ids(search.query_project("zebra", "a", "asking", 0).unwrap()).is_empty());
         assert_eq!(ids(search.query_project("zebra", "b", "asking", 10).unwrap()), ["theirs"]);
         assert!(ids(search.query_project("zebra", "none", "asking", 10).unwrap()).is_empty());
         let found = search.query_project("zebra", "a", "asking", 10).unwrap();
@@ -803,9 +838,17 @@ mod tests {
         let mut c = in_project("talk", Some("a"), Area::Project, "a question", 1);
         let mut answer = Message::new("1".into(), Role::Assistant, "the zebra answer".into(), 1);
         answer.status = Some(Status::Done);
+        answer.tools = Some(
+            serde_json::from_value(json!([{
+                "id":"tool", "name":"command", "input":{}, "output":"zebra with toolonly"
+            }]))
+            .unwrap(),
+        );
         c.messages.push(answer);
         store.save(&c);
-        let hit = store.search().query_project("zebra", "a", "", 5).unwrap().hits.remove(0);
+        let search = store.search();
+        assert!(search.query_project("toolonly", "a", "", 5).unwrap().hits.is_empty());
+        let hit = search.query_project("zebra", "a", "", 5).unwrap().hits.remove(0);
         assert_eq!((hit.message_index, hit.by_person), (1, false));
     }
 
@@ -866,7 +909,7 @@ mod tests {
         let mut files = 0;
         let result = store
             .search()
-            .query_until("needle", Area::Chat, None, HIT_LIMIT, || {
+            .query_until("needle", Area::Chat, None, None, HIT_LIMIT, || {
                 files += 1;
                 files > 1
             })

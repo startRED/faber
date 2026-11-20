@@ -5,6 +5,7 @@ use faber_engine::claude::EventSink;
 use faber_engine::events::{EngineEvent, Session, UserTurn};
 use faber_engine::proc::{Proc, Spawner};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -343,11 +344,12 @@ impl AsyncWrite for Tap {
 
 /// A fake CLI process that replays a recorded session. Each line the driver writes is checked against the next
 /// recorded input; then the recorded outputs up to the following input are streamed back.
-pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
+pub fn replay(mut entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
     let (driver_in, mut fake_in) = tokio::io::duplex(1 << 22);
     let (mut fake_out, driver_out) = tokio::io::duplex(1 << 22);
     tokio::spawn(async move {
         let mut at = 0;
+        let mut steering_tags = HashMap::new();
         let mut lines = BufReader::new(&mut fake_in).lines();
         loop {
             while at < entries.len() && !entries[at].input {
@@ -358,7 +360,15 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
                     at += 1;
                     continue;
                 }
-                let line = format!("{}\n", entries[at].msg);
+                let msg = &mut entries[at].msg;
+                let params = &msg["params"];
+                if params["item"]["type"] == "userMessage"
+                    && let Some((thread, recorded)) = params["threadId"].as_str().zip(params["item"]["clientId"].as_str())
+                    && let Some(live) = steering_tags.get(&(thread.to_string(), recorded.to_string()))
+                {
+                    msg["params"]["item"]["clientId"] = json!(live);
+                }
+                let line = format!("{msg}\n");
                 if fake_out.write_all(line.as_bytes()).await.is_err() {
                     return;
                 }
@@ -379,12 +389,23 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
                 }
                 continue;
             }
-            let sent = key(&sent);
+            let sent_key = key(&sent);
             let expected = if at < entries.len() && entries[at].input { key(&entries[at].msg) } else { "(no input expected)".into() };
-            if sent == expected {
+            if sent_key == expected {
+                // A CLI echoes the client-generated tag it just received, not the one in the recording.
+                let recorded = &entries[at].msg["params"];
+                let live = &sent["params"];
+                if sent["method"] == "turn/steer"
+                    && recorded["threadId"] == live["threadId"]
+                    && recorded["expectedTurnId"] == live["expectedTurnId"]
+                    && let Some(thread) = recorded["threadId"].as_str()
+                    && let Some((recorded, live)) = recorded["clientUserMessageId"].as_str().zip(live["clientUserMessageId"].as_str())
+                {
+                    steering_tags.insert((thread.to_string(), recorded.to_string()), live.to_string());
+                }
                 at += 1;
             } else {
-                mismatches.lock().unwrap().push(format!("sent {sent}, recorded {expected}"));
+                mismatches.lock().unwrap().push(format!("sent {sent_key}, recorded {expected}"));
             }
         }
         // stdin closed: the process exits, so its output ends

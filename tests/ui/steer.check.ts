@@ -13,6 +13,7 @@ check('steer: agent messages show origin and keep recovery controls only for hel
     const root = document.createElement('div');
     document.body.append(root);
     const [message, setMessage] = createSignal<Message>({ id: 'answer', at: 0, role: 'assistant', text: 'Synthetic work', status: 'streaming', vendor: 'codex' });
+    const [connected, setConnected] = createSignal(true);
     const queued: QueuedTurn[] = [{ id: 'agent', at: 1, text: 'Synthetic internal instructions for another AI', choice: { vendor: 'codex' }, wake: { why } }];
     const before = { remove: api.removeQueued, send: api.sendQueued };
     const actions: string[] = [];
@@ -20,11 +21,12 @@ check('steer: agent messages show origin and keep recovery controls only for hel
     api.sendQueued = async (conversation, id) => { actions.push(`send:${conversation}:${id}`); };
     const dispose = render(() => createComponent(Thread, {
       conversationId: 'agent-message', get messages() { return [message()]; }, queued, busy: false, from: 0, options: [], onBranch: () => {},
+      get noConnectedAccounts() { return !connected(); }, onOpenWaitAccounts: () => { actions.push('accounts'); },
     }), root);
     try {
       await new Promise((resolve) => setTimeout(resolve, 30));
       equal(root.querySelector('.mine.queued'), null, 'a message never impersonates the person');
-      ok(root.textContent!.includes(t(why)), 'its agent origin is visible');
+      ok(root.textContent!.includes(t(why === 'wake.childDone' ? 'wake.childQueued' : why)), 'its agent origin is visible');
       ok(!root.textContent!.includes(queued[0].text), 'internal instructions do not fill the conversation');
       equal(root.querySelector('button'), null, 'no Edit, Remove or Send now is needed');
       setMessage({ ...message(), status: 'stopped' });
@@ -37,6 +39,15 @@ check('steer: agent messages show origin and keep recovery controls only for hel
       line.querySelector<HTMLButtonElement>(`button[aria-label="${t('queue.sendNowLabel')}"]`)!.click();
       await new Promise((resolve) => setTimeout(resolve, 30));
       deepEqual(actions, ['remove:agent-message:agent', 'send:agent-message:agent'], 'held work uses the existing recovery commands');
+      if (why === 'wake.childDone') {
+        setConnected(false);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        equal(line.querySelector(`button[aria-label="${t('queue.sendNowLabel')}"]`), null, 'sending is unavailable without an account');
+        const connect = line.querySelector<HTMLButtonElement>('button[data-restore]');
+        equal(connect?.textContent?.trim(), t('empty.noAiButton'), 'the held report offers account connection');
+        connect!.click();
+        deepEqual(actions, ['remove:agent-message:agent', 'send:agent-message:agent', 'accounts'], 'opening accounts leaves the report queued');
+      }
     } finally {
       api.removeQueued = before.remove;
       api.sendQueued = before.send;

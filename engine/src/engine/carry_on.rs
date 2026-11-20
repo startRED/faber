@@ -67,7 +67,8 @@ fn is_carry_on(m: &Message) -> bool {
 impl Core {
     /// The end of a turn (`finish`): a reply that stopped short of the job goes on by itself. True when the turn went out.
     pub(super) fn carry_on(&mut self, conv: &str) -> bool {
-        if self.live.get(conv).is_some_and(|l| l.turn.is_some() || l.command_wait.is_some())
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || self.waiting_command(conv).is_some()
             || self.compacts.contains_key(conv)
             || self.compactions.contains_key(conv)
             || self.room_refusal(conv).is_some()

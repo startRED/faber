@@ -39,9 +39,9 @@ fn run() -> Result<(), String> {
         if !meta.is_dir() || meta.is_symlink() {
             return Err("storage maintenance refuses a linked build folder".into());
         }
-        if !sweep::due(&target, now) {
+        let Some(_maintenance) = sweep::claim_sweep(&target, now) else {
             continue;
-        }
+        };
         let report = if target == shared {
             sweep::sweep_worktrees(&target, &own, &worktrees, now, sweep::CAP)
         } else {

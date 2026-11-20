@@ -66,14 +66,20 @@ fn human(value: &Value, depth: usize, words: &Words) {
     match value {
         Value::Object(entries) => {
             for (key, value) in entries {
-                let state = if key == "state" { value.as_str().map(|s| words.get(&format!("cli.state.{s}"))) } else { None };
+                let translated = match (key.as_str(), value.as_str()) {
+                    ("state", Some(state)) => Some(words.get(&format!("cli.state.{state}"))),
+                    ("reason" | "problem", Some(reason)) if reason.starts_with("reason.") || reason.starts_with("error.") => {
+                        Some(words.get(reason))
+                    }
+                    _ => None,
+                };
                 let word = words.get(&format!("cli.field.{key}"));
                 let key = if word.starts_with("cli.field.") { key } else { &word };
                 if value.is_object() || value.is_array() {
                     println!("{indent}{key}:");
                     human(value, depth + 1, words);
                 } else {
-                    let text = state.filter(|s| !s.starts_with("cli.state.")).unwrap_or_else(|| display(value, words));
+                    let text = translated.filter(|s| !s.starts_with("cli.state.")).unwrap_or_else(|| display(value, words));
                     println!("{indent}{key}: {text}");
                 }
             }

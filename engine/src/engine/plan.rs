@@ -307,13 +307,13 @@ impl Core {
 
     fn plan_member_state(&self, id: &str) -> MemberState {
         match self.convs.get(id) {
-            Some(c) => siblings::member_state(self.live.get(id).is_some_and(|l| l.turn.is_some()), c),
+            Some(c) => siblings::member_state(self.live_sibling_state(c)),
             None => self.store.get(id).map_or(MemberState::Stopped, |mut c| {
                 for message in &mut c.messages {
                     message.closed |= message.status == Some(Status::Streaming);
                     settle(message);
                 }
-                siblings::member_state(false, &c)
+                siblings::member_state(siblings::state_of(false, &c))
             }),
         }
     }

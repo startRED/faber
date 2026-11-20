@@ -278,6 +278,12 @@ impl Root {
     pub fn open_file(&self, path: &str) -> io::Result<File> {
         self.open_with(path, || {})
     }
+    /// Checks the file type and link count without reading file data or excluding a writer.
+    pub fn check_unlinked_file(&self, path: &str) -> io::Result<()> {
+        let path = Path::new(path);
+        let (dir, _, _parents) = self.parent(path, false)?;
+        open_at_access(&dir, path.file_name().unwrap(), false, FILE_OPEN, false, false, None, true, false).map(drop)
+    }
     /// Holds the very object that may be removed after the caller has preserved its bytes.
     pub fn open_removable(&self, path: &str) -> io::Result<File> {
         let path = Path::new(path);

@@ -30,6 +30,7 @@ const EVERY: Duration = Duration::from_secs(60 * 60);
 /// Over the cap, a folder used more recently than this is a lane still at work, never evicted.
 const ACTIVE: Duration = Duration::from_secs(30 * 60);
 const STAMP: &str = ".faber-sweep";
+const SWEEP_LOCK: &str = ".faber-sweep.lock";
 /// The main checkout's own build folders that carry a `CACHEDIR.TAG` of their own.
 const MAIN_FOLDERS: [&str; 1] = ["faber-test"];
 const LOCKS: [&str; 3] = [".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock"];
@@ -391,15 +392,29 @@ pub fn sweep(target: &Path, own: &Path, now: SystemTime, cap: u64) -> Report {
     report
 }
 
-/// Whether the last sweep of `target` is older than an hour; marks this one as done.
-pub fn due(target: &Path, now: SystemTime) -> bool {
+/// Claims a due sweep. Keep the returned file open through cleanup so competing launchers can skip it.
+pub fn claim_sweep(target: &Path, now: SystemTime) -> Option<File> {
     let stamp = target.join(STAMP);
-    if mtime(&stamp) + EVERY > now {
-        return false;
+    let due = || match fs::symlink_metadata(&stamp) {
+        Ok(meta) if meta.is_file() => meta.modified().ok().and_then(|at| at.checked_add(EVERY)).is_some_and(|next| next <= now),
+        Ok(_) => false,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    };
+    if !due() {
+        return None;
     }
-    // Truncating an empty file leaves its time on Windows, so the stamp is dated by hand: without it every command
-    // swept the whole folder (a stamp of 2026-11-09 still read due on 2026-11-12).
-    File::create(&stamp).and_then(|file| file.set_modified(now)).is_ok()
+    let lease = target.join(SWEEP_LOCK);
+    if fs::symlink_metadata(&lease).is_ok_and(|meta| !meta.is_file()) {
+        return None;
+    }
+    let lease = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(lease).ok()?;
+    lease.try_lock().ok()?;
+    if !due() {
+        return None;
+    }
+    // Windows can keep an empty file's old time through truncation. Date the stamp explicitly.
+    OpenOptions::new().create(true).truncate(false).write(true).open(stamp).and_then(|file| file.set_modified(now)).ok()?;
+    Some(lease)
 }
 
 /// Sweeps Cargo output belonging to all registered checkouts under one budget.
@@ -585,13 +600,46 @@ mod tests {
     fn the_sweep_runs_at_most_once_an_hour() {
         let temp = fixture();
         let now = SystemTime::now();
-        assert!(due(temp.path(), now));
-        assert!(!due(temp.path(), now));
-        assert!(due(temp.path(), now + EVERY * 2));
+        assert!(claim_sweep(temp.path(), now).is_some());
+        assert!(claim_sweep(temp.path(), now).is_none());
+        assert!(claim_sweep(temp.path(), now + EVERY * 2).is_some());
         // An old, empty stamp: the sweep is due once, then not again within the hour.
         write(&temp.path().join(STAMP), 0, DAY * 3);
-        assert!(due(temp.path(), now));
-        assert!(!due(temp.path(), now + Duration::from_secs(60)));
+        assert!(claim_sweep(temp.path(), now).is_some());
+        assert!(claim_sweep(temp.path(), now + Duration::from_secs(60)).is_none());
+    }
+
+    #[test]
+    fn a_sweep_yields_while_another_launcher_holds_maintenance() {
+        let temp = fixture();
+        let now = SystemTime::now();
+        let lock = File::options().read(true).write(true).create_new(true).open(temp.path().join(SWEEP_LOCK)).unwrap();
+        lock.try_lock().unwrap();
+        assert!(claim_sweep(temp.path(), now).is_none());
+        assert!(!temp.path().join(STAMP).exists());
+        drop(lock);
+        let owner = claim_sweep(temp.path(), now).unwrap();
+        let next_hour = now + EVERY * 2;
+        assert!(claim_sweep(temp.path(), next_hour).is_none());
+        drop(owner);
+        assert!(claim_sweep(temp.path(), next_hour).is_some());
+    }
+
+    #[test]
+    fn simultaneous_launchers_claim_one_old_stamp() {
+        let temp = fixture();
+        let now = SystemTime::now();
+        write(&temp.path().join(STAMP), 0, DAY);
+        let ready = std::sync::Barrier::new(16);
+        let admitted = std::thread::scope(|scope| {
+            let attempt = || {
+                ready.wait();
+                claim_sweep(temp.path(), now).is_some()
+            };
+            let threads: Vec<_> = (0..16).map(|_| scope.spawn(attempt)).collect();
+            threads.into_iter().map(|worker| usize::from(worker.join().unwrap())).sum::<usize>()
+        });
+        assert_eq!(admitted, 1);
     }
 
     #[test]

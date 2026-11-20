@@ -53,7 +53,7 @@ impl Core {
             && c.waiting_on.is_none()
             && !self.copying.contains_key(&c.id)
             && self.live.get(&c.id).is_none_or(|l| l.turn.is_none())
-            && running_item(c, self.live.get(&c.id)).is_none()
+            && self.running_item(c).is_none()
             && c.messages.last().is_none_or(|m| {
                 m.recovery.is_none()
                     && m.status != Some(Status::Streaming)

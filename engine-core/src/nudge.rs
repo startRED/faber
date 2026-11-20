@@ -248,7 +248,7 @@ pub fn program(word: &str) -> String {
 /// True when one command (already split into words) runs a verification: the program position holds the check, after
 /// leading `NAME=value` words and the usual launchers. Shell launchers (`bash -lc "..."`, `powershell -Command "..."`)
 /// hold a whole command line in one word, which is read again.
-fn runs_check(words: &[String], depth: u8) -> bool {
+pub(crate) fn runs_check(words: &[String], depth: u8) -> bool {
     let words: Vec<String> = words
         .iter()
         .skip_while(|w| w.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_')))
@@ -289,6 +289,35 @@ pub fn command(tool: &ToolUse) -> Option<&str> {
         "commandExecution" => tool.input.as_str().or(tool.input["command"].as_str()),
         _ => None,
     }
+}
+
+/// Native Windows command receipts can log the PowerShell launcher around the script it ran.
+pub(crate) fn native_powershell(tool: &ToolUse) -> Option<String> {
+    if tool.name != "commandExecution" {
+        return None;
+    }
+    let command = command(tool)?.trim();
+    // The app-server displays the entire native argument inside single quotes, even when its script has quotes.
+    let (outer, verbatim) = command
+        .strip_suffix('\'')
+        .and_then(|head| head.split_once(" '"))
+        .map_or((command, None), |(launcher, script)| (launcher, Some(script)));
+    let mut outer = successful_segments(outer)?;
+    let [words] = outer.as_mut_slice() else { return None };
+    let script = verbatim.map_or_else(|| words.pop(), |script| Some(script.to_owned()))?;
+    let [shell, options @ .., flag] = words.as_slice() else { return None };
+    if !matches!(program(shell).as_str(), "pwsh" | "powershell") || !matches!(flag.to_ascii_lowercase().as_str(), "-command" | "-c") {
+        return None;
+    }
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        match option.to_ascii_lowercase().as_str() {
+            "-noprofile" | "-nologo" | "-noninteractive" => (),
+            "-executionpolicy" if options.next().is_some() => (),
+            _ => return None,
+        }
+    }
+    Some(script)
 }
 
 pub fn is_check(tool: &ToolUse) -> bool {
@@ -448,6 +477,8 @@ mod tests {
             input,
             ok,
             output: None,
+            failure_tail: None,
+            exit_code: None,
             declined: false,
             interrupted: false,
             parent: None,

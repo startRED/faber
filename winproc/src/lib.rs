@@ -67,7 +67,7 @@ pub mod process_tree;
 pub mod sound;
 
 #[cfg(windows)]
-pub use launch::{Child, Output, spawn_in_job};
+pub use launch::{Child, Output, spawn_detached, spawn_in_job};
 
 #[cfg(windows)]
 mod launch {
@@ -138,7 +138,7 @@ mod launch {
 
     impl Child {
         pub fn id(&self) -> Option<u32> {
-            Some(self.pid)
+            self.status.is_none().then_some(self.pid)
         }
         pub fn resume(&self) -> io::Result<()> {
             // SAFETY: this is the owned primary thread, still suspended until this call.
@@ -258,6 +258,82 @@ mod launch {
         Ok(())
     }
 
+    struct CommandText {
+        application: Vec<u16>,
+        line: Vec<u16>,
+        environment: Vec<u16>,
+        cwd: Option<Vec<u16>>,
+    }
+
+    impl CommandText {
+        fn new(command: &std::process::Command) -> io::Result<Self> {
+            let application = wide(command.get_program())?;
+            let mut line = Vec::new();
+            quote(command.get_program(), &mut line)?;
+            for arg in command.get_args() {
+                line.push(b' ' as u16);
+                quote(arg, &mut line)?;
+            }
+            line.push(0);
+            let mut env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+            for (key, value) in command.get_envs() {
+                env.retain(|(existing, _)| !existing.as_encoded_bytes().eq_ignore_ascii_case(key.as_encoded_bytes()));
+                if let Some(value) = value {
+                    env.push((key.into(), value.into()));
+                }
+            }
+            env.sort_by_key(|(key, _)| key.to_ascii_uppercase());
+            let mut environment = Vec::new();
+            for (key, value) in env {
+                let mut entry = key;
+                entry.push("=");
+                entry.push(value);
+                environment.extend(wide(&entry)?);
+            }
+            environment.push(0);
+            if environment.len() == 1 {
+                environment.push(0);
+            }
+            let cwd = command.get_current_dir().map(|p| wide(p.as_os_str())).transpose()?;
+            Ok(Self { application, line, environment, cwd })
+        }
+
+        fn cwd_ptr(&self) -> *const u16 {
+            self.cwd.as_ref().map_or(std::ptr::null(), |cwd| cwd.as_ptr())
+        }
+    }
+
+    /// Starts a desktop executable detached, with no inherited standard streams or other handles.
+    pub fn spawn_detached(command: &std::process::Command) -> io::Result<()> {
+        if !std::path::Path::new(command.get_program()).is_absolute() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "the application executable path must be resolved before launch"));
+        }
+        let mut text = CommandText::new(command)?;
+        // SAFETY: the startup structure is initialized, the buffers outlive creation and only success returns owned handles.
+        unsafe {
+            let startup = STARTUPINFOW { cb: std::mem::size_of::<STARTUPINFOW>() as u32, ..std::mem::zeroed() };
+            let mut info: PROCESS_INFORMATION = std::mem::zeroed();
+            if CreateProcessW(
+                text.application.as_ptr(),
+                text.line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT,
+                text.environment.as_ptr().cast(),
+                text.cwd_ptr(),
+                &startup,
+                &mut info,
+            ) == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            drop(OwnedHandle::from_raw_handle(info.hProcess));
+            drop(OwnedHandle::from_raw_handle(info.hThread));
+        }
+        Ok(())
+    }
+
     struct Attributes(Vec<usize>);
     impl Attributes {
         fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
@@ -287,7 +363,7 @@ mod launch {
         if !std::path::Path::new(command.get_program()).is_absolute() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the CLI executable path must be resolved before launch"));
         }
-        let application = wide(command.get_program())?;
+        let mut text = CommandText::new(command)?;
         // SAFETY: the caller keeps this job open through creation; the duplicate belongs only to this process.
         let job_handle = unsafe { BorrowedHandle::borrow_raw(job as HANDLE) }.try_clone_to_owned()?;
         // A private, first-instance pipe keeps another local process from replacing the CLI's standard streams.
@@ -359,33 +435,6 @@ mod launch {
                 return Err(io::Error::last_os_error());
             }
         }
-        let mut line = Vec::new();
-        quote(command.get_program(), &mut line)?;
-        for arg in command.get_args() {
-            line.push(b' ' as u16);
-            quote(arg, &mut line)?;
-        }
-        line.push(0);
-        let mut env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
-        for (key, value) in command.get_envs() {
-            env.retain(|(existing, _)| !existing.as_encoded_bytes().eq_ignore_ascii_case(key.as_encoded_bytes()));
-            if let Some(value) = value {
-                env.push((key.into(), value.into()));
-            }
-        }
-        env.sort_by_key(|(key, _)| key.to_ascii_uppercase());
-        let mut environment = Vec::new();
-        for (key, value) in env {
-            let mut entry = key;
-            entry.push("=");
-            entry.push(value);
-            environment.extend(wide(&entry)?);
-        }
-        environment.push(0);
-        if environment.len() == 1 {
-            environment.push(0);
-        }
-        let cwd = command.get_current_dir().map(|p| wide(p.as_os_str())).transpose()?;
         // SAFETY: all input buffers, handles and the attribute list outlive the call; successful output handles are owned below.
         unsafe {
             let mut startup: STARTUPINFOEXW = std::mem::zeroed();
@@ -397,14 +446,14 @@ mod launch {
             startup.lpAttributeList = attributes.ptr();
             let mut info: PROCESS_INFORMATION = std::mem::zeroed();
             if CreateProcessW(
-                application.as_ptr(),
-                line.as_mut_ptr(),
+                text.application.as_ptr(),
+                text.line.as_mut_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
                 1,
                 flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
-                environment.as_ptr().cast(),
-                cwd.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
+                text.environment.as_ptr().cast(),
+                text.cwd_ptr(),
                 &startup.StartupInfo,
                 &mut info,
             ) == 0

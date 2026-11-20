@@ -40,7 +40,8 @@ Stopping a command first stops its process tree. If that cannot be confirmed, it
 reserved rather than being reused under potentially live descendants.
 
 Before each local command, a small standard-library Rust helper sweeps output at most once an hour. The executable is
-reused by source digest, without compiling the app or its dependencies. The runner uses the same sweep. The 24 GB
+reused by source digest, without compiling the app or its dependencies. The runner and the helper share one file lock
+per build root. Other commands skip maintenance while a sweep holds it. The 24 GB
 budget (the owner, 2026-11-12, R566; it was 12 GB) includes the main checkout's `target` and Cargo-tagged `target` folders of all registered worktrees, including
 nested ones. A cache nothing used for two hours is cleared, whether its worktree is alive or gone; builds replaced
 more than two hours ago go, and in each crate's incremental folder only the newest finished compiler session stays
@@ -65,9 +66,9 @@ The legacy `%TEMP%\faber-target` root remains covered by the same hourly sweep a
 `scripts/cargo.mjs` is the one door every local Cargo command goes through, so it also coordinates the lanes. Nothing
 stays running: each part works at the start or end of a command, or is a kernel object that lives while a build runs.
 
-- **Each lane keeps its cache.** A copy takes the cache it built in last, then one whose copy is gone, then the least
-  recently used (`slotOrder`); before, every lane took the first free one and the three bounced between copies. A
-  landing's fresh copy (`ship.mjs`) prefers the cache of the lane it lands for (`FABER_CARGO_AFFINITY`).
+- **Each lane keeps its cache.** When a copy has used more than one available cache, it takes its most recent one.
+  Otherwise it takes a cache whose copy is gone first, then the least recently used (`slotOrder`). A landing's fresh
+  copy (`ship.mjs`) prefers the cache of the lane it lands for (`FABER_CARGO_AFFINITY`).
 - **One path per cache.** Cargo runs in the copy through a link named after its cache,
   `target/.faber-copies/build-<n>-<id>`, which points at the copy that leases the cache. The workspace crates keep one
   identity in a cache whichever copy builds there, so Cargo's units, the compiler's incremental state and the compile
@@ -79,6 +80,8 @@ stays running: each part works at the start or end of a command, or is a kernel 
   cost is disk: one cache grew from about 5 to 13 GB. The owner set the budget to 24 GB for it (R566): stale sessions
   go every hour and idle caches lose their incremental state before any cache is cleared. `FABER_INCREMENTAL=0`
   turns it off.
+- **One retry when the compiler cache dies.** The launcher remembers a cache connection error as stderr arrives, even
+  if Cargo follows it with a long compiler command. It retries once without the cache in the same build folder.
 - **One feature set.** `cargo t` runs the runner with `--bin faber-test`, not `--package faber-testkit`: one package
   resolved the dependencies' features differently from `--workspace`, so `cargo t` and `cargo test --workspace`
   rebuilt each other's shared crates every time.

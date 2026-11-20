@@ -544,6 +544,11 @@ mod tests {
     /// Starts a conversation whose resumed Codex session reports a lost session, with the reply shaped by `shape` and a transfer
     /// that was `retried` or not. Returns the reply after the error and how many processes the engine tried to start.
     fn lost(shape: impl FnOnce(&mut Message), retried: bool) -> (Message, usize) {
+        let (reply, spawns, _) = failure(shape, retried, "Codex thread failed: no rollout found for thread id x", false, false);
+        (reply, spawns)
+    }
+
+    fn failure(shape: impl FnOnce(&mut Message), retried: bool, error: &str, stopped: bool, with_history: bool) -> (Message, usize, Reach) {
         use crate::events::EngineEvent;
         let spawned = Arc::new(Mutex::new(0));
         let counted = spawned.clone();
@@ -568,6 +573,15 @@ mod tests {
         let reply = engine.with(|c| {
             let id = c.blank(Area::Chat, None);
             let conv = c.convs.get_mut(&id).unwrap();
+            conv.stopped = stopped;
+            if with_history {
+                conv.sessions.insert(Vendor::Codex, "parked-thread".into());
+                conv.messages.push(Message::new("earlier".into(), Role::User, "Earlier request".into(), 1));
+                let mut saved = Message::new("saved".into(), Role::Assistant, "Saved reply".into(), 1);
+                saved.vendor = Some(Vendor::Codex);
+                saved.status = Some(Status::Done);
+                conv.messages.push(saved);
+            }
             conv.messages.push(Message::new("question".into(), Role::User, "question".into(), 1));
             let mut reply = Message::new("reply".into(), Role::Assistant, String::new(), 2);
             reply.vendor = Some(Vendor::Codex);
@@ -632,8 +646,8 @@ mod tests {
                     tuning: Default::default(),
                     research: None,
                     retiring: false,
-                    was_idle: false,
-                    command_wait: None,
+                    codex_goal_held: false,
+                    idle_period: None,
                     runs: Permissions::FullAccess,
                     by_hand: true,
                     approved: false,
@@ -646,22 +660,49 @@ mod tests {
             );
             c.refresh_running();
             assert_eq!(c.running.items.len(), 1, "the control: the turn is on the running list before it fails");
-            let message = "Codex thread failed: no rollout found for thread id x".to_string();
-            c.handle(&id, 1, EngineEvent::Error { message, fatal: true });
-            (c.convs[&id].messages[1].clone(), c.running.items.len())
+            c.handle(&id, 1, EngineEvent::Error { message: error.into(), fatal: true });
+            (c.convs[&id].messages.last().unwrap().clone(), c.running.items.len(), c.ledger.of(Vendor::Codex).reach)
         });
-        let (reply, still_running) = reply;
+        let (reply, still_running, reach) = reply;
         let spawns = *spawned.lock().unwrap();
         // A turn that failed without starting another process must have left the running list, or `Engine::is_working` stays
         // true and no update ever installs. (A replay is a turn that is genuinely running again.)
         assert!(spawns > 0 || still_running == 0, "a failed turn stays on the running list");
-        (reply, spawns)
+        (reply, spawns, reach)
+    }
+
+    #[tokio::test]
+    async fn a_start_refusal_never_replays_or_changes_quota_and_preserves_stop() {
+        for detail in ["no rollout found for thread id x", "file handle limit reached"] {
+            let error = format!("{} {detail}", crate::codex::TURN_START_FAILURE);
+            for stopped in [false, true] {
+                let (reply, spawns, reach) = failure(|_| {}, false, &error, stopped, false);
+                assert_eq!(spawns, 0, "{detail}");
+                assert_eq!(reach, Reach::Clear, "{detail}");
+                assert_eq!(reply.status, Some(if stopped { Status::Stopped } else { Status::Error }));
+                assert_eq!(reply.error.as_deref(), (!stopped).then_some(error.as_str()));
+            }
+        }
     }
 
     #[tokio::test]
     async fn a_reply_with_nothing_done_is_replayed_on_a_new_session() {
         let (_, spawns) = lost(|_| {}, false);
         assert!(spawns > 0, "the control: without work the turn runs again on a new session");
+    }
+
+    #[tokio::test]
+    async fn an_unsent_idle_resume_can_use_the_saved_transcript_once() {
+        let blocked = crate::codex::IDLE_RESUME_UNCONFIRMED;
+        let (reply, spawns, _) = failure(|_| {}, false, blocked, false, true);
+        assert_eq!(spawns, 1);
+        assert_eq!(reply.note.as_deref(), Some("note.historyResent"));
+        for (retried, stopped) in [(true, false), (false, true)] {
+            let (reply, spawns, _) = failure(|_| {}, retried, blocked, stopped, true);
+            assert_eq!(spawns, 0);
+            assert_eq!(reply.error.as_deref(), Some("reason.codexThreadOpenTimeout"));
+            assert!(reply.note.is_none());
+        }
     }
 
     #[tokio::test]
@@ -679,6 +720,8 @@ mod tests {
                 input: json!({ "command": "git push" }),
                 ok: Some(true),
                 output: Some("pushed".into()),
+                failure_tail: None,
+                exit_code: None,
                 declined: false,
                 interrupted: false,
                 parent: None,

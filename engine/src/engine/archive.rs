@@ -68,6 +68,7 @@ impl Core {
         }
         self.save(id);
         if on {
+            self.command_waits.remove(id);
             self.emit_queue(id);
             self.keep_going_off(id);
         }

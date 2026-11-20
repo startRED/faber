@@ -75,7 +75,7 @@ pub async fn run(args: &Args) -> i32 {
                 } else if !arguments.is_object() {
                     (json!({"key":"error.host.badArgs"}), true)
                 } else {
-                    match client.call_detailed(name, arguments).await {
+                    match connect::call(&client, name, arguments).await {
                         Ok(Ok(value)) => (value, false),
                         Ok(Err(err)) => (json!({"key":err.key,"detail":err.detail,"data":err.data}), true),
                         Err(_) => (json!({"key":"error.channel.closed"}), true),

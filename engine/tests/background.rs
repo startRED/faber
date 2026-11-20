@@ -87,15 +87,32 @@ async fn background_codex_recording_starts_prints_finishes_and_never_saves_outpu
     assert!(started[0].started > 0);
     assert!(!started[0].stoppable, "Codex's processId is an opaque PTY id, never an OS pid");
     assert_eq!(engine.stop_background(&started[0].id).await, Err("error.backgroundGone"));
+    engine
+        .send(SendRequest { conversation_id: Some(conversation.clone()), text: "Continue while it runs".into(), ..request("codex") })
+        .unwrap();
+    assert!(!engine.open(&conversation).unwrap().queued[0].sending, "the command has yet to yield its step");
     for event in &recorded[1..4] {
         support::emit(&mut output, event.clone()).await;
     }
     let running = rows(&mut rx, |items| items.len() == 1 && items[0].output == "started\nworking\ntransient-only-tail\n").await;
     assert_eq!(running[0].state, State::Running, "a yielded process with no exit code is still running");
+    let result = || engine.open(&conversation).unwrap().messages[1].tools.as_ref().unwrap()[0].ok;
+    assert_eq!(result(), None, "the running command cannot appear as a passed step");
+    let steer = support::expect_method(&mut input, "turn/steer").await;
+    assert_eq!(steer["params"]["expectedTurnId"], "background-turn", "the yielded step releases the queued message");
+    support::emit(&mut output, json!({"id":steer["id"],"result":{"turnId":"background-turn"}})).await;
+    support::emit(
+        &mut output,
+        json!({"method":"item/started","params":{"threadId":"background-thread","turnId":"background-turn","item":{
+            "type":"userMessage","id":"queued","clientId":steer["params"]["clientUserMessageId"]
+        }}}),
+    )
+    .await;
     support::emit(&mut output, recorded[4].clone()).await;
     let ended = rows(&mut rx, |items| items.len() == 1 && items[0].state == State::Done).await;
     assert_eq!(ended[0].id, started[0].id);
     assert_eq!(ended[0].output, "started\nworking\nfinished\n");
+    assert_eq!(result(), Some(true), "only the reported exit settles the step");
     support::emit(
         &mut output,
         json!({"method":"turn/completed","params":{"threadId":"background-thread","turn":{"id":"background-turn","status":"completed"}}}),
@@ -143,19 +160,29 @@ async fn background_claude_recording_reads_stops_without_a_message_and_ends_natu
     support::emit(&mut output, recorded[2].clone()).await;
     claude_output(&mut input, &mut output, "background-task", "started\nworking\n").await;
     rows(&mut rx, |items| items.len() == 1 && items[0].output == "started\nworking\n").await;
-    let stopping = engine.stop_background(&started[0].id);
-    let reply = async {
-        let stop = support::read_message(&mut input).await;
-        assert_eq!(stop["type"], "control_request", "Stop sends no agent message and spends no tokens");
+    for _ in 0..MAX_COMMANDS {
+        let mut cancelled = Box::pin(engine.stop_background(&started[0].id));
+        let stop = tokio::select! {
+            result = &mut cancelled => panic!("Stop ended before its request went out: {result:?}"),
+            request = support::read_message(&mut input) => request,
+        };
         assert_eq!(stop["request"], json!({"subtype":"stop_task","task_id":"background-task"}));
-        support::emit(
-            &mut output,
-            json!({"type":"control_response","response":{"subtype":"success","request_id":stop["request_id"],"response":{}}}),
-        )
-        .await;
+        // The caller went away before the CLI answered.
+        drop(cancelled);
+    }
+    let mut stopping = Box::pin(engine.stop_background(&started[0].id));
+    let stop = tokio::select! {
+        result = &mut stopping => panic!("Abandoned requests prevented another Stop: {result:?}"),
+        request = support::read_message(&mut input) => request,
     };
-    let (stopped, ()) = tokio::join!(stopping, reply);
-    assert_eq!(stopped, Ok(()));
+    assert_eq!(stop["type"], "control_request", "Stop sends no agent message and spends no tokens");
+    assert_eq!(stop["request"], json!({"subtype":"stop_task","task_id":"background-task"}));
+    support::emit(
+        &mut output,
+        json!({"type":"control_response","response":{"subtype":"success","request_id":stop["request_id"],"response":{}}}),
+    )
+    .await;
+    assert_eq!(stopping.await, Ok(()));
     assert_eq!(engine.background_commands().items[0].state, State::Running, "only the CLI completion event ends a row");
     support::emit(&mut output, recorded[3].clone()).await;
     claude_output(&mut input, &mut output, "background-task", "started\nworking\nstopped\n").await;
@@ -176,8 +203,15 @@ async fn background_claude_recording_reads_stops_without_a_message_and_ends_natu
 }
 
 #[tokio::test]
-async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() {
-    for (owed_helper, next_turn) in [(false, false), (false, true), (true, false)] {
+async fn background_claude_late_task_start_keeps_its_shell_calls_original_turn() {
+    for (shell, owed_helper, next_turn) in [
+        ("Bash", false, false),
+        ("Bash", false, true),
+        ("Bash", true, false),
+        ("PowerShell", false, false),
+        ("PowerShell", false, true),
+        ("PowerShell", true, false),
+    ] {
         let (spawn, mut input, mut output) = support::controlled();
         let folder = support::DataFolder::new();
         let (engine, mut rx) = engine(&folder, Vendor::Claude, spawn);
@@ -187,7 +221,11 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
         if owed_helper {
             support::emit(&mut output, json!({"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"helper-task","run_id":"helper-run","tool_use_id":"helper-call","is_backgrounded":true})).await;
         }
-        let recorded = fixture("claude");
+        let mut recorded = fixture("claude");
+        recorded[4]["message"]["content"][0]["name"] = shell.into();
+        if shell == "PowerShell" {
+            recorded[4]["message"]["content"][0]["input"]["command"] = "Write-Output 'ready'".into();
+        }
         support::emit(&mut output, recorded[4].clone()).await;
         support::emit(&mut output, json!({"type":"result","subtype":"success","is_error":false,"usage":{}})).await;
         if !owed_helper {
@@ -201,7 +239,7 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
                 }
             })
             .await
-            .expect("the Bash call's original turn did not end");
+            .expect("the shell call's original turn did not end");
             assert!(engine.background_commands().items.is_empty());
         }
         if next_turn {
@@ -213,7 +251,10 @@ async fn background_claude_late_task_start_keeps_its_bash_calls_original_turn() 
         }
         support::emit(&mut output, recorded[5].clone()).await;
         claude_output(&mut input, &mut output, "natural-task", "late start\n").await;
-        rows(&mut rx, |items| items.len() == 1 && items[0].state == State::Running && items[0].output == "late start\n").await;
+        let started =
+            rows(&mut rx, |items| items.len() == 1 && items[0].state == State::Running && items[0].output == "late start\n").await;
+        assert_eq!(started[0].command, recorded[4]["message"]["content"][0]["input"]["command"].as_str().unwrap());
+        assert!(started[0].stoppable);
         support::emit(&mut output, recorded[6].clone()).await;
         claude_output(&mut input, &mut output, "natural-task", "finished\n").await;
         let ended = rows(&mut rx, |items| items.is_empty() || items[0].state == State::Done).await;

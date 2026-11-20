@@ -1677,7 +1677,8 @@ mod tests {
                                     "Skill(faber-guide:frontend-craft)",
                                     "Skill(faber-guide:frontend-proof)",
                                     "Skill(faber-guide:media-craft)",
-                                    "Skill(faber-guide:media-proof)"
+                                    "Skill(faber-guide:media-proof)",
+                                    "Skill(faber-guide:workflow-proof)"
                                 ],
                                 "{which}"
                             );

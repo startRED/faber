@@ -229,16 +229,18 @@ export async function adoptTarget(target, copy) {
   return true;
 }
 
-// A cache whose workspace crates were last built from one of the preferred copies (this one, or the lane a landing
-// verifies for) has the least to compile again; a cache stamped by a copy that is gone is the next best; the rest go
-// least recently adopted first. Before, every lane took the first free cache, so the three bounced between copies.
+// Prefer the newest cache of the requested copy (or of the lane a landing verifies for). For other copies, reuse
+// abandoned caches first and preserve the ones used most recently.
 export function slotOrder(slots, prefer = []) {
   const same = (a, b) => typeof a === 'string' && typeof b === 'string' && (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
   const rank = (slot) => {
     const at = prefer.findIndex((copy) => same(slot.copy, copy));
     return at >= 0 ? at : prefer.length + (slot.gone ? 0 : 1);
   };
-  return [...slots].sort((a, b) => rank(a) - rank(b) || a.at - b.at || a.index - b.index);
+  return [...slots].sort((a, b) => {
+    const aRank = rank(a);
+    return aRank - rank(b) || (aRank < prefer.length ? b.at - a.at : a.at - b.at) || a.index - b.index;
+  });
 }
 
 async function bySlotAffinity(targets, prefer) {
@@ -547,7 +549,7 @@ export function budgetEnv(env, logical = os.cpus().length) {
 }
 
 // The compiler cache server (sccache) can die mid-build; the build then fails before any test ran.
-export const CACHE_SERVER_DIED = /sccache[^\n]*(?:10054|connection|server)/i;
+export const CACHE_SERVER_DIED = /^sccache: (?:error|caused by):[^\n]*(?:10054|connection|server)/im;
 
 // Every copy builds in a cache through one path, a link named after the cache that points at the copy leasing it. The
 // workspace crates then keep one identity per cache whichever copy builds: Cargo's units, the compiler's incremental
@@ -598,15 +600,25 @@ export async function runChild(root, command, args, env, cwd = root, copy = null
     };
     child = spawn(jobRunner ?? command, jobRunner ? [command, ...args] : args, { cwd, env: childEnv, stdio: ['inherit', capture ? 'pipe' : 'inherit', 'pipe'], shell: false, windowsHide: true, detached: process.platform !== 'win32' });
     child.contained = jobRunner ? 'job' : process.platform === 'win32' ? undefined : 'group';
-    let tail = '';
+    let cacheServerDied = false;
+    let boundary = '';
     child.stdout?.on('data', (chunk) => { process.stdout.write(chunk); keep('stdout', chunk); });
-    child.stderr.on('data', (chunk) => { process.stderr.write(chunk); keep('stderr', chunk); tail = (tail + chunk).slice(-16384); });
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      keep('stderr', chunk);
+      if (!cacheServerDied) {
+        // Cargo can print a compiler command longer than the whole output tail after the cache's error.
+        const text = boundary + chunk;
+        cacheServerDied = CACHE_SERVER_DIED.test(text);
+        boundary = text.slice(-256);
+      }
+    });
     const result = new Promise((resolve, reject) => {
       child.once('error', (error) => { finished = true; reject(error); });
       // A background server the build started can keep the pipe open, so the last output is only given a moment.
       child.once('exit', (code, signal) => {
         finished = true;
-        Promise.race([new Promise((done) => child.stderr.once('end', done)), setTimeout(300)]).then(() => resolve({ code: code ?? (signal === 'SIGINT' ? 130 : 143), tail }));
+        Promise.race([new Promise((done) => child.stderr.once('end', done)), setTimeout(300)]).then(() => resolve({ code: code ?? (signal === 'SIGINT' ? 130 : 143), cacheServerDied }));
       });
     });
     let receiptError;
@@ -623,8 +635,8 @@ export async function runChild(root, command, args, env, cwd = root, copy = null
     if (copy) await adoptTarget(lease.target, copy);
     if (copy && options.link) cwd = await linkCopy(root, lease.target, copy, cwd);
     controller.signal.throwIfAborted();
-    let { code, tail } = await attempt(lease.env);
-    if (code !== 0 && !signals.interrupted && lease.env.RUSTC_WRAPPER !== '' && CACHE_SERVER_DIED.test(tail)) {
+    let { code, cacheServerDied } = await attempt(lease.env);
+    if (code !== 0 && !signals.interrupted && lease.env.RUSTC_WRAPPER !== '' && cacheServerDied) {
       console.error('The compiler cache server died; running this build once more without it.');
       ({ code } = await attempt({ ...lease.env, RUSTC_WRAPPER: '' }));
     }

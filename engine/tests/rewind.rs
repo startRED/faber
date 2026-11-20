@@ -1608,6 +1608,7 @@ async fn native_rewind_case(failure: Option<&'static str>) {
             tokio::spawn(async move {
                 let mut input = BufReader::new(fake_input).lines();
                 let mut fresh_fallback = false;
+                let mut release_after_fallback = None;
                 while let Ok(Some(line)) = input.next_line().await {
                     let sent: Value = serde_json::from_str(&line).unwrap();
                     let method = sent["method"].as_str().unwrap_or_default();
@@ -1621,7 +1622,16 @@ async fn native_rewind_case(failure: Option<&'static str>) {
                     }
                     if method == "thread/unsubscribe" || method == "config/read" {
                         let result = if method == "thread/unsubscribe" { json!({"status":"notLoaded"}) } else { json!({"config":{}}) };
-                        support::emit(&mut output, json!({"id":sent["id"],"result":result})).await;
+                        let reply = json!({"id":sent["id"],"result":result});
+                        if method == "thread/unsubscribe"
+                            && failure == Some("thread/revert")
+                            && failures.load(Ordering::SeqCst) > 0
+                            && turns.load(Ordering::SeqCst) < 3
+                        {
+                            release_after_fallback = Some(reply);
+                        } else {
+                            support::emit(&mut output, reply).await;
+                        }
                         continue;
                     }
                     if matches!(method, "initialized" | "skills/list" | "thread/name/set") {
@@ -1639,6 +1649,14 @@ async fn native_rewind_case(failure: Option<&'static str>) {
                         if reply.get("id").is_some() {
                             reply["id"] = sent["id"].clone();
                         }
+                        if method == "initialize" {
+                            // Codex derives the first user-agent field from this run's client name.
+                            let agent = reply["result"]["userAgent"].as_str().unwrap();
+                            reply["result"]["userAgent"] = agent.replacen("faber_rewind_probe/", "faber/", 1).into();
+                        }
+                        if method == "thread/revert" && reply.get("result").is_some() {
+                            reply["error"] = Value::Null;
+                        }
                         if fresh_fallback {
                             if reply["result"].get("thread").is_some() {
                                 reply["result"]["thread"]["id"] = "fallback-thread".into();
@@ -1648,6 +1666,12 @@ async fn native_rewind_case(failure: Option<&'static str>) {
                             }
                         }
                         support::emit(&mut output, reply).await;
+                    }
+                    if method == "turn/start"
+                        && fresh_fallback
+                        && let Some(release) = release_after_fallback.take()
+                    {
+                        support::emit(&mut output, release).await;
                     }
                 }
             });

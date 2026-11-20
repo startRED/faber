@@ -47,7 +47,7 @@
     "args": [
       [
         "state",
-        "Option<Vec<String>>"
+        "Option<Vec<ListState>>"
       ],
       [
         "archived",
@@ -89,6 +89,18 @@
         },
         "state": {
           "items": {
+            "enum": [
+              "working",
+              "waiting",
+              "concluded",
+              "ended",
+              "interrupted",
+              "stopped",
+              "failed",
+              "new",
+              "idle",
+              "running"
+            ],
             "type": "string"
           },
           "type": "array"
@@ -99,7 +111,7 @@
     },
     "kind": "read",
     "reach": "free",
-    "about": "The conversations, the running ones first, then pinned, then the newest, each with its state in plain words (`working`, `waiting`, `idle`; read one conversation for how it ended). `state` keeps only these states (`running` is working or waiting); `archived` true lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom); `query` keeps titles holding its words. Reads no conversation's messages."
+    "about": "The conversations, the running ones first, then pinned, then the newest, each with its state in plain words (`working`, `waiting`, `idle`). `state` can also select an exact ending (`concluded`, `ended`, `interrupted`, `stopped`, `failed`, `new`); matching rows show that state. `running` means working or waiting. `archived` true lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom); `query` keeps titles holding its words. Uses list metadata, not message bodies."
   },
   {
     "name": "conversation",
@@ -111,14 +123,28 @@
       [
         "last",
         "Option<usize>"
+      ],
+      [
+        "from",
+        "Option<usize>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
       ]
     ],
     "inputSchema": {
       "properties": {
+        "from": {
+          "type": "integer"
+        },
         "id": {
           "type": "string"
         },
         "last": {
+          "type": "integer"
+        },
+        "limit": {
           "type": "integer"
         }
       },
@@ -129,7 +155,169 @@
     },
     "kind": "read",
     "reach": "free",
-    "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it leaves its done mark for the person."
+    "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. For numbered messages, pass `from` (first is 1) and optionally `limit` (1 to 10, default 1) instead of `last`. `count` always holds the total. Unlike opening it on the screen, reading leaves its done mark for the person."
+  },
+  {
+    "name": "conversation_headers",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "from",
+        "Option<usize>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "role",
+        "Option<Role>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "from": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Message numbers, IDs, roles, times and statuses, without message bodies or tools. `from` starts at 1 and `limit` defaults to 20 (1 to 100). With `role`, `from` counts only that role. Pass each global `number` to `conversation` as `from`. `total` counts every message; `matching` counts the requested role, or every message with no filter."
+  },
+  {
+    "name": "conversation_steps",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "from",
+        "usize"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "offset",
+        "Option<usize>"
+      ],
+      [
+        "tool",
+        "Option<String>"
+      ],
+      [
+        "failedOnly",
+        "Option<bool>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "failedOnly": {
+          "type": "boolean"
+        },
+        "from": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Tool steps of one message in the caller's project. The caller must be an identified project agent. Number messages from 1. Omit `id` for the caller, and use `offset`, `limit` (1 to 50, default 10) or `failedOnly` to page steps. Or pass one `tool` ID to read a masked diagnostic of the caller or its direct child."
+  },
+  {
+    "name": "conversation_command_results",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "tool",
+        "Option<String>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "runningOnly",
+        "Option<bool>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "runningOnly": {
+          "type": "boolean"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Recent background command endings in this Faber run, for an identified project agent's own conversation or direct child. Omit `id` for the caller. Page with `limit` (1 to 20, default 10) or select one execution `tool` ID for masked output. Set `runningOnly` to true for active command metadata without partial output."
   },
   {
     "name": "projects",
@@ -572,6 +760,45 @@
     "reach": "own",
     "conversation": "/id",
     "about": "Go on with a reply Faber was closed under (R477): one fixed turn, refused once it is no longer the last."
+  },
+  {
+    "name": "wake_wait",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "since",
+        "u64"
+      ],
+      [
+        "until",
+        "u64"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "since": {
+          "type": "integer"
+        },
+        "until": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "since",
+        "until"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Recheck an overdue saved project wait, using its observed `since` and `until` from `waitingOn`. Uses the existing automatic admission and receipt. No message or override can be supplied."
   },
   {
     "name": "forget_auto_learned",
