@@ -34,25 +34,27 @@ impl Registry {
 
     /// One system sample, joined only to exact OS identities from owned containers.
     pub fn snapshot(&self) -> io::Result<Snapshot> {
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        #[cfg(windows)]
         {
+            self.snapshot_with(|_| {
+                let processes = faber_winproc::processes()?
+                    .into_iter()
+                    .map(|process| (ProcessIdentity { pid: process.pid, created: process.created }, process.private_bytes))
+                    .collect();
+                let mut system = sysinfo::System::new();
+                system.refresh_memory();
+                Ok((processes, system.total_memory(), system.available_memory()))
+            })
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            // Only the exact owned members are read, each checked against its creation time around the read.
             self.snapshot_with(|members| {
                 let unique: HashSet<_> = members.iter().copied().collect();
                 let processes = unique
                     .into_iter()
                     .map(|identity| faber_winproc::process_tree::resident_bytes(identity).map(|bytes| (identity, bytes)))
-                    .collect::<io::Result<Vec<_>>>();
-                #[cfg(windows)]
-                let processes = processes.or_else(|_| {
-                    // Older Windows builds lack per-process private resident counters.
-                    faber_winproc::processes().map(|processes| {
-                        processes
-                            .into_iter()
-                            .map(|process| (ProcessIdentity { pid: process.pid, created: process.created }, process.private_bytes))
-                            .collect()
-                    })
-                });
-                let processes = processes?;
+                    .collect::<io::Result<Vec<_>>>()?;
                 let mut system = sysinfo::System::new();
                 system.refresh_memory();
                 Ok((processes, system.total_memory(), system.available_memory()))

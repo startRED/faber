@@ -278,7 +278,6 @@ img, svg, a { -webkit-user-drag: none; }
 .vm.claude { color: var(--claude-ink); }
 .vm.codex { color: var(--codex-ink); }
 .vm .verb { color: var(--ink-2); font-weight: 400; }
-.vm .verb.declared-wait .st-waiting { color: inherit; }
 .vm .verb .st, .ask.stuck b .st { margin-right: .25em; }
 .amber-tag { display: inline-flex; align-items: center; gap: 5px; color: var(--amber-ink); font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; }
 svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -1984,7 +1983,6 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .child-conversation { display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; max-width: 100%; height: auto; min-height: var(--h-md); padding-block: 6px; white-space: normal; }
 .child-conversation :is(b, span) { min-width: 0; overflow-wrap: anywhere; }
 .conversation-wait { margin: 6px 0; color: var(--ink-2); font-size: var(--fs-ui); line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
-.conversation-wait.wait-attention, .child-conversation .wait-attention, .vm .verb.wait-attention, .woke.wait-attention { color: var(--amber-ink); }
 .item:has(.conversation-wait) { height: auto; min-height: calc(var(--h-sm) + 2px * var(--dens)); padding-block: 7px; align-items: flex-start; }
 .item .conversation-wait { display: block; margin: 3px 0 0; }
 .faber-act { min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }

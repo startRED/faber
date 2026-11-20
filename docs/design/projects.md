@@ -4,12 +4,6 @@ The published contract of the Projects area: screens, separate copies, stored re
 
 After edits, checks or a plan, both drivers read the conclusion from a hidden JSON block at the end of the agent’s closing message. The engine validates and records the same closing box as a legacy `wrap_up` call, without showing the block while it streams. Successful checks are reused while their inputs and environment are unchanged; done still requires evidence. If the card lists no checks, the agent checks the result directly instead of calling verify. The bounded missing-conclusion request remains as recovery (R509). Under a done that followed edits, the box adds quiet lines from Faber itself (R571): how many things asked a receipt confirms, what is not confirmed, a failed last check, and what it noticed in the edits (a test turned off or weakened, a test file deleted, code marked unwritten, files outside the plan). A done let through after two refusals opens with "Done, but not confirmed" in the amber ink; the lines cost no process or timer (`ui/Plan.tsx`, `ProofLines`). Token savings need a live comparison (`engine-drivers/src/progress.rs`, `new_tools_omit_wrap_up_but_legacy_calls_are_recognized`).
 
-A successful Codex command receipt can prove a direct executable inside its PowerShell launcher, including bare `&&` chains and lines that explicitly exit on each nonzero native status. Recognized PowerShell writes into source invalidate earlier receipts, and a script that can mask a failed command contributes no inner receipt.
-
-Review rounds put requested paths already found in the copy's change scan first in the excerpt. The inline diff stays within 40,000 UTF-8 bytes, including the path list and notices. Cut patches, omitted paths and incomplete scans direct reviewers to the copy for the remaining changes. After an incomplete scan, requested paths the scan did not find are labelled as author-reported.
-
-A file list or patch read replaced while it waits returns a read error with a replacement reason. The screen keeps its existing retry and partial-list behavior. A started Git read holds its slot until work ends.
-
 ## Projects
 
 The engine types live in `engine-projects/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).

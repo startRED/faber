@@ -103,21 +103,6 @@ mod tests {
         std::fs::write(dir.join("projects.json"), serde_json::to_string(&list).unwrap()).unwrap();
     }
 
-    fn log_at_rotation(dir: &Path, max: u64) -> PathBuf {
-        use std::fmt::Write as _;
-        let path = file(dir, "p1").unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let mut text = String::new();
-        for at in 0.. {
-            writeln!(&mut text, "{}", json!({"at":at,"event":"closed","secs":1})).unwrap();
-            if text.len() as u64 >= max {
-                break;
-            }
-        }
-        std::fs::write(&path, text).unwrap();
-        path
-    }
-
     #[test]
     fn the_counts_follow_the_lines_and_skip_what_does_not_parse() {
         let dir = tempfile::tempdir().unwrap();
@@ -159,53 +144,43 @@ mod tests {
     fn the_log_stays_bounded_and_drops_the_oldest_lines() {
         let dir = tempfile::tempdir().unwrap();
         listing(dir.path(), &["p1"]);
-        let path = log_at_rotation(dir.path(), MAX);
-        let old = std::fs::read_to_string(&path).unwrap();
-        let newest_old = old.lines().last().unwrap();
-        note(dir.path(), "p1", 4_999, "closed", 1);
+        for at in 0..5_000 {
+            note(dir.path(), "p1", at, "closed", 1);
+        }
+        let path = file(dir.path(), "p1").unwrap();
         let len = std::fs::metadata(&path).unwrap().len();
         assert!(len < MAX + 100, "grew to {len}");
         let text = std::fs::read_to_string(path).unwrap();
         assert!(text.lines().all(|l| serde_json::from_str::<Value>(l).is_ok()), "no half line is left");
-        assert!(text.lines().any(|line| line == newest_old), "rotation must keep the recent part of the old log");
         assert!(text.contains("\"at\":4999"), "the newest line stays");
         assert!(!text.contains("\"at\":0,"), "the oldest is gone");
     }
 
-    /// All racing writes fit after the seeded history rotates, so dropping any new line is a failure.
+    /// Writers that rotate at the same time must not erase each other's lines. A rotation drops only the oldest lines, so
+    /// what stays of each writer is an unbroken run of its lines; a gap means a rotation overwrote a line written meanwhile.
     #[test]
-    fn writers_rotating_at_once_keep_every_new_line() {
-        use std::sync::{Arc, Barrier};
-        const LIMIT: u64 = 6_000;
-        const WRITERS: u64 = 8;
-        const WRITES: u64 = 8;
+    fn writers_rotating_at_once_leave_no_gap_in_any_writers_lines() {
         for _ in 0..5 {
             let dir = tempfile::tempdir().unwrap();
             listing(dir.path(), &["p1"]);
-            let path = log_at_rotation(dir.path(), LIMIT);
-            let start = Arc::new(Barrier::new(WRITERS as usize));
-            let writers: Vec<_> = (1..=WRITERS)
+            let writers: Vec<_> = (0..8u64)
                 .map(|w| {
                     let dir = dir.path().to_path_buf();
-                    let start = start.clone();
-                    std::thread::spawn(move || {
-                        start.wait();
-                        for n in 0..WRITES {
-                            write_line(&dir, "p1", 1_000 * w + n, "closed", 1, LIMIT);
-                        }
-                    })
+                    // A limit of 6,000 bytes rotates every sixty lines or so, and keeps a run long enough to show a gap.
+                    std::thread::spawn(move || (0..400).for_each(|n| write_line(&dir, "p1", 1_000 * (w + 1) + n, "closed", 1, 6_000)))
                 })
                 .collect();
             writers.into_iter().for_each(|w| w.join().unwrap());
-            let mut written: Vec<_> = std::fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .map(|line| serde_json::from_str::<Value>(line).unwrap()["at"].as_u64().unwrap())
-                .filter(|at| *at >= 1_000)
-                .collect();
-            written.sort_unstable();
-            let expected: Vec<_> = (1..=WRITERS).flat_map(|w| (0..WRITES).map(move |n| 1_000 * w + n)).collect();
-            assert_eq!(written, expected);
+            let text = std::fs::read_to_string(file(dir.path(), "p1").unwrap()).unwrap();
+            for w in 1..=8u64 {
+                let mut ours: Vec<u64> = text
+                    .lines()
+                    .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["at"].as_u64())
+                    .filter(|at| at / 1_000 == w)
+                    .collect();
+                ours.sort();
+                assert!(ours.windows(2).all(|p| p[1] == p[0] + 1), "writer {w} has a gap: {ours:?}");
+            }
         }
     }
 

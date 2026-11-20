@@ -51,25 +51,6 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
         ask: None,
     };
     let engine = Engine::new(opts, wiring.emitter()).unwrap();
-    let project = engine.add_project(&data.path().to_string_lossy()).unwrap();
-    let wait: faber_engine::model::Conversation = serde_json::from_value(json!({
-        "id":"saved-wait", "title":"Saved task", "area":"project", "projectId":project.id,
-        "createdAt":1, "updatedAt":2, "messages":[], "waitingOn":{"since":5,"until":300005,"note":"saved"}
-    }))
-    .unwrap();
-    let store = faber_engine::store::Store::new(&data_dir);
-    store.save_checked(&wait).unwrap();
-    for (id, parent) in [("tool-reader", None), ("tool-child", Some("tool-reader"))] {
-        let conversation = serde_json::from_value(json!({
-            "id":id,"title":id,"area":"project","projectId":project.id,"startedBy":parent,"createdAt":1,"updatedAt":2,
-            "messages":[{"id":"answer","role":"assistant","text":"Separate body","at":2,"status":"error","tools":[
-                {"id":"command","name":"Bash","input":null,"ok":false,"exitCode":23,"output":"Cannot write the project"}
-            ]}]
-        }))
-        .unwrap();
-        store.save_checked(&conversation).unwrap();
-    }
-    assert!(engine.open("tool-reader").is_some());
     let host = Arc::new(wiring.host(engine, data_dir, true, tokio::runtime::Handle::current()));
 
     let person = client(&host, 0).await;
@@ -79,10 +60,6 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     assert_eq!(refusal.detail.as_deref(), Some("base"));
     let answer = person.offer["commands"].as_array().unwrap().iter().find(|c| c["name"] == "answer").unwrap().clone();
     assert_eq!(answer["args"][1], json!(["turnId", "String"]), "arguments are named as the screen sends them");
-    let steps = person.offer["commands"].as_array().unwrap().iter().find(|c| c["name"] == "conversation_steps").unwrap();
-    assert_eq!(steps["inputSchema"]["required"], json!(["from"]));
-    let stepped = json!({"by":"not-a-reader","id":"tool-child","from":1,"tool":"command"});
-    assert_eq!(person.call("conversation_steps", stepped.clone()).await.unwrap(), Err("error.session.agentOnly".into()));
     assert!(person.offer["commands"].as_array().unwrap().iter().all(|c| c["name"] != "state" && c["name"] != "screen_ready"));
     assert_eq!(person.call("no_such_command", json!({})).await.unwrap(), Err("error.host.unknownCommand".into()));
     assert_eq!(person.call("answer", json!({})).await.unwrap(), Err("error.reach.person".into()));
@@ -92,9 +69,6 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     let agent = client(&host, 1).await;
     assert_eq!(agent.call("interrupt", json!({"id": conversation["id"]})).await.unwrap(), Err("error.reach.ask".into()));
     assert!(person.call("conversations", json!({})).await.unwrap().unwrap().is_array());
-    let wake = json!({"id":"saved-wait","since":5,"until":300005});
-    assert_eq!(agent.call("wake_wait", wake.clone()).await.unwrap(), Err("error.reach.ask".into()));
-    assert_eq!(person.call("wake_wait", wake).await.unwrap().unwrap(), json!({"state":"blocked","reason":"error.noSubscription"}));
 
     let deep = client(&host, faber_channel::server::MAX_AGENT_DEPTH).await;
     let started = deep.call("new_group_chat", json!({ "groupId": "g" })).await.unwrap();
@@ -105,15 +79,10 @@ async fn refusal_detail_and_faber_s_own_table_keep_their_refusals() {
     tokio::spawn(connection_at(theirs, Arc::new(host.clone()), Guard::watching(host.subscribe()), secret.clone(), 0));
     let named = Client::over(
         ours,
-        Hello { client: "test".into(), secret: secret.hex(), token: Some(secret.token("tool-reader").unwrap()), ..Default::default() },
+        Hello { client: "test".into(), secret: secret.hex(), token: Some(secret.token("c1").unwrap()), ..Default::default() },
     )
     .await
     .unwrap();
-    let tool_page = named.call("conversation_steps", stepped).await.unwrap().unwrap();
-    assert_eq!(tool_page["messageId"], "answer");
-    assert_eq!(tool_page["tools"][0]["exitCode"], 23);
-    assert_eq!(tool_page["tools"][0]["diagnostic"], "Cannot write the project");
-    assert!(!tool_page.to_string().contains("Separate body"));
     let args = json!({"patch": {"language": "en"}});
     let failure = named.call_detailed("save_settings", args.clone()).await.unwrap().unwrap_err();
     assert_eq!(failure.key, "error.reach.ask");

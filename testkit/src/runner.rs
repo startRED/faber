@@ -126,12 +126,7 @@ fn run_rust(
         Some(packages) => scoped_args(args, packages),
         None => args,
     };
-    let mut command = cargo_command();
-    // A test channel has its own identities. The caller's agent belongs to a different Faber instance.
-    for key in ["FABER_AGENT_AUTH", "FABER_AGENT_TOKEN", "FABER_AGENT_DEPTH", "FABER_CONVERSATION"] {
-        command.env_remove(key);
-    }
-    let output = match cargo(command, root, &args, "cargo test --workspace") {
+    let output = match cargo(cargo_command(), root, &args, "cargo test --workspace") {
         Ok(output) => output,
         Err(e) => return vec![Outcome::fail(Suite::Rust, "cargo test --workspace", None, &format!("cannot start cargo: {e}"))],
     };
@@ -264,10 +259,9 @@ fn sweep_builds(paths: &Paths, porcelain: Option<&str>, loose: &Path, now: std::
 
 /// Sweeps one build root when its hour is due, and says so only when it freed space or stays above the cap.
 fn sweep_root(target: &Path, own: &Path, worktrees: &[PathBuf], now: std::time::SystemTime) {
-    if !std::fs::symlink_metadata(target).is_ok_and(|meta| meta.is_dir() && !meta.is_symlink()) {
+    if !std::fs::symlink_metadata(target).is_ok_and(|meta| meta.is_dir() && !meta.is_symlink()) || !sweep::due(target, now) {
         return;
     }
-    let Some(_maintenance) = sweep::claim_sweep(target, now) else { return };
     let report = if worktrees.first().is_some_and(|main| target == main.join("target").as_path()) {
         sweep::sweep_worktrees(target, own, worktrees, now, sweep::CAP)
     } else {

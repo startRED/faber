@@ -387,7 +387,7 @@ void app.whenReady().then(async () => {
   else show();
 });
 
-/** Host failures in the last minute, reset after 30 seconds of uptime; repeated failures close the app. */
+/** Restarts in the last minute, reset after 30 seconds of host uptime; repeated failures close the app. */
 const restarts: number[] = [];
 const HOST_RESTARTS = 3;
 
@@ -399,21 +399,22 @@ const HOST_RESTARTS = 3;
 function startHost(window: Parameters<typeof apply>[1]): Sidecar {
   const started = Date.now();
   return Sidecar.start({
-    ended: (code, exitedAt) => {
+    ended: (code) => {
       if (stopping) return;
       if (code === 0) {
         quitNow();
         return;
       }
-      if (exitedAt - started >= 30_000) restarts.length = 0;
-      while (restarts.length > 0 && exitedAt - restarts[0] > 60_000) restarts.shift();
+      const now = Date.now();
+      if (now - started >= 30_000) restarts.length = 0;
+      while (restarts.length > 0 && now - restarts[0] > 60_000) restarts.shift();
       // A host that keeps failing is not looped: the app closes rather than stay open with a window that answers nothing.
       if (restarts.length >= HOST_RESTARTS) {
         console.error(`faber: the host ended (code ${code}) ${HOST_RESTARTS} times in a minute; closing`);
         quitNow();
         return;
       }
-      restarts.push(exitedAt);
+      restarts.push(now);
       console.error(`faber: the host ended (code ${code}); starting it again`);
       host = startHost(window);
       host.note({ kind: 'window', visible: win?.isVisible() === true && !win.isMinimized() });

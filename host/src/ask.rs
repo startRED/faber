@@ -9,9 +9,7 @@ const LIMIT: usize = 20;
 const LIFE: Duration = Duration::from_secs(600);
 
 pub(crate) fn label(command: &str) -> &'static str {
-    if command == "wake_wait" {
-        "wake"
-    } else if command.starts_with("tools_") || command.starts_with("setup_") {
+    if command.starts_with("tools_") || command.starts_with("setup_") {
         "tools"
     } else if command.starts_with("project_") || command.contains("project") {
         "projects"

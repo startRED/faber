@@ -112,8 +112,6 @@ fn changed_lines(tool: &ToolUse) -> Vec<(String, Vec<crate::change::ChangedLine>
 /// Test paths a command deletes: `rm`, `del`, `git rm`, `Remove-Item`, `unlink`.
 pub(crate) fn deleted_by_command(tool: &ToolUse) -> Vec<String> {
     let Some(line) = crate::nudge::command(tool) else { return vec![] };
-    let native = crate::nudge::native_powershell(tool);
-    let line = native.as_deref().unwrap_or(line);
     let Some(all) = crate::nudge::segments(line) else { return vec![] };
     let mut out = vec![];
     for words in all {

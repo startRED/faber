@@ -4,29 +4,20 @@
 //! A step of the agent's own that runs (a command, a tool server's call) is not cut, since its process may still be at work
 //! and Faber cannot see it end, but it no longer hides the silence either (task 110): once it has said nothing for longer
 //! than its kind of work allows (`stuck::QUIET`, `stuck::QUIET_COMMAND` while a command runs), the reply says so, with Stop,
-//! until the CLI speaks again. A native hosted search alone uses the ordinary silence cutoff. A subagent at work has its
-//! own signs (`stuck_watch.rs`).
+//! until the CLI speaks again. A subagent at work has its own signs (`stuck_watch.rs`).
 //! With no open step the same ten-minute sign precedes the existing fifteen-minute stop.
 //! Cost: one map entry per running reply, written on events that already arrive, and one task that sleeps `EVERY` between two
 //! looks, alive only while a reply runs. No process and no timer per reply.
 use super::*;
-use crate::events::QuietSearchCheck;
 
 /// What the reply says on screen when Faber stopped it for its silence.
 pub(super) const KEY: &str = "reason.silent";
 /// The same when the CLI did not confirm that it stopped (a Codex thread that ignored the interrupt keeps its shared process).
 const UNCONFIRMED: &str = "reason.silent.unconfirmed";
-pub(super) const SHARED_DELIVERY_UNKNOWN: &str = "reason.sharedServiceDeliveryUnknown";
-pub(super) const KEEP_GOING_DELIVERY_UNKNOWN: &str = "reason.keepGoing.deliveryUnknown";
 
 /// What a reply Faber cut for its silence says when the driver ended it with `error`.
 pub(super) fn said(error: &str) -> &'static str {
-    match error {
-        crate::codex::SHARED_SERVICE_STOPPED => crate::codex::SHARED_SERVICE_STOPPED,
-        crate::codex::SERVICE_STARTUP_TIMEOUT => crate::codex::SERVICE_STARTUP_TIMEOUT,
-        "error.cli.stopUnconfirmed" => UNCONFIRMED,
-        _ => KEY,
-    }
+    if error == "error.cli.stopUnconfirmed" { UNCONFIRMED } else { KEY }
 }
 
 /// Seconds without a word from the CLI after which a reply is stopped: 15 minutes. The longest whole turn in the recordings
@@ -47,20 +38,16 @@ pub(super) struct Heard {
     at: f64,
     /// Faber stopped it for its silence; what follows says so.
     cut: bool,
-    /// A pending automatic search interrupt, or one already attempted on this reply.
-    search_requested: bool,
     /// Whole minutes a step of its own has run without a word, once past its kind's limit: the reply says so.
     quiet: Option<u32>,
 }
 
 /// What a running reply waits for, when it is not the CLI's words.
-enum Wait<'a> {
+enum Wait {
     /// The person, a compaction, or the process closing after a finished answer: never silence.
     Other,
     /// A subagent of its own, which has its own signs: its steps are the reply's words.
     Subagent,
-    /// A lone Claude hosted search can ask its driver to interrupt without force-stopping the session.
-    ClaudeSearch(&'a str),
     /// Steps of the agent's own: never cut, but told once they have said nothing for long; `command` when one runs a command.
     Steps { command: bool },
 }
@@ -69,9 +56,8 @@ impl Core {
     /// A reply started on the live process: its silence counts from now, and the check looks while it runs.
     pub(super) fn listen(&mut self, conv: &str) {
         let Some((turn, sid)) = self.live.get(conv).and_then(|l| Some((l.turn.clone()?, l.sid))) else { return };
-        self.command_waits.remove(conv);
         let at = self.secs();
-        self.heard.insert(conv.to_string(), Heard { turn, sid, at, cut: false, search_requested: false, quiet: None });
+        self.heard.insert(conv.to_string(), Heard { turn, sid, at, cut: false, quiet: None });
         if std::mem::replace(&mut self.listening, true) {
             return;
         }
@@ -114,7 +100,7 @@ impl Core {
 
     /// What a reply waits for other than the CLI's words, if anything: a question for the person, a compaction, an answer
     /// already finished that only waits for the process to close, a subagent, or steps of its own (a build, a tool server).
-    fn waits(&self, conv: &str, turn: &str) -> Option<Wait<'_>> {
+    fn waits(&self, conv: &str, turn: &str) -> Option<Wait> {
         let Some(c) = self.convs.get(conv) else { return Some(Wait::Other) };
         let Some(m) = c.messages.iter().find(|m| m.id == turn) else { return Some(Wait::Other) };
         if c.compacting || m.status != Some(Status::Streaming) || m.finished_at.is_some() || m.permissions.iter().flatten().next().is_some()
@@ -126,30 +112,9 @@ impl Core {
             return Some(Wait::Subagent);
         }
         let mut open = m.tools.iter().flatten().filter(|t| t.ok.is_none()).peekable();
-        let live = self.live.get(conv)?;
-        let Some(first) = open.next() else {
-            // A steer can move the reply while a tool on the previous reply is still running.
-            return (!live.open_tools.is_empty()).then_some(Wait::Steps { command: true });
-        };
-        let kind = (live.vendor, first.name.as_str());
-        if matches!(kind, (Vendor::Codex, "webSearch") | (Vendor::Claude, "WebSearch"))
-            && first.parent.is_none()
-            && open.peek().is_none()
-            && live.open_tools.as_slice() == [first.id.as_str()]
-            && live.steering.is_empty()
-            && !c.queued.iter().any(|q| q.sending)
-            && !self.background.running_in(conv)
-        {
-            match kind {
-                (Vendor::Codex, "webSearch") if self.rewind_reports_only_turn(conv, live.sid) => return None,
-                (Vendor::Claude, "WebSearch") if !c.stopped && self.rewind_reports_no_separate_writer(conv) => {
-                    return Some(Wait::ClaudeSearch(&first.id));
-                }
-                _ => {}
-            }
-        }
+        open.peek()?;
         let mut command = false;
-        for t in std::iter::once(first).chain(open) {
+        for t in open {
             if t.parent.is_some() || matches!(t.name.as_str(), "Agent" | "Task" | "Helper") {
                 return Some(Wait::Subagent);
             }
@@ -177,13 +142,12 @@ impl Core {
             let next = match self.waits(conv, &h.turn) {
                 // What it waits for is not silence: the count starts again when that ends.
                 Some(Wait::Other | Wait::Subagent) => Look::Again,
-                Some(Wait::ClaudeSearch(tool)) if quiet >= BOUND && !h.search_requested => Look::InterruptSearch(tool.into()),
                 Some(Wait::Steps { command }) => {
                     let limit = if command { crate::stuck::QUIET_COMMAND } else { crate::stuck::QUIET };
                     Look::Quiet((quiet >= limit).then(|| (quiet / 60.0) as u32))
                 }
                 None if quiet >= BOUND => Look::Cut,
-                Some(Wait::ClaudeSearch(_)) | None => Look::Quiet((quiet >= crate::stuck::QUIET).then(|| (quiet / 60.0) as u32)),
+                None => Look::Quiet((quiet >= crate::stuck::QUIET).then(|| (quiet / 60.0) as u32)),
             };
             looked.push((conv.clone(), next));
         }
@@ -198,10 +162,6 @@ impl Core {
                     None
                 }
                 Look::Quiet(minutes) => minutes,
-                Look::InterruptSearch(tool) => {
-                    self.ask_claude_search_stop(&conv, tool);
-                    continue;
-                }
                 Look::Cut => {
                     self.go_silent(&conv);
                     continue;
@@ -212,40 +172,6 @@ impl Core {
             }
         }
         !self.heard.is_empty()
-    }
-
-    fn ask_claude_search_stop(&mut self, conv: &str, tool: String) {
-        let Some(live) = self.live.get(conv) else { return };
-        let Some(heard) = self.heard.get_mut(conv) else { return };
-        heard.search_requested = true;
-        let (sid, at, turn) = (heard.sid, heard.at, heard.turn.clone());
-        let me = self.me.clone();
-        let conv = conv.to_owned();
-        let search = tool.clone();
-        live.session.interrupt_quiet_search(tool, move |check| {
-            let Some(core) = me.upgrade() else { return false };
-            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-            if !core.live.get(&conv).is_some_and(|live| live.sid == sid && live.turn.as_ref() == Some(&turn))
-                || !core.convs.get(&conv).is_some_and(|c| !c.stopped)
-                || !core.heard.get(&conv).is_some_and(|h| h.turn == turn && h.sid == sid && h.search_requested && !h.cut)
-            {
-                return false;
-            }
-            match check {
-                QuietSearchCheck::Current => {
-                    core.heard.get(&conv).is_some_and(|h| h.at == at)
-                        && matches!(core.waits(&conv, &turn), Some(Wait::ClaudeSearch(id)) if id == search)
-                }
-                QuietSearchCheck::Deferred => {
-                    core.heard.get_mut(&conv).expect("validated above").search_requested = false;
-                    true
-                }
-                QuietSearchCheck::Confirmed => {
-                    core.heard.get_mut(&conv).expect("validated above").cut = true;
-                    true
-                }
-            }
-        });
     }
 
     /// Stops the CLI as the person's Stop would, but leaves the conversation's own state alone: nobody pressed Stop. The reply
@@ -266,7 +192,6 @@ enum Look {
     Quiet(Option<u32>),
     /// Silent for the bound with nothing running: Faber stops it.
     Cut,
-    InterruptSearch(String),
 }
 
 impl Engine {
@@ -292,7 +217,7 @@ mod tests {
         let stops = Arc::new(Mutex::new(0));
         let counted = stops.clone();
         let session = Session::from_fn(move |cmd| {
-            if matches!(cmd, SessionCommand::Interrupt | SessionCommand::InterruptQuietSearch(_)) {
+            if matches!(cmd, SessionCommand::Interrupt) {
                 *counted.lock().unwrap() += 1;
             }
         });
@@ -318,77 +243,6 @@ mod tests {
 
     fn say(engine: &Engine, id: &str, event: EngineEvent) {
         engine.with(|c| c.handle(id, 1, event));
-    }
-
-    #[tokio::test]
-    async fn shared_service_recovery_preserves_its_reason_and_arms_the_existing_retry() {
-        let (engine, id, _, clock, _dir) = running();
-        engine.with(|c| c.convs.get_mut(&id).unwrap().keep_going = Some(Default::default()));
-        walk(&engine, &clock, BOUND);
-        say(&engine, &id, EngineEvent::WriterExit { confirmed: true });
-        say(&engine, &id, EngineEvent::Error { message: crate::codex::SHARED_SERVICE_STOPPED.into(), fatal: true });
-        let conversation = engine.open(&id).unwrap();
-        assert_eq!(conversation.messages.last().unwrap().error.as_deref(), Some(crate::codex::SHARED_SERVICE_STOPPED));
-        assert_eq!(conversation.keep_going.unwrap().waiting.unwrap().why, "retry");
-    }
-
-    #[tokio::test]
-    async fn shared_service_recovery_holds_steers_with_uncertain_delivery() {
-        let (engine, id, _, _, _dir) = running();
-        engine.with(|c| {
-            let conv = c.convs.get_mut(&id).unwrap();
-            conv.keep_going = Some(Default::default());
-            conv.queued.push(QueuedTurn {
-                id: "steer-receipt-missing".into(),
-                text: "This message may already have reached the model.".into(),
-                choice: Choice { vendor: "codex".into(), model: None, effort: None },
-                images: None,
-                attachments: None,
-                at: 0,
-                sending: true,
-                wake: Some(Wake::of("wake.childDone")),
-            });
-        });
-        say(&engine, &id, EngineEvent::WriterExit { confirmed: true });
-        say(&engine, &id, EngineEvent::Error { message: crate::codex::SHARED_SERVICE_STOPPED.into(), fatal: true });
-        let conversation = engine.open(&id).unwrap();
-        assert!(conversation.keep_going.is_none());
-        assert_eq!(next_queued(&conversation), None);
-        assert_eq!(conversation.queued.len(), 1);
-        assert!(!conversation.queued[0].sending);
-        assert_eq!(conversation.messages.last().unwrap().error.as_deref(), Some(SHARED_DELIVERY_UNKNOWN));
-        assert_eq!(conversation.messages.last().unwrap().halt.as_deref(), Some(KEEP_GOING_DELIVERY_UNKNOWN));
-    }
-
-    #[tokio::test]
-    async fn startup_timeout_does_not_hold_an_unsent_message_for_manual_delivery() {
-        let (engine, id, _, _, _dir) = running();
-        let queued_id = "queued-during-initialize";
-        engine.with(|c| {
-            let conv = c.convs.get_mut(&id).unwrap();
-            conv.keep_going = Some(Default::default());
-            conv.queued.push(QueuedTurn {
-                id: queued_id.into(),
-                text: "The service has not initialized yet.".into(),
-                choice: Choice { vendor: "codex".into(), model: None, effort: None },
-                images: None,
-                attachments: None,
-                at: 0,
-                sending: true,
-                wake: Some(Wake::of("wake.childDone")),
-            });
-        });
-        say(&engine, &id, EngineEvent::WriterExit { confirmed: true });
-        say(&engine, &id, EngineEvent::Error { message: crate::codex::SERVICE_STARTUP_TIMEOUT.into(), fatal: true });
-        let conversation = engine.open(&id).unwrap();
-        assert!(conversation.keep_going.is_some());
-        let queued: Vec<_> = conversation.queued.iter().filter(|q| q.id == queued_id).collect();
-        let admitted = conversation.messages.iter().filter(|m| m.id == queued_id).count();
-        assert_eq!(queued.len() + admitted, 1, "preserve exactly one copy of the waiting message");
-        assert!(queued.iter().all(|q| !q.sending), "a message that is still queued can be sent again");
-        let failed = conversation.messages.iter().find(|m| m.id == "t1").unwrap();
-        assert_eq!(failed.error.as_deref(), Some(crate::codex::SERVICE_STARTUP_TIMEOUT));
-        assert!(failed.halt.is_none());
     }
 
     fn done(ok: bool) -> EngineEvent {
@@ -509,145 +363,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_search_with_only_its_own_native_turn_is_interrupted_once() {
-        let (engine, id, n, clock, _dir) = running();
-        engine.with(|c| {
-            c.live.get_mut(&id).unwrap().vendor = Vendor::Codex;
-            c.convs.get_mut(&id).unwrap().keep_going = Some(Default::default());
-        });
-        say(&engine, &id, EngineEvent::Writers { active: vec!["turn:native".into()], unknown: false });
-        say(&engine, &id, EngineEvent::Tool { id: "lookup".into(), name: "webSearch".into(), input: json!(null), parent: None });
-
-        walk(&engine, &clock, BOUND - 1.0);
-        assert_eq!(stops(&n), 0);
-        assert_eq!(stall(&engine, &id), Some((StallKind::Quiet, Some(14))));
-        walk(&engine, &clock, BOUND);
-        engine.check_silence();
-        assert_eq!(stops(&n), 1);
-        assert_eq!(last(&engine, &id).error, None);
-
-        say(&engine, &id, done(false));
-        let reply = last(&engine, &id);
-        assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Stopped), Some(KEY)));
-        let conv = engine.open(&id).unwrap();
-        assert!(!conv.stopped);
-        assert_eq!(conv.keep_going.unwrap().waiting.unwrap().why, "retry");
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn a_lone_claude_web_search_has_a_silence_deadline() {
-        let (engine, id, _, clock, _dir) = running();
-        let (send, mut commands) = tokio::sync::mpsc::unbounded_channel();
-        engine.with(|c| {
-            let live = c.live.get_mut(&id).unwrap();
-            live.vendor = Vendor::Claude;
-            live.session = Session::new(send);
-            c.convs.get_mut(&id).unwrap().keep_going = Some(Default::default());
-        });
-        say(&engine, &id, EngineEvent::Writers { active: vec![], unknown: false });
-        say(&engine, &id, EngineEvent::Tool { id: "lookup".into(), name: "WebSearch".into(), input: json!({}), parent: None });
-        walk(&engine, &clock, BOUND - 1.0);
-        assert!(commands.try_recv().is_err());
-        walk(&engine, &clock, BOUND);
-        let SessionCommand::InterruptQuietSearch(request) = commands.try_recv().expect("a lone search reaches a deadline") else {
-            panic!("a hosted search needs its driver's recheck, not a general Stop");
-        };
-        assert_eq!(request.tool, "lookup");
-        assert!(request.current());
-        engine.check_silence();
-        assert!(commands.try_recv().is_err(), "missing receipt cannot interrupt again");
-        assert!(!engine.with(|c| c.silenced(&id)));
-        request.confirmed();
-        say(&engine, &id, done(false));
-        assert_eq!(last(&engine, &id).error.as_deref(), Some(KEY));
-        let conv = engine.open(&id).unwrap();
-        assert!(!conv.stopped);
-        assert_eq!(conv.keep_going.unwrap().waiting.unwrap().why, "retry");
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn a_stale_claude_search_request_cannot_stop_a_reply_that_spoke_again() {
-        let (engine, id, _, clock, _dir) = running();
-        let (send, mut commands) = tokio::sync::mpsc::unbounded_channel();
-        engine.with(|c| {
-            let live = c.live.get_mut(&id).unwrap();
-            live.vendor = Vendor::Claude;
-            live.session = Session::new(send);
-        });
-        say(&engine, &id, EngineEvent::Writers { active: vec![], unknown: false });
-        say(&engine, &id, EngineEvent::Tool { id: "lookup".into(), name: "WebSearch".into(), input: json!({}), parent: None });
-        walk(&engine, &clock, BOUND);
-        let SessionCommand::InterruptQuietSearch(request) = commands.try_recv().unwrap() else { panic!("expected search recovery") };
-        *clock.lock().unwrap() += 1.0;
-        say(&engine, &id, EngineEvent::Text("still here".into()));
-        assert!(!request.current());
-        request.defer();
-        assert!(!engine.with(|c| c.silenced(&id)));
-        walk(&engine, &clock, 2.0 * BOUND);
-        assert!(commands.try_recv().is_err());
-        walk(&engine, &clock, 2.0 * BOUND + 1.0);
-        let SessionCommand::InterruptQuietSearch(request) = commands.try_recv().unwrap() else { panic!("expected a new search request") };
-        assert!(request.current());
-        engine.with(|c| c.live.get_mut(&id).unwrap().sid = 2);
-        assert!(!request.current());
-        request.confirmed();
-        assert!(!engine.with(|c| c.silenced(&id)));
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn an_open_search_does_not_clear_protection_for_parallel_or_uncertain_work() {
-        for (vendor, active, unknown, other_step, steering) in [
-            (Vendor::Claude, vec!["turn:native"], false, false, false),
-            (Vendor::Claude, vec![], true, false, false),
-            (Vendor::Claude, vec![], false, true, false),
-            (Vendor::Claude, vec![], false, false, true),
-            (Vendor::Codex, vec![], false, false, false),
-            (Vendor::Codex, vec!["turn:native"], true, false, false),
-            (Vendor::Codex, vec!["turn:native", "native-command:build"], false, false, false),
-            (Vendor::Codex, vec!["turn:native"], false, true, false),
-            (Vendor::Codex, vec!["turn:native"], false, false, true),
-        ] {
-            let (engine, id, n, clock, _dir) = running();
-            engine.with(|c| {
-                let live = c.live.get_mut(&id).unwrap();
-                live.vendor = vendor;
-                if steering {
-                    live.steering.push("awaiting-receipt".into());
-                }
-            });
-            say(&engine, &id, EngineEvent::Writers { active: active.into_iter().map(String::from).collect(), unknown });
-            if other_step {
-                say(&engine, &id, EngineEvent::Tool { id: "b".into(), name: "Bash".into(), input: json!({}), parent: None });
-            }
-            let name = if vendor == Vendor::Claude { "WebSearch" } else { "webSearch" };
-            say(&engine, &id, EngineEvent::Tool { id: "lookup".into(), name: name.into(), input: json!(null), parent: None });
-            walk(&engine, &clock, 3.0 * BOUND);
-            assert_eq!(stops(&n), 0, "{vendor:?} unknown: {unknown}, step: {other_step}, steer: {steering}");
-            engine.shutdown();
-        }
-    }
-
-    #[tokio::test]
-    async fn a_steer_does_not_hide_an_open_tool_from_the_silence_watch() {
-        let (engine, id, n, clock, _dir) = running();
-        say(&engine, &id, EngineEvent::Tool { id: "old".into(), name: "Bash".into(), input: json!({}), parent: None });
-        // The tool still belongs to the same CLI turn, but is drawn above the new reply.
-        engine.with(|c| {
-            let mut reply = Message::new("t2".into(), Role::Assistant, String::new(), 3);
-            reply.status = Some(Status::Streaming);
-            c.convs.get_mut(&id).unwrap().messages.push(reply);
-            c.live.get_mut(&id).unwrap().turn = Some("t2".into());
-            c.listen(&id);
-        });
-        walk(&engine, &clock, 3.0 * BOUND);
-        assert_eq!(stops(&n), 0);
-        engine.shutdown();
-    }
-
-    #[tokio::test]
     async fn a_step_that_runs_and_a_question_that_waits_are_never_silence() {
         let (engine, id, n, clock, _dir) = running();
         let tool =
@@ -655,7 +370,7 @@ mod tests {
         say(&engine, &id, tool("build"));
         walk(&engine, &clock, 5.0 * BOUND);
         assert_eq!(stops(&n), 0, "a build the CLI reports as running");
-        say(&engine, &id, EngineEvent::ToolResult { id: "build".into(), ok: true, declined: false, exit_code: None, text: String::new() });
+        say(&engine, &id, EngineEvent::ToolResult { id: "build".into(), ok: true, declined: false, text: String::new() });
         assert_eq!(stall(&engine, &id), None, "a word from the CLI takes the notice away");
         walk(&engine, &clock, 5.0 * BOUND + BOUND - 1.0);
         assert_eq!(stops(&n), 0, "the count starts when the step ends");

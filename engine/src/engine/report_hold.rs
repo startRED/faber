@@ -11,6 +11,7 @@
 //! conversation before the hold goes out never replaces it.
 //! Cost: one map entry and one sleeping task per lead with held reports, gone when they go out. No process, no polling.
 use super::*;
+use crate::conversation_state::state_of;
 use crate::sibling::State;
 
 /// Seconds a routine report waits for the next one.
@@ -129,7 +130,7 @@ impl Core {
             id != except
                 && c.started_by.as_deref() == Some(parent)
                 && c.archived_at.is_none()
-                && matches!(self.live_sibling_state(c), State::Working | State::Stuck)
+                && matches!(state_of(self.live.get(id).is_some_and(|l| l.turn.is_some()), c), State::Working | State::Stuck)
         })
     }
 
@@ -197,23 +198,6 @@ mod tests {
     fn admit(core: &mut Core) {
         core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
         core.ledger.claude.billing = Billing::Subscription;
-    }
-
-    #[tokio::test]
-    async fn a_members_command_wait_keeps_a_routine_peer_report_batched() {
-        use super::super::command_wait::tests::{WAITING, turn_ends_with_render};
-
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, parent, kids, clock) = team(&dir, 1);
-        let waiting = turn_ends_with_render(&engine, Vendor::Claude, WAITING);
-        engine.set_batch_reports(true);
-        engine.with(|core| core.convs.get_mut(&waiting).unwrap().started_by = Some(parent.clone()));
-        end(&engine, &clock, &kids[0], 1000.0, true);
-        engine.with(|core| {
-            assert!(core.holds.contains_key(&parent));
-            assert!(core.convs[&kids[0]].pending_parent_report);
-        });
-        engine.shutdown();
     }
 
     /// The kid's turn ends at `at`, concluded or failed, and its report goes to the lead.

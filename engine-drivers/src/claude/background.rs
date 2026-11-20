@@ -45,7 +45,7 @@ impl Writers {
         match msg["type"].as_str() {
             Some("assistant") => {
                 for call in msg["message"]["content"].as_array().into_iter().flatten() {
-                    if call["type"] == "tool_use" && matches!(call["name"].as_str(), Some("Bash" | "PowerShell" | "Agent" | "Task")) {
+                    if call["type"] == "tool_use" && matches!(call["name"].as_str(), Some("Bash" | "Agent" | "Task")) {
                         if let Some(id) = call["id"].as_str().filter(|id| !id.is_empty()) {
                             self.calls.insert(id.into());
                             if call["input"]["run_in_background"] == true {
@@ -382,30 +382,19 @@ mod tests {
 
     #[test]
     fn rewind_tracks_commands_before_launch_and_after_the_main_reply_ends() {
-        for shell in ["Bash", "PowerShell"] {
-            let mut writers = Writers::default();
-            writers.observe(&call("shell", shell, true));
-            assert!(writers.busy(), "{shell} reserves a writer before execution");
-            writers.observe(&tool_result("shell"));
-            writers.observe(&result(None));
-            assert!(writers.busy(), "a delayed task-start notification cannot create an idle gap");
-            let mut task = started("command", true, "local_bash");
-            task["tool_use_id"] = json!("shell");
-            writers.observe(&task);
-            assert!(matches!(writers.snapshot(), EngineEvent::Writers { active, unknown: false } if active == ["task:command"]));
-            writers.observe(&json!({ "type": "system", "subtype": "task_notification", "task_id": "command", "status": "running" }));
-            assert!(writers.busy(), "progress never proves completion");
-            writers.observe(&json!({ "type": "system", "subtype": "task_notification", "task_id": "command", "status": "completed" }));
-            assert!(!writers.busy());
-        }
-    }
-
-    #[test]
-    fn rewind_tracks_a_powershell_writer_until_its_tool_result() {
         let mut writers = Writers::default();
-        writers.observe(&call("ps", "PowerShell", false));
-        assert!(writers.busy(), "a PowerShell call reserves a writer before execution");
-        writers.observe(&tool_result("ps"));
+        writers.observe(&call("bash", "Bash", true));
+        assert!(writers.busy(), "the tool call reserves a writer before execution");
+        writers.observe(&tool_result("bash"));
+        writers.observe(&result(None));
+        assert!(writers.busy(), "a delayed task-start notification cannot create an idle gap");
+        let mut task = started("command", true, "local_bash");
+        task["tool_use_id"] = json!("bash");
+        writers.observe(&task);
+        assert!(matches!(writers.snapshot(), EngineEvent::Writers { active, unknown: false } if active == ["task:command"]));
+        writers.observe(&json!({ "type": "system", "subtype": "task_notification", "task_id": "command", "status": "running" }));
+        assert!(writers.busy(), "progress never proves completion");
+        writers.observe(&json!({ "type": "system", "subtype": "task_notification", "task_id": "command", "status": "completed" }));
         assert!(!writers.busy());
     }
 

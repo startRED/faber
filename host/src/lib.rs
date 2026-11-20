@@ -35,7 +35,7 @@ pub use failure::Failure;
 pub use feed::Feed;
 pub use reach::{Caller, Reach};
 
-use faber_engine::codex::{ModelInfo, read_codex_account_models};
+use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::engine::Emit;
 use faber_engine::model::{Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
@@ -133,11 +133,6 @@ fn argument_type(ty: &str) -> Value {
         return serde_json::json!({"type":"array", "items":argument_type(inner)});
     }
     match ty {
-        "ListState" => {
-            let states: Vec<_> = views::STATES.iter().copied().chain(["running"]).collect();
-            serde_json::json!({"type":"string","enum":states})
-        }
-        "Role" => serde_json::json!({"type":"string","enum":["user","assistant"]}),
         "String" => serde_json::json!({"type":"string"}),
         "bool" => serde_json::json!({"type":"boolean"}),
         "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => {
@@ -543,10 +538,9 @@ impl Host {
         let (engine, models, voice) = (self.engine.clone(), self.models.clone(), self.voice.clone());
         self.runtime.spawn(async move {
             let _done = done;
-            let list = read_codex_account_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20), |events| {
-                engine.note_account_events(Vendor::Codex, events);
-            })
-            .await;
+            let events = read_codex_limits(&codex.command, &cwd, cfg!(windows), spawn.clone(), Duration::from_secs(20)).await;
+            engine.note_account_events(Vendor::Codex, events);
+            let list = list_codex_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20)).await;
             let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
             engine.set_codex_models(list.iter().map(|m| m.id.clone()).collect(), recommended);
             *lock(&models) = list;

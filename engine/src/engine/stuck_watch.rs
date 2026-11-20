@@ -235,8 +235,6 @@ mod tests {
             input: line.clone(),
             ok,
             output: None,
-            failure_tail: None,
-            exit_code: None,
             declined: false,
             interrupted: false,
             parent: Some("call".into()),

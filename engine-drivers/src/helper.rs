@@ -33,15 +33,6 @@ pub enum Helper {
     Aside,
 }
 
-/// A fatal error closes a helper before its separate writer event reaches the caller.
-pub(crate) fn writer_exit_detail(helper: Helper, confirmed: bool) -> &'static str {
-    match (helper, confirmed) {
-        (Helper::Is, true) => "The helper's writer exit was confirmed. The CLI stop cause is unknown. ",
-        (Helper::Is, false) => "The helper's writer exit is unconfirmed. ",
-        _ => "",
-    }
-}
-
 const DESCRIPTION: &str = "Split by kind of work, not size. For each piece give title, brief, job, kind, difficulty and scope: Faber picks the right model and keeps both AIs on the team when available. Many files, logs or searches: read; a self-contained change: build; at a hard point ask for advice (advise) before spending effort; finished work: review. Start a dependent piece after its prerequisite reports: helpers share this folder and see its files. Do a piece yourself only when it needs a stronger model than any helper can be. The brief must stand alone: goal, files and what done looks like. Reports are short; longer reports are saved in a file. helper({to, answer}) answers and waits; {to, tell} instructs immediately; {to, wait:true} waits for a question or report.";
 
 fn schema() -> Value {

@@ -14,7 +14,7 @@ export type Listeners = {
   event: (event: unknown) => void;
   order: (order: unknown) => void;
   /** The host ended without being asked to (`stop`): `code` 0 when it chose to (an update took over), else it failed. */
-  ended: (code: number | null, exitedAt: number) => void;
+  ended: (code: number | null) => void;
 };
 
 /** A failure crosses as the host sends it: an error key, or `{key, detail}` for the few that name a field. */
@@ -26,8 +26,6 @@ const MAX_LINE = 16 * 1024 * 1024;
 const MAX_PENDING = 1024;
 /** Bytes written to the host it has not read yet, past which new calls are refused instead of queued. */
 const MAX_UNREAD = 4 * MAX_LINE;
-/** An exited host may still have buffered replies, or a pipe that will not close promptly. */
-const REPLY_DRAIN_MS = 1_000;
 
 /** Where the host program is: beside the app once installed, or, while developing only, the one `FABER_SIDECAR` names. */
 function program(): string {
@@ -46,7 +44,6 @@ function startsWithSystem(): boolean {
 export class Sidecar {
   private next = 1;
   private alive = true;
-  private draining = false;
   /** Set by `stop`: the end that follows was asked for. */
   private stopping = false;
   private readonly pending = new Map<number, Pending>();
@@ -81,30 +78,17 @@ export class Sidecar {
         ended = resolve;
       }),
     );
-    let drain: NodeJS.Timeout | undefined;
-    let exit: { code: number | null; at: number } | undefined;
     const gone = (code: number | null) => {
       if (!sidecar.alive) return;
-      clearTimeout(drain);
       sidecar.alive = false;
       lines.close();
       for (const { reject } of sidecar.pending.values()) reject(new Error('error.host.gone'));
       sidecar.pending.clear();
       ended();
       // An end nobody asked for is told, so the app never stays open with no engine behind its window.
-      if (!sidecar.stopping) listen.ended(code, exit?.at ?? Date.now());
+      if (!sidecar.stopping) listen.ended(code);
     };
-    child.on('exit', (code) => {
-      if (!sidecar.alive || exit) return;
-      exit = { code, at: Date.now() };
-      if (sidecar.pending.size === 0 || child.stdout.readableEnded) {
-        gone(code);
-      } else {
-        sidecar.draining = true;
-        drain = setTimeout(() => gone(code), REPLY_DRAIN_MS);
-      }
-    });
-    child.on('close', (code) => gone(code));
+    child.on('exit', (code) => gone(code));
     // A program that cannot start (missing, not allowed) emits `error` instead of `exit`; unheard, it would end the app.
     child.on('error', (error) => {
       console.error(`faber: host process error: ${error.message}`);
@@ -113,15 +97,12 @@ export class Sidecar {
     // Writing to a host that just ended fails here, not as an uncaught error; its calls were already answered above.
     child.stdin.on('error', () => {});
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on('line', (line) => {
-      sidecar.heard(line, listen);
-      if (exit && sidecar.pending.size === 0) gone(exit.code);
-    });
+    lines.on('line', (line) => sidecar.heard(line, listen));
     return sidecar;
   }
 
   call(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-    if (!this.alive || this.stopping || this.draining) return Promise.reject(new Error('error.host.gone'));
+    if (!this.alive || this.stopping) return Promise.reject(new Error('error.host.gone'));
     if (this.pending.size >= MAX_PENDING) return Promise.reject(new Error('error.host.busy'));
     const id = this.next++;
     let line: string;
@@ -147,14 +128,13 @@ export class Sidecar {
       | { kind: 'picked'; id: number; path: string | null; noWindow: boolean }
       | PaneNote,
   ): void {
-    if (this.alive && !this.draining && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
+    if (this.alive && !this.child.stdin.writableEnded) this.child.stdin.write(`${JSON.stringify({ shell: note })}\n`);
   }
 
   /** Closes the host's input, so it saves what it holds and exits; one still running after `patience` ms is ended. */
   async stop(patience: number): Promise<void> {
     if (!this.alive) return;
     this.stopping = true;
-    if (this.draining) return this.exited;
     this.child.stdin.end();
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<'late'>((resolve) => {
@@ -162,7 +142,7 @@ export class Sidecar {
     });
     try {
       if ((await Promise.race([this.exited, late])) === 'late') {
-        if (!this.draining && this.child.kill() === false) throw new Error('error.host.stop');
+        if (this.child.kill() === false) throw new Error('error.host.stop');
         await this.exited;
       }
     } finally {
@@ -171,20 +151,18 @@ export class Sidecar {
   }
 
   private heard(line: string, listen: Listeners): void {
-    if (!this.alive) return;
     let message: { id?: number; ok?: unknown; err?: unknown; event?: unknown; order?: unknown };
     try {
       message = JSON.parse(line);
     } catch {
       return;
     }
-    if (!message || typeof message !== 'object') return;
     if ('event' in message) {
-      if (!this.draining) listen.event(message.event);
+      listen.event(message.event);
       return;
     }
     if ('order' in message) {
-      if (!this.draining) listen.order(message.order);
+      listen.order(message.order);
       return;
     }
     const waiting = message.id === undefined ? undefined : this.pending.get(message.id);

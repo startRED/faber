@@ -11,7 +11,7 @@ impl Engine {
             if core.rewind_blocked(id) {
                 return Err("error.rewind.busy".into());
             }
-            if core.running_item(&moved).is_some()
+            if running_item(&moved, core.live.get(id)).is_some()
                 || core.transfers.get(id).is_some_and(|t| core.pending_turn(id, &t.reply).is_ok())
                 || !moved.queued.is_empty()
                 || moved.keep_going.is_some()

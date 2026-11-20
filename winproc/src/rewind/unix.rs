@@ -127,15 +127,6 @@ impl Root {
     pub fn open_file(&self, path: &str) -> io::Result<File> {
         self.open_with(path, || {})
     }
-    /// Checks the file type and link count without reading file data or following the leaf.
-    pub fn check_unlinked_file(&self, path: &str) -> io::Result<()> {
-        let (dir, name) = self.parent(Path::new(path), false)?;
-        let metadata = rustix::fs::statat(&dir, name, AtFlags::SYMLINK_NOFOLLOW)?;
-        if !rustix::fs::FileType::from_raw_mode(metadata.st_mode).is_file() || metadata.st_nlink != 1 {
-            return Err(io::ErrorKind::PermissionDenied.into());
-        }
-        Ok(())
-    }
     pub fn open_removable(&self, path: &str) -> io::Result<File> {
         self.open_file(path)
     }

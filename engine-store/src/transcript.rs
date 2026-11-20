@@ -2,15 +2,12 @@
 use crate::store::{self, Disk, Fault, RealDisk};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 static PAGE_LOCKS: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -60,12 +57,6 @@ struct CallRecord {
 pub struct TranscriptStore {
     root: PathBuf,
     disk: Arc<dyn Disk>,
-}
-
-#[derive(PartialEq, Eq)]
-pub(crate) struct JournalRevision {
-    directory: SystemTime,
-    calls: Vec<(OsString, SystemTime, usize)>,
 }
 
 impl TranscriptStore {
@@ -257,7 +248,7 @@ impl TranscriptStore {
     /// conversation and one missing-page check per helper call.
     pub fn recover(&self, conversation: &str, messages: &mut [crate::model::Message]) {
         // A conversation no helper ever kept a page for has nothing to find.
-        if !self.may_have_recovery_data(conversation) {
+        if matches!(existing_directory(&self.root), Ok(false)) || matches!(existing_directory(&self.root.join(conversation)), Ok(false)) {
             return;
         }
         let mut recorded = std::collections::HashSet::new();
@@ -266,8 +257,7 @@ impl TranscriptStore {
             helpers |= tool.transcript.is_some();
             recorded.insert(call_component(&tool.id));
         }
-        let unrecorded = self.unrecorded_calls(conversation, &recorded, |id| messages.iter().any(|m| m.id == id));
-        for (message, tool) in unrecorded {
+        for (message, tool) in self.unrecorded_calls(conversation, &recorded) {
             if let Some(message) = messages.iter_mut().find(|m| m.id == message) {
                 message.tools.get_or_insert_default().push(tool);
                 helpers = true;
@@ -295,95 +285,9 @@ impl TranscriptStore {
         }
     }
 
-    fn may_have_recovery_data(&self, conversation: &str) -> bool {
-        !matches!(existing_directory(&self.root), Ok(false)) && !matches!(existing_directory(&self.root.join(conversation)), Ok(false))
-    }
-
-    /// The first page each saved reader has not seen. Only helpers with a journal add an entry.
-    pub(crate) fn page_positions(messages: &[crate::model::Message]) -> BTreeMap<String, u64> {
-        let mut positions: BTreeMap<String, u64> = BTreeMap::new();
-        for tool in messages.iter().flat_map(|message| message.tools.iter().flatten()) {
-            if let Some(transcript) = &tool.transcript {
-                positions
-                    .entry(call_component(&tool.id))
-                    .and_modify(|page| *page = (*page).min(transcript.pages))
-                    .or_insert(transcript.pages);
-            }
-        }
-        positions
-    }
-
-    /// A cheap test for what `recover` would add: a new root call or the next contiguous page of a known helper.
-    /// An unreadable journal is left to recovery, which already knows how to handle it.
-    pub(crate) fn has_more(&self, conversation: &str, positions: Option<&BTreeMap<String, u64>>) -> bool {
-        if !valid_conversation_id(conversation) {
-            return false;
-        }
-        let directory = self.root.join(conversation);
-        match existing_directory(&self.root).and_then(|exists| if exists { existing_directory(&directory) } else { Ok(false) }) {
-            Ok(true) => (),
-            Ok(false) => return false,
-            Err(_) => return true,
-        }
-        let Ok(mut entries) = fs::read_dir(&directory) else { return true };
-        entries.any(|entry| {
-            let Ok(entry) = entry else { return true };
-            let Ok(kind) = entry.file_type() else { return true };
-            if !kind.is_dir() {
-                return kind.is_symlink();
-            }
-            let file = entry.file_name();
-            let page = file.to_str().and_then(|name| positions.and_then(|p| p.get(name))).map(|page| page_component(*page));
-            let next = entry.path().join(page.as_deref().unwrap_or(CALL_FILE));
-            !matches!(fs::symlink_metadata(next), Err(e) if e.kind() == io::ErrorKind::NotFound)
-        })
-    }
-
-    /// Pages and call records are published by rename. Count published entries too, since two appends can share a timestamp.
-    /// Only a journal with work ahead of a saved record needs this scan, and no page bodies are read here.
-    pub(crate) fn recovery_revision(&self, conversation: &str) -> Option<JournalRevision> {
-        if !valid_conversation_id(conversation) || !matches!(existing_directory(&self.root), Ok(true)) {
-            return None;
-        }
-        let path = self.root.join(conversation);
-        let directory = journal_directory_time(&path)?;
-        let mut calls = Vec::new();
-        for entry in fs::read_dir(&path).ok()? {
-            let entry = entry.ok()?;
-            let kind = entry.file_type().ok()?;
-            if kind.is_symlink() {
-                return None;
-            }
-            if kind.is_dir() {
-                let call = entry.path();
-                let modified = journal_directory_time(&call)?;
-                let count = fs::read_dir(&call)
-                    .ok()?
-                    .try_fold(0, |count, entry| {
-                        entry.map(|entry| {
-                            let published = entry.file_name().to_str().is_some_and(|name| name.ends_with(".json"));
-                            count + usize::from(published)
-                        })
-                    })
-                    .ok()?;
-                if journal_directory_time(&call)? != modified {
-                    return None;
-                }
-                calls.push((entry.file_name(), modified, count));
-            }
-        }
-        calls.sort_unstable();
-        (journal_directory_time(&path)? == directory).then_some(JournalRevision { directory, calls })
-    }
-
     /// The helper calls with files on disk that the record does not hold, oldest first. One whose file cannot be read is left
     /// out: nothing can place it.
-    fn unrecorded_calls(
-        &self,
-        conversation: &str,
-        recorded: &std::collections::HashSet<String>,
-        belongs: impl Fn(&str) -> bool,
-    ) -> Vec<(String, crate::model::ToolUse)> {
+    fn unrecorded_calls(&self, conversation: &str, recorded: &std::collections::HashSet<String>) -> Vec<(String, crate::model::ToolUse)> {
         if !valid_conversation_id(conversation) || !matches!(existing_directory(&self.root), Ok(true)) {
             return vec![];
         }
@@ -399,8 +303,7 @@ impl TranscriptStore {
                 let path = entry.path().join(CALL_FILE);
                 reject_symlink(&path).ok()?;
                 let record: CallRecord = store::read_checked(&path).ok()??;
-                (belongs(&record.message) && entry.file_name().to_string_lossy() == call_component(&record.tool.id))
-                    .then_some((record.message, record.tool))
+                (entry.file_name().to_string_lossy() == call_component(&record.tool.id)).then_some((record.message, record.tool))
             })
             .collect();
         found.sort_by(|a, b| (a.1.started, &a.1.id).cmp(&(b.1.started, &b.1.id)));
@@ -638,14 +541,6 @@ fn existing_directory(path: &Path) -> Result<bool, Fault> {
     }
 }
 
-fn journal_directory_time(path: &Path) -> Option<SystemTime> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return None;
-    }
-    metadata.modified().ok()
-}
-
 fn reject_symlink(path: &Path) -> Result<(), Fault> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(Fault::Corrupt),
@@ -679,58 +574,6 @@ mod tests {
 
     fn entry(text: &str) -> TranscriptEntry {
         TranscriptEntry { at: 0, kind: TranscriptKind::Text, tool: None, text: text.into() }
-    }
-
-    #[test]
-    fn journal_revision_notices_a_new_page_at_the_same_directory_time() {
-        let fixture = tempfile::tempdir().unwrap();
-        let root = fixture.path().join("journal");
-        let store = TranscriptStore::new(&root);
-        assert!(!store.has_more("c1", None));
-        assert!(store.recovery_revision("c1").is_none());
-        store.append_page("c1", "helper", 0, &[entry("first")]).unwrap();
-
-        let call = call_component("helper");
-        let positions = BTreeMap::from([(call.clone(), 1)]);
-        assert!(!store.has_more("c1", Some(&positions)));
-        let path = root.join("c1").join(call);
-        let staged = path.join("staged-page.tmp");
-        fs::write(&staged, encode_page(&[entry("second")]).unwrap()).unwrap();
-        let before = store.recovery_revision("c1").unwrap();
-        let old_time = journal_directory_time(&path).unwrap();
-        fs::rename(staged, path.join(page_component(1))).unwrap();
-        #[cfg(windows)]
-        let directory = {
-            use std::os::windows::fs::OpenOptionsExt;
-            const WRITE_ATTRIBUTES: u32 = 0x100;
-            const BACKUP_SEMANTICS: u32 = 0x0200_0000;
-            fs::OpenOptions::new().access_mode(WRITE_ATTRIBUTES).custom_flags(BACKUP_SEMANTICS).open(&path).unwrap()
-        };
-        #[cfg(not(windows))]
-        let directory = fs::File::open(&path).unwrap();
-        directory.set_modified(old_time).unwrap();
-        drop(directory);
-        assert_eq!(journal_directory_time(&path), Some(old_time));
-        assert!(store.has_more("c1", Some(&positions)));
-        assert!(store.recovery_revision("c1").is_some_and(|after| after != before));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn journal_revision_does_not_follow_replaced_directories() {
-        let fixture = tempfile::tempdir().unwrap();
-        let root = fixture.path().join("journal");
-        let other = fixture.path().join("other");
-        fs::create_dir_all(&root).unwrap();
-        fs::create_dir_all(&other).unwrap();
-        std::os::unix::fs::symlink(&other, root.join("c1")).unwrap();
-        let store = TranscriptStore::new(&root);
-        assert!(store.has_more("c1", None));
-        assert!(store.recovery_revision("c1").is_none());
-        fs::create_dir_all(root.join("c2")).unwrap();
-        std::os::unix::fs::symlink(&other, root.join("c2").join(call_component("helper"))).unwrap();
-        assert!(store.has_more("c2", None));
-        assert!(store.recovery_revision("c2").is_none());
     }
 
     #[test]

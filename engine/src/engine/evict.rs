@@ -30,25 +30,17 @@ impl Core {
         let now = now();
         let gone: Vec<String> = self.convs.keys().filter(|id| self.unused(id, now)).cloned().collect();
         for id in gone {
-            self.evict_saved(&id);
-        }
-    }
-
-    pub(super) fn evict_if_unused(&mut self, id: &str) {
-        if self.unused(id, now()) {
-            self.evict_saved(id);
-        }
-    }
-
-    fn evict_saved(&mut self, id: &str) {
-        let Some(c) = self.convs.get(id) else { return };
-        // A file changed elsewhere cannot be overwritten. A conversation that cannot be saved stays in memory.
-        if !self.store.unchanged(id) || self.store.save_checked(c).is_err() {
-            return;
-        }
-        if let Some(c) = self.convs.remove(id) {
-            self.transcript_saved(id);
-            self.evicted.insert(id.to_string(), Evicted { commands: c.commands, reported: c.reported });
+            let Some(c) = self.convs.get(&id) else { continue };
+            // A file something else changed or removed since Faber last read or wrote it is not overwritten: the conversation
+            // stays in memory, as it did before. One whose file could not be written stays too: memory is its only copy.
+            if !self.store.unchanged(&id) || self.store.save_checked(c).is_err() {
+                continue;
+            }
+            if let Some(c) = self.convs.remove(&id) {
+                // The save above wrote every page it counts.
+                self.transcript_saved(&id);
+                self.evicted.insert(id, Evicted { commands: c.commands, reported: c.reported });
+            }
         }
     }
 
@@ -70,7 +62,7 @@ impl Core {
             && !person_recent
             && !self.live.contains_key(id)
             && self.session_idle(id)
-            && self.running_item(c).is_none()
+            && running_item(c, None).is_none()
             && c.queued.is_empty()
             && c.keep_going.is_none()
             && !c.compacting

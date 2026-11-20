@@ -8,33 +8,27 @@ use crate::model::Wake;
 /// What stands in the conversation for the notice the CLI gave its agent. It is also what goes out again if the turn has to
 /// move to another AI, so it reads as an instruction.
 pub(super) const OWN_TURN: &str = "A background command you started has ended. Read its result and go on with the task.";
-const PROJECT_COMMAND_RESULT: &str = "A background command you started has ended. Use conversation action command_results to check its recorded outcome and the output captured so far, then continue the task.";
-const NATIVE_CONTINUATION: &str = "Continue the task from where you left off.";
-
-pub(super) fn command_wake_text(c: &Conversation) -> &'static str {
-    if c.area == Area::Project && !c.temporary && c.project_id.is_some() { PROJECT_COMMAND_RESULT } else { OWN_TURN }
-}
 
 impl Core {
-    /// A turn the CLI began independently joins the conversation under a quiet line. Claude Code does this when a
-    /// background command ends, and Codex can continue a goal on its own. The turn already runs. If the conversation
-    /// cannot take it (for example after Stop or when its goal is out of money), interrupt it instead.
+    /// The CLI began a turn nobody sent. Claude Code tells its agent itself when a background command ends, and the agent
+    /// answers. Faber used to drop those words, so an agent that ended its turn with "I will tell you when the build ends"
+    /// never spoke again (recorded 2026-11-11, fixture `background-command-own-turn`). The turn joins the conversation
+    /// under a line of Faber's (`wake.commandDone`), like a message taken in mid-turn (`taken_in`); nothing is sent, the
+    /// turn already runs. A conversation that cannot take it (the person stopped it, it is archived or being compacted, a
+    /// reply is still being routed, its goal is out of money) has the turn interrupted instead of working unseen.
     pub(super) fn own_turn(&mut self, conv: &str) {
         let secs = self.secs();
         // A turn of Faber's runs: the words already have their reply.
         if self.live.get(conv).is_none_or(|l| l.turn.is_some()) {
             return;
         }
-        // Codex can begin its own goal turn before its requested compaction starts. The same driver
-        // identifies the two turns; the pending compaction continues to hold the queue.
-        let compact_watch = self.compactions.contains_key(conv);
-        let compact_waiting_for_codex = compact_watch && self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Codex);
-        let refused = (!compact_waiting_for_codex && (compact_watch || self.compacts.contains_key(conv)))
+        let refused = self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
             || self.goal_out_of_money(conv)
             || self.convs.get(conv).is_none_or(|c| {
                 c.stopped
                     || c.archived_at.is_some()
-                    || (c.compacting && !compact_waiting_for_codex)
+                    || c.compacting
                     || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
             });
         let Some(l) = self.live.get(conv) else { return };
@@ -45,14 +39,9 @@ impl Core {
         let (vendor, model) = (l.vendor, l.running.clone().or_else(|| l.model.clone()));
         let c = self.convs.get_mut(conv).expect("checked above");
         let at = now();
-        let (why, text) = if vendor == Vendor::Codex {
-            ("wake.nativeContinuation", NATIVE_CONTINUATION)
-        } else {
-            ("wake.commandDone", command_wake_text(c))
-        };
-        let wake = Wake::of(why);
-        let mut question = Message::new(new_id(), Role::User, text.into(), at);
-        question.acts.push(crate::act::FaberAct::wake(&wake, text));
+        let wake = Wake::of("wake.commandDone");
+        let mut question = Message::new(new_id(), Role::User, OWN_TURN.into(), at);
+        question.acts.push(crate::act::FaberAct::wake(&wake, OWN_TURN));
         question.wake = Some(wake);
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
         reply.vendor = Some(vendor);
@@ -84,7 +73,7 @@ impl Core {
         self.listen(conv);
         // A plan limit now continues this reply.
         if let Some(t) = self.transfers.get_mut(conv) {
-            (t.reply, t.request, t.text, t.images) = (reply_id.clone(), text.into(), text.into(), vec![]);
+            (t.reply, t.request, t.text, t.images) = (reply_id.clone(), OWN_TURN.into(), OWN_TURN.into(), vec![]);
             t.approved = None;
             t.by_hand = false;
         }
@@ -115,8 +104,6 @@ impl Core {
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let coordination = matches!(wake.why.as_str(), "wake.asked" | "wake.childDone" | "wake.childQuiet");
-        let returning_from_wait = wake.why == "wake.wait";
-        let approved_plan = wake.why == "wake.approvedPlan";
         // Recovery picks up the cut reply before waiting messages, keeping those messages in every admission save.
         let recovery = matches!(wake.why.as_str(), "wake.updated" | "wake.resumed");
         let item = QueuedTurn { id, text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
@@ -124,7 +111,7 @@ impl Core {
         if busy
             || collecting
             || c.stopped
-            || (!recovery && c.queued.iter().any(|q| !wait::needs_send(q)))
+            || (!c.queued.is_empty() && !recovery)
             || c.compacting
             || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
         {
@@ -132,28 +119,12 @@ impl Core {
                 return Err("error.queueFull".into());
             }
             // Approval is the person's explicit send, even though Faber supplies its visible line.
-            let requested = (c.stopped && approved_plan).then(|| item.id.clone());
-            let at = if approved_plan {
-                c.queued.iter().position(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.wait")).unwrap_or(c.queued.len())
-            } else {
-                c.queued.len()
-            };
-            let old_wait = if returning_from_wait { c.waiting_on.take() } else { None };
-            c.queued.insert(at, item);
+            let requested = (c.stopped && item.wake.as_ref().is_some_and(|w| w.why == "wake.approvedPlan")).then(|| item.id.clone());
+            c.queued.push(item);
             if let Some(requested) = requested {
                 return self.send_queued(conv, &requested);
             }
-            if returning_from_wait {
-                // Save the receipt and clear the wait together before acknowledging this queued return.
-                if let Err(error) = self.try_save(conv) {
-                    let c = self.convs.get_mut(conv).expect("queued conversation exists");
-                    c.queued.pop();
-                    c.waiting_on = old_wait;
-                    return Err(error);
-                }
-            } else {
-                self.save(conv);
-            }
+            self.save(conv);
             self.emit_queue(conv);
             if collecting {
                 return Ok(());
@@ -227,11 +198,10 @@ mod tests {
         engine.with_saves(false, |core| {
             let c = core.convs.get_mut(&conv).unwrap();
             c.keep_going = Some(crate::model::KeepGoing {
-                waiting: Some(crate::model::KeepWait { why: "command".into(), until: 9e12, timer_id: 0, command_limit: None }),
+                waiting: Some(crate::model::KeepWait { why: "command".into(), until: 9e12 }),
                 ..Default::default()
             });
             c.waiting_on = Some(crate::model::WaitingOn {
-                storage_blocked: false,
                 ids: vec!["member".into()],
                 note: String::new(),
                 since: 1,
@@ -287,27 +257,6 @@ mod tests {
                 assert_eq!(interrupts.load(Ordering::SeqCst), 1, "case {n}, {why}: the turn does not work unseen");
             });
         }
-        engine.shutdown();
-    }
-
-    #[tokio::test]
-    async fn a_codex_continuation_has_its_own_notice_in_the_conversation() {
-        let dir = crate::workspace::TestRoot::new();
-        let (engine, _) = super::super::answer::tests::engine(&dir);
-        let (conv, interrupts) = at_rest(&engine);
-        engine.with_saves(false, |core| {
-            core.live.get_mut(&conv).unwrap().vendor = Vendor::Codex;
-            let before = core.convs[&conv].messages.len();
-            core.handle(&conv, 1, EngineEvent::OwnTurn);
-            core.handle(&conv, 1, EngineEvent::Text("Continuing the work.".into()));
-            core.handle(&conv, 1, done());
-            let messages = &core.convs[&conv].messages;
-            assert_eq!(messages[before].wake.as_ref().unwrap().why, "wake.nativeContinuation");
-            assert_eq!(messages[before + 1].vendor, Some(Vendor::Codex));
-            assert_eq!(messages[before + 1].text, "Continuing the work.");
-            assert_eq!(messages[before + 1].status, Some(Status::Done));
-            assert_eq!(interrupts.load(Ordering::SeqCst), 0);
-        });
         engine.shutdown();
     }
 

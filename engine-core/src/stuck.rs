@@ -169,8 +169,6 @@ mod tests {
             input,
             ok: None,
             output: None,
-            failure_tail: None,
-            exit_code: None,
             declined: false,
             interrupted: false,
             parent: Some("call".into()),

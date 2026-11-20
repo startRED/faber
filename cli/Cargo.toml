@@ -26,5 +26,5 @@ faber-winproc = { path = "../winproc" }
 
 [dev-dependencies]
 tempfile = "3"
-# The end-to-end tests serve a fake Faber; connection deadlines also use a paused clock.
-tokio = { version = "1", features = ["rt-multi-thread", "test-util"] }
+# The end-to-end tests serve a fake Faber while the program runs.
+tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -523,7 +523,6 @@ async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_co
         "c1",
         None,
         Some(faber_engine::model::WaitingOn {
-            storage_blocked: false,
             ids: vec!["c2".into()],
             note: "waiting for child".into(),
             since: 5,
@@ -549,123 +548,6 @@ async fn a_conversation_with_waiting_on_reads_as_waiting_in_conversations_and_co
     let c2 = host.dispatch("conversation", json!({ "id": "c2" })).await.unwrap();
     assert_eq!(c2["state"], "new");
     assert!(c2.get("waitingOn").is_none(), "{c2}");
-}
-
-#[tokio::test]
-async fn conversation_headers_locate_numbered_messages_without_their_bodies() {
-    let (host, _dir) = host().await;
-    let large = "Message body. ".repeat(20_000);
-    let conversation = serde_json::from_value(json!({
-        "id":"indexed", "title":"Records", "area":"chat", "createdAt":1, "updatedAt":6,
-        "messages":[
-            {"id":"q1","role":"user","text":large,"at":1},
-            {"id":"a1","role":"assistant","text":"First answer","at":2,"status":"done"},
-            {"id":"q2","role":"user","text":"Second question","at":3},
-            {"id":"q3","role":"user","text":"Follow-up","at":4},
-            {"id":"a2","role":"assistant","text":"Partial answer","at":5,"status":"streaming"}
-        ]
-    }))
-    .unwrap();
-    faber_engine::store::Store::new(&host.data_dir).save(&conversation);
-
-    for open in [false, true] {
-        if open {
-            host.engine.view_conversation("indexed", |_, _| ()).unwrap();
-        }
-        let page = host.dispatch("conversation_headers", json!({"id":"indexed","role":"assistant","from":2,"limit":1})).await.unwrap();
-        assert_eq!(
-            page,
-            json!({"id":"indexed","total":5,"matching":2,"headers":[
-                {"number":5,"id":"a2","role":"assistant","at":5,"status":"stopped"}
-            ]})
-        );
-        let read = host.dispatch("conversation", json!({"id":"indexed","from":page["headers"][0]["number"]})).await.unwrap();
-        assert_eq!(read["messages"][0]["id"], "a2");
-        assert_eq!(read["messages"][0]["status"], page["headers"][0]["status"]);
-    }
-
-    let all = host.dispatch("conversation_headers", json!({"id":"indexed"})).await.unwrap();
-    assert_eq!(all["headers"].as_array().unwrap().len(), 5);
-    assert_eq!(all["headers"][0], json!({"number":1,"id":"q1","role":"user","at":1}));
-    assert!(all.to_string().len() < 600, "large text stays out of the header page");
-    let empty = host.dispatch("conversation_headers", json!({"id":"indexed","role":"user","from":4})).await.unwrap();
-    assert_eq!(empty, json!({"id":"indexed","total":5,"matching":3,"headers":[]}));
-    for bad in [json!({"from":0}), json!({"limit":0}), json!({"limit":101}), json!({"role":"system"})] {
-        let mut args = bad;
-        args["id"] = json!("indexed");
-        assert_eq!(host.dispatch("conversation_headers", args).await.unwrap_err().key, "error.host.badArgs");
-    }
-}
-
-#[tokio::test]
-async fn restored_saved_wait_is_waiting_in_a_read_and_exact_list_filters() {
-    let (host, dir) = host().await;
-    let project = host.engine.add_project(&dir.path().to_string_lossy()).unwrap();
-    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
-    let scenarios = [
-        ("saved-wait", None, false, "waiting"),
-        ("checks-interrupted", Some("running"), false, "waiting"),
-        ("decision", Some("needsYou"), false, "waiting"),
-        ("interrupted", None, true, "interrupted"),
-    ];
-    let store = faber_engine::store::Store::new(&host.data_dir);
-    for (id, checks, closed, _) in scenarios {
-        let conversation = serde_json::from_value(json!({
-            "id": id, "title": "Check later", "area": "project", "projectId": project.id,
-            "createdAt": since, "updatedAt": since,
-            "messages": [{"id":"last", "role":"assistant", "text":"Waiting", "at":since, "status":"done", "closed":closed,
-                "checks": checks.map(|state| json!({"state":state}))}],
-            "waitingOn": {"note":"Waiting for a result", "since":since, "until":since + 300_000}
-        }))
-        .unwrap();
-        store.save(&conversation);
-    }
-    host.engine.settle_start();
-    assert!(host.engine.state().running.items.iter().any(|item| item.conversation_id == "saved-wait"));
-
-    for (id, _, _, expected) in scenarios {
-        let read = host.dispatch("conversation", json!({"id":id,"last":0})).await.unwrap();
-        assert_eq!(read["waitingOn"]["until"], since + 300_000);
-        assert_eq!(read["state"], expected, "conversation {id}");
-        assert!(read.get("interruptedTurn").is_none(), "an item in the panel cannot be resumed manually");
-    }
-    for word in ["waiting", "working", "running", "interrupted"] {
-        let list = host.dispatch("conversations", json!({"state":[word]})).await.unwrap();
-        let rows = list.as_array().unwrap();
-        for (id, _, _, expected) in scenarios {
-            let present = rows.iter().any(|row| row["id"] == id);
-            assert_eq!(present, expected == word || word == "running" && expected != "interrupted", "filter {word}: {list}");
-        }
-    }
-}
-
-#[tokio::test]
-async fn a_local_supervisor_can_check_only_the_exact_saved_wait() {
-    let (host, dir) = host().await;
-    let project = host.engine.add_project(&dir.path().to_string_lossy()).unwrap();
-    let conv: faber_engine::model::Conversation = serde_json::from_value(json!({
-        "id":"waiting", "title":"Build", "area":"project", "projectId":project.id,
-        "createdAt":1, "updatedAt":2, "messages":[], "waitingOn":{"since":5,"until":300005,"note":"build"}
-    }))
-    .unwrap();
-    let store = faber_engine::store::Store::new(&host.data_dir);
-    store.save_checked(&conv).unwrap();
-    let exact = json!({"id":"waiting","since":5,"until":300005});
-    let denied = host.dispatch_as(&Caller::Agent { conversation: None }, "wake_wait", exact.clone()).await.unwrap_err();
-    assert_eq!(denied.key, "error.reach.ask");
-    let agent = Caller::Agent { conversation: Some("agent".into()) };
-    let denied = host.dispatch_as(&agent, "wake_wait", exact.clone()).await.unwrap_err();
-    assert_eq!(denied.key, "error.reach.ask");
-    let requests = host.dispatch_as(&agent, "asks", json!({})).await.unwrap();
-    assert_eq!(requests[0]["label"], "wake");
-    let stale = host.dispatch_as(&Caller::Person, "wake_wait", json!({"id":"waiting","since":5,"until":300004})).await.unwrap();
-    assert_eq!(stale, json!({"state":"obsolete"}));
-    assert_eq!(store.get("waiting").unwrap().waiting_on.unwrap().problem, None);
-    let blocked = host.dispatch_as(&Caller::Person, "wake_wait", exact).await.unwrap();
-    assert_eq!(blocked, json!({"state":"blocked","reason":"error.noSubscription"}));
-    let kept = store.get("waiting").unwrap();
-    assert_eq!(kept.waiting_on.unwrap().problem.as_deref(), Some("error.noSubscription"));
-    assert!(kept.messages.is_empty() && kept.queued.is_empty());
 }
 
 #[test]

@@ -29,7 +29,6 @@ Ended members with reports show their first sentence as one plain-text outcome, 
 end. All these details ellipsize to one line. Missing activity, question or report produces no placeholder. Cards in a
 row share its natural height, without a fixed minimum. The existing
 safe Markdown reader strips formatting; the language's native sentence segmenter preserves decimals and punctuation.
-A corrected report updates the open team fold even when its length stays the same.
 
 The existing state palette supplies every tone: positive is --ink (the concluded check's existing full ink), working
 is --accent-text; waiting for the lead is --ink-2 on --s3, with --ink-3 on its drop; needs-you is --amber-ink with

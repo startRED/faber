@@ -6,26 +6,6 @@ Readable cards keep the original request in a disclosure. Commands preserve argu
 
 Mode details distinguish requested CLI policy from machine isolation, which remains unverified. No new process or idle timer is kept. Full access retains its existing stored value and default; remembered-rule withdrawal and denial feedback need the separate host-command change.
 
-On Windows, a protected Codex conversation selects MXC when the server greeting identifies a stable CLI version from 0.166.0, which was checked with writable and Plan profiles. The legacy backend rejected split writable roots in a live protected project. The shared server starts with the legacy backend, and the version check selects the sandbox for each thread. The selected approval policy and filesystem rules apply to each thread.
-
-Protected and isolated Codex servers on Windows disable login shells. A normal shell tool call then runs PowerShell
-with `-NoProfile`, avoiding user startup scripts that can fail under the protected environment. An explicit login-shell
-request is refused. Full access uses the person's existing configuration. An isolated Codex 0.166.0 proof used a
-local response fixture and confirmed a successful default command and a refusal before launch when `login` was true.
-See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
-
-On Windows, before launching an isolated Codex `run_command` in MXC, Faber prepares the configured temporary directory inside the
-working folder without creating through junctions. A new command prepares it again if cleanup removed it. If the checked path
-cannot be prepared, the command fails before launch and later commands can try again. The direct Faber CLI route needs no sandbox
-temporary directory. A local response fixture with a fresh project reproduced the path error before the fix and verified the
-same command emitted its own output after the fix.
-
-Isolated conversations include instructions for using an explicit path with `rg`, since an empty piped input can otherwise be
-treated as its search source. If reading Git exclude metadata is denied, agents can retry with `--no-ignore-exclude`.
-That skips Git's local exclude metadata and keeps `.gitignore` rules. The local Windows response fixture reproduced the
-empty implicit search and the exclude-metadata error, and verified that the retry found a visible file and skipped an
-ignored one. See the [ripgrep maintainer's explanation of piped input](https://github.com/BurntSushi/ripgrep/discussions/2047).
-
 A decision the person wrote and kept as "never touch `path`" (R575) needs no card of its own: in every mode Claude Code's file
 tools are denied the path, a guarded Codex sandbox keeps it read-only, and an approval that names it is declined before any card,
 with a line telling the agent to leave it as it is. In Full access a shell command is not stopped; nothing on screen claims more.
@@ -61,29 +41,16 @@ that only mentions the name, as in a commit message, is refused too.
   missing or prefixed runner, missing shell or unresolved root is refused. A failed native start never retries the
   original command. Monitor is denied because it has no checked replacement protocol. Isolated keeps its existing
   command policy. Full access is unchanged; its five warnings name conversations and settings.
-  The Store link check reads file metadata only, so the engine holding its own budget lock does not refuse the shell.
   This is the owner-authorized fail-closed fallback (R554), with limits: native Auto classification and automatic
   plain-read approvals now reach Faber's cards unless a host grant matches; approval choices and mode flags remain.
-  Literal native project entrypoints (Node, npm, Cargo and the existing build tools) run directly inside the sandbox. Shell syntax requires a supported native shell; a shell that cannot start is refused. Read-only sandbox rules cover CLI configuration, Git metadata and check settings. Native missing-path rules do not prevent every directory rename, so guarded launches additionally disable hooks even after opt-in, load only user settings and use strict Faber MCP configuration; project/local settings and servers cannot plant a host startup command. The existing hook hint and help disclose this in all five languages. Commands start in the project folder, so a change of directory does not persist across calls, and background
+  Literal native project entrypoints (Node, npm, Cargo and the existing build tools) run directly inside the sandbox. Shell syntax requires a supported native shell; a shell that cannot start is refused. Read-only sandbox rules cover CLI configuration, Git metadata and check settings. Native missing-path rules do not prevent every directory rename, so guarded launches additionally disable hooks even after opt-in, load only user settings and use strict Faber MCP configuration; project/local settings and servers cannot plant a host startup command. The existing hook hint and help disclose this in all five languages. A working folder inside a Store is refused. Commands start in the project folder, so a change of directory does not persist across calls, and background
   execution stays off. An installed native Codex sandbox is required; shell syntax additionally needs a native shell. None is downloaded or bundled.
-  Outside the registered-copy case below, a working folder inside a Store is refused. Before every guarded approval,
-  including a remembered one, a metadata-only scan of every Store refuses symbolic
+  Before every guarded approval, including a remembered one, a metadata-only scan of every Store refuses symbolic
   links, multiply linked files, unknown or unreadable entries, and more than 10,000 entries. No file contents are read.
   This conservative fallback also refuses commands when catalog snapshots legitimately contain hardlinks; it does
   not silently exempt those files. A Store nested in the workspace denies its entire first workspace child, so
   renaming an allowed ancestor cannot reopen it; other files under that child become unavailable too. A separate
   unsandboxed process mutating links after preflight is outside this boundary. Full access is unchanged.
-  A protected Claude Code session on Windows whose project is in its own registered copy can run approved shell commands
-  through MXC. The engine checks the attachment and grants only its project folder through a default-deny profile. Plan
-  gets a read grant. An incomplete scan of up to 100,000 entries, a link, a nested Store or a mismatched attachment refuses
-  the command. This includes links made by dependency or build tools. The scan reads metadata on a bounded worker. Stop
-  can discard an approval while the scan is running. Commands that exceed the Windows launch budget are refused.
-  MXC supplies temporary storage inside its own container in either mode.
-  A kept path makes the first workspace child on its path read-only. If that child does not exist yet, the copy is
-  read-only for the command. Secret paths are also denied inside their read-only workspace child.
-  The source repository and other copies are outside the grant. The attached copy's Git state is available through the
-  conversation workspace action, which uses a separate read-only host lookup. The shell cannot read the source Git
-  configuration, which can hold credentials.
   Fake-process checks prove replacement and refusal, not OS enforcement. Native qualification must separately show
   a successful project command and denied computed-path reads/writes of both approval records through real aliases.
   No control, layout or motion changes.
@@ -126,15 +93,13 @@ that only mentions the name, as in a commit message, is refused too.
   `default`, Codex `untrusted`), keeps the folder-wide credential denies and refuses a forwarded request that names a
   credential folder; it asks except for what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
   by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
-  end together (R124b, R124c). On Windows the CLI is created inside its kill-on-close job before it runs, failing
-  closed if creation or assignment fails. A reaped CLI keeps its exit status and no longer supplies a PID for repeated
-  cleanup. Faber starts as few CLIs as it can: Codex is
+  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Known residual: the CLI is
+  created suspended and joins its job a moment later (about 100 ms, measured on Windows 11), so if Faber ends in that
+  moment the CLI stays suspended, outside any job, until the PC restarts. It never runs a single instruction. Std Rust
+  cannot create a process inside a job yet (`raw_attribute` is unstable), so Faber starts as few CLIs as it can: Codex is
   asked for its models only while Faber has none, one asking at a time. Settings shows the
   details; the thread shows nothing about it (R168). The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
-- The shared Codex connection protects conversation tokens for the life of the service, including late output from
-  a closed conversation. It passes ordinary lines through without checking each registered token when their shared
-  prefix is absent. Other token formats retain literal matching.
 - No prompt can block a full-access turn (R564). The host answers the CLI's permission requests in every mode (R160), so a
   question the agent asks the person is a card. Whatever else Claude Code still holds back in bypass mode (a protected path,
   a delete it finds risky, the person's own ask rules) is answered yes at once, on every CLI version: refusing it left the work

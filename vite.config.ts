@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
-import { lstatSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import solid from 'vite-plugin-solid';
 import { woff2OnlyPlugin } from './scripts/woff2-only.mjs';
 
@@ -9,20 +8,6 @@ export default defineConfig({
   root: 'ui',
   base: './',
   plugins: [solid(), {
-    name: 'test-build-output',
-    apply: 'build',
-    configResolved(config) {
-      if (config.mode !== 'test') return;
-      const test = resolve(config.root, '../dist-test');
-      if (resolve(config.root, config.build.outDir) !== test) {
-        throw new Error('The test build must write to dist-test/. Pass --outDir ../dist-test.');
-      }
-      const production = resolve(config.root, '../dist');
-      if ([test, production].some((dir) => lstatSync(dir, { throwIfNoEntry: false })?.isSymbolicLink())) {
-        throw new Error('The test build needs separate dist-test/ and dist/ folders, without linked output folders.');
-      }
-    },
-  }, {
     name: 'visual-runtime',
     transformIndexHtml: {
       order: 'post',
