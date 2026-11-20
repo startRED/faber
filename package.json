@@ -42,19 +42,19 @@
     "@fontsource/barlow-condensed": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@fontsource/ibm-plex-sans": "5.3.0",
-    "@tauri-apps/api": "2.12.4",
-    "dompurify": "3.4.17",
-    "marked": "18.1.2",
-    "solid-js": "1.9.17"
+    "@tauri-apps/api": "2.12.5",
+    "dompurify": "3.4.18",
+    "marked": "18.2.1",
+    "solid-js": "2.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.4",
-    "@types/node": "26.6.5",
-    "electron": "45.1.0",
-    "oxlint": "1.90.0",
-    "semver": "6.3.1",
+    "@tauri-apps/cli": "2.12.5",
+    "@types/node": "26.6.6",
+    "electron": "45.3.3",
+    "oxlint": "1.94.0",
+    "semver": "7.8.6",
     "typescript": "7.0.2",
-    "vite": "8.3.5",
-    "vite-plugin-solid": "2.11.14"
+    "vite": "8.3.8",
+    "vite-plugin-solid": "2.11.16"
   }
 }
