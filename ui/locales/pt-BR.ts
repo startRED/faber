@@ -2865,6 +2865,8 @@ export const ptBR: Messages = {
   'notes.454.better': 'Um projeto com muitas conversas antigas abre sem carregar cada uma: o Faber lê só o que a lista mostra.',
   'notes.455.fixed': 'Com Continuar sozinho ligado, a conversa que espera o próprio comando não acorda mais cedo demais nem passa do limite de 15 minutos.',
   'notes.456.fixed': 'O trabalho no Codex volta sozinho quando o serviço em segundo plano fica em silêncio ou para, e o Parar continua valendo.',
+  'notes.457.new': "Você pode testar suas próprias extensões no navegador do Faber: ligue o Modo desenvolvedor para extensões em Configurações > Privacidade e depois carregue, recarregue ou remova uma pasta de extensão pelo menu Mais do navegador. Elas rodam num perfil separado, sem os seus logins.",
+  'notes.457.fixed': "Apertar Enter na barra de endereço do navegador do Faber volta a abrir a página digitada, e palavras que não são um endereço viram uma busca no Google.",
   'update.checking': 'Procurando atualização…',
   'set.updateCheck': "Procurar atualizações",
   'set.updateCheckHint': "Procura uma versão nova agora.",

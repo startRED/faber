@@ -2758,6 +2758,8 @@ export const en = {
   'notes.454.better': 'A project with many past conversations opens without loading each one: Faber reads only what the list shows.',
   'notes.455.fixed': 'With Keep going on, a conversation waiting for its own command no longer wakes too early or waits past its 15-minute limit.',
   'notes.456.fixed': 'Work on Codex resumes by itself when its background service goes quiet or stops, and Stop still reaches it.',
+  'notes.457.new': "You can test your own browser extensions in Faber's browser: turn on Developer mode for extensions in Settings > Privacy, then load, reload or remove an unpacked extension folder from the browser's More menu. They run in a separate profile, without your sign-ins.",
+  'notes.457.fixed': "Pressing Enter in Faber's browser address bar opens the page you typed again, and words that are not an address search Google.",
   'update.checking': 'Looking for an update…',
   'set.updateCheck': "Check for updates",
   'set.updateCheckHint': "Looks for a new version now.",

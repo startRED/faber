@@ -2878,6 +2878,8 @@ export const fr: Messages = {
   'notes.454.better': 'Un projet qui a beaucoup d’anciennes conversations s’ouvre sans les charger une à une : Faber ne lit que ce que la liste affiche.',
   'notes.455.fixed': 'Avec Continuer seul activé, une conversation qui attend sa propre commande ne se réveille plus trop tôt et ne dépasse plus sa limite de 15 minutes.',
   'notes.456.fixed': 'Le travail sur Codex reprend tout seul quand son service en arrière-plan se tait ou s’arrête, et Arrêter l’atteint toujours.',
+  'notes.457.new': "Vous pouvez tester vos propres extensions dans le navigateur de Faber : activez le Mode développeur pour les extensions dans Réglages > Confidentialité, puis chargez, rechargez ou retirez un dossier d’extension depuis le menu Plus du navigateur. Elles tournent dans un profil séparé, sans vos connexions.",
+  'notes.457.fixed': "Appuyer sur Entrée dans la barre d’adresse du navigateur de Faber ouvre de nouveau la page saisie, et des mots qui ne sont pas une adresse lancent une recherche Google.",
   'update.checking': 'Recherche d’une mise à jour…',
   'set.updateCheck': "Rechercher des mises à jour",
   'set.updateCheckHint': "Cherche une nouvelle version maintenant.",

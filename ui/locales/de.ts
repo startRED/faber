@@ -2878,6 +2878,8 @@ export const de: Messages = {
   'notes.454.better': 'Ein Projekt mit vielen früheren Unterhaltungen öffnet sich, ohne jede einzelne zu laden: Faber liest nur, was die Liste zeigt.',
   'notes.455.fixed': 'Mit Selbst weitermachen wacht eine Unterhaltung, die auf ihren eigenen Befehl wartet, nicht mehr zu früh auf und wartet nicht länger als 15 Minuten.',
   'notes.456.fixed': 'Arbeit mit Codex geht von selbst weiter, wenn sein Hintergrunddienst verstummt oder anhält, und Stoppen erreicht sie weiterhin.',
+  'notes.457.new': "Sie können eigene Erweiterungen im Browser von Faber testen: Schalten Sie unter Einstellungen > Datenschutz den Entwicklermodus für Erweiterungen ein und laden, aktualisieren oder entfernen Sie dann einen entpackten Erweiterungsordner über das Menü Mehr des Browsers. Sie laufen in einem eigenen Profil, ohne Ihre Anmeldungen.",
+  'notes.457.fixed': "Die Eingabetaste in der Adressleiste von Faber öffnet wieder die eingegebene Seite, und Wörter, die keine Adresse sind, werden bei Google gesucht.",
   'update.checking': 'Suche nach einem Update…',
   'set.updateCheck': "Nach Updates suchen",
   'set.updateCheckHint': "Sucht jetzt nach einer neuen Version.",
