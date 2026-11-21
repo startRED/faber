@@ -348,9 +348,11 @@ check('blocked sites: Settings adds and removes saved hosts, retains failed edit
         equal(document.activeElement, input);
         ok(remove().getAttribute('aria-label')?.includes('bank.example'));
         const button = remove().getBoundingClientRect();
-        const card = remove().closest('.st-card')!.getBoundingClientRect();
+        // The row ends at the card, or at the next setting when Electron adds developer mode below it.
+        const next = remove().closest('.blocked-hosts')!.nextElementSibling;
+        const end = next ? next.getBoundingClientRect().top : remove().closest('.st-card')!.getBoundingClientRect().bottom;
         const option = view.host.querySelector('[data-opt="set-blocked-hosts"]')!.getBoundingClientRect();
-        ok(Math.abs((button.top - option.bottom) - (card.bottom - button.bottom)) <= 2, `${language}: the saved-host row has balanced vertical space`);
+        ok(Math.abs((button.top - option.bottom) - (end - button.bottom)) <= 2, `${language}: the saved-host row has balanced vertical space`);
         remove().focus();
         accept = false;
         remove().click();
