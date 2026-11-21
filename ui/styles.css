@@ -4,9 +4,9 @@
 
 * { box-sizing: border-box; }
 :root {
-  --thread-tail: 64px;
-  /* The reading column of a conversation, and its answers: about 760 px of text, the width Claude Desktop reads at, with room between lines. */
-  --col-w: 760px; --read-lh: 1.68;
+  --thread-tail: 40px;
+  --col-w: 760px; --read-lh: 1.6;
+  --scrollbar-w: 12px;
   /* Control heights: every button, select, chip, input and segmented control is one of the three. */
   --h-sm: 28px; --h-md: 32px; --h-lg: 40px;
   /* One timing family. The theme sets --dur-fast, --dur-ui, --dur-move, --dur-arrive and --ease; these complete it. */
@@ -38,7 +38,7 @@ img, svg, a { -webkit-user-drag: none; }
 /* Scrollbars: no arrows and no track; a thin rounded thumb shows while the pointer is over the list that scrolls and widens
    under the pointer. The standard scrollbar-width and scrollbar-color stay unset everywhere: in WebView2 they would bring
    back the system bar with its arrows and switch these rules off. */
-::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar { width: var(--scrollbar-w); height: var(--scrollbar-w); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 ::-webkit-scrollbar-thumb { min-height: 40px; border: 4px solid transparent; border-radius: var(--r-pill); background-color: transparent; background-clip: padding-box; }
@@ -219,6 +219,28 @@ img, svg, a { -webkit-user-drag: none; }
 .thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) clamp(16px, 4vw, 40px) var(--thread-tail); contain: strict; }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 2; }
 .col { width: min(100%, var(--col-w)); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(22px * var(--dens)); }
+.main:has(.thread > .col) { --head-h: 48px; grid-template-rows: var(--head-h) minmax(0, 1fr); }
+.work:has(> .thread > .col) { --reading-gutter: 24px; --reading-prose: 680px; --reading-type: var(--fs-read); --thread-start: 18px; }
+.thread:has(> .col) { scrollbar-gutter: stable both-edges; padding: var(--thread-start) calc(var(--reading-gutter) - var(--scrollbar-w)) var(--thread-tail); }
+.work:has(> .thread > .col) > .dock > :is(.composer, .archived-bar, .kg-note) { width: min(calc(100% - 2 * var(--reading-gutter)), var(--col-w)); }
+@media (min-width: 1600px) {
+  .work:has(> .thread > .col) { --col-w: 960px; --reading-prose: 640px; --reading-type: var(--fs-lead); }
+}
+@media (max-width: 760px) {
+  .work:has(> .thread > .col) { --reading-gutter: 16px; }
+}
+@media (min-height: 821px) and (forced-colors: none) {
+  .work:has(> .thread > .col):not(:has(> .thread:focus-within))::after {
+    content: ''; grid-area: 1 / 1; pointer-events: none; z-index: 2;
+    background: linear-gradient(var(--bg), transparent) top / 100% 6px no-repeat,
+                linear-gradient(transparent, var(--bg)) bottom / 100% 22px no-repeat;
+  }
+  .work > .toend { z-index: 3; }
+}
+@media (max-height: 540px) {
+  .main:has(.thread > .col) { --head-h: var(--h-lg); }
+  .work:has(> .thread > .col) { --thread-start: 8px; }
+}
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
 .empty h1 { font-size: min(var(--fs-h2), 9vw); max-width: 16em; overflow-wrap: anywhere; } /* the heading size, never the display one: an empty state is a short note, not a greeting */
 .empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; overflow-wrap: anywhere; }
@@ -673,6 +695,60 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .step-detail { display: grid; gap: 6px; width: 100%; min-width: 0; margin: 2px 0 6px 2px; padding: 4px 0 4px 12px; border-inline-start: 1px solid var(--line-2); }
 .step-what { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .step-out { margin: 0; max-height: 240px; overflow: auto; padding: 6px 8px; border-radius: var(--r-xs); background: var(--s1); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.col > .you.editing, .col > .mine > .you) { max-width: min(88%, 560px); padding: 12px 16px; border: 1px solid var(--line); box-shadow: none; line-height: 1.55; }
+.col > .you.editing { width: min(88%, 560px); }
+.col > .mine .you .thumbs { justify-content: start; }
+.col > .mine .you .thumbs:has(+ .sent-text) { margin-block-end: 8px; }
+.col > .mine .you .thumb { --thumb: 48px; height: 36px; border-radius: var(--r-xs); }
+.col > .mine .you .thumb.file { min-width: 0; height: var(--h-sm); padding-inline: 8px; }
+.col > .mine .you .thumb-card { gap: 6px; }
+.col > .mine .you .thumb-card .fi { width: 16px; height: 16px; background: none; color: var(--ink-2); }
+.col > .mine .you .thumb-text { display: flex; align-items: baseline; gap: 6px; }
+.col > .mine + .ai { margin-block-start: -4px; }
+.col > .mine:has(+ .ai):not(:has(.versions, .rewind-coverage)) { position: relative; overflow-clip-margin: 32px; }
+.col > .mine:has(+ .ai):not(:has(.versions, .rewind-coverage)) > .mine-bar {
+  position: absolute; z-index: 1; inset-inline-end: 0; inset-block-end: -20px;
+  max-width: min(40%, 180px); margin: 0;
+}
+.col > .mine:has(+ .ai):not(:has(.versions, .rewind-coverage)) > .mine-bar .when { overflow: hidden; text-overflow: ellipsis; }
+.col > .mine:has(> .mine-bar):not(:has(.versions, .rewind-coverage)) + .ai > .model { padding-inline-end: min(40%, 180px); }
+.col .ai { font-size: var(--reading-type, var(--fs-read)); gap: 12px; }
+.col .ai .model { flex-wrap: wrap; font-size: var(--fs-ui); line-height: 1.45; }
+.col .ai .model .vm { gap: 8px; }
+.col .ai .model .mk:not(.claude, .codex) { background: var(--accent); }
+.col .ai .model b { font-weight: 600; }
+.col .ai .model:has(+ .steps) { margin-block-end: -7px; }
+.col .ai .steps { margin-block: 0; font-size: var(--fs-ui); line-height: 1.45; }
+.col .ai :is(.steps-head, .steps.one .step-line) { min-height: var(--h-sm); color: var(--ink-2); margin-inline-start: -6px; }
+.col .ai .steps-list { gap: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line-2); }
+.col .ai .steps-list .step-line { min-height: var(--h-md); }
+.col .ai .step:not(.thought) .step-line b { color: var(--ink); font-weight: 600; }
+.col .ai .md > div > :is(p, ul, ol, blockquote) { max-width: var(--reading-prose); }
+.col .ai .md > div > :is(p, ul, ol) { margin-block-end: 12px; }
+.col .ai .md > div > :is(ul, ol) > li + li { margin-block-start: 8px; }
+.col .ai .md > div > ol { gap: 0; }
+.col .ai .md > div > :is(h1, h2, h3, h4, h5, h6) { margin: 20px 0 10px; font: 500 var(--fs-lead) / 1.22 var(--font-ui); }
+.col .ai .md:not(.md ~ .md) > div:first-child > :is(h1, h2, h3):first-child { margin: 0 0 8px; font-size: var(--fs-h3); font-weight: 600; }
+.col .ai .md > div > h3 em { font: inherit; color: inherit; }
+.col .ai .md > div > table :is(th, td) { padding: 8px 10px; border-inline: 0; }
+.col .ai .md > div > .codeblock { box-shadow: inset 0 0 0 1px var(--line-2); }
+.col .ai .md > div > :is(pre, .codeblock > pre) { padding: 12px; font: 400 var(--fs-ui) / 1.55 var(--font-mono); }
+.col .ai .md > div > :is(pre, .codeblock > pre) code { font-size: inherit; }
+.col .ai .md > div > .codeblock > .cb-bar { border-block-end: 1px solid var(--line-2); padding-inline-start: 12px; }
+@media (min-width: 1600px) {
+  .col .ai .md > div > table { max-width: 680px; }
+  .col .ai :is(.model, .steps) { font-size: var(--fs-read); }
+  .col .ai .model .vm:not(.claude):not(.codex) b { color: var(--ink); }
+}
+@media (max-height: 540px) {
+  :is(.col > .you.editing, .col > .mine > .you) { padding: 6px 12px; }
+  .col > .mine .you .thumb { --thumb: 40px; height: var(--h-sm); }
+  .col > .mine + .ai { margin-block-start: -12px; }
+  .col .ai { gap: 6px; }
+  .col .ai .model:has(+ .steps) { margin-block-end: -1px; }
+  .col .ai .md:not(.md ~ .md) > div:first-child > :is(h1, h2, h3):first-child { margin-block-end: 6px; }
+  .col .ai .md:not(.md ~ .md) > div:first-child > p:first-of-type { line-height: 1.5; }
+}
 .step-detail .note { margin: 0; }
 .step-detail .changed { margin-top: 0; }
 /* The newest edit's few lines sit under its own row, lined up with its label, never alone under the reply. */
@@ -1665,7 +1741,10 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 @keyframes find-out { to { opacity: 0; transform: translateY(calc(-1 * var(--motion-slide) / 2)); } }
 .find { max-width: calc(100% - 48px); }
 .main:has(.work.under > .runcol:is([aria-modal], .wide)) .find { right: calc(min(352px, 100%) + 24px); max-width: calc(100% - min(352px, 100%) - 48px); }
-.main:has(> .find) .thread { padding-top: calc(22px * var(--dens) + var(--h-lg)); }
+.main:has(> .find) .thread:not(:has(> .col)) { padding-top: calc(22px * var(--dens) + var(--h-lg)); }
+/* Keep the find bar outside the scrollport so restoring a reading anchor cannot scroll away its clearance. */
+.main:has(> .find) .thread:has(> .col) { margin-block-start: calc(10px + var(--h-lg)); }
+.main:has(.thread > .col) > .find { top: calc(var(--head-h) + 10px); }
 .find .field.search { flex: 1 1 200px; width: auto; min-width: 0; }
 .find .iconbtn { flex: none; }
 .find-count { flex: none; min-width: 48px; padding: 0 6px; color: var(--ink-3); font-size: var(--fs-xs); text-align: center; white-space: nowrap; }

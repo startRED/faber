@@ -176,7 +176,14 @@ fn check_shell(at: &str, seen: &Value, width: u32, modal: bool) -> Result {
     ensure(seen["page"] == true, || format!("{at}: the page scrolls sideways"))?;
     ensure(seen["past"].as_array().is_some_and(Vec::is_empty), || format!("{at}: these stick out past the right edge: {} ", seen["past"]))?;
     same(num(seen, &["title", "h"]), 36.0, &format!("{at}: the title bar"))?;
-    same(num(seen, &["topbar", "h"]), 52.0, &format!("{at}: the top bar"))?;
+    let topbar_height = if seen["col"].is_null() {
+        52.0
+    } else if num(seen, &["view", "h"]) <= 540.0 {
+        40.0
+    } else {
+        48.0
+    };
+    same(num(seen, &["topbar", "h"]), topbar_height, &format!("{at}: the top bar"))?;
     if width >= 900 {
         same(num(seen, &["side", "w"]), 288.0, &format!("{at}: the sidebar"))?;
     } else {

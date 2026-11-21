@@ -64,13 +64,12 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
 - A completed plan in Plan mode ends with the shared plan approval card ([running.md](running.md)): Approve and run,
   its run mode, and Keep planning. A closing box keeps its recap but no reply buttons while plan approval waits. The composer
   reads the shared Settings mode; the card says it applies to all conversations. Faber's work turn is one quiet line.
-- A message's pictures and files sit above its text, right-aligned, as one wrapped row of 72 px rounded thumbnails and
-  small file cards (icon, name, type), with "+N" as the fifth tile past five. The bubble has 17 px
-  of padding, a line height of 1.6 and at most 620 px. The same thumbnail is drawn in the message box at 56 px, where
-  the × sits at its top right corner and shows on hover and focus. A picture opens the viewer: a dark layer, the picture
-  growing out of its thumbnail and leaving the same way, arrows (and ← →) between the conversation's pictures, Esc and a
-  click outside to close, a count at the bottom, Tab kept inside. Its DOM exists only while open. Pictures inside
-  an answer are thumbnails too (at most 280 × 200 px).
+- Sent and queued attachments lead the text inside the right-aligned bubble. Pictures (48 × 36 px) and file chips (28 px tall,
+  with icon, name and kind) wrap at 8 px gaps, with "+N" as the fifth tile past five. The bubble is at most 88% or 560 px,
+  with 12 × 16 px padding and 1.55 leading. At heights up to 540 px it uses 6 × 12 px padding and 40 × 28 px pictures.
+  Composer thumbnails are 56 px with a remove button on hover and focus. The dark viewer grows from the thumbnail
+  and returns to it. Its arrows and ← → browse pictures, Esc or an outside click closes it, and Tab stays inside.
+  It shows a count and exists only while open. Reply pictures are at most 280 × 200 px.
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - Loading earlier messages keeps already drawn top-level message rows and their text nodes by message id. Streaming
   still updates that same row in place; paging does not reparse unchanged ordinary replies or move their text selection

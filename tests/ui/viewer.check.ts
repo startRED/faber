@@ -78,20 +78,23 @@ check('thumbs: frequent message actions only fade within 150ms', () => {
   } finally { view.close(); }
 });
 
-check('thumbs: seven pictures and two files are small rounded thumbnails above the text, with +N, not stacked full-width in the bubble', async () => {
+check('thumbs: seven pictures and two files wrap above the text inside the bubble, with +N', async () => {
   const images = Array.from({ length: 7 }, () => ({ mediaType: 'image/png', base64: PNG }));
   const view = thread([mine({ images, attachments: ['report.pdf', 'data.csv'] })]);
+  view.root.className = 'col';
   try {
     const bubble = view.root.querySelector<HTMLElement>('.you')!;
-    equal(bubble.textContent, 'Look at these');
-    equal(bubble.querySelector('img'), null, 'no picture sits inside the bubble');
-    const strip = view.root.querySelector<HTMLElement>('.thumbs')!;
-    ok(strip.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING, 'the thumbnails come before the text');
+    const text = bubble.querySelector('.sent-text')!;
+    equal(text.textContent, 'Look at these');
+    const strip = bubble.querySelector<HTMLElement>('.thumbs')!;
+    equal(strip.nextElementSibling, text, 'the thumbnails come before the text inside the same bubble');
     equal(strip.querySelectorAll('.thumb img').length, 4, 'four pictures and the +N tile');
     equal(strip.querySelector('.thumb-more')!.textContent, '+5');
     for (const img of strip.querySelectorAll<HTMLElement>('.thumb img')) {
       const box = img.closest('.thumb')!.getBoundingClientRect();
-      ok(box.width >= 56 && box.width <= 96 && box.height <= 96, `a thumbnail is ${box.width}x${box.height}`);
+      const compact = matchMedia('(max-height: 540px)').matches;
+      equal(box.width, compact ? 40 : 48, 'picture width');
+      equal(box.height, compact ? 28 : 36, 'picture height');
     }
     ok(strip.getBoundingClientRect().height <= 96 * 2 + 8, 'a row or two, not a column of pictures');
     strip.querySelector<HTMLButtonElement>('.thumb-more')!.click();

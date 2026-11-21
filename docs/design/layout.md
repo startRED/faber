@@ -5,13 +5,14 @@ The window's widths, titlebar, sidebar, the homes and the running column. An ope
 
 ## Layout
 
-The window has a 36 px titlebar across the full width, a 288 px sidebar, a stage with a 52 px topbar, a reading column of
-at most 760 px centred in the stage, and a running column on the right. The window can be as narrow as 720 px,
+The window has a 36 px titlebar across the full width, a 288 px sidebar, a stage with a topbar and a centered reading
+column, and a running column on the right. The topbar is 52 px outside conversations. In a conversation it is 48 px,
+or 40 px at window heights of 540 px and below. The window can be as narrow as 720 px,
 so the layout changes with its width:
 
 | Window width | Sidebar | Running column | Reading column |
 | :--- | :--- | :--- | :--- |
-| About 1,030 px and wider (whenever the stage keeps 440 px beside the column) | 288 px, beside the stage; it folds away while a wide view would squeeze the stage under 560 px | Its view's usual width when open, beside the stage | Shrinks with the stage, 760 px at most. The stage is never narrower than 440 px |
+| About 1,030 px and wider (whenever the stage keeps 440 px beside the column) | 288 px, beside the stage; it folds away while a wide view would squeeze the stage under 560 px | Its view's usual width when open, beside the stage | Shrinks with the stage, up to 760 px or 960 px at window widths of 1600 px and up. The stage is never narrower than 440 px |
 | 900 px to where the column no longer docks | 288 px, beside the stage | Auto list below; manual views overlay stage | Up to 760 px |
 | 720 to 899 px | Hidden. A button in the topbar opens it as an overlay | Auto list below; manual views overlay stage | Up to 760 px |
 
