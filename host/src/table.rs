@@ -118,9 +118,7 @@ table! {
     }
     /// Leaving an ordinary conversation never deletes it.
     Write Screen fn close_chat(h, id: String) -> () {
-        h.engine.close_chat(&id)?;
-        h.engine.media_close(&id);
-        Ok(())
+        h.engine.close_chat(&id)
     }
     Read Screen fn open(h, id: String) -> Option<Conversation> {
         // Whatever it heard of a streaming reply, the screen now takes this snapshot: the next update of each goes whole.
@@ -440,11 +438,7 @@ table! {
     Write Person fn remove(h, id: String, discard: Option<bool>) -> () {
         // `error.copy.unsaved`: its copy holds work found nowhere else, and the screen asks before `discard` (R201).
         let engine = h.engine.clone();
-        off("error.copy.failed", move || {
-            engine.remove_with(&id, discard.unwrap_or(false))?;
-            engine.media_close(&id);
-            Ok(())
-        }).await?
+        off("error.copy.failed", move || engine.remove_with(&id, discard.unwrap_or(false))).await?
     }
     /// Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation of its
     /// own project that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused.
@@ -872,38 +866,6 @@ table! {
         let ext = source.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
         let Some((_, kind)) = IMAGE_TYPES.iter().find(|(e, _)| Some(*e) == ext.as_deref()) else { return Ok(None) };
         Ok(data_url(&source, kind, 8_000_000))
-    }
-    /// Begins the visible conversation's media lease; the screen releases it when the view leaves.
-    Read Screen fn media_enter(h, id: String) -> String {
-        Ok(h.engine.media_enter(&id))
-    }
-    Read Screen fn media_leave(h, lease: String) -> () {
-        h.engine.media_leave(&lease);
-        Ok(())
-    }
-    Read Screen fn media_release(h, lease: String, url: String) -> () {
-        h.engine.media_release(&lease, &url);
-        Ok(())
-    }
-    /// A capability for a file named relative to the visible conversation's working folder.
-    Read Screen fn media_grant(h, id: String, path: String) -> String {
-        let engine = h.engine.clone();
-        off("error.media.gone", move || engine.media_grant(&id, &path).map_err(str::to_string)).await?
-    }
-    Read Screen fn media_clear(h) -> () {
-        h.engine.media_clear();
-        Ok(())
-    }
-    /// Bounded bytes for the Electron protocol, kept out of the screen's invoke surface.
-    Read Screen fn media_chunk(h, token: String, range: Option<String>) -> Value {
-        let engine = h.engine.clone();
-        off("error.media.gone", move || match engine.media_read(&token, range.as_deref()) {
-            Ok(chunk) => json!({
-                "type": chunk.kind, "body": base64::engine::general_purpose::STANDARD.encode(chunk.bytes),
-                "range": chunk.content_range,
-            }),
-            Err(error) => json!({"error": error.key, "length": error.length}),
-        }).await
     }
     /// A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again.
     Read Own("/id") fn site_tabs(h, id: String) -> Option<faber_engine::browser::tabs::Tabs> {

@@ -35,8 +35,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   non-frame destinations are refused, and exact single-use URLs, no CORS grant and the sandbox protect the bytes. Closing invalidates the pane's lease (late preparations are refused),
   drops its reference, sets src to about:blank and removes the frame, including its scripts. Every version keeps the
   opaque sandbox and its own response-header CSP, including the fixed visual loader's hash. The screen's resource CSP
-  admits the visual origin only in frame-src, and the local media origin only in img-src and
-  media-src. The screen blocks external reply images, CSS, fonts and media in both web settings. Live visual pages allow public HTTPS resources.
+  and original loader stay exactly as before; only frame-src admits the visual origin, never remote sites. Ordinary
+  reply images, CSS, fonts and media stay blocked in both web settings. Live visual pages allow public HTTPS resources.
   Their CSP blocks HTTP and Faber's asset, IPC and visual origins; the native filters block private HTTPS destinations.
   Wry may overwrite a later WebView2 denial for its own custom protocols, so asset/IPC isolation relies on CSP and the
   opaque sandbox, never that handler's 403. Child navigation cannot leave the visual origin or exact about:blank.
@@ -65,34 +65,6 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   WindowProxy indexed slots cannot be overwritten safely. The loader waits for the
   native parser drain before authored replay; its hash policy blocks raw parser-time sibling scripts. A real-frame
   check probes first-script window[0], frames[0] and named access. These checks still need a pass on each desktop.
-
-## Local media in a conversation
-
-- The screen calls `media_enter({ id })` when it starts displaying a conversation. It keeps the returned lease and
-  calls `media_leave({ lease })` when leaving, including when it returns to a home or settings screen. Entering a new
-  view invalidates the previous lease immediately. An old cleanup cannot close a newer lease. The shell also
-  revokes capabilities when its screen closes. A restart starts with an empty capability store.
-- `media_grant({ id, path })` returns an opaque, revocable URL for a relative filename. The host resolves the actual
-  Chat working folder or Project copy and records its identity on the first grant. Each read pins that same folder
-  for the duration of the read. It checks the opened file's type by bytes
-  before issuing a URL and on every request. File names are literal, with no URL or line-number parsing. The visual
-  reader refuses protected paths, links (including hard links), reparse points, devices and traversal. A replacement
-  regular media file can be read in a new request. A missing, unsafe or non-media replacement refuses the request.
-- A player gets a fresh URL for each load, including after it was unloaded off screen. It clears its element's
-  source and calls `media_release({ lease, url })` to drop that grant independently. Chromium can keep already
-  delivered bytes in its in-memory media cache, so a player never reattaches a previously issued URL.
-- Only the screen's media subresources use this transport. Electron uses `faber-media://app`, Tauri uses
-  `faber-media://localhost` or its Windows alias `http://faber-media.localhost`. Each screen CSP has only its own
-  origin for images and audio/video. SVG uses an image content type and an offline sandbox response policy.
-  Responses have a fixed media type, no sniffing, no CORS grant and no caching. The visual pane keeps its own CSP.
-- GET byte requests support one bounded range, including open-ended and suffix ranges. A chunk carries at most
-  1 MiB with a 206 and Content-Range. Unranged images keep the existing approximate size limit (8 MiB). Grants
-  retain only a path and an opaque token, up to 512 paths in the one active view. No process, watcher or idle loop
-  is added. Leaving the view drops the grants. The screen releases its element's source.
-- A refused grant returns `error.media.path` (outside or protected), `error.media.closed` (inactive view),
-  `error.media.gone` (missing, unsafe or wrong bytes), or `error.media.limit` (capacity reached). Protocol
-  refusals include the key in X-Faber-Media-Error. An element error can re-request the grant to detect a missing
-  replacement. A malformed or unsatisfiable range returns 416 and `error.media.range`.
 
 ## Files written by the agent
 
