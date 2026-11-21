@@ -2879,7 +2879,7 @@ export const es: Messages = {
   'notes.455.fixed': 'Con Seguir solo activado, una conversación que espera su propio comando ya no despierta antes de tiempo ni pasa de su límite de 15 minutos.',
   'notes.456.fixed': 'El trabajo en Codex se reanuda solo cuando su servicio en segundo plano se queda callado o se detiene, y Detener sigue llegando.',
   'notes.457.new': "Puedes probar tus propias extensiones en el navegador de Faber: activa el Modo de desarrollador para extensiones en Ajustes > Privacidad y luego carga, recarga o quita una carpeta de extensión desde el menú Más del navegador. Funcionan en un perfil aparte, sin tus inicios de sesión.",
-  'notes.457.fixed': "Pulsar Intro en la barra de direcciones del navegador de Faber vuelve a abrir la página que escribiste, y las palabras que no son una dirección se buscan en Google.",
+  'notes.458.fixed': "Pulsar Intro en la barra de direcciones del navegador de Faber vuelve a abrir la página que escribiste, y las palabras que no son una dirección se buscan en Google.",
   'update.checking': 'Buscando una actualización…',
   'set.updateCheck': "Buscar actualizaciones",
   'set.updateCheckHint': "Busca una versión nueva ahora.",
