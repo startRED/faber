@@ -49,6 +49,7 @@ export function Running(props: {
   agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
+  extensionsDeveloperMode?: boolean;
   visual?: { answer: VisualAnswer; open: OpenVisual };
   /** The quick question on the side (R250), opened from the topbar, Ctrl+; or `/btw`, shown the same way. */
   aside?: { conversation?: Conversation; options: Option[] };
@@ -310,7 +311,7 @@ export function Running(props: {
           </Show>}>
             {(aside) => <QuickQuestion conversation={aside().conversation} options={aside().options} onClose={props.onClose} onTell={(text) => props.onTell?.(text)} />}
           </Show>}>
-            {(site) => <SitePane site={site()} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
+            {(site) => <SitePane site={site()} onClose={props.onClose} wide={props.wide} onWide={props.onWide} extensionsDeveloperMode={props.extensionsDeveloperMode} />}
           </Show>
           }>{(visual) => <VisualPane answer={visual().answer} open={visual().open} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>
         }

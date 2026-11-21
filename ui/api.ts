@@ -629,6 +629,7 @@ export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'no
 export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
 export interface Settings {
   blockedHosts?: string[];
+  extensionsDeveloperMode?: boolean;
   appearance?: Appearance;
   userHooks?: boolean;
   permissions?: PermissionMode;
@@ -1219,6 +1220,9 @@ export const api = {
   siteSize: (pick: boolean, size?: string | null) =>
     invoke<{ now: string | null; sizes: { name: string; screen: 'pc' | 'mac' | 'tablet' | 'phone'; width: number; height: number }[] }>('site_size', { pick, size: size ?? null }),
   siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
+  siteExtensionMode: (enabled: boolean) => invoke<boolean>('site_extensions_mode', { enabled }),
+  siteExtensions: (id: string, action: 'list' | 'pick' | 'reload' | 'remove', folder?: string) =>
+    invoke<{ name: string; version: string; folder: string; failed?: boolean }[]>('site_extensions', { id, action, folder }),
   /** Back, forward or reload in Faber's browser, on that conversation's page only. */
   siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
   /** A conversation's tabs in Faber's browser, kept in its file (`engine-core/src/browser/tabs.rs`); null when it never had a page. */

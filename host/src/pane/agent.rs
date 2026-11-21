@@ -727,6 +727,25 @@ impl Drop for Abort {
 pub struct PaneBrowser(pub Arc<Pane>);
 
 impl Browser for PaneBrowser {
+    fn supports_extensions(&self) -> bool {
+        self.0.supports_extensions()
+    }
+
+    fn forget_extensions(&self, conversation: String) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        let pane = self.0.clone();
+        Box::pin(async move { pane.forget_extensions(conversation).await })
+    }
+
+    fn extensions(
+        &self,
+        conversation: String,
+        action: &'static str,
+        folder: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> {
+        let pane = self.0.clone();
+        Box::pin(async move { pane.extensions(&conversation, action, folder.as_deref()).await })
+    }
+
     fn act(&self, conversation: String, tab: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>> {
         let pane = self.0.clone();
         // The call runs as a task of its own on the pane's runtime, so the engine giving up on it is what ends it.

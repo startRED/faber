@@ -1805,6 +1805,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const runningColumn = () => (
     <Running
       items={items()}
+      extensionsDeveloperMode={state().settings.extensionsDeveloperMode}
       agentAsks={agentAsks()}
       onOpenAsk={(id) => { const c = state().conversations.find((item) => item.id === id); if (c) { if (!docked()) closeColumn(); openSummary(c); } }}
       done={done()}

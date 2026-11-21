@@ -129,7 +129,7 @@ impl Relay {
                     return Err(GONE.into());
                 }
                 if !matches!(op, PaneOp::Open { .. })
-                    && !matches!(&op, PaneOp::Call { method, .. } if method == "Faber.appControl")
+                    && !matches!(&op, PaneOp::Call { method, .. } if matches!(method.as_str(), "Faber.appControl" | "Faber.extensionMode" | "Faber.extensions" | "Faber.forgetExtensions"))
                     && !link.open.contains(&view)
                 {
                     return Err("not open".into());
@@ -193,7 +193,15 @@ impl Drop for Forget<'_> {
 
 impl Driver for Relay {
     fn open(&self, view: View, profile: String) -> BoxFuture<'_, Res<()>> {
-        Box::pin(async move { self.ask(view, PaneOp::Open { profile }).await.map(drop) })
+        Box::pin(async move { self.ask(view, PaneOp::Open { profile, development: None }).await.map(drop) })
+    }
+
+    fn supports_extensions(&self) -> bool {
+        true
+    }
+
+    fn open_developer(&self, view: View, profile: String, scope: String) -> BoxFuture<'_, Res<()>> {
+        Box::pin(async move { self.ask(view, PaneOp::Open { profile, development: Some(scope) }).await.map(drop) })
     }
 
     fn close(&self, view: View) {
@@ -358,7 +366,7 @@ mod tests {
             async move { relay.open(view, "faber-pane-x".into()).await }
         });
         let (id, shown, op) = pane_order(next(orders).await);
-        assert_eq!((shown, op), (view_of(view), PaneOp::Open { profile: "faber-pane-x".into() }));
+        assert_eq!((shown, op), (view_of(view), PaneOp::Open { profile: "faber-pane-x".into(), development: None }));
         relay.answer(id.expect("a call has an id"), Ok(Value::Null));
         opening.await.unwrap().unwrap();
     }

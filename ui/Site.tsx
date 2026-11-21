@@ -2,6 +2,8 @@ import { type Accessor, createEffect, createResource, createSignal, For, Index, 
 import { api, errorText, type Message, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
+import { SiteExtensions } from './SiteExtensions.tsx';
+import { hasBrowserExtensions } from './shell.ts';
 import { type MenuItem, openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { StateGlyph } from './icons/kinds.tsx';
@@ -429,7 +431,7 @@ function paintedCover(box: HTMLElement, departing: boolean): boolean {
 /** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
  * the person anywhere on the web; with no page yet, only the field shows. */
-export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void }) {
+export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void; extensionsDeveloperMode?: boolean }) {
   let box: HTMLDivElement | undefined;
   // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
   let id = boxId();
@@ -657,6 +659,13 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
       run: () => void pickSize(name),
     })), from);
   const [signingIn, setSigningIn] = createSignal(false);
+  const [extensions, setExtensions] = createSignal(false);
+  const developerMode = () => hasBrowserExtensions && props.extensionsDeveloperMode === true;
+  createEffect(on(developerMode, () => {
+    setSigningIn(false);
+    setExtensions(false);
+    if (!blank()) void step('new');
+  }, { defer: true }));
   let address: HTMLInputElement | undefined;
   const addressKeys = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -830,7 +839,8 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
       });
     }
     // The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists.
-    if (profiles()?.length) items.push({ id: 'signin', label: t('cookies.open'), run: () => setSigningIn(true) });
+    if (developerMode()) items.push({ id: 'extensions', label: t('site.extensions'), run: () => setExtensions(true) });
+    else if (profiles()?.length) items.push({ id: 'signin', label: t('cookies.open'), run: () => setSigningIn(true) });
     items.push({ id: 'clear', label: t('site.clear'), danger: true, confirm: t('site.clear.confirm'), run: () => void clear() });
     openMenu(e, items, from);
   };
@@ -950,6 +960,9 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
           <span>{t('site.preview', { size: sizeWords(sizes()?.now) })}</span>
           <button class="btn site-fit" disabled={sizing()} onClick={() => void pickSize(null).then((fitted) => fitted && address?.focus())}>{t('site.size.fit')}</button>
         </div>
+      </Show>
+      <Show when={developerMode() && extensions()}>
+        <SiteExtensions conversationId={props.site.conversationId} onClose={() => setExtensions(false)} />
       </Show>
       <Show when={signingIn()}>
         <Cookies conversationId={props.site.conversationId} onClose={() => setSigningIn(false)} />

@@ -19,6 +19,7 @@ fn read(path: &str) -> String {
 fn settings_keys() -> Vec<String> {
     let every = Settings {
         blocked_hosts: Some(Vec::new()),
+        extensions_developer_mode: Some(true),
         appearance: Some(Default::default()),
         user_hooks: Some(true),
         permissions: Some(Permissions::Ask),

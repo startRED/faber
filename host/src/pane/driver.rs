@@ -61,9 +61,8 @@ pub enum ViewEvent {
 ///
 /// What the shell must keep, since the host's rules rest on it:
 /// - A view opens at `about:blank`, parked, and reports nothing for that first page.
-/// - Its profile is private and only in memory: no cookie, login, storage or cache reaches the disk, and what it holds is
-///   gone once the last view opened on that profile closes. The host names a profile once, per pane it makes, and never
-///   gives the same name again, so a pane made later starts clean.
+/// - Its ordinary profile is private and only in memory. The host names a profile once per pane. A separately authorized
+///   developer profile may write site data to disk, is scoped to a conversation, and never inherits imported sign-ins.
 /// - Only web pages load, and the shell asks [`allowed_url`](super::allowed_url) for every navigation of the main frame,
 ///   whoever starts it (the page, a redirect, the back button) and cancels one that is not. A view opens no new window and
 ///   starts no download: both are refused without a word to the host.
@@ -73,6 +72,12 @@ pub enum ViewEvent {
 pub trait Driver: Send + Sync + 'static {
     /// Opens `view`, blank and parked, on the private profile `profile`; the second view is given the first's profile.
     fn open(&self, view: View, profile: String) -> BoxFuture<'_, Res<()>>;
+    fn supports_extensions(&self) -> bool {
+        false
+    }
+    fn open_developer(&self, _view: View, _profile: String, _scope: String) -> BoxFuture<'_, Res<()>> {
+        Box::pin(async { Err("error.browser.extensionsUnavailable".into()) })
+    }
     /// Closes `view` and everything its page holds. Does nothing for a view that is not open.
     fn close(&self, view: View);
     /// Moves `view`. Cheap: it never waits for the page.

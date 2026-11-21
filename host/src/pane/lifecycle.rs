@@ -53,7 +53,15 @@ impl Pane {
                 profile.ok_or(MOVED)?
             }
         };
-        tokio::time::timeout(CALL, self.driver.open(self.view, profile.clone())).await.map_err(|_| "Faber's browser did not open")??;
+        let extension_gate = self.extension_gate.lock().await;
+        let developer = self.driver.supports_extensions() && self.home.extensions_enabled().await;
+        let open = if developer {
+            self.sync_extensions(true).await?;
+            self.driver.open_developer(self.view, profile.clone(), conversation.to_string())
+        } else {
+            self.driver.open(self.view, profile.clone())
+        };
+        tokio::time::timeout(CALL, open).await.map_err(|_| "Faber's browser did not open")??;
         let made = {
             let mut s = crate::lock(&self.state);
             s.open = true;
@@ -77,9 +85,10 @@ impl Pane {
             s.brought = true;
             s.held.iter().find(|h| h.conversation == conversation).map(|h| h.cookies.clone())
         };
-        if let Some(cookies) = held {
+        if !developer && let Some(cookies) = held {
             self.set_cookies(&cookies).await;
         }
+        drop(extension_gate);
         if crate::lock(&self.state).made != made || !self.is_open() || !self.still_behind() {
             return Err("the browser closed".into());
         }

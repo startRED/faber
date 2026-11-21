@@ -893,7 +893,7 @@ mod tests {
             async move { driver.open(View::Main, "faber-pane-1".into()).await }
         });
         let asked = until(&sink, 1).await;
-        let [Order::Pane { id: Some(id), view: PaneView::Main, op: PaneOp::Open { profile } }] = asked.as_slice() else {
+        let [Order::Pane { id: Some(id), view: PaneView::Main, op: PaneOp::Open { profile, .. } }] = asked.as_slice() else {
             panic!("{asked:?}")
         };
         assert_eq!(profile, "faber-pane-1");

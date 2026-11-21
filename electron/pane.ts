@@ -3,18 +3,18 @@
 // pipes (`Order::Pane` in host/src/wire.rs) and this file opens, moves, loads and asks, and reports what the views tell. The
 // contract is the doc of `Driver` in host/src/pane/driver.rs; the Tauri pane (`src-tauri/src/pane/`) is the behaviour to match.
 //
-// A view is a `WebContentsView` in the main window, on a private in-memory profile: no cookie, login, storage or cache reaches
-// the disk. It has no preload, no Node, a sandbox and an isolated context; it opens no window, starts no download, asks for no
-// permission and loads only web pages. Parked, it sits outside the window where Chromium keeps drawing it.
+// A view is a `WebContentsView` in the main window. Ordinary profiles are in memory; extension development uses a separate
+// disk-backed session. Views have no preload or Node, use a sandbox and an isolated context, and open no popups or downloads.
 
 import { type BrowserWindow, type Rectangle, type Session, session, type WebContents, WebContentsView } from 'electron';
 import { allowedRequest, allowedUrl, CALLS, plainProfile } from './panerules.ts';
+import { PaneExtensions } from './pane-extensions.ts';
 
 type Name = 'main' | 'behind';
 
 /** What the host orders (`Order::Pane`). */
 export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
-  | { op: 'open'; profile: string }
+  | { op: 'open'; profile: string; development?: string }
   | { op: 'close' }
   | { op: 'place'; x: number; y: number; width: number; height: number }
   | { op: 'park' }
@@ -36,6 +36,9 @@ export type PaneHost = {
   /** The window the views live in, when one is open. */
   window: () => BrowserWindow | null;
   appControl?: (conversation: string, input: unknown) => Promise<unknown>;
+  extensionStorage?: () => string | undefined;
+  extensionRegistry?: string;
+  extensionBlockedFolders?: readonly string[];
   /** Tells the host something. */
   note: (note: PaneNote) => void;
 };
@@ -48,6 +51,7 @@ export const SCREEN_CHANNELS: ReadonlySet<string> = new Set(['faber:site', 'fabe
 type Entry = {
   name: Name;
   profile: string;
+  development?: string;
   /** What keeps the profile in use while this view is open. */
   claim: object;
   view: WebContentsView;
@@ -62,7 +66,7 @@ type Entry = {
 };
 
 /** A profile in use: the session behind it and the views on it. */
-type Held = { session: Session; users: Set<object>; ready: Promise<void> };
+type Held = { session: Promise<Session>; users: Set<object>; development?: string };
 
 function isOrder(value: unknown): value is PaneOrder {
   const order = value as { kind?: unknown; view?: unknown; op?: unknown; id?: unknown } | null;
@@ -90,12 +94,17 @@ async function wipe(profile: Session): Promise<void> {
 }
 
 /** A session no page can ask anything of: no permission, no device, no download. Its certificate errors keep Chromium's answer. */
-function guard(profile: Session, saw: (contents: WebContents, line: string) => void): void {
+function guard(profile: Session, saw: (contents: WebContents, line: string) => void, permits?: (url: string) => boolean): void {
   profile.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
   profile.setPermissionCheckHandler(() => false);
   profile.setDevicePermissionHandler(() => false);
   profile.setSpellCheckerEnabled(false);
-  profile.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !allowedRequest(details.url) }));
+  profile.webRequest.onBeforeRequest(({ url }, callback) => {
+    const allowed = permits
+      ? permits(url) && (url.startsWith('chrome-extension:') || allowedRequest(url))
+      : allowedRequest(url);
+    callback({ cancel: !allowed });
+  });
   profile.on('will-download', (event, item, contents) => {
     event.preventDefault();
     saw(contents, `download blocked: ${item.getFilename().slice(0, 80)}`);
@@ -119,8 +128,10 @@ const plain = (text: string): string => text.replace(/\b(?:https?|data|blob|java
 
 export class Pane {
   private readonly host: PaneHost;
+  private readonly extensions: PaneExtensions;
   private navigation = 0;
   private readonly views = new Map<Name, Entry>();
+  private readonly opening = new Map<Name, Promise<void>>();
   /** The profiles the host named and the views on them. */
   private readonly held = new Map<string, Held>();
   /**
@@ -128,13 +139,29 @@ export class Pane {
    * closed is wiped and kept here, and the next one the host names is made on it: the session is private to one profile at a
    * time, and a pane made later starts clean (the wipe is awaited before its view opens).
    */
-  private readonly spare: { session: Session; ready: Promise<void> }[] = [];
+  private readonly spare: Session[] = [];
   private slots = 0;
   /** Counts the opens and closes of a view, so an open that was overtaken by a close never makes its view. */
   private readonly epoch: Record<Name, number> = { main: 0, behind: 0 };
 
   constructor(host: PaneHost) {
     this.host = host;
+    this.extensions = new PaneExtensions(host.extensionStorage ?? (() => undefined), (folder, permits) => {
+      const made = session.fromPath(folder, { cache: false });
+      guard(made, this.saw, permits);
+      return made;
+    }, wipe, host.extensionRegistry, host.extensionBlockedFolders);
+  }
+
+  private readonly saw = (contents: WebContents, line: string): void => {
+    for (const entry of this.views.values()) if (entry.contents === contents) this.tell(entry, { kind: 'saw', line });
+  };
+
+  stopExtensions(): Promise<void> {
+    const cleared = this.extensions.mode(false);
+    for (const entry of this.views.values()) if (entry.development) this.gone(entry);
+    for (const [profile, held] of this.held) if (held.development) this.held.delete(profile);
+    return cleared;
   }
 
   /** Whether `contents` is one of the pane's views: nothing the screen may ask of the shell is asked from there. */
@@ -192,11 +219,27 @@ export class Pane {
 
   private run(order: PaneOrder): Promise<unknown> {
     switch (order.op) {
-      case 'open':
-        return this.open(order.view, order.profile);
+      case 'open': {
+        const pending = this.open(order.view, order.profile, order.development);
+        this.opening.set(order.view, pending);
+        return pending.finally(() => {
+          if (this.opening.get(order.view) === pending) this.opening.delete(order.view);
+        });
+      }
       case 'load':
-        return Promise.resolve(this.load(order.view, order.url));
+        return this.load(order.view, order.url);
       case 'call':
+        if (order.method === 'Faber.extensionMode') {
+          const params = order.params as { enabled?: unknown } | null;
+          if (typeof params?.enabled !== 'boolean') throw new Error('invalid extension mode');
+          return params.enabled ? this.extensions.mode(true) : this.stopExtensions();
+        }
+        if (order.method === 'Faber.extensions') return this.extensions.act(order.params);
+        if (order.method === 'Faber.forgetExtensions') {
+          const scope = (order.params as { scope?: unknown } | null)?.scope;
+          for (const entry of this.views.values()) if (entry.development && entry.development === scope) this.gone(entry);
+          return this.extensions.forget(scope);
+        }
         if (order.method === 'Faber.appControl') {
           const p = order.params as {conversation: string; input: unknown};
           if (!this.host.appControl) throw new Error('app control unavailable');
@@ -217,38 +260,42 @@ export class Pane {
   }
 
   /** A session for a profile the host just named: the one already on it, or a wiped spare, or a new one. */
-  private profile(name: string): Held {
+  private profile(name: string, development?: string): Held {
     const known = this.held.get(name);
     if (known) return known;
-    let spare = this.spare.pop();
-    if (!spare) {
+    let pending: Promise<Session>;
+    if (development) {
+      pending = this.extensions.acquire(development);
+    } else {
       // A name without `persist:` is a profile in memory only.
-      const made = session.fromPartition(`faber-pane-slot-${++this.slots}`);
-      guard(made, (contents, line) => {
-        for (const entry of this.views.values()) if (entry.contents === contents) this.tell(entry, { kind: 'saw', line });
-      });
-      spare = { session: made, ready: Promise.resolve() };
+      let made = this.spare.pop();
+      if (!made) {
+        made = session.fromPartition(`faber-pane-slot-${++this.slots}`);
+        guard(made, this.saw);
+      }
+      pending = Promise.resolve(made);
     }
-    const held: Held = { session: spare.session, users: new Set(), ready: spare.ready };
+    const held: Held = { session: pending, users: new Set(), development };
     this.held.set(name, held);
     return held;
   }
 
-  private async open(name: Name, profile: string): Promise<void> {
+  private async open(name: Name, profile: string, development?: string): Promise<void> {
     if (!plainProfile(profile)) throw new Error('the profile name is not valid');
+    if (development !== undefined) profile = 'development:' + this.extensions.scope(development);
     // A view opened again replaces the one before: an open the host gave up on may still have made it.
     this.close(name);
     const mine = this.epoch[name];
-    const held = this.profile(profile);
+    const held = this.profile(profile, development);
     const claim = {};
     held.users.add(claim);
     try {
-      await held.ready;
+      const session = await held.session;
       const window = this.host.window();
-      if (this.epoch[name] !== mine || !window || window.isDestroyed()) throw new Error("Faber's window is closed");
+      if (this.epoch[name] !== mine || this.held.get(profile) !== held || !window || window.isDestroyed()) throw new Error('the browser closed');
       const view = new WebContentsView({
         webPreferences: {
-          session: held.session,
+          session,
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
@@ -265,21 +312,12 @@ export class Pane {
         },
       });
       const contents = view.webContents;
-      const entry: Entry = { name, profile, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '', navigation: 0 };
+      const entry: Entry = { name, profile, development, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '', navigation: 0 };
       this.views.set(name, entry);
       this.guard(entry);
       view.setBounds(PARKED);
       window.contentView.addChildView(view);
-      contents.debugger.attach('1.3');
-      // Interception keeps Chromium's native file chooser from opening for pane pages.
-      await contents.debugger.sendCommand('Page.enable');
-      this.listen(entry);
-      await contents.debugger.sendCommand('Network.enable', { maxTotalBufferSize: 1, maxResourceBufferSize: 1 });
-      await contents.debugger.sendCommand('Runtime.enable');
-      await contents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true, cancel: true });
-      // Pages are told the browser they would have met anywhere, not the shell they run in.
-      contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|Faber)\/\S+/gi, ''));
-      await contents.loadURL('about:blank');
+      await this.initialize(entry);
       if (this.views.get(name) !== entry || !entry.open) throw new Error('the browser closed');
     } catch (failure) {
       // The view, if it was made, closes with the profile's claim; an open that was overtaken leaves what is not its own.
@@ -287,6 +325,22 @@ export class Pane {
       this.leave(profile, claim);
       throw failure;
     }
+  }
+
+  private async initialize(entry: Entry): Promise<void> {
+    const { contents } = entry;
+    // The first navigation starts the renderer before the DevTools domains wait for it.
+    await contents.loadURL('about:blank');
+    if (!entry.open) throw new Error('the browser closed');
+    contents.debugger.attach('1.3');
+    // Interception keeps Chromium's native file chooser from opening for pane pages.
+    await contents.debugger.sendCommand('Page.enable');
+    this.listen(entry);
+    await contents.debugger.sendCommand('Network.enable', { maxTotalBufferSize: 1, maxResourceBufferSize: 1 });
+    await contents.debugger.sendCommand('Runtime.enable');
+    await contents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true, cancel: true });
+    // Pages are told the browser they would have met anywhere, not the shell they run in.
+    contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|Faber)\/\S+/gi, ''));
   }
 
   /** Everything a view refuses, reports or survives; all silent, since the host's rules decided what is worth a word. */
@@ -383,16 +437,22 @@ export class Pane {
     for (const entry of this.views.values()) if (entry.open) entry.view.setBounds(entry.bounds);
   }
 
-  private load(name: Name, url: string): void {
-    const entry = this.need(name);
+  private async load(name: Name, url: string): Promise<void> {
     if (!allowedUrl(url)) throw new Error("only web pages open in Faber's browser");
+    const epoch = this.epoch[name];
+    await this.opening.get(name);
+    if (this.epoch[name] !== epoch) throw new Error('the browser closed');
+    const entry = this.need(name);
     // The page's end comes later as `finished`; a load that fails is reported there too.
-    entry.contents.loadURL(url).catch(() => {});
+    void entry.contents.loadURL(url).catch(() => {});
   }
 
   private async call(name: Name, method: string, params: unknown): Promise<unknown> {
     const entry = this.need(name);
     if (!CALLS.has(method)) throw new Error('that DevTools call is not one Faber makes');
+    if (entry.development && (method === 'Network.setCookie' || method === 'Network.setCookies')) {
+      throw new Error('sign-ins cannot be imported into an extension profile');
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -413,10 +473,15 @@ export class Pane {
 
   private async clear(name: Name): Promise<void> {
     const entry = this.need(name);
+    if (entry.development) return this.extensions.clear(entry.development);
     const held = this.held.get(entry.profile);
     if (held) {
-      held.ready = held.ready.then(() => wipe(held.session));
-      await held.ready;
+      const clean = held.session.then(async (session) => {
+        await wipe(session);
+        return session;
+      });
+      held.session = clean;
+      await clean;
     }
   }
 
@@ -444,9 +509,16 @@ export class Pane {
     if (!held || !held.users.delete(claim)) return;
     if (held.users.size > 0) return;
     this.held.delete(profile);
-    const ready = held.ready.then(() => wipe(held.session));
+    if (held.development) {
+      void this.extensions.release(held.development).catch(() => {});
+      return;
+    }
+    const ready = held.session.then(async (session) => {
+      await wipe(session);
+      return session;
+    });
     // A failed cleanup retires this session instead of sharing its data with another profile.
-    void ready.then(() => this.spare.push({ session: held.session, ready: Promise.resolve() }), () => {});
+    void ready.then((session) => this.spare.push(session), () => {});
   }
 
   /** The window closed: its views are gone with it, and the host hears so before they are dropped. */

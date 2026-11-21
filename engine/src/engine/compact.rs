@@ -450,6 +450,7 @@ impl Core {
     /// with this process: nothing would ever hear its end.
     pub(super) fn retire(&mut self, conv: &str) -> Option<Live> {
         self.settings_changes.remove(conv);
+        self.extension_loads.remove(conv);
         self.revoke_replacement(conv);
         self.release_codex_preparation(conv);
         let live = self.live.remove(conv)?;

@@ -617,6 +617,9 @@ table! {
     /// A theme file comes from other people, so an appearance is checked here before anything is saved.
     Write Ask fn save_settings(h, patch: Settings) -> SavedSettings [Failure] {
         let mut patch = patch;
+        if patch.extensions_developer_mode.is_some() {
+            return Err(Failure::key("error.host.badArgs"));
+        }
         if let Some(map) = &patch.appearance {
             patch.appearance = Some(look::validated(map)?.0.to_map());
         }
@@ -999,6 +1002,39 @@ table! {
         h.pane()?.site_park(load, box_id).await
     }
     /// The person opens a page from a reply's card in the browser pane; it is that conversation's page from then on.
+    Window Screen fn site_extensions_mode(h, enabled: bool) -> bool {
+        let pane = h.pane().map_err(|_| "error.browser.extensionsUnavailable")?;
+        pane.extension_mode(enabled, || {
+            h.engine.save_settings(Settings { extensions_developer_mode: Some(enabled), ..Settings::default() }).map(drop)
+        }).await?;
+        Ok(enabled)
+    }
+    Window Screen fn site_extensions(h, id: String, action: String, folder: Option<String>) -> Value {
+        let pane = h.pane().map_err(|_| "error.browser.extensionsUnavailable")?;
+        pane.extensions_available().await?;
+        if h.engine.read_window(&id, 1).is_none() {
+            return Err("error.browser.extensionsFailed".into());
+        }
+        let (action, folder) = match (action.as_str(), folder) {
+            ("list", None) => ("list", None),
+            ("reload", Some(folder)) => ("reload", Some(folder)),
+            ("remove", Some(folder)) => ("remove", Some(folder)),
+            ("pick", None) => {
+                match picked(h.shell.pick_folder().await, "error.browser.extensionsFailed").map_err(|failure| failure.key)? {
+                    Some(path) => ("load", Some(path.into_os_string().into_string().map_err(|_| "error.browser.extensionsFailed")?)),
+                    None => ("list", None),
+                }
+            }
+            _ => return Err("error.host.badArgs".into()),
+        };
+        pane.extensions(&id, action, folder.as_deref()).await.map_err(|why| {
+            if matches!(why.as_str(), "error.browser.extensionsUnavailable" | "error.browser.extensionsDisabled") {
+                why
+            } else {
+                "error.browser.extensionsFailed".into()
+            }
+        })
+    }
     Window Screen fn site_open(h, id: String, url: String) -> bool {
         h.pane()?.site_open(id, url).await
     }

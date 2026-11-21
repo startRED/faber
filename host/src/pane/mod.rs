@@ -19,6 +19,7 @@
 
 mod agent;
 mod driver;
+mod extensions;
 pub mod firefox;
 mod home;
 mod lifecycle;
@@ -63,6 +64,7 @@ pub struct Pane {
     noted: tokio::sync::watch::Sender<u64>,
     /// Held from a navigation to the last read of its page, so two calls never read each other's page.
     opening: tokio::sync::Mutex<()>,
+    extension_gate: Arc<tokio::sync::Mutex<()>>,
     /// The person is looking at the pane: it is theirs until they go back.
     looking: tokio::sync::watch::Sender<bool>,
     /// Held while an action of the agent changes the page: the person takes the pane only when it is over.
@@ -208,8 +210,9 @@ impl Pane {
     /// The first pane, with the agent's pane behind it.
     pub fn new(driver: Arc<dyn Driver>, home: Arc<dyn Home>, runtime: Handle) -> Arc<Pane> {
         let memos = Memos::default();
-        let behind = Pane::made(&driver, &home, &runtime, View::Behind, rules::BEHIND_IDLE, None, memos.clone());
-        let main = Pane::made(&driver, &home, &runtime, View::Main, rules::IDLE, Some(behind.clone()), memos);
+        let extension_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let behind = Pane::made(&driver, &home, &runtime, View::Behind, rules::BEHIND_IDLE, None, (memos.clone(), extension_gate.clone()));
+        let main = Pane::made(&driver, &home, &runtime, View::Main, rules::IDLE, Some(behind.clone()), (memos, extension_gate));
         let _ = behind.front_of.set(Arc::downgrade(&main));
         main
     }
@@ -221,7 +224,7 @@ impl Pane {
         view: View,
         idle: Duration,
         behind: Option<Arc<Pane>>,
-        memos: Memos,
+        (memos, extension_gate): (Memos, Arc<tokio::sync::Mutex<()>>),
     ) -> Arc<Pane> {
         Arc::new(Pane {
             driver: driver.clone(),
@@ -235,6 +238,7 @@ impl Pane {
             loads: tokio::sync::watch::channel((0, 0)).0,
             noted: tokio::sync::watch::channel(0).0,
             opening: tokio::sync::Mutex::new(()),
+            extension_gate,
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
             rounding: tokio::sync::Mutex::new(()),

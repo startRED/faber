@@ -59,8 +59,17 @@ impl Reach {
 
 /// The settings only the person changes on the screen, even through `save_settings`: the permission mode and what decides
 /// it, hooks that run commands, full trust, updates from the preview channel and starting with the system.
-pub const PERSON_SETTINGS: &[&str] =
-    &["permissions", "userHooks", "faberTrust", "grantsEpoch", "permissionsRevision", "beforePlan", "previews", "autostart"];
+pub const PERSON_SETTINGS: &[&str] = &[
+    "permissions",
+    "userHooks",
+    "faberTrust",
+    "grantsEpoch",
+    "permissionsRevision",
+    "beforePlan",
+    "previews",
+    "autostart",
+    "extensionsDeveloperMode",
+];
 
 /// Refusals, as the keys a caller reads.
 pub const SCREEN_ONLY: &str = "error.reach.screen";
@@ -193,6 +202,9 @@ mod tests {
             assert_eq!(check(&caller, "screen_ready", Reach::Screen, &json!({}), families()), Err(SCREEN_ONLY));
             let raise = json!({"patch": {"language": "de", "permissions": "dontAsk"}});
             assert_eq!(check(&caller, "save_settings", Reach::Ask, &raise, families()), Err(PERSON_ONLY));
+            let extensions = json!({"patch": {"extensionsDeveloperMode": true}});
+            assert_eq!(check(&caller, "save_settings", Reach::Ask, &extensions, families()), Err(PERSON_ONLY));
+            assert_eq!(check(&caller, "site_extensions_mode", Reach::Screen, &json!({"enabled": true}), families()), Err(SCREEN_ONLY));
         }
         assert_eq!(check(&Caller::Screen, "answer", Reach::Person, &json!({}), families()), Ok(()));
         assert_eq!(check(&Caller::Screen, "save_settings", Reach::Ask, &json!({"patch": {"permissions": "ask"}}), families()), Ok(()));

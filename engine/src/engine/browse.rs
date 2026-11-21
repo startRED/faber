@@ -29,6 +29,9 @@ impl Core {
             };
             return self.answer_browse(conv, sid, &call, false, why.into(), Vec::new());
         }
+        if input["action"].as_str().is_some_and(|action| action.starts_with("extensions_")) {
+            return self.browse_extensions(conv, sid, call, input);
+        }
         let opened = match (self.browser.clone(), browser::checked_request(&input)) {
             (None, _) => Err("Faber's browser is not available here.".to_string()),
             (_, Err(why)) => Err(format!("Faber's browser did not do it: {why}.")),

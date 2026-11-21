@@ -322,6 +322,9 @@ impl Core {
         allow: bool,
         always: bool,
     ) -> Option<Result<(), String>> {
+        if let Some(answered) = self.answer_extension(conv, turn_id, request_id, allow) {
+            return Some(answered);
+        }
         if let Some(answered) = self.answer_setting(conv, turn_id, request_id, allow, always) {
             return Some(answered);
         }

@@ -5,11 +5,14 @@
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, protocol, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AppControl, appControlSession } from './app-control.ts';
 import { isolatedTestData } from './app-control-data.ts';
 import { Pane, SCREEN_CHANNELS } from './pane.ts';
+import { resetExtensionStorage } from './pane-extensions.ts';
 import { Sidecar } from './sidecar.ts';
 import { readyWayback, startWayback } from './wayback.ts';
 import { migrateDrafts } from './migrate.ts';
@@ -74,9 +77,25 @@ if (process.platform === 'win32') app.setAppUserModelId('io.github.startred.fabe
 
 let win: BrowserWindow | null = null;
 let host: Sidecar | null = null;
+let extensionStorage: string | undefined;
+const extensionRegistry = path.resolve(dataDir, 'pane-extension-registry.json');
+const extensionProfileRoot = path.resolve(dataDir, 'pane-extension-profiles');
+const extensionBlockedFolders = [
+  ...['.codex', '.claude', '.claude.json', '.gemini', '.config/gcloud'].map((name) => path.resolve(homedir(), name)),
+  ...[process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR, process.env.GEMINI_CLI_HOME]
+    .filter((name): name is string => !!name?.trim()).map((name) => path.resolve(name.trim())),
+  extensionRegistry, extensionProfileRoot, app.getPath('userData'),
+];
 /** Faber's browser pane: the views the host orders (`electron/pane.ts`). */
 const apps = new AppControl(testmode.testing && isolatedTestData(process.env.FABER_DATA_DIR, path.join(app.getPath('appData'), 'Faber')), ORIGIN);
-const pane = new Pane({ window: () => win, note: (note) => host?.note(note), appControl: (conversation, input) => apps.act(conversation, input) });
+const pane = new Pane({
+  window: () => win,
+  note: (note) => host?.note(note),
+  appControl: (conversation, input) => apps.act(conversation, input),
+  extensionStorage: () => extensionStorage,
+  extensionRegistry,
+  extensionBlockedFolders,
+});
 
 /**
  * The hashes of the inline scripts dist/index.html ships: only the fixed loader that starts the screen's modules
@@ -346,10 +365,11 @@ app.on('before-quit', (event) => {
   // A refused draft close must leave the engine and tray usable too.
   if (win) { closingForQuit = true; win.close(); return; }
   stopping = true;
-  void host.stop(HOST_STOP_MS).then(() => {
+  void host.stop(HOST_STOP_MS).then(async () => {
     host = null;
     release();
     apps.closeAll();
+    await pane.stopExtensions().catch(() => console.error('faber: extension profile cleanup failed; the next start will retry.'));
     pane.closeAll();
     app.quit();
   }, (failure) => {
@@ -359,6 +379,12 @@ app.on('before-quit', (event) => {
 });
 
 void app.whenReady().then(async () => {
+  try {
+    await mkdir(dataDir, { recursive: true });
+    extensionStorage = await resetExtensionStorage(extensionProfileRoot);
+  } catch {
+    console.error('faber: extension profile storage unavailable.');
+  }
   readyWayback(dataDir);
   // The screen asks for nothing a browser grants: no camera, no notifications from the page, no geolocation, no devices.
   // The exceptions are the clipboard, which Copy and the right-click menu's Paste use (Tauri's window allowed it too).

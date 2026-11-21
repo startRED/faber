@@ -93,16 +93,33 @@ async fn blocked_hosts_are_validated_atomically_merged_and_kept_after_restart() 
 
 /// Records which tab each of the agent's calls acted in, and answers every one with the page it asked for.
 #[derive(Default)]
-struct Tabbed(std::sync::Mutex<Vec<(String, String)>>);
+struct Tabbed {
+    pages: std::sync::Mutex<Vec<(String, String)>>,
+    extensions: std::sync::Mutex<Vec<(String, &'static str, Option<String>)>>,
+}
 
 impl faber_engine::browser::Browser for Tabbed {
+    fn supports_extensions(&self) -> bool {
+        true
+    }
+
+    fn extensions(
+        &self,
+        conversation: String,
+        action: &'static str,
+        folder: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>> {
+        self.extensions.lock().unwrap().push((conversation, action, folder));
+        Box::pin(async { Ok(serde_json::json!([])) })
+    }
+
     fn act(
         &self,
         conversation: String,
         tab: String,
         request: faber_engine::browser::Request,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<faber_engine::browser::Page, String>> + Send>> {
-        self.0.lock().unwrap().push((conversation, tab));
+        self.pages.lock().unwrap().push((conversation, tab));
         let url = match request {
             faber_engine::browser::Request::Open(url) => url,
             _ => "https://example.org/agent".into(),
@@ -185,14 +202,36 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
     for (n, url) in ["https://bank.example/", "https://login.BANK.example.:8443/"].into_iter().enumerate() {
         let (said, ok) = browse(&mut pipe, 800 + n as u64, serde_json::json!({ "url": url })).await;
         assert!(!ok && said == "error.browser.blockedHost", "{said}");
-        assert!(browser.0.lock().unwrap().is_empty(), "a blocked address never reaches the pane");
+        assert!(browser.pages.lock().unwrap().is_empty(), "a blocked address never reaches the pane");
         assert_eq!(app.browser_tabs(&id), None, "a blocked address never creates a tab");
     }
 
     // Nothing of the agent's is open: an action has no page to act on, and never reaches the browser.
     let (said, ok) = browse(&mut pipe, 900, serde_json::json!({ "action": "read" })).await;
     assert!(!ok && said.contains("no page of yours is open"), "{said}");
-    assert!(browser.0.lock().unwrap().is_empty());
+    assert!(browser.pages.lock().unwrap().is_empty());
+
+    let (why, ok) = browse(&mut pipe, 910, serde_json::json!({"action":"extensions_list"})).await;
+    assert!(!ok && why == "error.browser.extensionsDisabled", "{why}");
+    assert!(browser.extensions.lock().unwrap().is_empty());
+    app.save_settings(Settings { extensions_developer_mode: Some(true), ..Default::default() }).unwrap();
+    std::fs::create_dir(folder.path().join("extension")).unwrap();
+    pipe.say(serde_json::json!({"id":911,"method":"item/tool/call","params":{"threadId":"main","turnId":"turn-main",
+        "callId":"call-911","tool":"browse","arguments":{"action":"extensions_load","folder":"extension"}}}))
+        .await;
+    let mut pending = None;
+    support::until("extension approval did not arrive", || {
+        let Some(message) = app.open(&id).and_then(|c| c.messages.last().cloned()) else { return false };
+        pending = message.permissions.iter().flatten().find(|p| p.tool == "BrowserExtensionLoad").map(|p| (message.id.clone(), p.clone()));
+        pending.is_some()
+    })
+    .await;
+    let (turn_id, card) = pending.unwrap();
+    assert!(browser.extensions.lock().unwrap().is_empty(), "full access still needs the person's approval");
+    app.answer(&id, &turn_id, &card.request_id, true, false).await.unwrap();
+    assert_eq!(wire(&pipe, |m| m["id"] == 911 && m.get("result").is_some()).await["result"]["success"], true);
+    assert_eq!(browser.extensions.lock().unwrap().as_slice(), &[(id.clone(), "load", card.input["folder"].as_str().map(str::to_string))]);
+    assert_eq!(app.browser_tabs(&id), None, "extension management needs no agent page");
 
     // The person is on a page of their own in front.
     let (_, mine) = app.browser_tab(&id, faber_engine::TabStep::New).unwrap();
@@ -203,7 +242,7 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
     assert!(ok, "{said}");
     let (said, ok) = browse(&mut pipe, 902, serde_json::json!({ "action": "read" })).await;
     assert!(ok, "{said}");
-    let calls = browser.0.lock().unwrap().clone();
+    let calls = browser.pages.lock().unwrap().clone();
     assert_eq!(calls.len(), 2);
     assert!(calls.iter().all(|(c, tab)| c == &id && tab == &calls[0].1), "{calls:?}");
     assert_ne!(calls[0].1, mine, "the agent's page opens in a tab of its own");
@@ -220,7 +259,7 @@ async fn the_agent_opens_and_acts_in_its_own_tab_never_on_the_page_the_person_is
     assert!(!ok && said.contains("no page of yours is open"), "{said}");
     let (_, ok) = browse(&mut pipe, 904, serde_json::json!({ "url": "https://docs.example.org/b" })).await;
     assert!(ok);
-    let last = browser.0.lock().unwrap().last().unwrap().1.clone();
+    let last = browser.pages.lock().unwrap().last().unwrap().1.clone();
     assert!(last != calls[0].1 && last != mine, "{last}");
     app.shutdown();
 }

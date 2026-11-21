@@ -606,6 +606,9 @@ impl Pane {
     }
 
     pub async fn cookie_import(self: &Arc<Self>, id: String, ticket: String, sites: Vec<String>) -> Res<usize> {
+        if self.driver.supports_extensions() && self.home.extensions_enabled().await {
+            return Err("error.browser.extensionsDisabledSignIn".into());
+        }
         self.import(&id, &ticket, &sites).await.map_err(str::to_string)
     }
 

@@ -5,7 +5,8 @@ import { AppearanceSection } from './Appearance.tsx';
 import { Fold, Group, Opt, PickMenu, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon } from './Glyphs.tsx';
-import { LANGUAGES, t } from './i18n.ts';
+import { failureText, LANGUAGES, t } from './i18n.ts';
+import { hasBrowserExtensions } from './shell.ts';
 import { openShortcuts } from './Shortcuts.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
@@ -342,6 +343,9 @@ export function Settings(props: Props) {
           <Match when={section() === 'privacy'}>
             <Group>
               <BlockedSites saved={props.saved} onSave={save} onError={props.onError} />
+              <Show when={hasBrowserExtensions}>
+                <ExtensionMode enabled={props.saved.extensionsDeveloperMode === true} />
+              </Show>
             </Group>
             <div class="st-card">
               <ul class="facts">
@@ -360,6 +364,27 @@ export function Settings(props: Props) {
       </div>
     </div>
   );
+}
+
+function ExtensionMode(props: { enabled: boolean }) {
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal<unknown>();
+  const save = async (enabled: boolean) => {
+    if (saving()) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.siteExtensionMode(enabled);
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <>
+    <Toggle id="set-extension-mode" label={t('set.extensionsDeveloperMode')} hint={t('set.extensionsDeveloperModeHint')} more={t('site.extensionsRisk')} checked={props.enabled} disabled={saving()} onChange={(enabled) => void save(enabled)} />
+    <Show when={error()}>{(failure) => <p role="alert">{failureText(failure())}</p>}</Show>
+  </>;
 }
 
 function BlockedSites(props: Pick<Props, 'saved' | 'onSave' | 'onError'>) {

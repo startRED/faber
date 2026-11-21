@@ -1775,6 +1775,9 @@ pub struct PaceNote {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    /// The person enabled a separate profile for testing unpacked browser extensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions_developer_mode: Option<bool>,
     /// Sites the browser must not open, in canonical host form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked_hosts: Option<Vec<String>>,

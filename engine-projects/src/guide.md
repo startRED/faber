@@ -28,7 +28,7 @@ Open with Ctrl+, or "Settings" at the bottom of the sidebar; Esc goes back. Five
 - "Projects": each project's "Checks" and "A separate copy for each conversation".
 - "Appearance": "Look" has six looks (default "Dark Room"; "Morning" is the light one), plus "Accent color", "Text size", "Motion", background, spacing, corners and fonts. Nothing applies until "Use this look"; "Back to default" restores it; "Look file" saves or opens a theme file.
 - "Accounts and limits": a card per AI with its plan and quota bars (5-hour and 7-day, with the reset time). "Manage accounts" connects or installs an AI. Faber never sees the login.
-- "Privacy": "Blocked sites" (sites Faber’s browser never opens), and three statements: no telemetry, history stays on this PC, logins never read.
+- "Privacy": "Blocked sites" (sites Faber’s browser never opens) and "Developer mode for extensions" (Electron only, off by default). The mode adds "Extensions" to the browser menu. Use "Load unpacked folder" to test a local extension in a profile that writes site data to disk and starts without the ordinary browser's sign-ins. Privacy also says that telemetry is off, history stays on this PC, and Faber never reads AI tool logins.
 
 Permission modes: "Ask" (every change waits for OK), "Accept edits" (edits run, commands may ask), "Plan" (plans, changes wait), "Auto" (the AI's own reviewer approves safe actions), "Full access" (the default: no cards, the whole computer). A change applies from the next message. "Reply style": "AI's own way", "Short", "Explained" or "My own words". "Web search" is "Off" or "Live" (Codex also has a cached copy).
 
@@ -123,6 +123,7 @@ Accounts and limits | Contas e limites | Cuentas y límites | Comptes et limites
 Manage accounts | Gerenciar contas | Gestionar cuentas | Gérer les comptes | Konten verwalten
 Privacy | Privacidade | Privacidad | Confidentialité | Datenschutz
 Blocked sites | Sites bloqueados | Sitios bloqueados | Sites bloqués | Gesperrte Websites
+Developer mode for extensions | Modo desenvolvedor para extensões | Modo de desarrollador para extensiones | Mode développeur pour les extensions | Entwicklermodus für Erweiterungen
 Ask | Perguntar | Preguntar | Demander | Nachfragen
 Accept edits | Aceitar edições | Aceptar ediciones | Accepter les modifications | Änderungen annehmen
 Plan | Planejar | Planificar | Planifier | Planen

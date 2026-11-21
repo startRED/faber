@@ -37,6 +37,7 @@ mod aside;
 mod auto;
 mod auto_archive;
 mod browse;
+mod browser_extensions;
 mod by_itself;
 mod carry_on;
 mod changes;
@@ -568,6 +569,8 @@ struct Core {
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
     installs: HashMap<String, toolbox::PendingChange>,
     settings_changes: HashMap<String, settings_change::PendingSetting>,
+    extension_loads: HashMap<String, browser_extensions::PendingExtension>,
+    extension_revision: u64,
     web_revision: u64,
     #[cfg(test)]
     settings_audit_barrier: Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>,
@@ -907,6 +910,8 @@ impl Engine {
                 node_missing: false,
                 installs: HashMap::new(),
                 settings_changes: HashMap::new(),
+                extension_loads: HashMap::new(),
+                extension_revision: 0,
                 web_revision: 0,
                 #[cfg(test)]
                 settings_audit_barrier: None,
@@ -2729,6 +2734,7 @@ impl Core {
                 .transpose()
                 .map_err(str::to_string)?
                 .or(before.blocked_hosts),
+            extensions_developer_mode: patch.extensions_developer_mode.or(before.extensions_developer_mode),
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),
@@ -2770,6 +2776,9 @@ impl Core {
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         if patch.web_search.is_some() {
             self.web_revision = self.web_revision.wrapping_add(1);
+        }
+        if patch.extensions_developer_mode.is_some() {
+            self.extension_revision = self.extension_revision.wrapping_add(1);
         }
         if let Some(receipt) = receipt {
             self.settle_saved_setting(receipt);
@@ -2922,6 +2931,7 @@ impl Core {
         let retry_line = self.turn(id).is_some_and(|m| m.overload_retry.take().is_some());
         self.cancel_workers(id);
         self.settings_changes.remove(id);
+        self.extension_loads.remove(id);
         self.revoke_replacement(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.release_codex_preparation(id);
@@ -3925,6 +3935,7 @@ impl Core {
         self.transfers.remove(conv);
         self.installs.remove(conv);
         self.settings_changes.remove(conv);
+        self.extension_loads.remove(conv);
         self.revoke_replacement(conv);
         self.bigger.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
@@ -6203,6 +6214,10 @@ impl Core {
         self.follows.remove(id);
         self.goals.at.remove(id);
         if existed {
+            if let Some(browser) = self.browser.clone().filter(|browser| browser.supports_extensions()) {
+                let id = id.to_string();
+                self.opts.runtime.spawn(async move { browser.forget_extensions(id).await });
+            }
             if !temporary {
                 self.keep_family(id, heir);
             }

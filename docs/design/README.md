@@ -58,6 +58,18 @@ Native pieces and generated pages have their own [visual-answer rules](visual-an
 - `steps` runs a whole flow in one call: at most 30 steps (open, click, type, scroll, back, wait for text or seconds, assert text is or is not there), 120 s in all, stopping at the first step that fails, then one read of the page and a line per step run (what was typed never goes in the log). Before every click the page says the control is on view and enabled, and Faber reads its box twice, 120 ms apart, and clicks only a control that held still (up to four tries). A flow cannot do what a single call cannot: each step goes through the same checks, and a login, captcha or payment still ends it as the person's turn.
 - A picture only on request: `shot` draws the numbers of the last read on the controls and takes them off again, or shows one control with a little margin, or a region enlarged up to four times (JPEG, 20 MB cap). A click or drag by position (`click_at`, `drag`) is refused where the page has a control or an iframe (the number is used instead) and on a person's turn. Each agent call turns on focus emulation in its own tab, so a covered or parked tab keeps running; it opens no window and draws nothing for the person. Cost: no new process, a JPEG held only during the call, one local call per action; mouse events only when asked.
 - Forgetting imported sign-ins closes both browser views and reopens the visible page on a clean profile.
+- Electron's browser More menu offers Extensions while Settings > Privacy > Developer mode for extensions is on (R577).
+  The dialog parks the native view and lists an extension's name, version and full folder. Loading uses the native folder
+  picker. Reload and Remove act per folder. The browser tool works in its own conversation, and loading a project folder
+  requires folder-specific consent even in Full access. An extension can read and change signed-in pages in this
+  profile outside the browser tool's masking. Refresh the test page after reloading the extension.
+- The developer profile writes site data to disk. Ordinary profiles stay in memory, and Firefox sign-ins are never
+  imported into developer profiles. Disabling the mode closes the developer views and unloads the extensions. Profile
+  data left after an unexpected exit is cleaned at the next startup. Switching modes opens a blank tab if the browser
+  is showing a page. Approved folders are kept separately, cleared when the conversation is deleted, and restored
+  for that conversation before a real page loads. Developer profiles use a bounded pool, with no developer view or
+  extension worker started while off. Electron supports a subset of extension APIs. The Chrome Web Store and toolbar
+  buttons are outside this flow.
 - Settings > Privacy has the browser's Blocked sites list ([settings.md](settings.md)). Refused typed addresses and page/app cards show the localized reason without opening the pane. Known incoherence: the Electron pane checks only direct opens through the Rust host; page links, history and redirects still need the Electron move's per-hop hook. Tauri checks each navigation callback the platform reports.
 - Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
   reload, print, save and view-source shortcuts do nothing. A menu opens only on a conversation (Rename, Pin or Unpin when not archived, Export, Move to group, Remove from group when assigned and Move to project (project-name picker) in Chat, Archive or Unarchive, Delete), a Chat group (Rename, Delete), a project (New

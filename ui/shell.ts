@@ -23,6 +23,7 @@ interface ElectronShell {
 }
 
 const electron = (globalThis as { faberShell?: ElectronShell }).faberShell;
+export const hasBrowserExtensions = electron !== undefined;
 
 /** Electron buffers DOMStorage writes; do not leave drafts and the last thread waiting for its commit timer. */
 export function flushStorage(): void {

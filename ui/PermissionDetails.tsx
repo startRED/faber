@@ -34,6 +34,9 @@ export function permissionDescription(permission: Permission) {
   const command = ['Bash', 'PowerShell', 'command'].includes(tool);
   const file = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool);
   const mcp = tool.startsWith('mcp__');
+  if (tool === 'BrowserExtensionLoad') {
+    return { title: t('site.extensionsApproval'), note: '', body: text(i.folder), cwd: '', command: false, file: false, mcp: false };
+  }
   return {
     title: t(command ? 'ask.command' : file ? 'ask.file' : tool === 'WebFetch' ? 'ask.page' : mcp ? 'ask.mcp' : 'ask.other', { tool }),
     note: text(i.reason) || text(i.description),

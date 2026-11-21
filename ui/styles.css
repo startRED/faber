@@ -775,6 +775,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .site-empty p { margin: 0; }
 /* Bringing sign-ins from Firefox: the rewind dialog's surface, a short list of sites with the sensitive ones marked. */
 .cookies { width: min(520px, calc(100vw - 32px)); }
+.site-extensions-list { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.site-extensions-list li { display: grid; gap: 6px; padding: 12px 0; border-block-start: 1px solid var(--line); }
 .cookies-from { display: grid; gap: 6px; }
 .cookies-points { display: grid; gap: 6px; margin: 0; padding-left: 18px; }
 .cookies-held { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }

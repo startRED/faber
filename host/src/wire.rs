@@ -120,7 +120,11 @@ pub enum PaneView {
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum PaneOp {
     /// Opens the view blank and parked, on the private in-memory profile `profile`. Answers `null`.
-    Open { profile: String },
+    Open {
+        profile: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        development: Option<String>,
+    },
     /// Closes the view and everything its page holds, and forgets its profile once no view uses it.
     Close,
     /// Moves the view over this box.
@@ -342,7 +346,7 @@ mod tests {
     fn a_pane_order_names_its_op_beside_the_view_and_only_a_call_has_an_id() {
         let order = |id, view, op| line(&Ordered { order: Order::Pane { id, view, op } });
         assert_eq!(
-            order(Some(3), PaneView::Main, PaneOp::Open { profile: "faber-pane-x".into() }),
+            order(Some(3), PaneView::Main, PaneOp::Open { profile: "faber-pane-x".into(), development: None }),
             "{\"order\":{\"kind\":\"pane\",\"id\":3,\"view\":\"main\",\"op\":\"open\",\"profile\":\"faber-pane-x\"}}\n"
         );
         assert_eq!(
@@ -356,7 +360,7 @@ mod tests {
         assert_eq!(order(None, PaneView::Main, PaneOp::Park), "{\"order\":{\"kind\":\"pane\",\"view\":\"main\",\"op\":\"park\"}}\n");
         assert_eq!(order(None, PaneView::Behind, PaneOp::Close), "{\"order\":{\"kind\":\"pane\",\"view\":\"behind\",\"op\":\"close\"}}\n");
         let all = [
-            Order::Pane { id: Some(1), view: PaneView::Main, op: PaneOp::Open { profile: "p".into() } },
+            Order::Pane { id: Some(1), view: PaneView::Main, op: PaneOp::Open { profile: "p".into(), development: None } },
             Order::Pane { id: Some(2), view: PaneView::Main, op: PaneOp::Load { url: "https://example.org/".into() } },
             Order::Pane {
                 id: Some(3),

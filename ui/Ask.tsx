@@ -445,6 +445,9 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
           fallback={
             <>
               <PermissionDetails permission={props.permission} />
+              <Show when={props.permission.tool === 'BrowserExtensionLoad'}>
+                <p>{t('site.extensionsRisk')}</p>
+              </Show>
             </>
           }
         >
@@ -468,9 +471,9 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
           <button class="btn primary" disabled={sending()} onClick={() => void answer(true)}>
             {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
-          <button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
+          <Show when={props.permission.tool !== 'BrowserExtensionLoad'}><button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
             {own() ? t(props.permission.tool === `${SELF}.settings.web_search` ? 'ask.self.alwaysWebSearch' : props.permission.tool === `${SELF}.tools.update` ? 'ask.self.alwaysUpdate' : props.permission.tool === `${SELF}.tools.repair` ? 'ask.self.alwaysRepair' : props.permission.tool === `${SELF}.tools.remove` ? 'ask.self.alwaysRemove' : props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
-          </button>
+          </button></Show>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>
             {t('ask.deny')}
           </button>

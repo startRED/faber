@@ -38,6 +38,9 @@ impl PaneEvent {
 /// Faber around the pane. The methods that touch the conversation's file are asynchronous so an implementation can leave the
 /// pane's thread for them.
 pub trait Home: Send + Sync + 'static {
+    fn extensions_enabled(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async { false })
+    }
     /// Checks a destination against the latest browser settings before the pane changes tabs or loads it.
     fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>>;
     /// A conversation's tabs; none for one that is gone or never had a page.
@@ -91,6 +94,10 @@ impl EngineHome {
 }
 
 impl Home for EngineHome {
+    fn extensions_enabled(&self) -> BoxFuture<'_, bool> {
+        self.with(|engine| engine.settings().extensions_developer_mode == Some(true))
+    }
+
     fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(async move {
             self.with(move |engine| {
