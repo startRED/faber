@@ -16,7 +16,7 @@ pub fn denied() -> Response<Vec<u8>> {
     failure("error.media.closed", None)
 }
 
-pub fn respond(engine: &Engine, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+pub async fn respond(engine: &Engine, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let destination = request.headers().get("sec-fetch-dest");
     if request.method() != Method::GET || destination.is_some_and(|value| !matches!(value.to_str(), Ok("image" | "video" | "audio"))) {
         return denied();
@@ -29,7 +29,7 @@ pub fn respond(engine: &Engine, request: Request<Vec<u8>>) -> Response<Vec<u8>> 
         1 => Some(ranges.iter().next().and_then(|value| value.to_str().ok()).unwrap_or("invalid")),
         _ => Some("invalid"),
     };
-    match engine.media_read(token, range) {
+    match engine.media_read_route(token, range).await {
         Ok(chunk) => {
             let mut response = headers()
                 .status(if chunk.content_range.is_some() { 206 } else { 200 })
